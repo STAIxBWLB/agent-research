@@ -13,6 +13,7 @@ export interface LedgerEvent { v: 1; at: string; actor: Actor; type: string; dat
 const EVENT_BYTES = 65_536, LEDGER_BYTES = 64 * 1024 * 1024;
 const LOCK_STALE_MS = 10 * 60_000;
 const QUESTION_MAX = 2000;
+export const STUDY_BYTES = 65_536;
 
 /** Agent environment markers the family uses; the first match names the actor. */
 const AGENT_MARKERS: readonly [string, string | undefined][] = [
@@ -28,8 +29,12 @@ export function detectActor(env: NodeJS.ProcessEnv): Actor {
 
 export const sha256 = (data: string | Uint8Array) => createHash("sha256").update(data).digest("hex");
 
-/** Write a file by temp + fsync + rename so readers never see a partial file. */
-export function writeAtomic(path: string, text: string): void {
+/**
+ * Write a file by temp + fsync + rename so readers never see a partial file. `maxBytes` must be the bound the
+ * file's reader uses, so nothing is written that the tool cannot read back.
+ */
+export function writeAtomic(path: string, text: string, maxBytes: number): void {
+  assertWritable(text, maxBytes, path);
   const tmp = `${path}.${randomUUID()}.tmp`;
   const fd = openSync(tmp, "wx", 0o644);
   try { writeSync(fd, text); fsyncSync(fd); } finally { closeSync(fd); }
@@ -87,7 +92,7 @@ export function studyFile(dir: string, ...parts: string[]): string { return join
 export function openStudy(dir: string): { dir: string; study: Study } {
   const root = resolve(dir), file = join(root, "study.json");
   if (!existsSync(file)) throw new Error(`${root}: no study.json (run ares init first)`);
-  return { dir: root, study: validStudy(readJsonFile(file, 65_536)) };
+  return { dir: root, study: validStudy(readJsonFile(file, STUDY_BYTES)) };
 }
 
 function validStudy(raw: unknown): Study {
@@ -104,7 +109,7 @@ export function initStudy(dir: string, options: { question: string; mode?: strin
   if (autonomy !== "auto" && autonomy !== "gates") throw new Error("--autonomy: auto or gates");
   const study: Study = { v: 1, id: randomUUID(), question: boundedText(options.question, "--question", QUESTION_MAX), mode, autonomy, createdAt: new Date().toISOString() };
   for (const sub of ["", "literature", "literature/cards", "refs"]) mkdirSync(join(root, sub), { recursive: true });
-  writeAtomic(join(root, "study.json"), JSON.stringify(study, null, 2) + "\n");
+  writeAtomic(join(root, "study.json"), JSON.stringify(study, null, 2) + "\n", STUDY_BYTES);
   appendEvent(root, actor, "study.init", { id: study.id, mode, autonomy });
   return study;
 }

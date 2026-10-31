@@ -101,3 +101,44 @@ describe("PR #3 review fixes, round 3", () => {
     expect(await searchSource(fake.http, "arxiv", "q", { limit: 5 })).toMatchObject({ ok: false, error: "arxiv: query error" });
   });
 });
+
+describe("PR #3 review fixes, round 4", () => {
+  const cand = (over: Partial<import("../src/lit/candidates.ts").Candidate> & { id: string; title: string }) => ({ authors: [], year: 2025, sources: ["t"], addedAt: "", status: "new" as const, ...over });
+  test("a truncated or short arXiv feed is unknown, never missing", async () => {
+    const { verifyCandidates } = await import("../src/lit/verify.ts");
+    const head = `<?xml version='1.0'?><feed xmlns="http://www.w3.org/2005/Atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">`;
+    const truncated = `${head}<opensearch:totalResults>1</opensearch:totalResults><entry><id>http://arxiv.org/abs/2502.04321v1</id><title>Cross`;
+    const short = `${head}<opensearch:totalResults>2</opensearch:totalResults><entry><id>http://arxiv.org/abs/2502.04321v1</id><title>A</title><published>2025-01-01</published></entry></feed>`;
+    const c = { id: "arxiv:2503.00007", arxivId: "2503.00007", title: "x", year: 2025, authors: [], sources: ["t"], addedAt: "", status: "included" as const };
+    for (const body of [truncated, short]) {
+      const result = await verifyCandidates(fakeHttp([["https://export.arxiv.org/", ok(body)]]).http, [c], { sleep: async () => {} });
+      expect(result.get(c.id)).toMatchObject({ exists: "unknown", error: "arxiv: incomplete response" });
+    }
+  });
+  test("a record linking two unscreened candidates folds them into one", () => {
+    const list = [cand({ id: "doi:10.1/a", title: "Published Title", doi: "10.1/a" }), cand({ id: "arxiv:2501.00001", title: "Preprint Title", arxivId: "2501.00001" })];
+    const counts = mergeCandidates(list, [{ source: "s2", title: "Published Title", authors: [], year: 2025, doi: "10.1/a", arxivId: "2501.00001" }], 100);
+    expect(list).toHaveLength(1);
+    expect(list[0]!.arxivId).toBe("2501.00001");
+    expect(counts.linked).toBe(0);
+  });
+  test("screened twins are flagged, and bib refuses while both are included", async () => {
+    const dir = join(tempDir(), "s");
+    ops.init(dir, { question: "Q?", autonomy: "auto" }, { actor: person });
+    const ctx = { actor: person, http: fakeHttp([]).http };
+    await ops.scope(dir, { question: "Q?" }, ctx);
+    const list = [cand({ id: "doi:10.1/a", title: "Published Title", doi: "10.1/a", status: "included" }), cand({ id: "arxiv:2501.00001", title: "Preprint Title", arxivId: "2501.00001", status: "included" })];
+    expect(mergeCandidates(list, [{ source: "s2", title: "x", authors: [], doi: "10.1/a", arxivId: "2501.00001" }], 100).linked).toBe(1);
+    saveCandidates(dir, list);
+    expect(loadCandidates(dir).map(c => c.duplicates)).toEqual([["arxiv:2501.00001"], ["doi:10.1/a"]]);
+    await expect(ops.bib(dir, ctx)).rejects.toThrow("same work");
+  });
+  test("a write larger than its reader's bound is refused and leaves no file", async () => {
+    const { writeAtomic } = await import("../src/study.ts");
+    const { existsSync, readdirSync } = await import("node:fs");
+    const dir = tempDir(), path = join(dir, "f.json");
+    expect(() => writeAtomic(path, "x".repeat(11), 10)).toThrow("would exceed 10 bytes");
+    expect(existsSync(path)).toBe(false);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+});

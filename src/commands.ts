@@ -11,7 +11,7 @@ import { checkCitations } from "./lit/cite.ts";
 import { cardPath, validateCard } from "./lit/cards.ts";
 
 export interface Ctx { actor: Actor; http: Http; sleep?: (ms: number) => Promise<void> }
-const MAX_IDS = 200, DRAFT_BYTES = 2 * 1024 * 1024, BIB_BYTES = 16 * 1024 * 1024;
+const MAX_IDS = 200, DRAFT_BYTES = 2 * 1024 * 1024, BIB_BYTES = 16 * 1024 * 1024, CARD_BYTES = 65_536;
 
 export function binder(dir: string): Binder {
   return gate => (gate === "scope" ? scopeHash(dir) : includedHash(loadCandidates(dir)));
@@ -106,7 +106,7 @@ export function list(dirArg: string, options: { status?: string; limit?: number 
     total: all.length,
     candidates: all.slice(0, limit).map(c => ({
       id: c.id, title: c.title, authors: c.authors.slice(0, 5), year: c.year, venue: c.venue, sources: c.sources, status: c.status,
-      ...(c.reason ? { reason: c.reason } : {}), ...(c.citekey ? { citekey: c.citekey } : {}),
+      ...(c.reason ? { reason: c.reason } : {}), ...(c.citekey ? { citekey: c.citekey } : {}), ...(c.duplicates?.length ? { duplicates: c.duplicates } : {}),
       verified: isVerified(c), ...(c.verify ? { verify: { syntax: c.verify.syntax, exists: c.verify.exists, match: c.verify.match } } : {}),
       ...(c.abstract ? { abstract: c.abstract.slice(0, 600) } : {}),
     })),
@@ -137,7 +137,7 @@ export async function card(dirArg: string, id: string, raw: unknown, ctx: Ctx) {
     if (c.status !== "included") throw new Error(`${id}: cards are recorded for included candidates only`);
     requireGate(dir, study, "scope", binder(dir));
     const path = cardPath(dir, id), text = JSON.stringify({ id, ...value }, null, 2) + "\n";
-    writeAtomic(path, text);
+    writeAtomic(path, text, CARD_BYTES);
     appendEvent(dir, ctx.actor, "lit.card", { id, sha256: sha256(text) });
     return { id, path };
   });
@@ -173,10 +173,13 @@ export async function bib(dirArg: string, ctx: Ctx) {
   return withLock(dir, () => {
     requireGate(dir, study, "screen", binder(dir));
     const all = loadCandidates(dir), eligible = all.filter(c => c.status === "included" && isVerified(c));
+    const included = new Set(all.filter(c => c.status === "included").map(c => c.id));
+    const twins = all.filter(c => included.has(c.id) && c.duplicates?.some(d => included.has(d))).map(c => c.id);
+    if (twins.length) throw new Error(`included candidates that are the same work: ${twins.join(", ")}; exclude all but one`);
     const assigned = assignCitekeys(all, eligible);
     if (assigned) saveCandidates(dir, all);
     const { text, entries } = renderBib(all), path = join(dir, "refs", "references.bib"), hash = sha256(text);
-    writeAtomic(path, text);
+    writeAtomic(path, text, BIB_BYTES);
     appendEvent(dir, ctx.actor, "lit.bib", { entries, sha256: hash });
     const left = all.filter(c => c.status === "included" && !isVerified(c)).map(c => ({ id: c.id, verify: c.verify ? `${c.verify.syntax}/${c.verify.exists}/${c.verify.match}` : "not checked" }));
     return { path, entries, sha256: hash, newKeys: assigned, notInBib: left };

@@ -28,7 +28,7 @@ describe("source parsing", () => {
   test("AC4: the same paper from several sources merges into one record with all sources", () => {
     const list: Candidate[] = [];
     const counts = mergeCandidates(list, [...parseOpenAlex(JSON.parse(fixture("openalex.json"))), ...parseS2(JSON.parse(fixture("s2.json"))), ...parseArxiv(fixture("arxiv-search.xml")).entries], 100);
-    expect(counts).toEqual({ added: 4, merged: 2, dropped: 0 });
+    expect(counts).toEqual({ added: 4, merged: 2, dropped: 0, linked: 0 });
     expect(list.find(c => c.id === "doi:10.1234/jrl.2024.001")!.sources).toEqual(["openalex", "s2"]);
     expect(list.find(c => c.id === "arxiv:2502.04321")!.sources).toEqual(["s2", "arxiv"]);
     expect(list.find(c => c.id === "arxiv:2501.01234")).toBeDefined();
@@ -36,7 +36,7 @@ describe("source parsing", () => {
   test("the candidate limit drops new records but still merges known ones", () => {
     const list: Candidate[] = [];
     const counts = mergeCandidates(list, [...parseOpenAlex(JSON.parse(fixture("openalex.json"))), ...parseS2(JSON.parse(fixture("s2.json")))], 1);
-    expect(counts).toEqual({ added: 1, merged: 1, dropped: 2 });
+    expect(counts).toEqual({ added: 1, merged: 1, dropped: 2, linked: 0 });
   });
 });
 

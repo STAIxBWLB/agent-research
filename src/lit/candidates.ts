@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { assertWritable, plain, readJsonFile, sha256, writeAtomic, type Actor } from "../study.ts";
+import { plain, readJsonFile, sha256, writeAtomic, type Actor } from "../study.ts";
 
 export interface Registry { title: string; authors: string[]; year?: number; venue?: string; type?: string }
 export interface Verification {
@@ -14,6 +14,8 @@ export interface Candidate extends Omit<RawCandidate, "source"> {
   id: string; sources: string[]; addedAt: string;
   status: "new" | "included" | "excluded"; reason?: string; decidedBy?: Actor; decidedAt?: string;
   citekey?: string; verify?: Verification;
+  /** Other candidates that a record linked to this one but could not be absorbed (screened or keyed). */
+  duplicates?: string[];
 }
 
 const ABSTRACT_MAX = 2000, TITLE_MAX = 1000, AUTHORS_MAX = 100, AUTHOR_MAX = 300, CANDIDATES_BYTES = 64 * 1024 * 1024;
@@ -62,16 +64,30 @@ const titleKey = (c: { title: string; year?: number }) => `${normTitle(c.title)}
  * Merge source records into the list. A record joins an existing candidate on DOI, arXiv id or normalized
  * title plus year; the candidate keeps its first id so screening decisions and citekeys stay attached.
  */
-export function mergeCandidates(list: Candidate[], incoming: RawCandidate[], limit: number, now = new Date().toISOString()): { added: number; merged: number; dropped: number } {
-  let added = 0, merged = 0, dropped = 0;
+function absorb(into: Candidate, from: Omit<RawCandidate, "source"> & { sources?: string[]; source?: string }): void {
+  for (const source of from.sources ?? (from.source ? [from.source] : [])) if (!into.sources.includes(source)) into.sources.push(source);
+  for (const key of ["doi", "arxivId", "year", "venue", "url", "abstract"] as const) if (into[key] === undefined && from[key] !== undefined) (into as unknown as Record<string, unknown>)[key] = from[key];
+  if (!into.authors.length && from.authors.length) into.authors = from.authors;
+}
+function link(a: Candidate, b: Candidate): void {
+  a.duplicates = [...new Set([...(a.duplicates ?? []), b.id])];
+  b.duplicates = [...new Set([...(b.duplicates ?? []), a.id])];
+}
+
+export function mergeCandidates(list: Candidate[], incoming: RawCandidate[], limit: number, now = new Date().toISOString()): { added: number; merged: number; dropped: number; linked: number } {
+  let added = 0, merged = 0, dropped = 0, linked = 0;
   for (const raw of incoming) {
     const clean = cleanRaw(raw);
     if (!clean) { dropped++; continue; }
-    const match = list.find(c => (clean.doi && c.doi === clean.doi) || (clean.arxivId && c.arxivId === clean.arxivId) || titleKey(c) === titleKey(clean));
-    if (match) {
-      if (!match.sources.includes(clean.source)) match.sources.push(clean.source);
-      for (const key of ["doi", "arxivId", "year", "venue", "url", "abstract"] as const) if (match[key] === undefined && clean[key] !== undefined) (match as unknown as Record<string, unknown>)[key] = clean[key];
-      if (!match.authors.length && clean.authors.length) match.authors = clean.authors;
+    const matches = list.filter(c => (clean.doi && c.doi === clean.doi) || (clean.arxivId && c.arxivId === clean.arxivId) || titleKey(c) === titleKey(clean));
+    const [primary, ...others] = matches;
+    if (primary) {
+      // A record that links several candidates folds the unscreened, unkeyed ones into the first; the rest are flagged.
+      for (const other of others) {
+        if (other.status === "new" && !other.citekey) { absorb(primary, other); list.splice(list.indexOf(other), 1); }
+        else { link(primary, other); linked++; }
+      }
+      absorb(primary, clean);
       merged++;
       continue;
     }
@@ -80,7 +96,7 @@ export function mergeCandidates(list: Candidate[], incoming: RawCandidate[], lim
     list.push({ ...rest, id: candidateId(clean), sources: [source], addedAt: now, status: "new" });
     added++;
   }
-  return { added, merged, dropped };
+  return { added, merged, dropped, linked };
 }
 
 export function candidatesPath(dir: string): string { return join(dir, "literature", "candidates.json"); }
@@ -93,9 +109,7 @@ export function loadCandidates(dir: string): Candidate[] {
   return raw as Candidate[];
 }
 export function saveCandidates(dir: string, list: Candidate[]): void {
-  const text = JSON.stringify(list, null, 1) + "\n";
-  assertWritable(text, CANDIDATES_BYTES, "literature/candidates.json (lower scope.maxCandidates)");
-  writeAtomic(candidatesPath(dir), text);
+  writeAtomic(candidatesPath(dir), JSON.stringify(list, null, 1) + "\n", CANDIDATES_BYTES);
 }
 
 /** The fields a verification checked. A later merge that adds a DOI, arXiv id or year makes an older verification stale. */

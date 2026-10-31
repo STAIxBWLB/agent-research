@@ -81,6 +81,7 @@ async function verifyArxiv(http: Http, batch: Candidate[], now: string, sleep: (
       const feed = result.body === undefined ? undefined : parseArxiv(result.body);
       if (!feed || feed.total === undefined) throw new Error("arxiv: unexpected response");
       if (feed.errors) throw new Error("arxiv: error response"); // a service error is never evidence that an id does not exist
+      if (!feed.complete || feed.entries.length !== feed.total) throw new Error("arxiv: incomplete response");
       for (const c of slice) {
         const entry = feed.entries.find(e => e.arxivId === c.arxivId);
         out.set(c.id, entry

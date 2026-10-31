@@ -58,8 +58,11 @@ export function xmlText(text: string): string {
 const tag = (xml: string, name: string) => { const m = new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`).exec(xml); return m ? xmlText(m[1]!) : undefined; };
 
 export interface ArxivEntry extends RawCandidate { arxivId: string }
-/** Parse an arXiv Atom feed. `total` tells "none" from a broken page; `errors` counts the error entries arXiv reports under /api/errors. */
-export function parseArxiv(xml: string): { total: number | undefined; entries: ArxivEntry[]; errors: number } {
+/**
+ * Parse an arXiv Atom feed. `complete` means the feed closed and every entry closed; `errors` counts the error
+ * entries arXiv reports under /api/errors. Absence may be concluded only from a complete, error-free feed.
+ */
+export function parseArxiv(xml: string): { total: number | undefined; entries: ArxivEntry[]; errors: number; complete: boolean } {
   if (!/<feed[\s>]/.test(xml)) throw new Error("arxiv: unexpected response");
   const totalText = /<opensearch:totalResults[^>]*>(\d+)</.exec(xml)?.[1];
   const entries: ArxivEntry[] = [];
@@ -74,7 +77,9 @@ export function parseArxiv(xml: string): { total: number | undefined; entries: A
       venue: tag(body, "arxiv:journal_ref"), doi: tag(body, "arxiv:doi"), url: `https://arxiv.org/abs/${id}`, abstract: tag(body, "summary"),
     });
   }
-  return { total: totalText === undefined ? undefined : Number(totalText), entries, errors };
+  const opened = xml.match(/<entry>/g)?.length ?? 0, closed = xml.match(/<\/entry>/g)?.length ?? 0;
+  const complete = /<\/feed>\s*$/.test(xml) && opened === closed;
+  return { total: totalText === undefined ? undefined : Number(totalText), entries, errors, complete };
 }
 
 function terms(query: string): string[] { return query.split(/\s+/).map(t => t.replace(/[^\p{L}\p{N}-]/gu, "")).filter(Boolean).slice(0, 20); }
@@ -103,6 +108,7 @@ export async function searchSource(http: Http, source: SourceName, query: string
       const result = await http.text(url);
       const feed = result.body === undefined ? undefined : parseArxiv(result.body);
       if (feed?.errors) throw new Error("arxiv: query error");
+      if (feed && !feed.complete) throw new Error("arxiv: incomplete response");
       return { source, ok: true, records: feed?.entries ?? [] };
     }
     const key = http.env.S2_API_KEY?.trim();

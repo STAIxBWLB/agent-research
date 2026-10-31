@@ -36,7 +36,8 @@ ares cite check study draft.md              # exit 1 on unknown or unverified [@
 ## What the checks mean
 
 - **verified**: the DOI exists at Crossref or DataCite, or the arXiv id exists at arXiv, and the registry's title and year match the candidate. It never means a paper supports a claim.
-- **unknown**: the registry could not be reached (network failure, rate limit, server error). Run `ares lit verify` again; unknown is never treated as missing.
+- **unknown**: the registry could not be reached or answered incompletely (network failure, rate limit, server error, error or truncated feed). Run `ares lit verify` again; unknown is never treated as missing.
+- When a record shows that two candidates are the same work, an unscreened one is folded in; otherwise both are flagged `duplicates`, and `ares lit bib` refuses while both are included.
 - Only included and verified papers enter `references.bib`. Citekeys never change once assigned.
 
 ## Gates
