@@ -85,3 +85,19 @@ describe("PR #3 review fixes, round 2", () => {
     expect(readLedger(dir).some(e => e.type === "gate.approve")).toBe(false);
   });
 });
+
+describe("PR #3 review fixes, round 3", () => {
+  const errorFeed = `<?xml version='1.0' encoding='UTF-8'?><feed xmlns="http://www.w3.org/2005/Atom" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/"><opensearch:totalResults>1</opensearch:totalResults><entry><id>http://arxiv.org/api/errors#incorrect_id_format</id><title>Error</title><summary>incorrect id format</summary></entry></feed>`;
+  test("an arXiv error entry makes the batch unknown, not missing", async () => {
+    const { verifyCandidates } = await import("../src/lit/verify.ts");
+    const fake = fakeHttp([["https://export.arxiv.org/", ok(errorFeed)]]);
+    const c = { id: "arxiv:2502.04321", arxivId: "2502.04321", title: "x", year: 2025, authors: [], sources: ["t"], addedAt: "", status: "included" as const };
+    const result = await verifyCandidates(fake.http, [c], { sleep: async () => {} });
+    expect(result.get(c.id)).toMatchObject({ exists: "unknown", error: "arxiv: error response" });
+  });
+  test("an arXiv error entry in a search is a failed source", async () => {
+    const { searchSource } = await import("../src/lit/sources.ts");
+    const fake = fakeHttp([["https://export.arxiv.org/", ok(errorFeed)]]);
+    expect(await searchSource(fake.http, "arxiv", "q", { limit: 5 })).toMatchObject({ ok: false, error: "arxiv: query error" });
+  });
+});

@@ -58,22 +58,23 @@ export function xmlText(text: string): string {
 const tag = (xml: string, name: string) => { const m = new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`).exec(xml); return m ? xmlText(m[1]!) : undefined; };
 
 export interface ArxivEntry extends RawCandidate { arxivId: string }
-/** Parse an arXiv Atom feed. `totalResults` is the count arXiv reports, used to tell "none" from a broken page. */
-export function parseArxiv(xml: string): { total: number | undefined; entries: ArxivEntry[] } {
+/** Parse an arXiv Atom feed. `total` tells "none" from a broken page; `errors` counts the error entries arXiv reports under /api/errors. */
+export function parseArxiv(xml: string): { total: number | undefined; entries: ArxivEntry[]; errors: number } {
   if (!/<feed[\s>]/.test(xml)) throw new Error("arxiv: unexpected response");
   const totalText = /<opensearch:totalResults[^>]*>(\d+)</.exec(xml)?.[1];
   const entries: ArxivEntry[] = [];
+  let errors = 0;
   for (const m of xml.matchAll(/<entry>([\s\S]*?)<\/entry>/g)) {
     const body = m[1]!, idUrl = tag(body, "id") ?? "";
     const id = /arxiv\.org\/abs\/(.+?)(v\d+)?$/.exec(idUrl)?.[1];
-    if (!id) continue; // arXiv reports query errors as an entry under /api/errors
+    if (!id) { errors++; continue; }
     const authors = [...body.matchAll(/<author>[\s\S]*?<name>([\s\S]*?)<\/name>[\s\S]*?<\/author>/g)].map(a => xmlText(a[1]!));
     entries.push({
       source: "arxiv", arxivId: id, title: tag(body, "title") ?? "", authors, year: int(tag(body, "published")?.slice(0, 4)),
       venue: tag(body, "arxiv:journal_ref"), doi: tag(body, "arxiv:doi"), url: `https://arxiv.org/abs/${id}`, abstract: tag(body, "summary"),
     });
   }
-  return { total: totalText === undefined ? undefined : Number(totalText), entries };
+  return { total: totalText === undefined ? undefined : Number(totalText), entries, errors };
 }
 
 function terms(query: string): string[] { return query.split(/\s+/).map(t => t.replace(/[^\p{L}\p{N}-]/gu, "")).filter(Boolean).slice(0, 20); }
@@ -100,7 +101,9 @@ export async function searchSource(http: Http, source: SourceName, query: string
   try {
     if (source === "arxiv") {
       const result = await http.text(url);
-      return { source, ok: true, records: result.body === undefined ? [] : parseArxiv(result.body).entries };
+      const feed = result.body === undefined ? undefined : parseArxiv(result.body);
+      if (feed?.errors) throw new Error("arxiv: query error");
+      return { source, ok: true, records: feed?.entries ?? [] };
     }
     const key = http.env.S2_API_KEY?.trim();
     const result = await http.json(url, source === "s2" && key ? { "x-api-key": key } : {});
