@@ -1,0 +1,11 @@
+#!/usr/bin/env -S bun --smol
+const version = /^(\d+)\.(\d+)\.(\d+)/.exec(process.versions.bun ?? "");
+if (!version || Number(version[1]) < 1 || (Number(version[1]) === 1 && (Number(version[2]) < 4 || (Number(version[2]) === 4 && Number(version[3]) < 2)))) {
+  console.error("ares: Bun >=1.4.2 is required. Install Bun: https://bun.sh");
+  process.exit(1);
+}
+const { main, runMcp } = await import("../src/cli.ts");
+if (process.argv.length === 3 && process.argv[2] === "mcp") {
+  try { await runMcp(); }
+  catch (error) { console.error(`ares mcp: ${error instanceof Error ? error.message : "failed"}`); process.exitCode = 1; }
+} else process.exitCode = await main(process.argv.slice(2));

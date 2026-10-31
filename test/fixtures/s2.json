@@ -1,0 +1,4 @@
+{"total":2,"offset":0,"data":[
+ {"paperId":"p1","externalIds":{"DOI":"10.1234/jrl.2024.001"},"url":"https://www.semanticscholar.org/paper/p1","title":"Verified retrieval for agentic literature review","abstract":"We verify references automatically.","venue":"J. Test Stud.","year":2024,"authors":[{"authorId":"1","name":"Ada Example"}]},
+ {"paperId":"p2","externalIds":{"ArXiv":"2502.04321"},"url":"https://www.semanticscholar.org/paper/p2","title":"Cross-Family Review of Generated Papers","abstract":null,"venue":"","year":2025,"authors":[{"authorId":"2","name":"Dan Muster"}]}
+]}

@@ -1,0 +1,12 @@
+{"meta":{"count":2,"page":1,"per_page":2},"results":[
+ {"id":"https://openalex.org/W1001","doi":"https://doi.org/10.1234/JRL.2024.001","title":"Verified Retrieval for Agentic Literature Review","display_name":"Verified Retrieval for Agentic Literature Review","publication_year":2024,"type":"article",
+  "ids":{"openalex":"https://openalex.org/W1001","doi":"https://doi.org/10.1234/jrl.2024.001"},
+  "authorships":[{"author":{"display_name":"Ada Example"}},{"author":{"display_name":"Ben Sample"}}],
+  "primary_location":{"landing_page_url":"https://doi.org/10.1234/jrl.2024.001","source":{"display_name":"Journal of Test Studies"}},
+  "abstract_inverted_index":{"We":[0],"verify":[1],"references":[2],"automatically.":[3]}},
+ {"id":"https://openalex.org/W1002","doi":"https://doi.org/10.48550/arXiv.2501.01234","title":"Sealed Evaluators for Autonomous Experiments","display_name":"Sealed Evaluators for Autonomous Experiments","publication_year":2025,"type":"preprint",
+  "ids":{"openalex":"https://openalex.org/W1002"},
+  "authorships":[{"author":{"display_name":"Chloé Exemple"}}],
+  "primary_location":{"landing_page_url":"https://arxiv.org/abs/2501.01234","source":{"display_name":"arXiv (Cornell University)"}},
+  "abstract_inverted_index":null}
+]}
