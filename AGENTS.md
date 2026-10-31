@@ -6,7 +6,7 @@
 - `src/commands-table.ts` is the single CLI source; CLI and MCP both call `src/commands.ts`. Add a command to all three.
 - Verify with `bun install --frozen-lockfile && bun run check`. Passing output ends with `boundary: ok`, `0 fail` and the package dry-run listing. Tests never touch the network: route requests through `fakeHttp` in `test/helpers.ts`.
 - Fixtures are synthetic records shaped like real API responses; do not paste real paper records or keys into tests.
-- Read files only through `readTextBounded`/`readBytesBounded` in `src/study.ts` (regular files, stop past the limit), and pass the reader's bound to `writeAtomic`. Validate arguments and ids before `requireGate`, which can record an auto approval. (2026-11-01: PR #3 review found unbounded reads twice; revisit if a streaming store replaces whole-file JSON.)
+- Read files only through `readTextBounded`/`readBytesBounded` in `src/study.ts` (regular files, stop past the limit), and pass the reader's bound to `writeAtomic`. Call the function `requireGate` returns right before the command's own ledger event, after every write succeeded: a failed command must never record an auto approval. (2026-11-01: PR #3 review found unbounded reads twice; revisit if a streaming store replaces whole-file JSON.)
 - Never write API keys, request URLs or response bodies into a study; errors name the host and status only.
 - "verified" is identifier existence plus title and year match. Do not add any path that marks support for a claim or lets unverified references into the bibliography.
 - No agent-environment refusal or TTY requirement. Gates record the actor; approval policy belongs to the workspace.

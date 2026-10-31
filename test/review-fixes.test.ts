@@ -172,3 +172,34 @@ describe("PR #3 review fixes, round 5", () => {
     expect(() => readTextBounded(fifo, 100)).toThrow("not a regular file");
   }, 2000);
 });
+
+describe("PR #3 review fixes, round 6", () => {
+  test("a duplicate chain through an excluded candidate still blocks bib", async () => {
+    const dir = join(tempDir(), "s");
+    ops.init(dir, { question: "Q?", autonomy: "auto" }, { actor: person });
+    const ctx = { actor: person, http: fakeHttp([]).http };
+    await ops.scope(dir, { question: "Q?" }, ctx);
+    const base = { authors: [], year: 2025, sources: ["t"], addedAt: "" };
+    saveCandidates(dir, [
+      { ...base, id: "doi:10.1/a", title: "Title A", doi: "10.1/a", status: "included", duplicates: ["doi:10.1/b"] },
+      { ...base, id: "doi:10.1/b", title: "Title B", doi: "10.1/b", status: "excluded", duplicates: ["doi:10.1/a", "doi:10.1/c"] },
+      { ...base, id: "doi:10.1/c", title: "Title C", doi: "10.1/c", status: "included", duplicates: ["doi:10.1/b"] },
+    ]);
+    await expect(ops.bib(dir, ctx)).rejects.toThrow("doi:10.1/a = doi:10.1/c");
+  });
+  test("a command that fails after its gate check records no auto approval", async () => {
+    const { readLedger } = await import("../src/study.ts");
+    const dir = join(tempDir(), "s");
+    ops.init(dir, { question: "Q?", autonomy: "auto" }, { actor: person });
+    const ctx = { actor: person, http: fakeHttp(searchRoutes()).http };
+    await ops.scope(dir, { question: "Q?" }, ctx);
+    await ops.search(dir, "agent review", {}, ctx);
+    await ops.screen(dir, ["doi:10.1234/jrl.2024.001"], "include", undefined, ctx);
+    await ops.scope(dir, { question: "Changed?" }, ctx);
+    const approvals = () => readLedger(dir).filter(e => e.type === "gate.approve").length;
+    const before = approvals();
+    const big = { summary: "s".repeat(4000), claims: Array.from({ length: 50 }, () => "c".repeat(1000)), methods: "m".repeat(4000), findings: "f".repeat(4000), limitations: "l".repeat(4000), relevance: "r".repeat(4000) };
+    await expect(ops.card(dir, "doi:10.1234/jrl.2024.001", big, ctx)).rejects.toThrow("would exceed");
+    expect(approvals()).toBe(before);
+  });
+});

@@ -185,14 +185,15 @@ export function decideGate(dir: string, gate: GateName, decision: "approve" | "r
   return gateState(gate, readLedger(dir), binder);
 }
 
-/** Pass when the gate is approved for the current content; in auto mode approve it as `auto` first. */
-export function requireGate(dir: string, study: Study, gate: GateName, binder: Binder): void {
+/**
+ * Pass when the gate is approved for the current content. In auto mode a pending gate passes too, and the returned
+ * function records the `auto` approval: call it only after the command's own writes succeed, so a failed command
+ * never changes a gate.
+ */
+export function requireGate(dir: string, study: Study, gate: GateName, binder: Binder): () => void {
   const state = gateState(gate, readLedger(dir), binder);
-  if (state.state === "approved") return;
-  if (state.state === "pending" && study.autonomy === "auto") {
-    appendEvent(dir, { kind: "auto" }, "gate.approve", { gate, binding: state.current! });
-    return;
-  }
+  if (state.state === "approved") return () => {};
+  if (state.state === "pending" && study.autonomy === "auto") return () => { appendEvent(dir, { kind: "auto" }, "gate.approve", { gate, binding: state.current! }); };
   if (state.state === "none") throw new Error(gate === "scope" ? "gate scope: no scope yet (run ares scope)" : "gate screen: no included candidates yet");
   if (state.state === "rejected") throw new Error(`gate ${gate} is rejected${state.decided?.reason ? `: ${state.decided.reason}` : ""}; change the content and ask again`);
   throw new Error(`gate ${gate} is pending: run ares gate approve <dir> ${gate}`);

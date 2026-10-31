@@ -85,13 +85,14 @@ export async function search(dirArg: string, query: string, options: { source?: 
     if (!sc) throw new Error("gate scope: no scope yet (run ares scope)");
     const yearFrom = options.yearFrom ?? sc.yearFrom;
     if (yearFrom !== undefined && sc.yearTo !== undefined && yearFrom > sc.yearTo) throw new Error(`--year-from: after the scope's yearTo ${sc.yearTo}`);
-    requireGate(dir, study, "scope", binder(dir));
+    const approve = requireGate(dir, study, "scope", binder(dir));
     const names = source === "all" ? SOURCES : [source as SourceName];
     const results = [];
     for (const name of names) results.push(await searchSource(ctx.http, name, q, { limit, ...(yearFrom !== undefined ? { yearFrom } : {}), ...(sc.yearTo !== undefined ? { yearTo: sc.yearTo } : {}) }));
     const list = loadCandidates(dir), counts = mergeCandidates(list, results.flatMap(r => r.records), sc.maxCandidates);
     saveCandidates(dir, list);
     const sources = results.map(r => ({ source: r.source, ok: r.ok, returned: r.records.length, ...(r.error ? { error: r.error } : {}) }));
+    approve();
     appendEvent(dir, ctx.actor, "lit.search", { query: q, sources, ...counts });
     return { query: q, sources, ...counts, candidates: list.length };
   });
@@ -118,13 +119,14 @@ export async function screen(dirArg: string, values: string[], decision: "includ
   return withLock(dir, () => {
     const all = loadCandidates(dir), at = new Date().toISOString(), status = decision === "include" ? "included" : "excluded";
     for (const id of wanted) find(all, id);
-    requireGate(dir, study, "scope", binder(dir));
+    const approve = requireGate(dir, study, "scope", binder(dir));
     for (const id of wanted) {
       const c = find(all, id);
       c.status = status; c.decidedBy = ctx.actor; c.decidedAt = at;
       if (why) c.reason = why; else delete c.reason;
     }
     saveCandidates(dir, all);
+    approve();
     appendEvent(dir, ctx.actor, "lit.screen", { ids: wanted, decision, ...(why ? { reason: why } : {}) });
     return { decision, ids: wanted, gate: gateState("screen", readLedger(dir), binder(dir)) };
   });
@@ -135,9 +137,10 @@ export async function card(dirArg: string, id: string, raw: unknown, ctx: Ctx) {
   return withLock(dir, () => {
     const c = find(loadCandidates(dir), id);
     if (c.status !== "included") throw new Error(`${id}: cards are recorded for included candidates only`);
-    requireGate(dir, study, "scope", binder(dir));
+    const approve = requireGate(dir, study, "scope", binder(dir));
     const path = cardPath(dir, id), text = JSON.stringify({ id, ...value }, null, 2) + "\n";
     writeAtomic(path, text, CARD_BYTES);
+    approve();
     appendEvent(dir, ctx.actor, "lit.card", { id, sha256: sha256(text) });
     return { id, path };
   });
@@ -154,7 +157,7 @@ export async function verify(dirArg: string, values: string[], ctx: Ctx) {
     const all = loadCandidates(dir);
     const open = (c: Candidate) => !c.verify || c.verify.subject !== verifySubject(c) || (c.verify.syntax === "ok" && c.verify.exists === "unknown");
     const pending = wanted ? wanted.map(id => find(all, id)) : all.filter(c => c.status === "included" && !isVerified(c) && open(c));
-    requireGate(dir, study, "scope", binder(dir));
+    const approve = requireGate(dir, study, "scope", binder(dir));
     const batch = pending.slice(0, MAX_IDS);
     const results = await verifyCandidates(ctx.http, batch, ctx.sleep ? { sleep: ctx.sleep } : {});
     for (const c of batch) { const v = results.get(c.id); if (v) c.verify = v; }
@@ -163,6 +166,7 @@ export async function verify(dirArg: string, values: string[], ctx: Ctx) {
       unknown: batch.filter(c => c.verify?.exists === "unknown").length, mismatched: batch.filter(c => c.verify?.exists === "yes" && c.verify.match !== "yes").length,
       noIdentifier: batch.filter(c => c.verify?.syntax !== "ok").length, remaining: pending.length - batch.length,
       final: wanted ? 0 : all.filter(c => c.status === "included" && !isVerified(c) && !open(c)).length };
+    approve();
     appendEvent(dir, ctx.actor, "lit.verify", tally);
     return { ...tally, results: batch.map(c => ({ id: c.id, ...c.verify })) };
   });
@@ -171,14 +175,15 @@ export async function verify(dirArg: string, values: string[], ctx: Ctx) {
 export async function bib(dirArg: string, ctx: Ctx) {
   const { dir, study } = openStudy(dirArg);
   return withLock(dir, () => {
-    requireGate(dir, study, "screen", binder(dir));
+    const approve = requireGate(dir, study, "screen", binder(dir));
     const all = loadCandidates(dir), eligible = all.filter(c => c.status === "included" && isVerified(c));
-    const twins = sameWork(all.filter(c => c.status === "included"));
+    const twins = sameWork(all).map(g => g.filter(id => all.find(c => c.id === id)!.status === "included")).filter(g => g.length > 1);
     if (twins.length) throw new Error(`included candidates that are the same work: ${twins.map(g => g.join(" = ")).join("; ")}; exclude all but one of each`);
     const assigned = assignCitekeys(all, eligible);
     if (assigned) saveCandidates(dir, all);
     const { text, entries } = renderBib(all), path = join(dir, "refs", "references.bib"), hash = sha256(text);
     writeAtomic(path, text, BIB_BYTES);
+    approve();
     appendEvent(dir, ctx.actor, "lit.bib", { entries, sha256: hash });
     const left = all.filter(c => c.status === "included" && !isVerified(c)).map(c => ({ id: c.id, verify: c.verify ? `${c.verify.syntax}/${c.verify.exists}/${c.verify.match}` : "not checked" }));
     return { path, entries, sha256: hash, newKeys: assigned, notInBib: left };
