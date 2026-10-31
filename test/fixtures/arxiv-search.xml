@@ -1,0 +1,23 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/test</id>
+  <opensearch:totalResults>2</opensearch:totalResults>
+  <entry>
+    <id>http://arxiv.org/abs/2502.04321v2</id>
+    <published>2025-02-06T09:00:00Z</published>
+    <title>Cross-Family Review of
+      Generated Papers</title>
+    <summary>Reviewers from another model family catch more errors &amp; omissions.</summary>
+    <author><name>Dan Muster</name></author>
+    <author><name>Eve Probe</name></author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2503.00007v1</id>
+    <published>2025-03-01T09:00:00Z</published>
+    <title>Budgets for Research Agents</title>
+    <summary>Costs.</summary>
+    <author><name>Fay Tester</name></author>
+    <arxiv:doi>10.5555/budget.2025.7</arxiv:doi>
+    <arxiv:journal_ref>Proc. Test Conf. 2025</arxiv:journal_ref>
+  </entry>
+</feed>
