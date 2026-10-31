@@ -1,5 +1,5 @@
 import { HttpError, type Http } from "../http.ts";
-import { normTitle, type Candidate, type Registry, type Verification } from "./candidates.ts";
+import { normTitle, verifySubject, type Candidate, type Registry, type Verification } from "./candidates.ts";
 import { parseArxiv } from "./sources.ts";
 
 export const DOI = /^10\.\d{4,9}\/\S+$/;
@@ -25,10 +25,10 @@ export function titleSimilarity(a: string, b: string): number {
   return common / (x.size + y.size - common);
 }
 
-/** yes: title Jaccard >= 0.85 and years within one; partial: one of them holds weakly; no otherwise. */
+/** yes: title Jaccard >= 0.85 and both years present and within one; partial: the title is close but the year differs or cannot be compared. */
 export function matchRegistry(c: Pick<Candidate, "title" | "year">, r: Registry): Verification["match"] {
   const similarity = titleSimilarity(c.title, r.title);
-  const yearOk = c.year === undefined || r.year === undefined || Math.abs(c.year - r.year) <= 1;
+  const yearOk = c.year !== undefined && r.year !== undefined && Math.abs(c.year - r.year) <= 1;
   if (similarity >= 0.85 && yearOk) return "yes";
   if (similarity >= 0.5) return "partial";
   return "no";
@@ -103,5 +103,6 @@ export async function verifyCandidates(http: Http, list: Candidate[], options: {
     else arxiv.push(c);
   }
   for (const [id, v] of await verifyArxiv(http, arxiv, now, sleep)) out.set(id, v);
+  for (const c of list) { const v = out.get(c.id); if (v) v.subject = verifySubject(c); }
   return out;
 }

@@ -6,6 +6,8 @@ export interface Registry { title: string; authors: string[]; year?: number; ven
 export interface Verification {
   syntax: "ok" | "none" | "bad"; exists: "yes" | "no" | "unknown"; match: "yes" | "partial" | "no" | "unknown";
   via?: "crossref" | "datacite" | "arxiv"; checkedAt: string; error?: string; registry?: Registry;
+  /** Hash of the identifiers, title and year that were checked; see verifySubject. */
+  subject?: string;
 }
 export interface RawCandidate { title: string; authors: string[]; year?: number; venue?: string; doi?: string; arxivId?: string; url?: string; abstract?: string; source: string }
 export interface Candidate extends Omit<RawCandidate, "source"> {
@@ -92,7 +94,13 @@ export function loadCandidates(dir: string): Candidate[] {
 }
 export function saveCandidates(dir: string, list: Candidate[]): void { writeAtomic(candidatesPath(dir), JSON.stringify(list, null, 1) + "\n"); }
 
-export function isVerified(c: Candidate): boolean { return c.verify?.syntax === "ok" && c.verify.exists === "yes" && c.verify.match === "yes"; }
+/** The fields a verification checked. A later merge that adds a DOI, arXiv id or year makes an older verification stale. */
+export function verifySubject(c: Pick<Candidate, "doi" | "arxivId" | "title" | "year">): string {
+  return sha256(JSON.stringify([c.doi ?? null, c.arxivId ?? null, normTitle(c.title), c.year ?? null]));
+}
+export function isVerified(c: Candidate): boolean {
+  return c.verify?.syntax === "ok" && c.verify.exists === "yes" && c.verify.match === "yes" && c.verify.subject === verifySubject(c);
+}
 /** The screen gate binds to the included set. */
 export function includedHash(list: Candidate[]): string | undefined {
   const ids = list.filter(c => c.status === "included").map(c => c.id).sort();

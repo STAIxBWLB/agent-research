@@ -10,7 +10,7 @@ export interface Study { v: 1; id: string; question: string; mode: Mode; autonom
 export interface Actor { kind: "person" | "agent" | "auto"; id?: string }
 export interface LedgerEvent { v: 1; at: string; actor: Actor; type: string; data: Record<string, unknown> }
 
-const EVENT_BYTES = 65_536;
+const EVENT_BYTES = 65_536, LEDGER_BYTES = 64 * 1024 * 1024;
 const LOCK_STALE_MS = 10 * 60_000;
 const QUESTION_MAX = 2000;
 
@@ -117,6 +117,7 @@ export function appendEvent(dir: string, actor: Actor, type: string, data: Recor
 export function readLedger(dir: string): LedgerEvent[] {
   const path = join(dir, "ledger.jsonl");
   if (!existsSync(path)) return [];
+  if (statSync(path).size > LEDGER_BYTES) throw new Error(`ledger.jsonl: larger than ${LEDGER_BYTES} bytes`);
   const lines = readFileSync(path, "utf8").split("\n");
   const events: LedgerEvent[] = [];
   lines.forEach((line, index) => {

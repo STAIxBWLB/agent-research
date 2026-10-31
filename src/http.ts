@@ -15,6 +15,23 @@ export interface Http {
 const TIMEOUT_MS = 20_000, MAX_BYTES = 5 * 1024 * 1024;
 const EMAIL = /^[^\s@<>()]{1,64}@[^\s@<>()]{1,190}$/;
 
+/** Read the body while counting bytes; past the limit the stream is cancelled, never buffered whole. */
+async function readBounded(response: Response, host: string): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader(), chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_BYTES) { await reader.cancel().catch(() => {}); throw new HttpError("format", host); }
+      chunks.push(value);
+    }
+  } catch (error) { if (error instanceof HttpError) throw error; throw new HttpError("network", host); }
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks)); } catch { throw new HttpError("format", host); }
+}
+
 export function userAgent(env: NodeJS.ProcessEnv): string {
   const email = env.ARES_CONTACT_EMAIL?.trim();
   return `agent-research/${version}${email && EMAIL.test(email) ? ` (mailto:${email})` : ""}`;
@@ -31,10 +48,7 @@ export function createHttp(env: NodeJS.ProcessEnv = process.env, fetchImpl: Fetc
     if (response.status === 429) throw new HttpError("rate", host, 429);
     if (response.status >= 500) throw new HttpError("server", host, response.status);
     if (response.status !== 200) throw new HttpError("client", host, response.status);
-    let text: string;
-    try { text = await response.text(); } catch { throw new HttpError("network", host); }
-    if (Buffer.byteLength(text) > MAX_BYTES) throw new HttpError("format", host);
-    return { status: 200, body: text };
+    return { status: 200, body: await readBounded(response, host) };
   }
   return {
     env,

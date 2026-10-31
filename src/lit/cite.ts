@@ -5,7 +5,7 @@ export function citedKeys(text: string): { count: number; keys: string[] } {
   const keys: string[] = [];
   let count = 0;
   for (const group of text.matchAll(/\[([^\[\]]*?@[^\[\]]*?)\]/g)) {
-    for (const m of group[1]!.matchAll(/(?:^|[\s;,(-])@([A-Za-z0-9_][A-Za-z0-9_:.#$%&+?<>~/-]*[A-Za-z0-9_])/g)) { count++; keys.push(m[1]!); }
+    for (const m of group[1]!.matchAll(/(?:^|[\s;,(-])@([A-Za-z0-9_](?:[A-Za-z0-9_:.#$%&+?<>~/-]*[A-Za-z0-9_])?)/g)) { count++; keys.push(m[1]!); }
   }
   return { count, keys: [...new Set(keys)] };
 }

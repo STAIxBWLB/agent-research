@@ -1,6 +1,6 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { appendEvent, boundedText, onlyKeys, plain, sha256, writeAtomic, type Actor } from "./study.ts";
+import { appendEvent, boundedText, onlyKeys, plain, readJsonFile, sha256, writeAtomic, type Actor } from "./study.ts";
 
 export interface Scope { question: string; subquestions: string[]; include: string[]; exclude: string[]; yearFrom?: number; yearTo?: number; maxCandidates: number }
 const KEYS = ["question", "subquestions", "include", "exclude", "yearFrom", "yearTo", "maxCandidates"] as const;
@@ -35,10 +35,16 @@ export function validateScope(raw: unknown): Scope {
 }
 
 export function scopePath(dir: string): string { return join(dir, "scope.json"); }
-export function scopeHash(dir: string): string | undefined { const path = scopePath(dir); return existsSync(path) ? sha256(readFileSync(path)) : undefined; }
+const SCOPE_BYTES = 65_536;
+export function scopeHash(dir: string): string | undefined {
+  const path = scopePath(dir);
+  if (!existsSync(path)) return undefined;
+  if (statSync(path).size > SCOPE_BYTES) throw new Error(`scope.json: larger than ${SCOPE_BYTES} bytes`);
+  return sha256(readFileSync(path));
+}
 export function readScope(dir: string): Scope | undefined {
   const path = scopePath(dir);
-  return existsSync(path) ? validateScope(JSON.parse(readFileSync(path, "utf8"))) : undefined;
+  return existsSync(path) ? validateScope(readJsonFile(path, SCOPE_BYTES)) : undefined;
 }
 
 export function setScope(dir: string, raw: unknown, actor: Actor): { scope: Scope; sha256: string; changed: boolean } {

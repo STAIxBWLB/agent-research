@@ -11,7 +11,7 @@ import { checkCitations } from "./lit/cite.ts";
 import { cardPath, validateCard } from "./lit/cards.ts";
 
 export interface Ctx { actor: Actor; http: Http; sleep?: (ms: number) => Promise<void> }
-const MAX_IDS = 200, DRAFT_BYTES = 2 * 1024 * 1024;
+const MAX_IDS = 200, DRAFT_BYTES = 2 * 1024 * 1024, BIB_BYTES = 16 * 1024 * 1024;
 
 export function binder(dir: string): Binder {
   return gate => (gate === "scope" ? scopeHash(dir) : includedHash(loadCandidates(dir)));
@@ -50,7 +50,7 @@ export function status(dirArg: string) {
       verified: included.filter(isVerified).length, unverified: included.filter(c => !isVerified(c)).length,
       cards: existsSync(cardsDir) ? readdirSync(cardsDir).filter(f => f.endsWith(".json")).length : 0,
     },
-    bib: existsSync(bibPath) ? { path: bibPath, sha256: sha256(readFileSync(bibPath)) } : null,
+    bib: existsSync(bibPath) && statSync(bibPath).size <= BIB_BYTES ? { path: bibPath, sha256: sha256(readFileSync(bibPath)) } : existsSync(bibPath) ? { path: bibPath, sha256: null } : null,
     events: events.length,
   };
 }
