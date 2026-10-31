@@ -46,3 +46,42 @@ describe("PR #3 review fixes", () => {
     expect(pulled).toBeLessThanOrEqual(7);
   });
 });
+
+describe("PR #3 review fixes, round 2", () => {
+  async function autoStudy() {
+    const dir = join(tempDir(), "s");
+    ops.init(dir, { question: "Q?", autonomy: "auto" }, { actor: person });
+    const ctx = { actor: person, http: fakeHttp(searchRoutes()).http, sleep: async () => {} };
+    await ops.scope(dir, { question: "Q?" }, ctx);
+    return { dir, ctx };
+  }
+  test("a scope whose stored form would be unreadable is refused and the study stays readable", async () => {
+    const { dir, ctx } = await autoStudy();
+    const long = (n: number) => Array.from({ length: n }, (_, i) => `${i}`.padEnd(500, "x"));
+    await expect(ops.scope(dir, { question: "Q?", include: long(50), exclude: long(50), subquestions: Array.from({ length: 30 }, () => "y".repeat(1000)) }, ctx)).rejects.toThrow("would exceed");
+    expect(ops.status(dir).scope.set).toBe(true);
+    await ops.scope(dir, { question: "Q2?" }, ctx);
+  });
+  test("--file refuses special files before reading them", async () => {
+    const { run } = await import("../src/cli.ts");
+    const { dir } = await autoStudy();
+    await expect(run(["scope", dir, "--file", "/dev/zero"], {}, {})).rejects.toThrow("not a regular file");
+  });
+  test("the default verify batch advances past final results", async () => {
+    const { dir, ctx } = await autoStudy();
+    const list = Array.from({ length: 201 }, (_, i) => ({ id: `title:${i}`, title: `Paper ${i}`, authors: [], year: 2024, sources: ["t"], addedAt: "", status: "included" as const }));
+    saveCandidates(dir, list);
+    const first = await ops.verify(dir, [], ctx);
+    expect(first).toMatchObject({ checked: 200, noIdentifier: 200, remaining: 1 });
+    const second = await ops.verify(dir, [], ctx);
+    expect(second).toMatchObject({ checked: 1, remaining: 0, final: 201 });
+  });
+  test("invalid arguments are refused before an auto gate approval is recorded", async () => {
+    const { dir, ctx } = await autoStudy();
+    const { readLedger } = await import("../src/study.ts");
+    await expect(ops.search(dir, "q", { yearFrom: 999 }, ctx)).rejects.toThrow("--year-from");
+    await expect(ops.verify(dir, ["doi:10.1/unknown"], ctx)).rejects.toThrow("unknown candidate");
+    await expect(ops.screen(dir, ["doi:10.1/unknown"], "include", undefined, ctx)).rejects.toThrow("unknown candidate");
+    expect(readLedger(dir).some(e => e.type === "gate.approve")).toBe(false);
+  });
+});

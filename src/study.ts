@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 
@@ -36,10 +36,34 @@ export function writeAtomic(path: string, text: string): void {
   try { renameSync(tmp, path); } catch (error) { try { unlinkSync(tmp); } catch { /* already gone */ } throw error; }
 }
 
+/** Read a regular file, stopping one byte past `maxBytes`: special files and oversize files are refused without buffering them. */
+export function readBytesBounded(path: string, maxBytes: number): Buffer {
+  const fd = openSync(path, "r");
+  try {
+    if (!fstatSync(fd).isFile()) throw new Error(`${path}: not a regular file`);
+    const buffer = Buffer.alloc(Math.min(maxBytes + 1, 1 << 20)), parts: Buffer[] = [];
+    let total = 0;
+    for (;;) {
+      const n = readSync(fd, buffer, 0, buffer.length, null);
+      if (n === 0) break;
+      total += n;
+      if (total > maxBytes) throw new Error(`${path}: larger than ${maxBytes} bytes`);
+      parts.push(Buffer.from(buffer.subarray(0, n)));
+    }
+    return Buffer.concat(parts);
+  } finally { closeSync(fd); }
+}
+export function readTextBounded(path: string, maxBytes: number): string {
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(readBytesBounded(path, maxBytes)); }
+  catch (error) { if (error instanceof TypeError) throw new Error(`${path}: not valid UTF-8`); throw error; }
+}
 export function readJsonFile(path: string, maxBytes: number): unknown {
-  const size = statSync(path).size;
-  if (size > maxBytes) throw new Error(`${path}: larger than ${maxBytes} bytes`);
-  try { return JSON.parse(readFileSync(path, "utf8")); } catch { throw new Error(`${path}: not valid JSON`); }
+  const text = readTextBounded(path, maxBytes);
+  try { return JSON.parse(text); } catch { throw new Error(`${path}: not valid JSON`); }
+}
+/** Refuse a write that the matching bounded read could not load back. */
+export function assertWritable(text: string, maxBytes: number, what: string): void {
+  if (Buffer.byteLength(text) > maxBytes) throw new Error(`${what} would exceed ${maxBytes} bytes`);
 }
 
 export const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v) && Object.getPrototypeOf(v) === Object.prototype;
@@ -117,8 +141,7 @@ export function appendEvent(dir: string, actor: Actor, type: string, data: Recor
 export function readLedger(dir: string): LedgerEvent[] {
   const path = join(dir, "ledger.jsonl");
   if (!existsSync(path)) return [];
-  if (statSync(path).size > LEDGER_BYTES) throw new Error(`ledger.jsonl: larger than ${LEDGER_BYTES} bytes`);
-  const lines = readFileSync(path, "utf8").split("\n");
+  const lines = readTextBounded(path, LEDGER_BYTES).split("\n");
   const events: LedgerEvent[] = [];
   lines.forEach((line, index) => {
     if (!line.trim()) return;

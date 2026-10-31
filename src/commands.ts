@@ -1,9 +1,9 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Http } from "./http.ts";
 import { readScope, scopeHash, setScope } from "./scope.ts";
-import { appendEvent, boundedText, decideGate, gateState, GATES, initStudy, openStudy, readLedger, requireGate, sha256, withLock, writeAtomic, type Actor, type Binder, type GateName } from "./study.ts";
-import { includedHash, isVerified, loadCandidates, mergeCandidates, saveCandidates, type Candidate } from "./lit/candidates.ts";
+import { appendEvent, boundedText, decideGate, gateState, GATES, initStudy, openStudy, readBytesBounded, readLedger, readTextBounded, requireGate, sha256, withLock, writeAtomic, type Actor, type Binder, type GateName } from "./study.ts";
+import { includedHash, isVerified, loadCandidates, mergeCandidates, saveCandidates, verifySubject, type Candidate } from "./lit/candidates.ts";
 import { searchSource, SOURCES, type SourceName } from "./lit/sources.ts";
 import { verifyCandidates } from "./lit/verify.ts";
 import { assignCitekeys, renderBib } from "./lit/bibtex.ts";
@@ -50,7 +50,7 @@ export function status(dirArg: string) {
       verified: included.filter(isVerified).length, unverified: included.filter(c => !isVerified(c)).length,
       cards: existsSync(cardsDir) ? readdirSync(cardsDir).filter(f => f.endsWith(".json")).length : 0,
     },
-    bib: existsSync(bibPath) && statSync(bibPath).size <= BIB_BYTES ? { path: bibPath, sha256: sha256(readFileSync(bibPath)) } : existsSync(bibPath) ? { path: bibPath, sha256: null } : null,
+    bib: existsSync(bibPath) ? { path: bibPath, sha256: sha256(readBytesBounded(bibPath, BIB_BYTES)) } : null,
     events: events.length,
   };
 }
@@ -79,10 +79,13 @@ export async function search(dirArg: string, query: string, options: { source?: 
   if (source !== "all" && !SOURCES.includes(source as SourceName)) throw new Error("--source: openalex, s2, arxiv or all");
   const limit = options.limit ?? 20;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new Error("--limit: 1..50");
+  if (options.yearFrom !== undefined && (!Number.isSafeInteger(options.yearFrom) || options.yearFrom < 1000 || options.yearFrom > 2100)) throw new Error("--year-from: year 1000..2100");
   return withLock(dir, async () => {
+    const sc = readScope(dir);
+    if (!sc) throw new Error("gate scope: no scope yet (run ares scope)");
+    const yearFrom = options.yearFrom ?? sc.yearFrom;
+    if (yearFrom !== undefined && sc.yearTo !== undefined && yearFrom > sc.yearTo) throw new Error(`--year-from: after the scope's yearTo ${sc.yearTo}`);
     requireGate(dir, study, "scope", binder(dir));
-    const sc = readScope(dir)!, yearFrom = options.yearFrom ?? sc.yearFrom;
-    if (yearFrom !== undefined && (!Number.isSafeInteger(yearFrom) || yearFrom < 1000 || yearFrom > 2100)) throw new Error("--year-from: year 1000..2100");
     const names = source === "all" ? SOURCES : [source as SourceName];
     const results = [];
     for (const name of names) results.push(await searchSource(ctx.http, name, q, { limit, ...(yearFrom !== undefined ? { yearFrom } : {}), ...(sc.yearTo !== undefined ? { yearTo: sc.yearTo } : {}) }));
@@ -113,9 +116,9 @@ export function list(dirArg: string, options: { status?: string; limit?: number 
 export async function screen(dirArg: string, values: string[], decision: "include" | "exclude", reason: string | undefined, ctx: Ctx) {
   const { dir, study } = openStudy(dirArg), wanted = ids(values), why = reason === undefined ? undefined : boundedText(reason, "--reason", 500);
   return withLock(dir, () => {
-    requireGate(dir, study, "scope", binder(dir));
     const all = loadCandidates(dir), at = new Date().toISOString(), status = decision === "include" ? "included" : "excluded";
     for (const id of wanted) find(all, id);
+    requireGate(dir, study, "scope", binder(dir));
     for (const id of wanted) {
       const c = find(all, id);
       c.status = status; c.decidedBy = ctx.actor; c.decidedAt = at;
@@ -130,9 +133,9 @@ export async function screen(dirArg: string, values: string[], decision: "includ
 export async function card(dirArg: string, id: string, raw: unknown, ctx: Ctx) {
   const { dir, study } = openStudy(dirArg), value = validateCard(raw);
   return withLock(dir, () => {
-    requireGate(dir, study, "scope", binder(dir));
     const c = find(loadCandidates(dir), id);
     if (c.status !== "included") throw new Error(`${id}: cards are recorded for included candidates only`);
+    requireGate(dir, study, "scope", binder(dir));
     const path = cardPath(dir, id), text = JSON.stringify({ id, ...value }, null, 2) + "\n";
     writeAtomic(path, text);
     appendEvent(dir, ctx.actor, "lit.card", { id, sha256: sha256(text) });
@@ -140,20 +143,26 @@ export async function card(dirArg: string, id: string, raw: unknown, ctx: Ctx) {
   });
 }
 
-/** Without ids: included candidates not yet verified, up to 200. With ids: exactly those, re-checked. */
+/**
+ * Without ids: included candidates never checked, checked against other identifiers, or left unknown, up to 200.
+ * Final results (no identifier, not found, title or year mismatch) are skipped so the batch always advances;
+ * re-check one by naming its id.
+ */
 export async function verify(dirArg: string, values: string[], ctx: Ctx) {
   const { dir, study } = openStudy(dirArg), wanted = values.length ? ids(values) : undefined;
   return withLock(dir, async () => {
-    requireGate(dir, study, "scope", binder(dir));
     const all = loadCandidates(dir);
-    const pending = wanted ? wanted.map(id => find(all, id)) : all.filter(c => c.status === "included" && !isVerified(c));
+    const open = (c: Candidate) => !c.verify || c.verify.subject !== verifySubject(c) || (c.verify.syntax === "ok" && c.verify.exists === "unknown");
+    const pending = wanted ? wanted.map(id => find(all, id)) : all.filter(c => c.status === "included" && !isVerified(c) && open(c));
+    requireGate(dir, study, "scope", binder(dir));
     const batch = pending.slice(0, MAX_IDS);
     const results = await verifyCandidates(ctx.http, batch, ctx.sleep ? { sleep: ctx.sleep } : {});
     for (const c of batch) { const v = results.get(c.id); if (v) c.verify = v; }
     saveCandidates(dir, all);
     const tally = { checked: batch.length, verified: batch.filter(isVerified).length, notFound: batch.filter(c => c.verify?.exists === "no").length,
       unknown: batch.filter(c => c.verify?.exists === "unknown").length, mismatched: batch.filter(c => c.verify?.exists === "yes" && c.verify.match !== "yes").length,
-      noIdentifier: batch.filter(c => c.verify?.syntax !== "ok").length, remaining: pending.length - batch.length };
+      noIdentifier: batch.filter(c => c.verify?.syntax !== "ok").length, remaining: pending.length - batch.length,
+      final: wanted ? 0 : all.filter(c => c.status === "included" && !isVerified(c) && !open(c)).length };
     appendEvent(dir, ctx.actor, "lit.verify", tally);
     return { ...tally, results: batch.map(c => ({ id: c.id, ...c.verify })) };
   });
@@ -176,8 +185,5 @@ export async function bib(dirArg: string, ctx: Ctx) {
 
 export function cite(dirArg: string, draft: string) {
   const { dir } = openStudy(dirArg), path = resolve(draft);
-  const info = statSync(path);
-  if (!info.isFile()) throw new Error(`${path}: not a file`);
-  if (info.size > DRAFT_BYTES) throw new Error(`${path}: larger than 2 MiB`);
-  return { draft: path, ...checkCitations(readFileSync(path, "utf8"), loadCandidates(dir)) };
+  return { draft: path, ...checkCitations(readTextBounded(path, DRAFT_BYTES), loadCandidates(dir)) };
 }

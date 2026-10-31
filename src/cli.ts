@@ -1,10 +1,9 @@
-import { readFileSync, statSync } from "node:fs";
 import { version } from "../package.json";
 import { findCommand, help, type CommandSpec } from "./commands-table.ts";
 import * as ops from "./commands.ts";
 import { createHttp, type Http } from "./http.ts";
 import { PLAYBOOK } from "./playbook.ts";
-import { detectActor } from "./study.ts";
+import { detectActor, readTextBounded } from "./study.ts";
 
 const INPUT_BYTES = 65_536;
 export interface Io { readStdin?: () => Promise<string>; http?: Http; sleep?: (ms: number) => Promise<void> }
@@ -37,10 +36,7 @@ async function readInput(path: string, io: Io): Promise<unknown> {
   if (path === "-") {
     if (!io.readStdin) throw new Error("--file -: no standard input");
     text = await io.readStdin();
-  } else {
-    if (statSync(path).size > INPUT_BYTES) throw new Error(`${path}: larger than ${INPUT_BYTES} bytes`);
-    text = readFileSync(path, "utf8");
-  }
+  } else text = readTextBounded(path, INPUT_BYTES);
   if (Buffer.byteLength(text) > INPUT_BYTES) throw new Error(`input larger than ${INPUT_BYTES} bytes`);
   try { return JSON.parse(text); } catch { throw new Error(`${path === "-" ? "standard input" : path}: not valid JSON`); }
 }

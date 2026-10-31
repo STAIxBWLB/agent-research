@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { plain, readJsonFile, sha256, writeAtomic, type Actor } from "../study.ts";
+import { assertWritable, plain, readJsonFile, sha256, writeAtomic, type Actor } from "../study.ts";
 
 export interface Registry { title: string; authors: string[]; year?: number; venue?: string; type?: string }
 export interface Verification {
@@ -16,7 +16,7 @@ export interface Candidate extends Omit<RawCandidate, "source"> {
   citekey?: string; verify?: Verification;
 }
 
-const ABSTRACT_MAX = 2000, TITLE_MAX = 1000, AUTHORS_MAX = 100;
+const ABSTRACT_MAX = 2000, TITLE_MAX = 1000, AUTHORS_MAX = 100, AUTHOR_MAX = 300, CANDIDATES_BYTES = 64 * 1024 * 1024;
 const ARXIV_DOI = /^10\.48550\/arxiv\.(.+)$/i;
 
 export function normTitle(title: string): string {
@@ -41,7 +41,7 @@ export function cleanRaw(raw: RawCandidate): RawCandidate | undefined {
   const arxivDoi = doi && ARXIV_DOI.exec(doi);
   if (arxivDoi) { arxivId ??= normArxiv(arxivDoi[1]); doi = undefined; }
   return {
-    title, authors: raw.authors.map(a => a.replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, AUTHORS_MAX), source: raw.source,
+    title, authors: raw.authors.map(a => a.replace(/\s+/g, " ").trim().slice(0, AUTHOR_MAX)).filter(Boolean).slice(0, AUTHORS_MAX), source: raw.source,
     ...(raw.year !== undefined && Number.isSafeInteger(raw.year) ? { year: raw.year } : {}),
     ...(raw.venue?.trim() ? { venue: raw.venue.trim().slice(0, 500) } : {}),
     ...(doi ? { doi } : {}), ...(arxivId ? { arxivId } : {}),
@@ -87,12 +87,16 @@ export function candidatesPath(dir: string): string { return join(dir, "literatu
 export function loadCandidates(dir: string): Candidate[] {
   const path = candidatesPath(dir);
   if (!existsSync(path)) return [];
-  const raw = readJsonFile(path, 64 * 1024 * 1024);
+  const raw = readJsonFile(path, CANDIDATES_BYTES);
   if (!Array.isArray(raw) || !raw.every(c => plain(c) && typeof c.id === "string" && typeof c.title === "string" && Array.isArray(c.sources)))
     throw new Error("literature/candidates.json: malformed");
   return raw as Candidate[];
 }
-export function saveCandidates(dir: string, list: Candidate[]): void { writeAtomic(candidatesPath(dir), JSON.stringify(list, null, 1) + "\n"); }
+export function saveCandidates(dir: string, list: Candidate[]): void {
+  const text = JSON.stringify(list, null, 1) + "\n";
+  assertWritable(text, CANDIDATES_BYTES, "literature/candidates.json (lower scope.maxCandidates)");
+  writeAtomic(candidatesPath(dir), text);
+}
 
 /** The fields a verification checked. A later merge that adds a DOI, arXiv id or year makes an older verification stale. */
 export function verifySubject(c: Pick<Candidate, "doi" | "arxivId" | "title" | "year">): string {
