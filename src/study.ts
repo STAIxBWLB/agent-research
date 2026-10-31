@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 
@@ -43,7 +43,8 @@ export function writeAtomic(path: string, text: string, maxBytes: number): void 
 
 /** Read a regular file, stopping one byte past `maxBytes`: special files and oversize files are refused without buffering them. */
 export function readBytesBounded(path: string, maxBytes: number): Buffer {
-  const fd = openSync(path, "r");
+  // Non-blocking open: a FIFO without a writer would otherwise block before the type check.
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
     if (!fstatSync(fd).isFile()) throw new Error(`${path}: not a regular file`);
     const buffer = Buffer.alloc(Math.min(maxBytes + 1, 1 << 20)), parts: Buffer[] = [];

@@ -60,6 +60,25 @@ export function candidateId(raw: RawCandidate): string {
 
 const titleKey = (c: { title: string; year?: number }) => `${normTitle(c.title)}|${c.year ?? ""}`;
 
+/** Groups of candidates that are the same work by DOI, arXiv id, title plus year, or a recorded duplicate link. */
+export function sameWork(list: Candidate[]): string[][] {
+  const parent = new Map(list.map(c => [c.id, c.id]));
+  const root = (id: string): string => { const p = parent.get(id)!; return p === id ? id : root(p); };
+  const join = (a: string, b: string) => { if (parent.has(a) && parent.has(b)) parent.set(root(a), root(b)); };
+  const seen = new Map<string, string>();
+  for (const c of list) {
+    for (const key of [c.doi && `doi:${c.doi}`, c.arxivId && `arxiv:${c.arxivId}`, `title:${titleKey(c)}`]) {
+      if (!key) continue;
+      const first = seen.get(key);
+      if (first) join(first, c.id); else seen.set(key, c.id);
+    }
+    for (const d of c.duplicates ?? []) join(c.id, d);
+  }
+  const groups = new Map<string, string[]>();
+  for (const c of list) { const r = root(c.id); groups.set(r, [...(groups.get(r) ?? []), c.id]); }
+  return [...groups.values()].filter(g => g.length > 1);
+}
+
 /**
  * Merge source records into the list. A record joins an existing candidate on DOI, arXiv id or normalized
  * title plus year; the candidate keeps its first id so screening decisions and citekeys stay attached.
@@ -84,7 +103,11 @@ export function mergeCandidates(list: Candidate[], incoming: RawCandidate[], lim
     if (primary) {
       // A record that links several candidates folds the unscreened, unkeyed ones into the first; the rest are flagged.
       for (const other of others) {
-        if (other.status === "new" && !other.citekey) { absorb(primary, other); list.splice(list.indexOf(other), 1); }
+        if (other.status === "new" && !other.citekey) {
+          absorb(primary, other);
+          for (const twin of other.duplicates ?? []) { const t = list.find(c => c.id === twin); if (t && t !== primary) { t.duplicates = t.duplicates!.filter(d => d !== other.id); link(primary, t); } }
+          list.splice(list.indexOf(other), 1);
+        }
         else { link(primary, other); linked++; }
       }
       absorb(primary, clean);

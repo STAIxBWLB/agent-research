@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import type { Http } from "./http.ts";
 import { readScope, scopeHash, setScope } from "./scope.ts";
 import { appendEvent, boundedText, decideGate, gateState, GATES, initStudy, openStudy, readBytesBounded, readLedger, readTextBounded, requireGate, sha256, withLock, writeAtomic, type Actor, type Binder, type GateName } from "./study.ts";
-import { includedHash, isVerified, loadCandidates, mergeCandidates, saveCandidates, verifySubject, type Candidate } from "./lit/candidates.ts";
+import { includedHash, isVerified, loadCandidates, mergeCandidates, sameWork, saveCandidates, verifySubject, type Candidate } from "./lit/candidates.ts";
 import { searchSource, SOURCES, type SourceName } from "./lit/sources.ts";
 import { verifyCandidates } from "./lit/verify.ts";
 import { assignCitekeys, renderBib } from "./lit/bibtex.ts";
@@ -173,9 +173,8 @@ export async function bib(dirArg: string, ctx: Ctx) {
   return withLock(dir, () => {
     requireGate(dir, study, "screen", binder(dir));
     const all = loadCandidates(dir), eligible = all.filter(c => c.status === "included" && isVerified(c));
-    const included = new Set(all.filter(c => c.status === "included").map(c => c.id));
-    const twins = all.filter(c => included.has(c.id) && c.duplicates?.some(d => included.has(d))).map(c => c.id);
-    if (twins.length) throw new Error(`included candidates that are the same work: ${twins.join(", ")}; exclude all but one`);
+    const twins = sameWork(all.filter(c => c.status === "included"));
+    if (twins.length) throw new Error(`included candidates that are the same work: ${twins.map(g => g.join(" = ")).join("; ")}; exclude all but one of each`);
     const assigned = assignCitekeys(all, eligible);
     if (assigned) saveCandidates(dir, all);
     const { text, entries } = renderBib(all), path = join(dir, "refs", "references.bib"), hash = sha256(text);

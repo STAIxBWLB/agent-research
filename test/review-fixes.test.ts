@@ -142,3 +142,33 @@ describe("PR #3 review fixes, round 4", () => {
     expect(readdirSync(dir)).toEqual([]);
   });
 });
+
+describe("PR #3 review fixes, round 5", () => {
+  test("bib refuses included candidates that share an identifier, whatever the stored links say", async () => {
+    const dir = join(tempDir(), "s");
+    ops.init(dir, { question: "Q?", autonomy: "auto" }, { actor: person });
+    const ctx = { actor: person, http: fakeHttp([]).http };
+    await ops.scope(dir, { question: "Q?" }, ctx);
+    const base = { authors: [], year: 2025, sources: ["t"], addedAt: "", status: "included" as const };
+    saveCandidates(dir, [{ ...base, id: "doi:10.1/a", title: "One Title", doi: "10.1/a" }, { ...base, id: "title:abc", title: "Another Title", doi: "10.1/a" }]);
+    await expect(ops.bib(dir, ctx)).rejects.toThrow("doi:10.1/a = title:abc");
+  });
+  test("absorbing a candidate moves its duplicate links to the survivor", () => {
+    const base = { authors: [], year: 2025, sources: ["t"], addedAt: "" };
+    const list: import("../src/lit/candidates.ts").Candidate[] = [
+      { ...base, id: "doi:10.1/c", title: "Paper C", doi: "10.1/c", status: "included" as const },
+      { ...base, id: "arxiv:2501.00001", title: "Paper A", arxivId: "2501.00001", status: "new" as const, duplicates: ["doi:10.1/b"] },
+      { ...base, id: "doi:10.1/b", title: "Paper B", doi: "10.1/b", status: "included" as const, duplicates: ["arxiv:2501.00001"] },
+    ];
+    mergeCandidates(list, [{ source: "s2", title: "Paper C", authors: [], year: 2025, doi: "10.1/c", arxivId: "2501.00001" }], 100);
+    expect(list.map(c => c.id)).toEqual(["doi:10.1/c", "doi:10.1/b"]);
+    expect(list[0]!.duplicates).toEqual(["doi:10.1/b"]);
+    expect(list[1]!.duplicates).toEqual(["doi:10.1/c"]);
+  });
+  test("a FIFO without a writer is refused without blocking", async () => {
+    const dir = tempDir(), fifo = join(dir, "pipe");
+    expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
+    const { readTextBounded } = await import("../src/study.ts");
+    expect(() => readTextBounded(fifo, 100)).toThrow("not a regular file");
+  }, 2000);
+});
