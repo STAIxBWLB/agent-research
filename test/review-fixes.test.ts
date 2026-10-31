@@ -203,3 +203,40 @@ describe("PR #3 review fixes, round 6", () => {
     expect(approvals()).toBe(before);
   });
 });
+
+describe("PR #3 review fixes, round 7", () => {
+  async function autoStudy(routes: Parameters<typeof fakeHttp>[0] = searchRoutes()) {
+    const dir = join(tempDir(), "s");
+    ops.init(dir, { question: "Q?", autonomy: "auto" }, { actor: person });
+    const ctx = { actor: person, http: fakeHttp(routes).http };
+    await ops.scope(dir, { question: "Q?" }, ctx);
+    return { dir, ctx };
+  }
+  const approvals = async (dir: string) => (await import("../src/study.ts")).readLedger(dir).filter(e => e.type === "gate.approve").length;
+  test("a screen whose event would be too large changes no candidate and records no approval", async () => {
+    const { dir, ctx } = await autoStudy();
+    const base = { authors: [], year: 2025, sources: ["t"], addedAt: "", status: "new" as const };
+    const ids = Array.from({ length: 200 }, (_, i) => `doi:10.1/${"가".repeat(130)}${i}`);
+    saveCandidates(dir, ids.map((id, i) => ({ ...base, id, title: `T${i}` })));
+    await expect(ops.screen(dir, ids, "include", undefined, ctx)).rejects.toThrow("exceeds 65536 bytes");
+    expect(loadCandidates(dir).every(c => c.status === "new")).toBe(true);
+    expect(await approvals(dir)).toBe(0);
+  });
+  test("a search where every source failed records the search but no approval", async () => {
+    const { dir, ctx } = await autoStudy([["https://", "network"]]);
+    const out = await ops.search(dir, "q", {}, ctx);
+    expect(out.sources.every(s => !s.ok)).toBe(true);
+    expect(await approvals(dir)).toBe(0);
+    const { readLedger } = await import("../src/study.ts");
+    expect(readLedger(dir).some(e => e.type === "lit.search")).toBe(true);
+  });
+  test("a commit that would push the ledger past its read limit writes nothing", async () => {
+    const { commit } = await import("../src/study.ts");
+    const { existsSync, truncateSync, writeFileSync } = await import("node:fs");
+    const dir = tempDir(), ledger = join(dir, "ledger.jsonl"), file = join(dir, "out.json");
+    writeFileSync(ledger, "");
+    truncateSync(ledger, 64 * 1024 * 1024 - 10);
+    expect(() => commit(dir, [[file, "{}\n", 100]], [{ actor: person, type: "t", data: {} }])).toThrow("would exceed");
+    expect(existsSync(file)).toBe(false);
+  });
+});

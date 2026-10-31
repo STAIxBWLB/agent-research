@@ -1,4 +1,4 @@
-import { closeSync, constants, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 
@@ -110,7 +110,14 @@ export function initStudy(dir: string, options: { question: string; mode?: strin
   if (autonomy !== "auto" && autonomy !== "gates") throw new Error("--autonomy: auto or gates");
   const study: Study = { v: 1, id: randomUUID(), question: boundedText(options.question, "--question", QUESTION_MAX), mode, autonomy, createdAt: new Date().toISOString() };
   for (const sub of ["", "literature", "literature/cards", "refs"]) mkdirSync(join(root, sub), { recursive: true });
-  writeAtomic(join(root, "study.json"), JSON.stringify(study, null, 2) + "\n", STUDY_BYTES);
+  // link() refuses an existing target, so two concurrent inits cannot both create the study.
+  const text = JSON.stringify(study, null, 2) + "\n", tmp = join(root, `study.json.${randomUUID()}.tmp`);
+  assertWritable(text, STUDY_BYTES, "study.json");
+  const fd = openSync(tmp, "wx", 0o644);
+  try { writeSync(fd, text); fsyncSync(fd); } finally { closeSync(fd); }
+  try { linkSync(tmp, join(root, "study.json")); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error(`${root}: a study already exists here`); throw error; }
+  finally { unlinkSync(tmp); }
   appendEvent(root, actor, "study.init", { id: study.id, mode, autonomy });
   return study;
 }
@@ -135,12 +142,29 @@ export async function withLock<T>(dir: string, fn: () => Promise<T> | T): Promis
   try { return await fn(); } finally { try { unlinkSync(path); } catch { /* already removed */ } }
 }
 
+export interface PendingEvent { actor: Actor; type: string; data: Record<string, unknown> }
+export type FileWrite = [path: string, text: string, maxBytes: number];
+
+/**
+ * Apply one command's changes: every file and ledger bound is checked first (file sizes, event sizes, the ledger's
+ * total against its read limit), then the files are written and all events appended in one write. A failed check
+ * changes nothing.
+ * ponytail: no write-ahead log; a crash between the file writes and the append leaves files without their event.
+ */
+export function commit(dir: string, files: FileWrite[], pending: PendingEvent[]): LedgerEvent[] {
+  const at = new Date().toISOString(), events: LedgerEvent[] = pending.map(e => ({ v: 1, at, ...e }));
+  const lines = events.map(e => JSON.stringify(e) + "\n");
+  lines.forEach((line, i) => { if (Buffer.byteLength(line) > EVENT_BYTES) throw new Error(`ledger event ${events[i]!.type} exceeds ${EVENT_BYTES} bytes`); });
+  const ledger = join(dir, "ledger.jsonl"), size = existsSync(ledger) ? statSync(ledger).size : 0;
+  if (size + Buffer.byteLength(lines.join("")) > LEDGER_BYTES) throw new Error(`ledger.jsonl would exceed ${LEDGER_BYTES} bytes; start a new study`);
+  for (const [path, text, max] of files) assertWritable(text, max, path);
+  for (const [path, text, max] of files) writeAtomic(path, text, max);
+  if (lines.length) appendFileSync(ledger, lines.join(""), { mode: 0o644 });
+  return events;
+}
+
 export function appendEvent(dir: string, actor: Actor, type: string, data: Record<string, unknown>): LedgerEvent {
-  const event: LedgerEvent = { v: 1, at: new Date().toISOString(), actor, type, data };
-  const line = JSON.stringify(event) + "\n";
-  if (Buffer.byteLength(line) > EVENT_BYTES) throw new Error(`ledger event ${type} exceeds ${EVENT_BYTES} bytes`);
-  appendFileSync(join(dir, "ledger.jsonl"), line, { mode: 0o644 });
-  return event;
+  return commit(dir, [], [{ actor, type, data }])[0]!;
 }
 
 /** Read the whole ledger; a malformed line fails closed with its line number. */
@@ -187,13 +211,13 @@ export function decideGate(dir: string, gate: GateName, decision: "approve" | "r
 
 /**
  * Pass when the gate is approved for the current content. In auto mode a pending gate passes too, and the returned
- * function records the `auto` approval: call it only after the command's own writes succeed, so a failed command
- * never changes a gate.
+ * `auto` approval goes into the command's own commit only when the command succeeds, so a failed command never
+ * changes a gate.
  */
-export function requireGate(dir: string, study: Study, gate: GateName, binder: Binder): () => void {
+export function requireGate(dir: string, study: Study, gate: GateName, binder: Binder): PendingEvent[] {
   const state = gateState(gate, readLedger(dir), binder);
-  if (state.state === "approved") return () => {};
-  if (state.state === "pending" && study.autonomy === "auto") return () => { appendEvent(dir, { kind: "auto" }, "gate.approve", { gate, binding: state.current! }); };
+  if (state.state === "approved") return [];
+  if (state.state === "pending" && study.autonomy === "auto") return [{ actor: { kind: "auto" }, type: "gate.approve", data: { gate, binding: state.current! } }];
   if (state.state === "none") throw new Error(gate === "scope" ? "gate scope: no scope yet (run ares scope)" : "gate screen: no included candidates yet");
   if (state.state === "rejected") throw new Error(`gate ${gate} is rejected${state.decided?.reason ? `: ${state.decided.reason}` : ""}; change the content and ask again`);
   throw new Error(`gate ${gate} is pending: run ares gate approve <dir> ${gate}`);

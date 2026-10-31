@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { appendEvent, boundedText, onlyKeys, plain, readBytesBounded, readJsonFile, sha256, writeAtomic, type Actor } from "./study.ts";
+import { boundedText, commit, onlyKeys, plain, readBytesBounded, readJsonFile, sha256, type Actor } from "./study.ts";
 
 export interface Scope { question: string; subquestions: string[]; include: string[]; exclude: string[]; yearFrom?: number; yearTo?: number; maxCandidates: number }
 const KEYS = ["question", "subquestions", "include", "exclude", "yearFrom", "yearTo", "maxCandidates"] as const;
@@ -48,6 +48,6 @@ export function readScope(dir: string): Scope | undefined {
 export function setScope(dir: string, raw: unknown, actor: Actor): { scope: Scope; sha256: string; changed: boolean } {
   const scope = validateScope(raw), text = JSON.stringify(scope, null, 2) + "\n", hash = sha256(text);
   const changed = scopeHash(dir) !== hash;
-  if (changed) { writeAtomic(scopePath(dir), text, SCOPE_BYTES); appendEvent(dir, actor, "scope.set", { sha256: hash }); }
+  if (changed) commit(dir, [[scopePath(dir), text, SCOPE_BYTES]], [{ actor, type: "scope.set", data: { sha256: hash } }]);
   return { scope, sha256: hash, changed };
 }

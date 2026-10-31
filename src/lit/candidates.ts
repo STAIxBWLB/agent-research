@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { plain, readJsonFile, sha256, writeAtomic, type Actor } from "../study.ts";
+import { plain, readJsonFile, sha256, writeAtomic, type Actor, type FileWrite } from "../study.ts";
 
 export interface Registry { title: string; authors: string[]; year?: number; venue?: string; type?: string }
 export interface Verification {
@@ -131,9 +131,8 @@ export function loadCandidates(dir: string): Candidate[] {
     throw new Error("literature/candidates.json: malformed");
   return raw as Candidate[];
 }
-export function saveCandidates(dir: string, list: Candidate[]): void {
-  writeAtomic(candidatesPath(dir), JSON.stringify(list, null, 1) + "\n", CANDIDATES_BYTES);
-}
+export function candidatesFile(dir: string, list: Candidate[]): FileWrite { return [candidatesPath(dir), JSON.stringify(list, null, 1) + "\n", CANDIDATES_BYTES]; }
+export function saveCandidates(dir: string, list: Candidate[]): void { writeAtomic(...candidatesFile(dir, list)); }
 
 /** The fields a verification checked. A later merge that adds a DOI, arXiv id or year makes an older verification stale. */
 export function verifySubject(c: Pick<Candidate, "doi" | "arxivId" | "title" | "year">): string {
