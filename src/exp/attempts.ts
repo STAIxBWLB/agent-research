@@ -7,13 +7,14 @@ import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, r
 import { designBinding, protocolHash, readDesign, type Protocol } from "./protocol.ts";
 import { buildContainerArgs, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
 import { resolveSnapshot, transferSnapshot, transferTask } from "./snapshot.ts";
+import { collectEvaluation as defaultEvaluationCollector, collectStageEvidence as defaultStageCollector, EvidenceError, MetricsError, outputBudget, type StageEvidence } from "./metrics.ts";
 
 export type AttemptStatus = "running" | "succeeded" | "failed" | "cancelled" | "unknown";
-export interface AttemptStage { image: string; argv: string[]; mounts: { target: string; readOnly: boolean }[]; network: "none"; limits: Protocol["limits"]; user: string; containerId?: string; startedAt: string; endedAt?: string; exitCode?: number }
+export interface AttemptStage { image: string; argv: string[]; mounts: { target: string; readOnly: boolean }[]; network: "none"; limits: Protocol["limits"]; user: string; containerId?: string; startedAt: string; endedAt?: string; exitCode?: number; evidence?: StageEvidence; evidenceError?: { reason: string; message: string } }
 export interface Evaluation { metrics: { name: string; unit: string; value: number; provenance: "ares-observed" }[]; outputs: { path: string; sha256: string; bytes: number }[] }
 export interface Attempt {
   v: 1; id: string; studyId: string; run: string; protocolHash: string; sealBinding: string; commit: string; treeId: string; snapshotSha256?: string; seed: number; label: string; retryOf?: string;
-  executor: Executor; protocol: Protocol; paths: ContainerPaths; status: AttemptStatus; stage: Stage; reason?: string; startedAt: string; endedAt?: string;
+  executor: Executor; protocol: Protocol; paths: ContainerPaths; status: AttemptStatus; stage: Stage; reason?: string; error?: string; startedAt: string; endedAt?: string;
   stages: Partial<Record<Stage, AttemptStage>>; metrics: Evaluation["metrics"]; outputs: Evaluation["outputs"];
   sealing: { separateContainers: boolean; evaluatorReadOnly: boolean; candidateHasNoEvaluator: boolean; verifiedBy: "ares-observed" };
   launching?: { pid: number; host: string; token: string; claimedAt: string; expiresAt: string };
@@ -21,7 +22,7 @@ export interface Attempt {
 }
 export interface AttemptOptions { repo: string; commit: string; seed?: number; run?: string; label?: string; retry?: string; detach?: boolean }
 /** collectEvaluation is T4's validating adapter; T3 does not parse or validate metric schemas. */
-export interface AttemptContext { actor: Actor; runner?: ProcessRunner; now?: () => number; sleep?: (ms: number) => Promise<void>; collectEvaluation?: (attempt: Attempt, runner: ProcessRunner) => Promise<Evaluation> }
+export interface AttemptContext { actor: Actor; runner?: ProcessRunner; now?: () => number; sleep?: (ms: number) => Promise<void>; collectEvaluation?: (attempt: Attempt, runner: ProcessRunner) => Promise<Evaluation>; collectStageEvidence?: (attempt: Attempt, stage: Stage, runner: ProcessRunner) => Promise<StageEvidence> }
 export const ATTEMPT_BYTES = 1024 * 1024;
 // Startup includes bounded image pulls and two 5-minute transfers; claims never survive indefinitely after a crash.
 export const CONTROL_STALE_MS = 30 * 60_000;
@@ -254,6 +255,21 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
   }
 }
 
+async function captureStage(dir: string, attempt: Attempt, ctx: AttemptContext, bestEffort: boolean): Promise<Attempt> {
+  if (attempt.stages[attempt.stage]?.evidence) return attempt;
+  try {
+    const collected = await (ctx.collectStageEvidence ?? defaultStageCollector)(attempt, attempt.stage, ctx.runner ?? spawnRunner);
+    const metadata = (log: StageEvidence["logs"]["stdout"]) => ({ path: log.path, sha256: log.sha256, bytes: log.bytes, truncated: log.truncated });
+    const evidence: StageEvidence = { logs: { stdout: metadata(collected.logs.stdout), stderr: metadata(collected.logs.stderr) }, outputs: collected.outputs.map(output => ({ path: output.path, sha256: output.sha256, bytes: output.bytes })) };
+    const outputs = outputBudget([...attempt.outputs, ...evidence.outputs]);
+    return update(dir, attempt.id, ctx, current => { current.stages[current.stage]!.evidence = evidence; current.outputs = outputs; return "attempt.stage.evidence"; });
+  } catch (error) {
+    const failure = error instanceof EvidenceError ? error : new EvidenceError("evidence-read", "stage evidence: collection failed; inspect the executor stage files and retry the attempt");
+    if (!bestEffort) throw failure;
+    return update(dir, attempt.id, ctx, current => { current.stages[current.stage]!.evidenceError = { reason: failure.reason, message: failure.message }; return "attempt.stage.evidence-failed"; });
+  }
+}
+
 export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: AttemptContext): Promise<Attempt> {
   const dir = studyDir(dirArg), { study } = openStudy(dir);
   const frozen = await withLock(dir, () => {
@@ -324,7 +340,7 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
   for (let attempt of load(dir).filter(a => a.status === "running")) {
     if (alive(attempt, ctx)) continue;
     try {
-      const state = await inspect(attempt, ctx);
+      let state = await inspect(attempt, ctx);
       if (!state) { changed.push(await update(dir, attempt.id, ctx, current => { finish(current, "unknown", "lost", ctx); return "attempt.unknown"; })); continue; }
       const recovered = needsReceipt(attempt, state);
       if (recovered) attempt = await recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered");
@@ -332,25 +348,37 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
       if (!stage) throw hostError(attempt, "stage record");
       const deadline = Date.parse(stage.startedAt) + stage.limits.wallSeconds * 1000;
       if ((state.running && now(ctx) >= deadline) || (!state.running && state.finishedAt !== undefined && Date.parse(state.finishedAt) >= deadline)) {
-        if (state.running) await command(attempt, "wall-clock kill", "docker", ["kill", state.id], ctx);
-        changed.push(await update(dir, attempt.id, ctx, current => { if (state.finishedAt) current.stages[current.stage]!.endedAt = state.finishedAt; finish(current, "failed", "wall-clock", ctx); return "attempt.failed"; })); continue;
+        if (state.running) { await command(attempt, "wall-clock kill", "docker", ["kill", state.id], ctx); const stopped = await inspect(attempt, ctx); if (stopped) state = stopped; }
+        attempt = await captureStage(dir, attempt, ctx, true);
+        const ended = state;
+        changed.push(await update(dir, attempt.id, ctx, current => { if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; if (!ended.running) current.stages[current.stage]!.exitCode = ended.exitCode; finish(current, "failed", "wall-clock", ctx); return "attempt.failed"; })); continue;
       }
       if (state.running) {
         if (recovered) changed.push(attempt);
         continue;
       }
-      if (state.exitCode !== 0) { changed.push(await update(dir, attempt.id, ctx, current => { current.stages[current.stage]!.exitCode = state.exitCode; if (state.finishedAt) current.stages[current.stage]!.endedAt = state.finishedAt; finish(current, "failed", `${current.stage}-exit`, ctx); return "attempt.failed"; })); continue; }
+      if (state.exitCode !== 0) { attempt = await captureStage(dir, attempt, ctx, true); const ended = state; changed.push(await update(dir, attempt.id, ctx, current => { current.stages[current.stage]!.exitCode = ended.exitCode; if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; finish(current, "failed", `${current.stage}-exit`, ctx); return "attempt.failed"; })); continue; }
+      try { attempt = await captureStage(dir, attempt, ctx, false); }
+      catch (error) {
+        const failure = error as EvidenceError, ended = state;
+        changed.push(await update(dir, attempt.id, ctx, current => {
+          current.stages[current.stage]!.exitCode = ended.exitCode;
+          if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt;
+          current.error = failure.message; finish(current, "failed", failure.reason, ctx); return "attempt.failed";
+        })); continue;
+      }
       if (attempt.stage === "candidate") {
         const next = await update(dir, attempt.id, ctx, current => { current.stages.candidate!.exitCode = 0; current.stages.candidate!.endedAt = state.finishedAt ?? at(ctx); current.stage = "evaluator"; current.stages.evaluator = stageRecord(current, "evaluator", stage.user, ctx); current.launching = owner(ctx); return "attempt.stage.changed"; });
         changed.push(await launch(dir, next, stage.user, ctx));
       } else {
-        let evaluation: Evaluation | undefined;
-        try { evaluation = await ctx.collectEvaluation?.(attempt, ctx.runner ?? spawnRunner); } catch { /* no unvalidated metrics can succeed */ }
+        let evaluation: Evaluation | undefined, failure: EvidenceError | undefined;
+        try { evaluation = await (ctx.collectEvaluation ?? defaultEvaluationCollector)(attempt, ctx.runner ?? spawnRunner); }
+        catch (error) { failure = error instanceof EvidenceError ? error : new MetricsError("invalid-metrics", "evaluator result validation failed"); }
         changed.push(await update(dir, attempt.id, ctx, current => {
           current.stages.evaluator!.exitCode = 0;
           if (state.finishedAt) current.stages.evaluator!.endedAt = state.finishedAt;
-          if (!evaluation) { finish(current, "failed", ctx.collectEvaluation ? "invalid-metrics" : "missing-metrics", ctx); return "attempt.failed"; }
-          current.metrics = evaluation.metrics; current.outputs = evaluation.outputs; finish(current, "succeeded", undefined, ctx); return "attempt.succeeded";
+          if (!evaluation) { const rejected = failure ?? new MetricsError("invalid-metrics", "the collector returned no result"); current.error = rejected.message; finish(current, "failed", rejected.reason, ctx); return "attempt.failed"; }
+          current.metrics = evaluation.metrics; current.outputs = outputBudget([...current.outputs, ...evaluation.outputs]); finish(current, "succeeded", undefined, ctx); return "attempt.succeeded";
         }));
       }
     } catch {
@@ -368,10 +396,12 @@ export async function cancelAttempt(dirArg: string, wanted: string, reason: stri
   if (attempt.status !== "running") return attempt;
   if (alive(attempt, ctx)) throw new Error("attempt: another startup operation is active; retry cancel when it finishes (abandoned claims expire after 30 minutes)");
   try {
-    const state = await inspect(attempt, ctx);
+    let state = await inspect(attempt, ctx);
     if (state && needsReceipt(attempt, state)) attempt = await recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered", false);
-    if (state?.running) await command(attempt, "cancel kill", "docker", ["kill", state.id], ctx);
-    return update(dir, attempt.id, ctx, current => { finish(current, "cancelled", why ?? "cancelled", ctx); return "attempt.cancelled"; });
+    if (state?.running) { await command(attempt, "cancel kill", "docker", ["kill", state.id], ctx); state = await inspect(attempt, ctx); }
+    if (state) attempt = await captureStage(dir, attempt, ctx, true);
+    const ended = state;
+    return update(dir, attempt.id, ctx, current => { if (ended && !ended.running) { current.stages[current.stage]!.exitCode = ended.exitCode; if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; } finish(current, "cancelled", why ?? "cancelled", ctx); return "attempt.cancelled"; });
   } catch {
     await update(dir, attempt.id, ctx, current => { delete current.launching; return "attempt.executor-error"; });
     throw hostError(attempt, "cancel");
