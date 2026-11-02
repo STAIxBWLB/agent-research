@@ -1,15 +1,15 @@
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { init, gateDecide, gateList } from "../src/commands.ts";
 import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
 import { readLedger, sha256, withLock } from "../src/study.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
-import { metricLogTar, metricTar } from "./metric-fixtures.ts";
-import { EvidenceError } from "../src/exp/metrics.ts";
+import { logCaptureFixtureRunner, metricLogTar, metricTar } from "./metric-fixtures.ts";
+import { collectStageEvidence, EvidenceError, LOG_COPY_BYTES } from "../src/exp/metrics.ts";
 
 const actor = { kind: "person" as const }, commitSha = "a".repeat(40), treeId = "b".repeat(40);
 function protocol(): Protocol {
@@ -40,7 +40,7 @@ function runtime(dir: string) {
     if (request.command === "sh") {
       if (request.stdoutSink) {
         const stage = args.join(" ").includes("candidate.stdout.log") ? "candidate" : "evaluator";
-        await request.stdoutSink(metricLogTar(stage, `${stage} score=999\n`));
+        await request.stdoutSink(metricLogTar(stage, `${stage} score=999\nGET https://api.example.test/private?query=sensitive\n{"body":"synthetic-response-body","API_KEY":"synthetic-key-value"}\n`));
       }
       return ok();
     }
@@ -81,7 +81,7 @@ function runtime(dir: string) {
     throw new Error(`unscripted synthetic process ${request.command}`);
   };
   const ctx: AttemptContext = { actor, runner, now: () => clock.value, collectEvaluation: async () => ({ metrics: [{ name: "score", unit: "points", value: 7, provenance: "ares-observed" }], outputs: [] }), collectStageEvidence: async (_attempt, stage) => {
-    const log = { path: `/synthetic/${stage}.log`, sha256: sha256(""), bytes: 0, tail: "", redacted: false, truncated: false };
+    const log = { path: `/synthetic/${stage}.log`, sha256: sha256(""), bytes: 0, truncated: false };
     return { logs: { stdout: log, stderr: log }, outputs: [] };
   } };
   return { requests, containers, clock, ctx, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; } };
@@ -341,12 +341,13 @@ test("AC6: default collector records only evaluator metrics and complete stage/o
   expect(done.status).toBe("succeeded"); expect(done.metrics).toEqual([{ name: "score", unit: "points", value: 7, provenance: "ares-observed" }]);
   for (const stage of ["candidate", "evaluator"] as const) {
     const record = done.stages[stage]!; expect(record.containerId).toHaveLength(64); expect(record.exitCode).toBe(0); expect(record.endedAt).toBeDefined();
-    expect(record.evidence!.logs.stdout.tail).toContain(`${stage} score=999`); expect(record.evidence!.logs.stdout.sha256).toHaveLength(64);
+    expect(Object.keys(record.evidence!.logs.stdout).sort()).toEqual(["bytes", "path", "sha256", "truncated"]); expect(record.evidence!.logs.stdout.sha256).toHaveLength(64);
     expect(record.evidence!.logs.stdout.path).toContain(`/logs/${stage}.stdout.log`); expect(record.evidence!.logs.stdout.bytes).toBeGreaterThan(0);
     expect(record.evidence!.logs.stdout.truncated).toBe(false);
   }
   expect(done.outputs).toHaveLength(2); expect(done.outputs.every(file => file.sha256.length === 64 && Number.isSafeInteger(file.bytes))).toBe(true);
   expect(done.sealing).toEqual({ separateContainers: true, evaluatorReadOnly: true, candidateHasNoEvaluator: true, verifiedBy: "ares-observed" });
+  for (const content of ["https://api.example.test", "synthetic-response-body", "synthetic-key-value", "score=999"]) expect(JSON.stringify(done)).not.toContain(content);
 });
 
 test("AC6: evaluator validation failures retain evaluator stage, named reason and no unvalidated numbers", async () => {
@@ -368,3 +369,21 @@ test("evidence failure preserves observed exit and finish time instead of chargi
   expect(done.stages.candidate!.exitCode).toBe(0); expect(done.stages.candidate!.endedAt).toBe(candidate.finishedAt);
   expect(budgetUsage([done], fake.clock.value).gpuHours).toBeCloseTo(1 / 3600);
 });
+test("oversized stage logs are capped and marked truncated without failing a successful attempt", async () => {
+  const { dir, fake } = await setup(), root = tempDir();
+  await withLock(dir, () => setExecutor(dir, { v: 1, kind: "local", workdir: root }, actor));
+  delete fake.ctx.collectEvaluation;
+  fake.ctx.collectStageEvidence = async (attempt, stage, runner) => {
+    mkdirSync(dirname(attempt.paths.snapshot), { recursive: true, mode: 0o700 });
+    return collectStageEvidence(attempt, stage, logCaptureFixtureRunner(runner));
+  };
+  const first = await runAttempt(dir, request, fake.ctx); running(fake, "candidate").running = false;
+  await reconcileAttempts(dir, fake.ctx); running(fake, "evaluator").running = false;
+  await reconcileAttempts(dir, fake.ctx); const done = showAttempt(dir, first.id);
+  expect(done.status).toBe("succeeded"); expect(done.metrics[0]?.value).toBe(7);
+  for (const stage of ["candidate", "evaluator"] as const) {
+    expect(done.stages[stage]!.evidence!.logs.stdout.bytes).toBe(LOG_COPY_BYTES);
+    expect(done.stages[stage]!.evidence!.logs.stdout.truncated).toBe(true);
+    expect(Object.keys(done.stages[stage]!.evidence!.logs.stdout).sort()).toEqual(["bytes", "path", "sha256", "truncated"]);
+  }
+}, 10_000);

@@ -1,5 +1,7 @@
 import type { Attempt } from "../src/exp/attempts.ts";
 import type { Protocol } from "../src/exp/protocol.ts";
+import { shellQuote, spawnRunner, type ProcessRunner } from "../src/exp/executor.ts";
+import { LOG_COPY_BYTES } from "../src/exp/metrics.ts";
 
 export function metricProtocol(): Protocol {
   const image = `fixture@sha256:${"a".repeat(64)}`;
@@ -21,6 +23,19 @@ export function metricTar(entries: { path: string; data?: string | Uint8Array; t
 }
 export function metricLogTar(stage: "candidate" | "evaluator", stdout: string, stderr = "", cuts = { stdout: false, stderr: false }): Buffer {
   return metricTar([{ path: `logs/${stage}.stdout.log`, data: stdout }, { path: `logs/${stage}.stderr.log`, data: stderr }, { path: `logs/${stage}.state.json`, data: JSON.stringify(cuts) }]);
+}
+/** Execute the real private-copy shell with an oversized local fixture, replacing Docker before execution. */
+export function logCaptureFixtureRunner(fallback?: ProcessRunner): ProcessRunner {
+  const producer = `process.stderr.write('fixture stderr context\\n'); process.stdout.on('error',()=>process.exit(17)); process.stdout.write('x'.repeat(${LOG_COPY_BYTES + 1024}),()=>process.exit(17));`;
+  return async request => {
+    if (request.command === "sh" && request.stdoutSink && request.args[1]?.includes("docker logs")) {
+      const script = request.args[1].replace(/docker logs [a-f0-9]{64}/, `${shellQuote(process.execPath)} -e ${shellQuote(producer)}`);
+      if (script.includes("docker logs")) throw new Error("synthetic runner refused an unhandled Docker command");
+      return spawnRunner({ ...request, args: ["-c", script] });
+    }
+    if (fallback) return fallback(request);
+    throw new Error("unscripted synthetic fixture process");
+  };
 }
 export function metricAttempt(): Attempt {
   const p = metricProtocol(), start = "2030-01-01T00:00:00Z";

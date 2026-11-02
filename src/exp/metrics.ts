@@ -6,10 +6,10 @@ import { ARTIFACT_BYTES, ARTIFACT_FILES, ArtifactError, readArtifactArchive } fr
 import type { Attempt, Evaluation } from "./attempts.ts";
 import type { Protocol } from "./protocol.ts";
 
-export const METRICS_BYTES = 65_536, LOG_TAIL_BYTES = 16_384;
+export const METRICS_BYTES = 65_536;
 export const OUTPUT_METADATA_BYTES = 256 * 1024;
 export const LOG_COPY_BYTES = 16 * 1024 * 1024;
-export interface LogEvidence { path: string; sha256: string; bytes: number; tail: string; redacted: boolean; truncated: boolean }
+export interface LogEvidence { path: string; sha256: string; bytes: number; truncated: boolean }
 export interface StageEvidence { logs: { stdout: LogEvidence; stderr: LogEvidence }; outputs: Evaluation["outputs"] }
 export class EvidenceError extends Error {
   constructor(readonly reason: string, message: string) { super(message); this.name = "EvidenceError"; }
@@ -70,7 +70,7 @@ function archiveFailure(error: unknown, attempt: Attempt, step: string): Evidenc
 /** Only the evaluator's result mount supplies numbers. Candidate files and printed numbers are never parsed. */
 export async function collectEvaluation(attempt: Attempt, runner: ProcessRunner): Promise<Evaluation> {
   let archive;
-  try { archive = await readArtifactArchive(attempt.executor, "docker", ["cp", `${container(attempt, "evaluator")}:/result/.`, "-"], runner, { capture: "metrics.json", captureBytes: METRICS_BYTES, tailBytes: 0, ...remaining(attempt) }); }
+  try { archive = await readArtifactArchive(attempt.executor, "docker", ["cp", `${container(attempt, "evaluator")}:/result/.`, "-"], runner, { capture: "metrics.json", captureBytes: METRICS_BYTES, ...remaining(attempt) }); }
   catch (error) { throw archiveFailure(error, attempt, "evaluator result archive"); }
   if (!archive.captured) throw new MetricsError("missing-metrics", "metrics.json is missing from the evaluator result directory");
   const metrics = parseMetrics(archive.captured, attempt.protocol);
@@ -79,49 +79,7 @@ export async function collectEvaluation(attempt: Attempt, runner: ProcessRunner)
   return { metrics, outputs };
 }
 
-function normalizeLog(value: string): string { return value.replace(/\p{C}/gu, character => character === "\n" || character === "\t" ? character : ""); }
-function assignmentEnd(text: string, start: number): number {
-  const first = text[start];
-  if (first === '"' || first === "'") {
-    let escaped = false;
-    for (let index = start + 1; index < text.length; index++) { const character = text[index]; if (!escaped && character === first) return index + 1; escaped = !escaped && character === "\\"; }
-    return text.length;
-  }
-  if (first === "{" || first === "[") {
-    const stack: string[] = []; let quote: string | undefined, escaped = false;
-    for (let index = start; index < text.length; index++) {
-      const character = text[index]!;
-      if (quote) { if (!escaped && character === quote) quote = undefined; escaped = !escaped && character === "\\"; continue; }
-      if (character === '"' || character === "'") { quote = character; continue; }
-      if (character === "{" || character === "[") stack.push(character);
-      else if (character === "}" || character === "]") { stack.pop(); if (!stack.length) return index + 1; }
-    }
-    return text.length;
-  }
-  let end = start; while (end < text.length && !/[\s,;&]/.test(text[end]!)) end++; return end;
-}
-/** Apply the spec's explicit masks before taking a bounded tail; do not guess or omit response bodies. */
-export function sanitizeLogTail(bytes: Uint8Array, env: NodeJS.ProcessEnv = process.env): { tail: string; redacted: boolean } {
-  if (bytes.byteLength > LOG_COPY_BYTES) throw new EvidenceError("log-limit", "stage evidence: log exceeds 16 MiB; reduce stage log volume before retrying");
-  const original = new TextDecoder().decode(bytes);
-  let text = normalizeLog(original);
-  text = text.replace(/(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/\s@]+@/g, "$1***@");
-  const assignment = /("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|(?<![A-Za-z0-9_-])[A-Za-z0-9_-]+)\s*(?:=|:)\s*/g;
-  let masked = "", cursor = 0;
-  for (let match = assignment.exec(text); match; match = assignment.exec(text)) {
-    let key = match[1]!;
-    if (key.startsWith('"')) { try { key = JSON.parse(key) as string; } catch { /* shell-style quoted key; inspect its literal spelling */ } }
-    if (!/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(key)) continue;
-    const start = assignment.lastIndex, end = assignmentEnd(text, start), quote = text[start] === '"' || text[start] === "'" ? text[start]! : "";
-    masked += text.slice(cursor, start) + quote + "***" + quote; cursor = end; assignment.lastIndex = Math.max(end, start);
-  }
-  text = masked + text.slice(cursor);
-  const secrets = [...new Set(Object.entries(env).filter(([key, value]) => /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(key) && value).map(([, value]) => normalizeLog(value!)).filter(Boolean))].sort((a, b) => b.length - a.length);
-  if (secrets.length) text = text.replace(new RegExp(secrets.map(value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "g"), "***");
-  const encoded = Buffer.from(text), tail = encoded.length > LOG_TAIL_BYTES ? new TextDecoder().decode(encoded.subarray(-(LOG_TAIL_BYTES - 3))) : text;
-  return { tail, redacted: text !== original };
-}
-/** Raw copies remain in the executor's private attempt directory; only sanitized tails and hashes enter the study. */
+/** Raw copies remain in the executor's private attempt directory; only metadata enters the study. */
 export async function collectStageEvidence(attempt: Attempt, stage: Stage, runner: ProcessRunner): Promise<StageEvidence> {
   const cid = container(attempt, stage), root = posix.dirname(attempt.paths.snapshot), logs = posix.join(root, "logs");
   const stdout = posix.join(logs, `${stage}.stdout.log`), stderr = posix.join(logs, `${stage}.stderr.log`), suffix = randomUUID();
@@ -131,7 +89,7 @@ export async function collectStageEvidence(attempt: Attempt, stage: Stage, runne
     'if test ! -e "$logs"; then mkdir -m 700 "$logs"; fi', 'test -d "$logs"; test ! -L "$logs"; test -O "$logs"',
     `out=${shellQuote(stdout)}; err=${shellQuote(stderr)}; state=${shellQuote(stateFile)}`,
     'for file in "$out" "$err" "$state"; do if test -e "$file" || test -L "$file"; then test -f "$file"; test ! -L "$file"; fi; done',
-    'if test -f "$out" && test -f "$err" && test -f "$state"; then :; else',
+    `if test -f "$out" && test -f "$err" && test -f "$state" && test "$(wc -c < "$out")" -le ${LOG_COPY_BYTES} && test "$(wc -c < "$err")" -le ${LOG_COPY_BYTES}; then :; else`,
     `outtmp=${shellQuote(`${stdout}.${suffix}.tmp`)}; errtmp=${shellQuote(`${stderr}.${suffix}.tmp`)}; statetmp=${shellQuote(`${stateFile}.${suffix}.tmp`)}`,
     `outpipe=${shellQuote(posix.join(logs, `${stage}.${suffix}.stdout.pipe`))}; errpipe=${shellQuote(posix.join(logs, `${stage}.${suffix}.stderr.pipe`))}`,
     'trap \'rm -f "$outtmp" "$errtmp" "$statetmp" "$outpipe" "$errpipe"\' 0',
@@ -147,15 +105,9 @@ export async function collectStageEvidence(attempt: Attempt, stage: Stage, runne
     'mv "$outtmp" "$out"; mv "$errtmp" "$err"; mv "$statetmp" "$state"', 'fi',
     `tar -C ${shellQuote(root)} -cf - ${shellQuote(`logs/${stage}.stdout.log`)} ${shellQuote(`logs/${stage}.stderr.log`)} ${shellQuote(statePath)}`,
   ].join("\n");
-  const copies = new Map<string, { parts: Buffer[]; bytes: number }>(); let oversized = false;
-  const observe = (path: string, chunk: Uint8Array) => {
-    let copy = copies.get(path); if (!copy) { copy = { parts: [], bytes: 0 }; copies.set(path, copy); }
-    if (copy.bytes + chunk.length > LOG_COPY_BYTES) { oversized = true; throw new Error("bounded log copy"); }
-    copy.bytes += chunk.length; copy.parts.push(Buffer.from(chunk));
-  };
   let logArchive;
-  try { logArchive = await readArtifactArchive(attempt.executor, "sh", ["-c", script], runner, { capture: statePath, captureBytes: 1024, tailBytes: 0, onFileChunk: observe, maxFiles: 3, maxBytes: LOG_COPY_BYTES * 2 + 1024 }); }
-  catch (error) { if (oversized) throw new EvidenceError("log-limit", "stage evidence: log exceeds 16 MiB; reduce stage log volume before retrying"); throw archiveFailure(error, attempt, "stage log collection"); }
+  try { logArchive = await readArtifactArchive(attempt.executor, "sh", ["-c", script], runner, { capture: statePath, captureBytes: 1024, maxFiles: 3, maxBytes: LOG_COPY_BYTES * 2 + 1024 }); }
+  catch (error) { throw archiveFailure(error, attempt, "stage log collection"); }
   let truncated: unknown;
   try { truncated = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(logArchive.captured)); } catch { /* validated below without copying metadata */ }
   if (!plain(truncated) || Object.keys(truncated).length !== 2 || typeof truncated.stdout !== "boolean" || typeof truncated.stderr !== "boolean") throw new EvidenceError("invalid-log-state", "stage evidence: truncation metadata is missing or malformed; remove incomplete log copies on the executor host and retry collection");
@@ -163,13 +115,12 @@ export async function collectStageEvidence(attempt: Attempt, stage: Stage, runne
   const log = (kind: "stdout" | "stderr"): LogEvidence => {
     const file = logArchive.files.find(item => item.path === `logs/${stage}.${kind}.log`);
     if (!file) throw new EvidenceError("missing-logs", "stage evidence: a stdout/stderr copy is missing; inspect the executor log directory and retry collection");
-    const copy = copies.get(file.path);
-    return { path: posix.join(root, file.path), sha256: file.sha256, bytes: file.bytes, truncated: cuts[kind] || file.bytes >= LOG_COPY_BYTES, ...sanitizeLogTail(copy ? Buffer.concat(copy.parts, copy.bytes) : Buffer.alloc(0)) };
+    return { path: posix.join(root, file.path), sha256: file.sha256, bytes: file.bytes, truncated: cuts[kind] || file.bytes >= LOG_COPY_BYTES };
   };
   const outputs: Evaluation["outputs"] = [];
   if (stage === "candidate") {
     let archive;
-    try { archive = await readArtifactArchive(attempt.executor, "docker", ["cp", `${cid}:/out/.`, "-"], runner, { tailBytes: 0, ...remaining(attempt, outputs) }); }
+    try { archive = await readArtifactArchive(attempt.executor, "docker", ["cp", `${cid}:/out/.`, "-"], runner, { ...remaining(attempt, outputs) }); }
     catch (error) { throw archiveFailure(error, attempt, "candidate output archive"); }
     outputs.push(...archive.files.map(file => ({ path: posix.join(attempt.paths.output, file.path), sha256: file.sha256, bytes: file.bytes })));
   }

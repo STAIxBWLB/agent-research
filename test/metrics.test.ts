@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { collectEvaluation, collectStageEvidence, LOG_COPY_BYTES, LOG_TAIL_BYTES, METRICS_BYTES, MetricsError, outputBudget, parseMetrics, sanitizeLogTail, validateMetrics } from "../src/exp/metrics.ts";
+import { collectEvaluation, collectStageEvidence, LOG_COPY_BYTES, METRICS_BYTES, MetricsError, outputBudget, parseMetrics, validateMetrics } from "../src/exp/metrics.ts";
 import { ARTIFACT_BYTES } from "../src/exp/artifacts.ts";
 import { sha256 } from "../src/study.ts";
-import { shellQuote, spawnRunner, type ProcessRequest, type ProcessRunner } from "../src/exp/executor.ts";
-import { metricAttempt, metricLogTar, metricProtocol, metricTar } from "./metric-fixtures.ts";
+import type { ProcessRequest, ProcessRunner } from "../src/exp/executor.ts";
+import { logCaptureFixtureRunner, metricAttempt, metricLogTar, metricProtocol, metricTar } from "./metric-fixtures.ts";
 import { tempDir } from "./helpers.ts";
 
 function archiveRunner(archives: Buffer[]) {
@@ -49,39 +49,19 @@ test("stage evidence hashes candidate output but never treats printed or candida
   const logs = metricLogTar("candidate", 'candidate score=999\n{"score":999}\n', "synthetic error detail\n");
   const fake = archiveRunner([logs, metricTar([{ path: "metrics.json", data: '{"score":999}' }])]), attempt = metricAttempt();
   const stage = await collectStageEvidence(attempt, "candidate", fake.runner);
-  expect(stage.logs.stdout.tail).toContain("candidate score=999"); expect(stage.logs.stdout.tail).toContain('{"score":999}');
+  expect(Object.keys(stage.logs.stdout).sort()).toEqual(["bytes", "path", "sha256", "truncated"]);
+  expect(JSON.stringify(stage)).not.toContain("candidate score=999"); expect(JSON.stringify(stage)).not.toContain('{"score":999}');
   expect(stage.outputs.some(file => file.path === `${attempt.paths.output}/metrics.json`)).toBe(true);
   expect(attempt.metrics).toEqual([]); expect(fake.requests[1]?.args).toEqual(["cp", `${attempt.stages.candidate!.containerId}:/out/.`, "-"]);
   expect(fake.requests[0]?.args.join(" ")).toContain(`head -c ${LOG_COPY_BYTES}`);
 });
-test("log tails apply the declared credential masks and preserve ordinary context and JSON", () => {
-  const key = "synthetic-parent-value", text = `ordinary stage progress\n${key}\nGET https://user:pass@example.test/private?API_TOKEN=query-value&step=1\nAPI_KEY=assignment-value next\nTOKEN="quoted value" next\n{\n  "body": "synthetic-response-body", "PASSWORD":"json-value"\n}\n`;
-  const sanitized = sanitizeLogTail(Buffer.from(text), { API_TOKEN: key });
-  expect(sanitized.redacted).toBe(true); expect(sanitized.tail).toContain("ordinary stage progress");
-  expect(sanitized.tail).toContain("https://***@example.test/private?API_TOKEN=***&step=1");
-  expect(sanitized.tail).toContain('TOKEN="***" next'); expect(sanitized.tail).toContain('"PASSWORD":"***"');
-  expect(sanitized.tail).toContain("synthetic-response-body");
-  expect(sanitizeLogTail(Buffer.from("ordinary stage progress"), {}).tail).toBe("ordinary stage progress");
-  for (const value of [key, "user:pass", "query-value", "assignment-value", "quoted value", "json-value"]) expect(sanitized.tail).not.toContain(value);
-  expect(Buffer.byteLength(sanitizeLogTail(Buffer.from("x".repeat(LOG_TAIL_BYTES * 2))).tail)).toBeLessThanOrEqual(LOG_TAIL_BYTES);
-  expect(Buffer.byteLength(sanitizeLogTail(Buffer.from("x".repeat(1024 * 1024)), {}).tail)).toBeLessThanOrEqual(LOG_TAIL_BYTES);
-  expect(Buffer.byteLength(sanitizeLogTail(Buffer.from("x-".repeat(512 * 1024)), {}).tail)).toBeLessThanOrEqual(LOG_TAIL_BYTES);
-  expect(() => sanitizeLogTail(Buffer.alloc(LOG_COPY_BYTES + 1))).toThrow("log exceeds 16 MiB");
-});
-test("controls normalize before masking, tabs/newlines remain and body markers never erase evidence", () => {
-  expect(sanitizeLogTail(Buffer.from("abc\0def"), { API_KEY: "abcdef" })).toEqual({ tail: "***", redacted: true });
-  expect(sanitizeLogTail(Buffer.from("https:\0//user:pass@example.test/private"), {}).tail).toBe("https://***@example.test/private");
-  expect(sanitizeLogTail(Buffer.from("x"), { API_KEY: "x" }).tail).toBe("***");
-  expect(sanitizeLogTail(Buffer.from("first\nsecond"), { API_KEY: "first\nsecond" }).tail).toBe("***");
-  expect(sanitizeLogTail(Buffer.from("step\t1\nnext"), {}).tail).toBe("step\t1\nnext");
-  for (const body of ['[\n  "synthetic-private-body"\n]', '<body>\nsynthetic-private-body\n</body>', '{\n  "value":\n  "synthetic-private-body"\n}']) expect(sanitizeLogTail(Buffer.from(body), {}).tail).toBe(body);
-  expect(sanitizeLogTail(Buffer.from('CREDENTIAL={"id":"nested-value","items":[1,2]} next'), {}).tail).toBe("CREDENTIAL=*** next");
-});
-test("credential assignment prefixes outside the retained tail still mask the whole value", async () => {
-  const body = `API_KEY=${"z".repeat(LOG_TAIL_BYTES + 1000)}\nnormal final context\n`;
+test("request URLs, response bodies and keys remain exclusively in private logs, never evidence metadata", async () => {
+  const body = 'GET https://api.example.test/private?query=sensitive\n{"body":"synthetic-private-body","API_KEY":"synthetic-key-value"}\n';
   const logs = metricLogTar("evaluator", body);
   const result = await collectStageEvidence(metricAttempt(), "evaluator", archiveRunner([logs]).runner);
-  expect(result.logs.stdout.bytes).toBeGreaterThan(LOG_TAIL_BYTES); expect(result.logs.stdout.tail).toBe("API_KEY=***\nnormal final context\n"); expect(result.logs.stdout.redacted).toBe(true);
+  expect(result.logs.stdout.sha256).toBe(sha256(body)); expect(result.logs.stdout.bytes).toBe(Buffer.byteLength(body));
+  expect(Object.keys(result.logs.stdout).sort()).toEqual(["bytes", "path", "sha256", "truncated"]);
+  for (const text of ["https://", "synthetic-private-body", "synthetic-key-value"]) expect(JSON.stringify(result)).not.toContain(text);
 });
 test("logs have independent evidence and do not consume the 500-file candidate/result inventory", async () => {
   const attempt = metricAttempt(); attempt.outputs = Array.from({ length: 498 }, (_, index) => ({ path: `/private/prior-${index}`, sha256: "a".repeat(64), bytes: 1 }));
@@ -91,29 +71,20 @@ test("logs have independent evidence and do not consume the 500-file candidate/r
   const result = await collectEvaluation(attempt, archiveRunner([metricTar([{ path: "metrics.json", data: '{"score":7}' }])]).runner);
   expect(outputBudget([...attempt.outputs, ...result.outputs])).toHaveLength(500);
 });
-test("truncated log copies retain their own hash, size and tail with an explicit incomplete flag", async () => {
+test("truncated log copies retain their own hash and size with an explicit incomplete flag", async () => {
   const stdout = "retained stdout prefix\n", stderr = "retained stderr prefix\n";
   const logs = metricLogTar("evaluator", stdout, stderr, { stdout: true, stderr: true });
   const result = await collectStageEvidence(metricAttempt(), "evaluator", archiveRunner([logs]).runner);
-  expect(result.logs.stdout).toMatchObject({ sha256: sha256(stdout), bytes: Buffer.byteLength(stdout), tail: stdout, truncated: true });
+  expect(result.logs.stdout).toMatchObject({ sha256: sha256(stdout), bytes: Buffer.byteLength(stdout), truncated: true });
   expect(result.logs.stderr).toMatchObject({ sha256: sha256(stderr), bytes: Buffer.byteLength(stderr), truncated: true });
 });
 test("host capture enforces the byte cap and records truncation without starting Docker", async () => {
   const attempt = metricAttempt(), root = tempDir();
   attempt.paths.snapshot = join(root, "snapshot"); mkdirSync(attempt.paths.snapshot);
-  const producer = `process.stderr.write('fixture stderr context\\n'); process.stdout.on('error',()=>process.exit(17)); process.stdout.write('x'.repeat(${LOG_COPY_BYTES + 1024}),()=>process.exit(17));`;
-  const fixtureRunner: ProcessRunner = async request => {
-    expect(request.command).toBe("sh");
-    const realCommand = `docker logs ${attempt.stages.evaluator!.containerId}`;
-    expect(request.args[1]).toContain(realCommand);
-    const script = request.args[1]!.replace(realCommand, `${shellQuote(process.execPath)} -e ${shellQuote(producer)}`);
-    expect(script).not.toContain("docker logs");
-    return spawnRunner({ ...request, args: ["-c", script] });
-  };
-  const result = await collectStageEvidence(attempt, "evaluator", fixtureRunner);
+  const result = await collectStageEvidence(attempt, "evaluator", logCaptureFixtureRunner());
   expect(result.logs.stdout.bytes).toBe(LOG_COPY_BYTES); expect(result.logs.stdout.sha256).toBe(sha256(Buffer.alloc(LOG_COPY_BYTES, "x")));
   expect(result.logs.stdout.truncated).toBe(true); expect(result.logs.stderr.truncated).toBe(true);
-  expect(Buffer.byteLength(result.logs.stdout.tail)).toBeLessThanOrEqual(LOG_TAIL_BYTES);
+  expect(Object.keys(result.logs.stdout).sort()).toEqual(["bytes", "path", "sha256", "truncated"]);
 }, 10_000);
 test("artifact limits include prior stage outputs and reject changed receipts", async () => {
   const attempt = metricAttempt(); attempt.outputs = [{ path: "/private/existing", sha256: "a".repeat(64), bytes: ARTIFACT_BYTES }];

@@ -2,7 +2,7 @@ import { createHash, type Hash } from "node:crypto";
 import { runOnExecutor, type Executor, type ProcessRunner } from "./executor.ts";
 
 export const ARTIFACT_FILES = 500, ARTIFACT_BYTES = 256 * 1024 * 1024;
-export const ARTIFACT_CAPTURE_BYTES = 65_536, ARTIFACT_TAIL_BYTES = 16_384;
+export const ARTIFACT_CAPTURE_BYTES = 65_536;
 export const ARTIFACT_HEADERS = 2048, ARTIFACT_METADATA_BYTES = 65_536;
 export const ARTIFACT_WIRE_BYTES = ARTIFACT_BYTES + 16 * 1024 * 1024;
 export type ArtifactErrorCode = "invalid-artifact" | "artifact-limit" | "artifact-read";
@@ -12,12 +12,10 @@ export class ArtifactError extends Error {
     this.name = "ArtifactError";
   }
 }
-export interface ArtifactFile { path: string; sha256: string; bytes: number; tail: Uint8Array }
+export interface ArtifactFile { path: string; sha256: string; bytes: number }
 export interface ArtifactArchive { files: ArtifactFile[]; captured?: Uint8Array }
 export interface ArtifactArchiveOptions {
-  capture?: string; captureBytes?: number; tailBytes?: number; maxBytes?: number; maxFiles?: number;
-  /** Synchronous observer of borrowed payload bytes; do not mutate or retain the chunk. */
-  onFileChunk?: (path: string, chunk: Uint8Array) => void;
+  capture?: string; captureBytes?: number; maxBytes?: number; maxFiles?: number;
 }
 function invalid(cause: string): never { throw new ArtifactError("invalid-artifact", cause); }
 function limit(cause: string): never { throw new ArtifactError("artifact-limit", cause); }
@@ -74,7 +72,7 @@ function allZero(bytes: Uint8Array): boolean {
   return true;
 }
 type Pax = { path?: string | null; size?: string | null };
-interface FileBody { kind: "file"; path: string; size: number; remaining: number; hash: Hash; tail: Buffer; capture?: Buffer; offset: number }
+interface FileBody { kind: "file"; path: string; size: number; remaining: number; hash: Hash; capture?: Buffer; offset: number }
 interface MetadataBody { kind: "metadata"; type: "x" | "g" | "L"; remaining: number; data: Buffer; offset: number }
 
 class TarArtifacts {
@@ -95,7 +93,7 @@ class TarArtifacts {
   private pendingMetadata = false;
   private longName?: string;
   private seen = new Map<string, "file" | "directory">();
-  constructor(private capture: string | undefined, private captureBytes: number, private tailBytes: number, private maxBytes: number, private maxFiles: number, private onFileChunk?: ArtifactArchiveOptions["onFileChunk"]) {}
+  constructor(private capture: string | undefined, private captureBytes: number, private maxBytes: number, private maxFiles: number) {}
   push(chunk: Uint8Array): void {
     if (!(chunk instanceof Uint8Array)) return invalid("non-binary archive stream");
     this.wireBytes += chunk.byteLength;
@@ -113,10 +111,7 @@ class TarArtifacts {
         if (body.kind === "metadata") body.data.set(part, body.offset);
         else {
           body.hash.update(part);
-          if (this.tailBytes) body.tail = part.byteLength >= this.tailBytes ? Buffer.from(part.subarray(part.byteLength - this.tailBytes)) : Buffer.concat([body.tail.subarray(Math.max(0, body.tail.length + part.byteLength - this.tailBytes)), part]);
           body.capture?.set(part, body.offset);
-          try { this.onFileChunk?.(body.path, part); }
-          catch { throw new ArtifactError("artifact-read", "artifact payload observer failed"); }
         }
         body.offset += count; body.remaining -= count; offset += count;
         if (body.remaining === 0) this.completeBody();
@@ -168,7 +163,7 @@ class TarArtifacts {
       if (size > this.maxBytes - this.totalBytes) return limit(`regular file bytes exceed ${this.maxBytes}`);
       this.totalBytes += size;
       if (path === this.capture && size > this.captureBytes) return limit(`selected capture exceeds ${this.captureBytes} bytes`);
-      this.body = { kind: "file", path, size, remaining: size, hash: createHash("sha256"), tail: Buffer.alloc(0), ...(path === this.capture ? { capture: Buffer.alloc(size) } : {}), offset: 0 };
+      this.body = { kind: "file", path, size, remaining: size, hash: createHash("sha256"), ...(path === this.capture ? { capture: Buffer.alloc(size) } : {}), offset: 0 };
       this.padding = (512 - size % 512) % 512;
     }
     if (this.body.remaining === 0) this.completeBody();
@@ -176,7 +171,7 @@ class TarArtifacts {
   private completeBody(): void {
     const body = this.body!; this.body = undefined;
     if (body.kind === "file") {
-      this.files.push({ path: body.path, sha256: body.hash.digest("hex"), bytes: body.size, tail: body.tail });
+      this.files.push({ path: body.path, sha256: body.hash.digest("hex"), bytes: body.size });
       if (body.capture) this.captured = body.capture;
     } else if (body.type === "L") {
       let end = body.data.length;
@@ -211,11 +206,11 @@ class TarArtifacts {
   }
 }
 
-/** Hash and tail regular artifacts without storing files or decoding their payloads. */
+/** Hash regular artifacts, retaining no payload except an explicitly selected bounded capture. */
 export async function readArtifactArchive(executor: Executor, command: string, args: string[], runner: ProcessRunner, options: ArtifactArchiveOptions = {}): Promise<ArtifactArchive> {
-  const capture = options.capture === undefined ? undefined : relative(options.capture), captureBytes = bound(options.captureBytes ?? ARTIFACT_CAPTURE_BYTES, ARTIFACT_CAPTURE_BYTES, "captureBytes"), tailBytes = bound(options.tailBytes ?? ARTIFACT_TAIL_BYTES, ARTIFACT_TAIL_BYTES, "tailBytes");
+  const capture = options.capture === undefined ? undefined : relative(options.capture), captureBytes = bound(options.captureBytes ?? ARTIFACT_CAPTURE_BYTES, ARTIFACT_CAPTURE_BYTES, "captureBytes");
   const maxBytes = bound(options.maxBytes ?? ARTIFACT_BYTES, ARTIFACT_BYTES, "maxBytes"), maxFiles = bound(options.maxFiles ?? ARTIFACT_FILES, ARTIFACT_FILES, "maxFiles");
-  const parser = new TarArtifacts(capture, captureBytes, tailBytes, maxBytes, maxFiles, options.onFileChunk), controller = new AbortController();
+  const parser = new TarArtifacts(capture, captureBytes, maxBytes, maxFiles), controller = new AbortController();
   let parseError: ArtifactError | undefined;
   try {
     const result = await runOnExecutor(executor, command, args, runner, { signal: controller.signal, timeoutMs: 300_000,

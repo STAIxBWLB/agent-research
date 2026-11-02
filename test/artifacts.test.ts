@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { ArtifactError, ARTIFACT_BYTES, ARTIFACT_CAPTURE_BYTES, ARTIFACT_FILES, ARTIFACT_METADATA_BYTES, ARTIFACT_TAIL_BYTES, ARTIFACT_WIRE_BYTES, readArtifactArchive } from "../src/exp/artifacts.ts";
+import { ArtifactError, ARTIFACT_BYTES, ARTIFACT_CAPTURE_BYTES, ARTIFACT_FILES, ARTIFACT_METADATA_BYTES, ARTIFACT_WIRE_BYTES, readArtifactArchive } from "../src/exp/artifacts.ts";
 import type { ArtifactArchiveOptions, ArtifactErrorCode } from "../src/exp/artifacts.ts";
 import type { Executor, ProcessRequest, ProcessRunner } from "../src/exp/executor.ts";
 
@@ -55,34 +55,21 @@ async function errorCode(archive: Uint8Array, code: ArtifactErrorCode, options: 
   }
 }
 
-test("artifact tar parsing hashes binary files, bounds tails and captures only the selected payload", async () => {
+test("artifact tar parsing hashes binary files and captures only the selected payload", async () => {
   const binary = Buffer.alloc(30_000); for (let i = 0; i < binary.length; i++) binary[i] = i % 256;
   const metrics = Buffer.from('{"score":1}'), archive = Buffer.concat([entry("./", "", "5"), entry("./binary.bin", binary), entry("./metrics.json", metrics), end]);
-  const result = await read(archive, { capture: "metrics.json", tailBytes: 7 }, 1);
-  expect(result.files).toEqual([{ path: "binary.bin", bytes: binary.length, sha256: digest(binary), tail: binary.subarray(-7) }, { path: "metrics.json", bytes: metrics.length, sha256: digest(metrics), tail: metrics.subarray(-7) }]);
+  const result = await read(archive, { capture: "metrics.json" }, 1);
+  expect(result.files).toEqual([{ path: "binary.bin", bytes: binary.length, sha256: digest(binary) }, { path: "metrics.json", bytes: metrics.length, sha256: digest(metrics) }]);
   expect(result.captured).toEqual(metrics);
-  const defaultTails = await read(archive);
-  expect(defaultTails.files[0]?.tail).toEqual(binary.subarray(-ARTIFACT_TAIL_BYTES));
-  expect(defaultTails.captured).toBeUndefined();
+  const hashOnly = await read(archive);
+  expect(hashOnly.files).toEqual(result.files);
+  expect(hashOnly.captured).toBeUndefined();
 });
 
 test("zero-byte capture, absent capture and empty archives are distinct", async () => {
-  const empty = await read(Buffer.concat([entry("empty"), end]), { capture: "empty", captureBytes: 0, tailBytes: 0 });
-  expect(empty.captured).toEqual(Buffer.alloc(0)); expect(empty.files[0]?.tail.byteLength).toBe(0);
+  const empty = await read(Buffer.concat([entry("empty"), end]), { capture: "empty", captureBytes: 0 });
+  expect(empty.captured).toEqual(Buffer.alloc(0)); expect(empty.files).toEqual([{ path: "empty", bytes: 0, sha256: digest(Buffer.alloc(0)) }]);
   expect(await read(end, { capture: "missing" })).toEqual({ files: [] });
-});
-
-test("payload observer receives exact regular-file bytes and paths without changing metadata", async () => {
-  const bytes = Buffer.from([0, 255, 128, 10]), archive = Buffer.concat([entry("./logs/", "", "5"), entry("./logs/stdout", bytes), entry("./logs/stderr", "synthetic"), end]);
-  const chunks = new Map<string, Buffer[]>();
-  const observed = await read(archive, { tailBytes: 2, onFileChunk: (path, chunk) => { const list = chunks.get(path) ?? []; list.push(Buffer.from(chunk)); chunks.set(path, list); } }, 3);
-  expect(Buffer.concat(chunks.get("logs/stdout")!)).toEqual(bytes);
-  expect(Buffer.concat(chunks.get("logs/stderr")!).toString()).toBe("synthetic");
-  expect([...chunks.keys()]).toEqual(["logs/stdout", "logs/stderr"]);
-  expect(observed).toEqual(await read(archive, { tailBytes: 2 }, 3));
-  const failed = scripted(archive, 3);
-  try { await readArtifactArchive(executor, "tar", [], failed.runner, { onFileChunk: () => { throw new Error("synthetic-private-observer-error"); } }); throw new Error("unexpected success"); }
-  catch (error) { expect((error as ArtifactError).code).toBe("artifact-read"); expect((error as Error).message).not.toContain("synthetic-private"); expect(failed.requests[0]?.signal?.aborted).toBe(true); }
 });
 
 test("PAX local paths/sizes and global metadata are bounded and applied only to their intended entries", async () => {
@@ -144,7 +131,7 @@ test("remaining attempt budgets stop archives before exceeding caller file or by
   const archive = Buffer.concat([entry("first", "abc"), entry("second", "xy"), end]);
   await errorCode(archive, "artifact-limit", { maxBytes: 4 });
   await errorCode(archive, "artifact-limit", { maxFiles: 1 });
-  expect((await read(archive, { maxBytes: 5, maxFiles: 2, tailBytes: 0 })).files.every(file => file.tail.byteLength === 0)).toBe(true);
+  expect((await read(archive, { maxBytes: 5, maxFiles: 2 })).files.map(file => file.bytes)).toEqual([3, 2]);
   await errorCode(Buffer.concat([entry("empty"), end]), "artifact-limit", { maxFiles: 0 });
 });
 
@@ -168,6 +155,6 @@ test("SSH uses the existing BatchMode transport and invalid options start no pro
   expect(fake.requests[0]?.command).toBe("ssh"); expect(fake.requests[0]?.args.slice(0, 4)).toEqual(["-o", "BatchMode=yes", "fixture-host", "tar"]);
   expect(fake.requests[0]?.args).toContain("'/private/path with spaces'");
   const unused = scripted(end);
-  for (const options of [{ capture: "../bad" }, { captureBytes: ARTIFACT_CAPTURE_BYTES + 1 }, { tailBytes: ARTIFACT_TAIL_BYTES + 1 }, { tailBytes: -1 }]) await expect(readArtifactArchive(executor, "tar", [], unused.runner, options)).rejects.toBeInstanceOf(ArtifactError);
+  for (const options of [{ capture: "../bad" }, { captureBytes: ARTIFACT_CAPTURE_BYTES + 1 }, { captureBytes: -1 }, { maxBytes: ARTIFACT_BYTES + 1 }, { maxBytes: -1 }, { maxFiles: ARTIFACT_FILES + 1 }]) await expect(readArtifactArchive(executor, "tar", [], unused.runner, options)).rejects.toBeInstanceOf(ArtifactError);
   expect(unused.requests).toHaveLength(0);
 });

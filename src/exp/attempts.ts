@@ -258,7 +258,9 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
 async function captureStage(dir: string, attempt: Attempt, ctx: AttemptContext, bestEffort: boolean): Promise<Attempt> {
   if (attempt.stages[attempt.stage]?.evidence) return attempt;
   try {
-    const evidence = await (ctx.collectStageEvidence ?? defaultStageCollector)(attempt, attempt.stage, ctx.runner ?? spawnRunner);
+    const collected = await (ctx.collectStageEvidence ?? defaultStageCollector)(attempt, attempt.stage, ctx.runner ?? spawnRunner);
+    const metadata = (log: StageEvidence["logs"]["stdout"]) => ({ path: log.path, sha256: log.sha256, bytes: log.bytes, truncated: log.truncated });
+    const evidence: StageEvidence = { logs: { stdout: metadata(collected.logs.stdout), stderr: metadata(collected.logs.stderr) }, outputs: collected.outputs.map(output => ({ path: output.path, sha256: output.sha256, bytes: output.bytes })) };
     const outputs = outputBudget([...attempt.outputs, ...evidence.outputs]);
     return update(dir, attempt.id, ctx, current => { current.stages[current.stage]!.evidence = evidence; current.outputs = outputs; return "attempt.stage.evidence"; });
   } catch (error) {
