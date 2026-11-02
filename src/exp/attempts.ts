@@ -113,7 +113,10 @@ export function budgetUsage(attempts: Attempt[], time = Date.now()) {
     const elapsed = Math.max(0, (attempt.endedAt ? Date.parse(attempt.endedAt) : time) - Date.parse(attempt.startedAt)) / 3_600_000;
     if (!Number.isFinite(elapsed)) throw new Error("attempt timing: malformed; restore valid timestamps before starting an attempt");
     wallHours += elapsed;
-    for (const stage of Object.values(attempt.stages)) {
+    // Preserve extension entries, but only interpret stages defined by this schema.
+    for (const name of ["candidate", "evaluator"] as const) {
+    const stage = attempt.stages[name];
+    if (!stage) continue;
     const end = stage.endedAt ? Date.parse(stage.endedAt) : attempt.endedAt ? Date.parse(attempt.endedAt) : time;
     const hours = Math.max(0, end - Date.parse(stage.startedAt)) / 3_600_000;
     if (!Number.isFinite(hours) || !Number.isFinite(stage.limits.gpus)) throw new Error("attempt timing: malformed; restore valid stage timestamps and limits before starting an attempt");

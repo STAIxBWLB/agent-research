@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import * as ops from "../src/commands.ts";
-import { ATTEMPT_BYTES } from "../src/exp/attempts.ts";
+import { ATTEMPT_BYTES, budgetUsage } from "../src/exp/attempts.ts";
 import { appendEvent, openStudy, readLedger, readTextBounded, writeAtomic, STUDY_BYTES } from "../src/study.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
 import { metricAttempt } from "./metric-fixtures.ts";
@@ -16,17 +16,17 @@ test("older study and ledger readers retain additive fields and unknown event ki
   const oldLedger = readTextBounded(join(dir, "ledger.jsonl"), 64 * 1024 * 1024) + JSON.stringify(future) + "\n";
   writeAtomic(join(dir, "ledger.jsonl"), oldLedger, 64 * 1024 * 1024);
   expect(openStudy(dir).study).toEqual(study);
-  expect(readLedger(dir).at(-1)).toEqual(future);
+  expect(readLedger(dir).at(-1) as unknown).toEqual(future);
   expect(ops.status(dir).events).toBe(2);
   appendEvent(dir, actor, "compat.checked", {});
   expect(readTextBounded(join(dir, "ledger.jsonl"), 64 * 1024 * 1024).startsWith(oldLedger)).toBe(true);
-  expect(readLedger(dir)[1]).toEqual(future);
+  expect(readLedger(dir)[1] as unknown).toEqual(future);
   expect(JSON.parse(readTextBounded(join(dir, "study.json"), STUDY_BYTES))).toEqual(study);
 });
 
 test("older attempt reader preserves newer additive fields during a real cancellation transition", async () => {
   const dir = tempDir(); ops.init(dir, { question: "Synthetic attempt?", mode: "experiment" }, ctx);
-  const attempt = metricAttempt(), record = { ...attempt, extension: { version: 2, opaque: ["synthetic"] }, stages: { ...attempt.stages, futureStage: { opaque: true }, evaluator: { ...attempt.stages.evaluator, future: [1, 2] } } };
+  const attempt = metricAttempt(), record = { ...attempt, extension: { version: 2, opaque: ["synthetic"] }, stages: { ...attempt.stages, futureStage: { opaque: true }, evaluator: { ...attempt.stages.evaluator!, future: [1, 2] } } };
   const folder = join(dir, "runs", attempt.run, "attempts"), file = join(folder, `${attempt.id}.json`);
   mkdirSync(folder, { recursive: true }); writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES);
   expect(ops.attemptShow(dir, attempt.id)).toEqual(record);
@@ -34,6 +34,9 @@ test("older attempt reader preserves newer additive fields during a real cancell
   expect(result.status).toBe("cancelled");
   const saved = JSON.parse(readTextBounded(file, ATTEMPT_BYTES));
   expect(saved.extension).toEqual(record.extension); expect(saved.stages.futureStage).toEqual(record.stages.futureStage); expect(saved.stages.evaluator.future).toEqual([1, 2]);
+  const knownOnly = { ...saved, stages: { candidate: saved.stages.candidate, evaluator: saved.stages.evaluator } };
+  expect(budgetUsage([saved])).toEqual(budgetUsage([knownOnly]));
+  expect(budgetUsage([saved]).attempts).toBe(1);
 });
 
 test("unsupported study, ledger and attempt semantics refuse safely without rewriting newer data", async () => {
