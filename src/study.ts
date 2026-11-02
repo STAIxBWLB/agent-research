@@ -4,10 +4,13 @@ import { join, resolve } from "node:path";
 
 export type Mode = "survey" | "experiment";
 export type Autonomy = "auto" | "gates";
-export type GateName = "scope" | "screen";
-export const GATES: readonly GateName[] = ["scope", "screen"];
+export type GateName = "scope" | "screen" | "design";
+export const GATES: readonly GateName[] = ["scope", "screen", "design"];
 export interface Study { v: 1; id: string; question: string; mode: Mode; autonomy: Autonomy; createdAt: string }
 export interface Actor { kind: "person" | "agent" | "auto"; id?: string }
+export function requireExperiment(study: Study): void {
+  if (study.mode !== "experiment") throw new Error("experiment command: study mode must be experiment");
+}
 export interface LedgerEvent { v: 1; at: string; actor: Actor; type: string; data: Record<string, unknown> }
 
 const EVENT_BYTES = 65_536, LEDGER_BYTES = 64 * 1024 * 1024;
@@ -215,10 +218,11 @@ export function decideGate(dir: string, gate: GateName, decision: "approve" | "r
  * changes a gate.
  */
 export function requireGate(dir: string, study: Study, gate: GateName, binder: Binder): PendingEvent[] {
+  if (gate === "design") requireExperiment(study);
   const state = gateState(gate, readLedger(dir), binder);
   if (state.state === "approved") return [];
   if (state.state === "pending" && study.autonomy === "auto") return [{ actor: { kind: "auto" }, type: "gate.approve", data: { gate, binding: state.current! } }];
-  if (state.state === "none") throw new Error(gate === "scope" ? "gate scope: no scope yet (run ares scope)" : "gate screen: no included candidates yet");
+  if (state.state === "none") throw new Error(gate === "scope" ? "gate scope: no scope yet (run ares scope)" : gate === "design" ? "gate design: no protocol yet (run ares protocol)" : "gate screen: no included candidates yet");
   if (state.state === "rejected") throw new Error(`gate ${gate} is rejected${state.decided?.reason ? `: ${state.decided.reason}` : ""}; change the content and ask again`);
   throw new Error(`gate ${gate} is pending: run ares gate approve <dir> ${gate}`);
 }

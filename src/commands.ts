@@ -9,15 +9,17 @@ import { verifyCandidates } from "./lit/verify.ts";
 import { assignCitekeys, renderBib } from "./lit/bibtex.ts";
 import { checkCitations } from "./lit/cite.ts";
 import { cardPath, validateCard } from "./lit/cards.ts";
+import { designBinding } from "./exp/protocol.ts";
+import { requireExperiment } from "./study.ts";
 
 export interface Ctx { actor: Actor; http: Http; sleep?: (ms: number) => Promise<void> }
 const MAX_IDS = 200, DRAFT_BYTES = 2 * 1024 * 1024, BIB_BYTES = 16 * 1024 * 1024, CARD_BYTES = 65_536;
 
 export function binder(dir: string): Binder {
-  return gate => (gate === "scope" ? scopeHash(dir) : includedHash(loadCandidates(dir)));
+  return gate => gate === "scope" ? scopeHash(dir) : gate === "design" ? designBinding(dir) : includedHash(loadCandidates(dir));
 }
 function gateName(value: string): GateName {
-  if (!GATES.includes(value as GateName)) throw new Error(`unknown gate: ${value} (scope or screen)`);
+  if (!GATES.includes(value as GateName)) throw new Error(`unknown gate: ${value} (${GATES.join(", ")})`);
   return value as GateName;
 }
 function ids(values: string[]): string[] {
@@ -69,7 +71,8 @@ export function gateList(dirArg: string) {
 }
 
 export async function gateDecide(dirArg: string, gate: string, decision: "approve" | "reject", reason: string | undefined, ctx: Ctx) {
-  const { dir } = openStudy(dirArg), name = gateName(gate), why = reason === undefined ? undefined : boundedText(reason, "--reason", 500);
+  const { dir, study } = openStudy(dirArg), name = gateName(gate), why = reason === undefined ? undefined : boundedText(reason, "--reason", 500);
+  if (name === "design") requireExperiment(study);
   return withLock(dir, () => decideGate(dir, name, decision, ctx.actor, binder(dir), why));
 }
 
