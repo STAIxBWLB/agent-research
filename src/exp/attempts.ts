@@ -21,6 +21,9 @@ export interface AttemptOptions { repo: string; commit: string; seed?: number; r
 export interface AttemptContext { actor: Actor; runner?: ProcessRunner; now?: () => number; sleep?: (ms: number) => Promise<void>; collectEvaluation?: (attempt: Attempt, runner: ProcessRunner) => Promise<Evaluation> }
 export const ATTEMPT_BYTES = 1024 * 1024;
 const STATUSES: AttemptStatus[] = ["running", "succeeded", "failed", "cancelled", "unknown"];
+const inspectFields = (prefix: string, fields: string[]) => fields.map(field => `${JSON.stringify(field)}:{{json ${prefix}.${field}}}`).join(",");
+// Exclude inherited image labels/env and other unbounded Docker metadata from the observation.
+const INSPECT_FORMAT = `[{"Id":{{json .Id}},"State":{${inspectFields(".State", ["Running", "ExitCode", "StartedAt", "FinishedAt"])}},"Config":{${inspectFields(".Config", ["Image", "User", "Cmd"])},"Labels":{${["ares.study", "ares.attempt", "ares.stage"].map(key => `${JSON.stringify(key)}:{{json (index .Config.Labels ${JSON.stringify(key)})}}`).join(",")}}},"HostConfig":{${inspectFields(".HostConfig", ["NetworkMode", "ReadonlyRootfs", "CapDrop", "SecurityOpt", "Tmpfs", "Memory", "PidsLimit", "NanoCpus", "DeviceRequests"])}},"Mounts":{{json .Mounts}}}]`;
 const now = (ctx: AttemptContext) => ctx.now?.() ?? Date.now();
 const at = (ctx: AttemptContext) => new Date(now(ctx)).toISOString();
 function runName(value: string): string {
@@ -143,7 +146,7 @@ function observed(raw: unknown, attempt: Attempt): { id: string; running: boolea
 }
 async function inspect(attempt: Attempt, ctx: AttemptContext) {
   let result;
-  try { result = await runOnExecutor(attempt.executor, "docker", ["inspect", containerName(attempt.id, attempt.stage)], ctx.runner ?? spawnRunner); }
+  try { result = await runOnExecutor(attempt.executor, "docker", ["inspect", "--format", INSPECT_FORMAT, containerName(attempt.id, attempt.stage)], ctx.runner ?? spawnRunner, { maxOutputBytes: ATTEMPT_BYTES }); }
   catch { throw hostError(attempt, "container inspection"); }
   if (result.timedOut || result.truncated) throw hostError(attempt, "container inspection");
   if (result.exitCode === 1) {

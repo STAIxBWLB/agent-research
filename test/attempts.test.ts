@@ -53,7 +53,7 @@ function runtime(dir: string) {
         found.running = false; found.exitCode = 137; found.finishedAt = new Date(clock.value).toISOString(); return ok();
       }
       if (args[0] === "inspect") {
-        const found = containers.get(args[1]!); if (!found) return { exitCode: 1, stdout: "", stderr: "missing" };
+        const found = containers.get(args.at(-1)!); if (!found) return { exitCode: 1, stdout: "", stderr: "missing" };
         const a = found.args, imageAt = a.findIndex(x => x.includes("@sha256:"));
         const mounts = a.flatMap((x, i) => x === "--mount" ? [a[i + 1]!] : []).map(text => {
           const parts = text.split(","); return { Type: "bind", Source: parts.find(x => x.startsWith("src="))!.slice(4), Destination: parts.find(x => x.startsWith("dst="))!.slice(4), RW: !parts.includes("readonly") };
@@ -84,6 +84,7 @@ test("AC5: identity binds protocol, commit, tree, seed, run and retry; duplicate
   const again = await runAttempt(dir, request, fake.ctx); expect(again.id).toBe(first.id);
   expect(fake.requests.filter(r => r.command === "docker" && r.args[0] === "run")).toHaveLength(1);
   expect(fake.requests.some(r => r.command === "sh" && r.args.join(" ").includes(`docker kill ${first.stages.candidate!.containerId}`))).toBe(true);
+  expect(fake.requests.filter(r => r.args[0] === "inspect").every(r => r.args.includes("--format") && !r.args.join(" ").includes(".Config.Env"))).toBe(true);
   expect(readLedger(dir).filter(e => e.type === "attempt.started")).toHaveLength(1);
   expect(first.id).toBe(attemptId(protocolHash(protocol()), commitSha, treeId, 1, "main"));
   for (const args of [["changed", commitSha, treeId, 1, "main"], [first.protocolHash, "c".repeat(40), treeId, 1, "main"], [first.protocolHash, commitSha, "c".repeat(40), 1, "main"], [first.protocolHash, commitSha, treeId, 2, "main"], [first.protocolHash, commitSha, treeId, 1, "other"]] as const) expect(attemptId(args[0], args[1], args[2], args[3], args[4])).not.toBe(first.id);
