@@ -9,10 +9,14 @@ import { verifyCandidates } from "./lit/verify.ts";
 import { assignCitekeys, renderBib } from "./lit/bibtex.ts";
 import { checkCitations } from "./lit/cite.ts";
 import { cardPath, validateCard } from "./lit/cards.ts";
-import { designBinding } from "./exp/protocol.ts";
+import { designBinding, protocolHash, setProtocol } from "./exp/protocol.ts";
 import { requireExperiment } from "./study.ts";
+import { checkExecutor, setExecutor } from "./exp/executor.ts";
+import { cancelAttempt, listAttemptSummaries, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type AttemptListOptions, type AttemptOptions } from "./exp/attempts.ts";
+import { readAttemptLogs, type LogOptions } from "./exp/logs.ts";
 
-export interface Ctx { actor: Actor; http: Http; sleep?: (ms: number) => Promise<void> }
+export type ExperimentRuntime = Omit<AttemptContext, "actor">;
+export interface Ctx extends ExperimentRuntime { actor: Actor; http: Http }
 const MAX_IDS = 200, DRAFT_BYTES = 2 * 1024 * 1024, BIB_BYTES = 16 * 1024 * 1024, CARD_BYTES = 65_536;
 
 export function binder(dir: string): Binder {
@@ -37,6 +41,25 @@ export function init(dir: string, options: { question: string; mode?: string; au
   const study = initStudy(dir, options, ctx.actor);
   return { created: resolve(dir), study };
 }
+
+export async function protocol(dirArg: string, raw: unknown, ctx: Ctx) {
+  const { dir } = openStudy(dirArg);
+  return withLock(dir, () => {
+    const value = setProtocol(dir, raw, ctx.actor);
+    return { protocol: value, protocolHash: protocolHash(value), gate: gateState("design", readLedger(dir), binder(dir)) };
+  });
+}
+export async function executorSet(dirArg: string, raw: unknown, ctx: Ctx) {
+  const { dir } = openStudy(dirArg);
+  return withLock(dir, () => setExecutor(dir, raw, ctx.actor));
+}
+export const executorCheck = (dir: string, ctx: Ctx) => checkExecutor(dir, ctx.runner);
+export const attemptRun = (dir: string, options: AttemptOptions, ctx: Ctx) => runAttempt(dir, options, ctx);
+export const attemptList = (dir: string, options: AttemptListOptions = {}) => listAttemptSummaries(dir, options);
+export const attemptShow = (dir: string, id: string) => showAttempt(dir, id);
+export const attemptCancel = (dir: string, id: string, reason: string | undefined, ctx: Ctx) => cancelAttempt(dir, id, reason, ctx);
+export const attemptReconcile = (dir: string, ctx: Ctx) => reconcileAttempts(dir, ctx);
+export const attemptLogs = (dir: string, id: string, options: LogOptions, ctx: Ctx) => readAttemptLogs(dir, id, options, ctx.runner);
 
 export function status(dirArg: string) {
   const { dir, study } = openStudy(dirArg), events = readLedger(dir), list = loadCandidates(dir), bind = binder(dir);

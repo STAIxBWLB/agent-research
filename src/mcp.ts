@@ -2,7 +2,7 @@ import { once } from "node:events";
 import type { Readable, Writable } from "node:stream";
 
 /** Newline-delimited JSON-RPC stdio transport (MCP basic + tools). Sequential, bounded, no timers. */
-export const FRAME_BYTES = 65_536, RESULT_BYTES = 262_144;
+export const FRAME_BYTES = 128 * 1024, RESULT_BYTES = 2 * 1024 * 1024;
 export interface McpTool { name: string; description: string; inputSchema: Record<string, unknown>; annotations: Record<string, boolean> }
 export type McpHandler = (args: Record<string, unknown>) => unknown | Promise<unknown>;
 export interface McpServerOptions { tools: readonly McpTool[]; handlers: Record<string, McpHandler>; input?: Readable; output?: Writable; name?: string; version?: string }
@@ -27,7 +27,9 @@ export function validArguments(value: unknown, raw: unknown): boolean {
     if (keys.length < (s.minProperties ?? 0) || keys.length > (s.maxProperties ?? 64)) return false;
     if ((s.required ?? []).some((key: string) => !Object.hasOwn(value, key))) return false;
     for (const key of keys) {
-      if (["__proto__", "prototype", "constructor"].includes(key) || key.length > 200) return false;
+      if (key.length > 200) return false;
+      // Explicit string dictionaries (protocol env) keep these literal own keys; no object is assigned through them.
+      if (["__proto__", "prototype", "constructor"].includes(key) && !(plain(s.additionalProperties) && s.additionalProperties.type === "string" && typeof value[key] === "string")) return false;
       if (Object.hasOwn(s.properties ?? {}, key)) { if (!validArguments(value[key], s.properties[key])) return false; }
       else if (s.additionalProperties === false || !plain(s.additionalProperties) || !validArguments(value[key], s.additionalProperties)) return false;
     }
@@ -76,7 +78,7 @@ export async function serveMcp(options: McpServerOptions): Promise<void> {
       const text = JSON.stringify(await handler(args as Record<string, unknown>));
       if (text === undefined) throw new Error("tool returned no result");
       result = Buffer.byteLength(text) > RESULT_BYTES
-        ? { isError: true, content: [{ type: "text", text: JSON.stringify({ refused: true, issues: [{ code: "LIMIT", severity: "error", message: "result exceeds 256 KiB; narrow the request" }] }) }] }
+        ? { isError: true, content: [{ type: "text", text: JSON.stringify({ refused: true, issues: [{ code: "LIMIT", severity: "error", message: "result exceeds 2 MiB; narrow filters, lower the list limit or select fewer log streams" }] }) }] }
         : { content: [{ type: "text", text }] };
     } catch (failure) {
       // Handlers return structured refusals; anything thrown is reported without stack or content.
@@ -96,7 +98,7 @@ export async function serveMcp(options: McpServerOptions): Promise<void> {
         else pending += part;
       }
       if (newline < 0) return;
-      if (overflow) await error(null, -32600, "Request exceeds the 64 KiB frame bound");
+      if (overflow) await error(null, -32600, "Request exceeds the 128 KiB frame bound; shorten the request and retry");
       else if (pending.trim()) await handle(pending);
       pending = ""; overflow = false; start = newline + 1;
     }
