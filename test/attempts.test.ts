@@ -8,7 +8,7 @@ import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunne
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
 import { readLedger, sha256, withLock } from "../src/study.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
-import { metricTar } from "./metric-fixtures.ts";
+import { metricLogTar, metricTar } from "./metric-fixtures.ts";
 
 const actor = { kind: "person" as const }, commitSha = "a".repeat(40), treeId = "b".repeat(40);
 function protocol(): Protocol {
@@ -39,7 +39,7 @@ function runtime(dir: string) {
     if (request.command === "sh") {
       if (request.stdoutSink) {
         const stage = args.join(" ").includes("candidate.stdout.log") ? "candidate" : "evaluator";
-        await request.stdoutSink(metricTar([{ path: `logs/${stage}.stdout.log`, data: `${stage} score=999\n` }, { path: `logs/${stage}.stderr.log`, data: "" }]));
+        await request.stdoutSink(metricLogTar(stage, `${stage} score=999\n`));
       }
       return ok();
     }
@@ -80,7 +80,7 @@ function runtime(dir: string) {
     throw new Error(`unscripted synthetic process ${request.command}`);
   };
   const ctx: AttemptContext = { actor, runner, now: () => clock.value, collectEvaluation: async () => ({ metrics: [{ name: "score", unit: "points", value: 7, provenance: "ares-observed" }], outputs: [] }), collectStageEvidence: async (_attempt, stage) => {
-    const log = { path: `/synthetic/${stage}.log`, sha256: sha256(""), bytes: 0, tail: "", redacted: false };
+    const log = { path: `/synthetic/${stage}.log`, sha256: sha256(""), bytes: 0, tail: "", redacted: false, truncated: false };
     return { logs: { stdout: log, stderr: log }, outputs: [] };
   } };
   return { requests, containers, clock, ctx, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; } };
@@ -342,6 +342,7 @@ test("AC6: default collector records only evaluator metrics and complete stage/o
     const record = done.stages[stage]!; expect(record.containerId).toHaveLength(64); expect(record.exitCode).toBe(0); expect(record.endedAt).toBeDefined();
     expect(record.evidence!.logs.stdout.tail).toContain(`${stage} score=999`); expect(record.evidence!.logs.stdout.sha256).toHaveLength(64);
     expect(record.evidence!.logs.stdout.path).toContain(`/logs/${stage}.stdout.log`); expect(record.evidence!.logs.stdout.bytes).toBeGreaterThan(0);
+    expect(record.evidence!.logs.stdout.truncated).toBe(false);
   }
   expect(done.outputs).toHaveLength(2); expect(done.outputs.every(file => file.sha256.length === 64 && Number.isSafeInteger(file.bytes))).toBe(true);
   expect(done.sealing).toEqual({ separateContainers: true, evaluatorReadOnly: true, candidateHasNoEvaluator: true, verifiedBy: "ares-observed" });

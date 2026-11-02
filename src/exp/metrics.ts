@@ -9,7 +9,7 @@ import type { Protocol } from "./protocol.ts";
 export const METRICS_BYTES = 65_536, LOG_TAIL_BYTES = 16_384;
 export const OUTPUT_METADATA_BYTES = 256 * 1024;
 export const LOG_COPY_BYTES = 16 * 1024 * 1024;
-export interface LogEvidence { path: string; sha256: string; bytes: number; tail: string; redacted: boolean }
+export interface LogEvidence { path: string; sha256: string; bytes: number; tail: string; redacted: boolean; truncated: boolean }
 export interface StageEvidence { logs: { stdout: LogEvidence; stderr: LogEvidence }; outputs: Evaluation["outputs"] }
 export class EvidenceError extends Error {
   constructor(readonly reason: string, message: string) { super(message); this.name = "EvidenceError"; }
@@ -125,9 +125,28 @@ export function sanitizeLogTail(bytes: Uint8Array, env: NodeJS.ProcessEnv = proc
 export async function collectStageEvidence(attempt: Attempt, stage: Stage, runner: ProcessRunner): Promise<StageEvidence> {
   const cid = container(attempt, stage), root = posix.dirname(attempt.paths.snapshot), logs = posix.join(root, "logs");
   const stdout = posix.join(logs, `${stage}.stdout.log`), stderr = posix.join(logs, `${stage}.stderr.log`), suffix = randomUUID();
-  const outTmp = `${stdout}.${suffix}.tmp`, errTmp = `${stderr}.${suffix}.tmp`;
-  // POSIX shells use 512/1024-byte file-size blocks: 16384 blocks caps each raw copy at no more than 16 MiB.
-  const script = `set -eu; umask 077; ulimit -f 16384; logs=${shellQuote(logs)}; if test ! -e "$logs"; then mkdir -m 700 "$logs"; fi; test -d "$logs"; test ! -L "$logs"; test -O "$logs"; out=${shellQuote(stdout)}; err=${shellQuote(stderr)}; if test -e "$out" || test -L "$out" || test -e "$err" || test -L "$err"; then test -f "$out"; test ! -L "$out"; test -f "$err"; test ! -L "$err"; else outtmp=${shellQuote(outTmp)}; errtmp=${shellQuote(errTmp)}; trap 'rm -f "$outtmp" "$errtmp"' 0; docker logs ${cid} > "$outtmp" 2> "$errtmp"; mv "$outtmp" "$out"; mv "$errtmp" "$err"; fi; tar -C ${shellQuote(root)} -cf - ${shellQuote(`logs/${stage}.stdout.log`)} ${shellQuote(`logs/${stage}.stderr.log`)}`;
+  const statePath = `logs/${stage}.state.json`, stateFile = posix.join(root, statePath);
+  const script = [
+    "set -eu", "umask 077", `logs=${shellQuote(logs)}`,
+    'if test ! -e "$logs"; then mkdir -m 700 "$logs"; fi', 'test -d "$logs"; test ! -L "$logs"; test -O "$logs"',
+    `out=${shellQuote(stdout)}; err=${shellQuote(stderr)}; state=${shellQuote(stateFile)}`,
+    'for file in "$out" "$err" "$state"; do if test -e "$file" || test -L "$file"; then test -f "$file"; test ! -L "$file"; fi; done',
+    'if test -f "$out" && test -f "$err" && test -f "$state"; then :; else',
+    `outtmp=${shellQuote(`${stdout}.${suffix}.tmp`)}; errtmp=${shellQuote(`${stderr}.${suffix}.tmp`)}; statetmp=${shellQuote(`${stateFile}.${suffix}.tmp`)}`,
+    `outpipe=${shellQuote(posix.join(logs, `${stage}.${suffix}.stdout.pipe`))}; errpipe=${shellQuote(posix.join(logs, `${stage}.${suffix}.stderr.pipe`))}`,
+    'trap \'rm -f "$outtmp" "$errtmp" "$statetmp" "$outpipe" "$errpipe"\' 0',
+    'mkfifo "$outpipe" "$errpipe"',
+    `head -c ${LOG_COPY_BYTES} < "$outpipe" > "$outtmp" & outpid=$!`,
+    `head -c ${LOG_COPY_BYTES} < "$errpipe" > "$errtmp" & errpid=$!`,
+    `status=0; docker logs ${cid} > "$outpipe" 2> "$errpipe" || status=$?`,
+    'wait "$outpid"; wait "$errpid"', 'outbytes=$(wc -c < "$outtmp"); errbytes=$(wc -c < "$errtmp")',
+    'outcut=false; errcut=false',
+    `if test "$outbytes" -ge ${LOG_COPY_BYTES}; then outcut=true; fi; if test "$errbytes" -ge ${LOG_COPY_BYTES}; then errcut=true; fi`,
+    'if test "$status" -ne 0; then if test "$outcut" = true || test "$errcut" = true; then outcut=true; errcut=true; else exit "$status"; fi; fi',
+    'printf \'{"stdout":%s,"stderr":%s}\\n\' "$outcut" "$errcut" > "$statetmp"',
+    'mv "$outtmp" "$out"; mv "$errtmp" "$err"; mv "$statetmp" "$state"', 'fi',
+    `tar -C ${shellQuote(root)} -cf - ${shellQuote(`logs/${stage}.stdout.log`)} ${shellQuote(`logs/${stage}.stderr.log`)} ${shellQuote(statePath)}`,
+  ].join("\n");
   const copies = new Map<string, { parts: Buffer[]; bytes: number }>(); let oversized = false;
   const observe = (path: string, chunk: Uint8Array) => {
     let copy = copies.get(path); if (!copy) { copy = { parts: [], bytes: 0 }; copies.set(path, copy); }
@@ -135,13 +154,17 @@ export async function collectStageEvidence(attempt: Attempt, stage: Stage, runne
     copy.bytes += chunk.length; copy.parts.push(Buffer.from(chunk));
   };
   let logArchive;
-  try { logArchive = await readArtifactArchive(attempt.executor, "sh", ["-c", script], runner, { tailBytes: 0, onFileChunk: observe, maxFiles: 2, maxBytes: LOG_COPY_BYTES * 2 }); }
+  try { logArchive = await readArtifactArchive(attempt.executor, "sh", ["-c", script], runner, { capture: statePath, captureBytes: 1024, tailBytes: 0, onFileChunk: observe, maxFiles: 3, maxBytes: LOG_COPY_BYTES * 2 + 1024 }); }
   catch (error) { if (oversized) throw new EvidenceError("log-limit", "stage evidence: log exceeds 16 MiB; reduce stage log volume before retrying"); throw archiveFailure(error, attempt, "stage log collection"); }
+  let truncated: unknown;
+  try { truncated = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(logArchive.captured)); } catch { /* validated below without copying metadata */ }
+  if (!plain(truncated) || Object.keys(truncated).length !== 2 || typeof truncated.stdout !== "boolean" || typeof truncated.stderr !== "boolean") throw new EvidenceError("invalid-log-state", "stage evidence: truncation metadata is missing or malformed; remove incomplete log copies on the executor host and retry collection");
+  const cuts = truncated as { stdout: boolean; stderr: boolean };
   const log = (kind: "stdout" | "stderr"): LogEvidence => {
     const file = logArchive.files.find(item => item.path === `logs/${stage}.${kind}.log`);
     if (!file) throw new EvidenceError("missing-logs", "stage evidence: a stdout/stderr copy is missing; inspect the executor log directory and retry collection");
     const copy = copies.get(file.path);
-    return { path: posix.join(root, file.path), sha256: file.sha256, bytes: file.bytes, ...sanitizeLogTail(copy ? Buffer.concat(copy.parts, copy.bytes) : Buffer.alloc(0)) };
+    return { path: posix.join(root, file.path), sha256: file.sha256, bytes: file.bytes, truncated: cuts[kind] || file.bytes >= LOG_COPY_BYTES, ...sanitizeLogTail(copy ? Buffer.concat(copy.parts, copy.bytes) : Buffer.alloc(0)) };
   };
   const outputs: Evaluation["outputs"] = [];
   if (stage === "candidate") {

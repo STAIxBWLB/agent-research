@@ -19,6 +19,9 @@ export function metricTar(entries: { path: string; data?: string | Uint8Array; t
   }
   return Buffer.concat([...parts, Buffer.alloc(1024)]);
 }
+export function metricLogTar(stage: "candidate" | "evaluator", stdout: string, stderr = "", cuts = { stdout: false, stderr: false }): Buffer {
+  return metricTar([{ path: `logs/${stage}.stdout.log`, data: stdout }, { path: `logs/${stage}.stderr.log`, data: stderr }, { path: `logs/${stage}.state.json`, data: JSON.stringify(cuts) }]);
+}
 export function metricAttempt(): Attempt {
   const p = metricProtocol(), start = "2030-01-01T00:00:00Z";
   const stage = (cid: string, kind: "candidate" | "evaluator") => ({ image: p[kind].image, argv: p[kind].command, mounts: [], network: "none" as const, limits: p.limits, user: "1001:1001", containerId: cid, startedAt: start, endedAt: start, exitCode: 0 });

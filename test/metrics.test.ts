@@ -1,9 +1,12 @@
 import { expect, test } from "bun:test";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { collectEvaluation, collectStageEvidence, LOG_COPY_BYTES, LOG_TAIL_BYTES, METRICS_BYTES, MetricsError, outputBudget, parseMetrics, sanitizeLogTail, validateMetrics } from "../src/exp/metrics.ts";
 import { ARTIFACT_BYTES } from "../src/exp/artifacts.ts";
 import { sha256 } from "../src/study.ts";
-import type { ProcessRequest, ProcessRunner } from "../src/exp/executor.ts";
-import { metricAttempt, metricProtocol, metricTar } from "./metric-fixtures.ts";
+import { shellQuote, spawnRunner, type ProcessRequest, type ProcessRunner } from "../src/exp/executor.ts";
+import { metricAttempt, metricLogTar, metricProtocol, metricTar } from "./metric-fixtures.ts";
+import { tempDir } from "./helpers.ts";
 
 function archiveRunner(archives: Buffer[]) {
   const requests: ProcessRequest[] = [];
@@ -43,13 +46,13 @@ test("AC6: missing, malformed and unsafe evaluator result files fail with named 
   }
 });
 test("stage evidence hashes candidate output but never treats printed or candidate-file numbers as metrics", async () => {
-  const logs = metricTar([{ path: "logs/candidate.stdout.log", data: 'candidate score=999\n{"score":999}\n' }, { path: "logs/candidate.stderr.log", data: "synthetic error detail\n" }]);
+  const logs = metricLogTar("candidate", 'candidate score=999\n{"score":999}\n', "synthetic error detail\n");
   const fake = archiveRunner([logs, metricTar([{ path: "metrics.json", data: '{"score":999}' }])]), attempt = metricAttempt();
   const stage = await collectStageEvidence(attempt, "candidate", fake.runner);
   expect(stage.logs.stdout.tail).toContain("candidate score=999"); expect(stage.logs.stdout.tail).toContain('{"score":999}');
   expect(stage.outputs.some(file => file.path === `${attempt.paths.output}/metrics.json`)).toBe(true);
   expect(attempt.metrics).toEqual([]); expect(fake.requests[1]?.args).toEqual(["cp", `${attempt.stages.candidate!.containerId}:/out/.`, "-"]);
-  expect(fake.requests[0]?.args.join(" ")).toContain("ulimit -f 16384");
+  expect(fake.requests[0]?.args.join(" ")).toContain(`head -c ${LOG_COPY_BYTES}`);
 });
 test("log tails apply the declared credential masks and preserve ordinary context and JSON", () => {
   const key = "synthetic-parent-value", text = `ordinary stage progress\n${key}\nGET https://user:pass@example.test/private?API_TOKEN=query-value&step=1\nAPI_KEY=assignment-value next\nTOKEN="quoted value" next\n{\n  "body": "synthetic-response-body", "PASSWORD":"json-value"\n}\n`;
@@ -76,18 +79,42 @@ test("controls normalize before masking, tabs/newlines remain and body markers n
 });
 test("credential assignment prefixes outside the retained tail still mask the whole value", async () => {
   const body = `API_KEY=${"z".repeat(LOG_TAIL_BYTES + 1000)}\nnormal final context\n`;
-  const logs = metricTar([{ path: "logs/evaluator.stdout.log", data: body }, { path: "logs/evaluator.stderr.log", data: "" }]);
+  const logs = metricLogTar("evaluator", body);
   const result = await collectStageEvidence(metricAttempt(), "evaluator", archiveRunner([logs]).runner);
   expect(result.logs.stdout.bytes).toBeGreaterThan(LOG_TAIL_BYTES); expect(result.logs.stdout.tail).toBe("API_KEY=***\nnormal final context\n"); expect(result.logs.stdout.redacted).toBe(true);
 });
 test("logs have independent evidence and do not consume the 500-file candidate/result inventory", async () => {
   const attempt = metricAttempt(); attempt.outputs = Array.from({ length: 498 }, (_, index) => ({ path: `/private/prior-${index}`, sha256: "a".repeat(64), bytes: 1 }));
-  const logs = metricTar([{ path: "logs/candidate.stdout.log", data: "progress\n" }, { path: "logs/candidate.stderr.log", data: "" }]);
+  const logs = metricLogTar("candidate", "progress\n");
   const stage = await collectStageEvidence(attempt, "candidate", archiveRunner([logs, metricTar([{ path: "one-output", data: "one" }])]).runner);
   expect(stage.outputs).toHaveLength(1); attempt.outputs.push(...stage.outputs);
   const result = await collectEvaluation(attempt, archiveRunner([metricTar([{ path: "metrics.json", data: '{"score":7}' }])]).runner);
   expect(outputBudget([...attempt.outputs, ...result.outputs])).toHaveLength(500);
 });
+test("truncated log copies retain their own hash, size and tail with an explicit incomplete flag", async () => {
+  const stdout = "retained stdout prefix\n", stderr = "retained stderr prefix\n";
+  const logs = metricLogTar("evaluator", stdout, stderr, { stdout: true, stderr: true });
+  const result = await collectStageEvidence(metricAttempt(), "evaluator", archiveRunner([logs]).runner);
+  expect(result.logs.stdout).toMatchObject({ sha256: sha256(stdout), bytes: Buffer.byteLength(stdout), tail: stdout, truncated: true });
+  expect(result.logs.stderr).toMatchObject({ sha256: sha256(stderr), bytes: Buffer.byteLength(stderr), truncated: true });
+});
+test("host capture enforces the byte cap and records truncation without starting Docker", async () => {
+  const attempt = metricAttempt(), root = tempDir();
+  attempt.paths.snapshot = join(root, "snapshot"); mkdirSync(attempt.paths.snapshot);
+  const producer = `process.stderr.write('fixture stderr context\\n'); process.stdout.on('error',()=>process.exit(17)); process.stdout.write('x'.repeat(${LOG_COPY_BYTES + 1024}),()=>process.exit(17));`;
+  const fixtureRunner: ProcessRunner = async request => {
+    expect(request.command).toBe("sh");
+    const realCommand = `docker logs ${attempt.stages.evaluator!.containerId}`;
+    expect(request.args[1]).toContain(realCommand);
+    const script = request.args[1]!.replace(realCommand, `${shellQuote(process.execPath)} -e ${shellQuote(producer)}`);
+    expect(script).not.toContain("docker logs");
+    return spawnRunner({ ...request, args: ["-c", script] });
+  };
+  const result = await collectStageEvidence(attempt, "evaluator", fixtureRunner);
+  expect(result.logs.stdout.bytes).toBe(LOG_COPY_BYTES); expect(result.logs.stdout.sha256).toBe(sha256(Buffer.alloc(LOG_COPY_BYTES, "x")));
+  expect(result.logs.stdout.truncated).toBe(true); expect(result.logs.stderr.truncated).toBe(true);
+  expect(Buffer.byteLength(result.logs.stdout.tail)).toBeLessThanOrEqual(LOG_TAIL_BYTES);
+}, 10_000);
 test("artifact limits include prior stage outputs and reject changed receipts", async () => {
   const attempt = metricAttempt(); attempt.outputs = [{ path: "/private/existing", sha256: "a".repeat(64), bytes: ARTIFACT_BYTES }];
   await expect(collectEvaluation(attempt, archiveRunner([metricTar([{ path: "metrics.json", data: '{"score":7}' }])]).runner)).rejects.toThrow("evaluator result archive failed");
