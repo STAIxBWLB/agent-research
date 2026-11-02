@@ -3,6 +3,7 @@ import type { Readable, Writable } from "node:stream";
 
 /** Newline-delimited JSON-RPC stdio transport (MCP basic + tools). Sequential, bounded, no timers. */
 export const FRAME_BYTES = 128 * 1024, RESULT_BYTES = 2 * 1024 * 1024;
+export const DEFAULT_STRING_LENGTH = 65_536;
 export interface McpTool { name: string; description: string; inputSchema: Record<string, unknown>; annotations: Record<string, boolean> }
 export type McpHandler = (args: Record<string, unknown>) => unknown | Promise<unknown>;
 export interface McpServerOptions { tools: readonly McpTool[]; handlers: Record<string, McpHandler>; input?: Readable; output?: Writable; name?: string; version?: string }
@@ -16,7 +17,7 @@ export function validArguments(value: unknown, raw: unknown): boolean {
   if (!types.includes(type) && !(type === "number" && Number.isSafeInteger(value) && types.includes("integer"))) return false;
   if (type === "number" && !types.includes("number") && !Number.isSafeInteger(value)) return false;
   if (s.enum && !s.enum.includes(value)) return false;
-  if (typeof value === "string" && (value.length < (s.minLength ?? 0) || value.length > (s.maxLength ?? FRAME_BYTES) || value.includes("\0"))) return false;
+  if (typeof value === "string" && (value.length < (s.minLength ?? 0) || value.length > (s.maxLength ?? DEFAULT_STRING_LENGTH) || value.includes("\0"))) return false;
   if (typeof value === "number" && (!Number.isFinite(value) || value < (s.minimum ?? -Infinity) || value > (s.maximum ?? Infinity))) return false;
   if (Array.isArray(value)) {
     if (value.length < (s.minItems ?? 0) || value.length > (s.maxItems ?? 64) || !plain(s.items)) return false;
@@ -27,9 +28,7 @@ export function validArguments(value: unknown, raw: unknown): boolean {
     if (keys.length < (s.minProperties ?? 0) || keys.length > (s.maxProperties ?? 64)) return false;
     if ((s.required ?? []).some((key: string) => !Object.hasOwn(value, key))) return false;
     for (const key of keys) {
-      if (key.length > 200) return false;
-      // Explicit string dictionaries (protocol env) keep these literal own keys; no object is assigned through them.
-      if (["__proto__", "prototype", "constructor"].includes(key) && !(plain(s.additionalProperties) && s.additionalProperties.type === "string" && typeof value[key] === "string")) return false;
+      if (["__proto__", "prototype", "constructor"].includes(key) || key.length > 200) return false;
       if (Object.hasOwn(s.properties ?? {}, key)) { if (!validArguments(value[key], s.properties[key])) return false; }
       else if (s.additionalProperties === false || !plain(s.additionalProperties) || !validArguments(value[key], s.additionalProperties)) return false;
     }
