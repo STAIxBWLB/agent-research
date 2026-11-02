@@ -101,7 +101,7 @@ export async function checkExecutor(dir: string, runner: ProcessRunner = spawnRu
   const images: ExecutorCheck["images"] = [];
   for (const image of new Set([protocol.candidate.image, protocol.evaluator.image])) {
     let present: ProcessResult;
-    try { present = await runOnExecutor(executor, "docker", ["image", "inspect", image], runner); }
+    try { present = await runOnExecutor(executor, "docker", ["image", "inspect", "--format", "{{.Id}}", image], runner); }
     catch { throw failed(executor, "image availability"); }
     if (present.timedOut || present.truncated) throw failed(executor, "image availability");
     if (present.exitCode !== 0) await step(executor, "image pull", "docker", ["pull", image], runner, { timeoutMs: 300_000 });

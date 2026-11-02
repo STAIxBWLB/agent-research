@@ -89,6 +89,11 @@ test("executor check reports server and non-root user, pulling missing images on
   expect(checked).toEqual({ executor: remote, serverVersion: "29.1.3", user: "1001:1002", images: [{ image, available: true }, { image: protocol().evaluator.image, available: true }], pull: "missing" });
   expect(fake.requests.every(r => r.command === "ssh" && r.args.slice(0, 3).join(" ") === "-o BatchMode=yes fixture-host")).toBe(true);
   expect(fake.requests.filter(r => r.args.includes("pull"))).toHaveLength(1);
+  const inspections = fake.requests.filter(r => r.args.includes("inspect"));
+  expect(inspections.map(r => r.args.slice(3))).toEqual([
+    ["docker", "image", "inspect", "--format", "'{{.Id}}'", image],
+    ["docker", "image", "inspect", "--format", "'{{.Id}}'", protocol().evaluator.image],
+  ]);
   expect(fake.remaining()).toBe(0); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
 });
 
