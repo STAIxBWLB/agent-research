@@ -105,7 +105,7 @@ export function sanitizeLogTail(bytes: Uint8Array, env: NodeJS.ProcessEnv = proc
   if (bytes.byteLength > LOG_COPY_BYTES) throw new EvidenceError("log-limit", "stage evidence: log exceeds 16 MiB; reduce stage log volume before retrying");
   const original = new TextDecoder().decode(bytes);
   let text = normalizeLog(original);
-  text = text.replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/\s@]+@/g, "$1***@");
+  text = text.replace(/(?<![A-Za-z0-9+.-])([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/\s@]+@/g, "$1***@");
   const assignment = /("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|(?<![A-Za-z0-9_-])[A-Za-z0-9_-]+)\s*(?:=|:)\s*/g;
   let masked = "", cursor = 0;
   for (let match = assignment.exec(text); match; match = assignment.exec(text)) {
