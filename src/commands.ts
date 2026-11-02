@@ -46,7 +46,7 @@ export function status(dirArg: string) {
   return {
     study: dir, question: study.question, mode: study.mode, autonomy: study.autonomy,
     scope: { set: scopeHash(dir) !== undefined },
-    gates: GATES.map(g => gateState(g, events, bind)),
+    gates: GATES.filter(g => g !== "design" || study.mode === "experiment").map(g => gateState(g, events, bind)),
     literature: {
       candidates: list.length, new: count("new"), included: included.length, excluded: count("excluded"),
       verified: included.filter(isVerified).length, unverified: included.filter(c => !isVerified(c)).length,
@@ -66,8 +66,8 @@ export async function scope(dirArg: string, raw: unknown, ctx: Ctx) {
 }
 
 export function gateList(dirArg: string) {
-  const { dir } = openStudy(dirArg), events = readLedger(dir), bind = binder(dir);
-  return GATES.map(g => gateState(g, events, bind));
+  const { dir, study } = openStudy(dirArg), events = readLedger(dir), bind = binder(dir);
+  return GATES.filter(g => g !== "design" || study.mode === "experiment").map(g => gateState(g, events, bind));
 }
 
 export async function gateDecide(dirArg: string, gate: string, decision: "approve" | "reject", reason: string | undefined, ctx: Ctx) {
