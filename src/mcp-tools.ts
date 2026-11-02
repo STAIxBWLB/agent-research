@@ -38,6 +38,7 @@ const PROTOCOL = obj({
 }, ["v", "method", "candidate", "evaluator", "metrics", "seeds", "limits", "network", "budget"]);
 
 export const ARES_TOOLS: readonly McpTool[] = [
+  { name: "ares_manifest", description: "Read this ares version, implemented commands and shared schema versions without opening a study or reaching an executor.", inputSchema: obj({}, []), annotations: read },
   { name: "ares_status", description: "Study summary: gates, candidate counts, verification counts, bibliography.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_scope_set", description: "Set scope.json (question, subquestions, include, exclude, yearFrom, yearTo, maxCandidates). A change returns the scope gate to pending.", inputSchema: obj({ study, scope: SCOPE }, ["study", "scope"]), annotations: write },
   { name: "ares_gate", description: "List gates, or approve or reject scope, screen or experiment design. The ledger records the actor; who may approve is workspace policy.", inputSchema: obj({ study, action: { type: "string", enum: ["list", "approve", "reject"] }, gate: { type: "string", enum: ["scope", "screen", "design"] }, reason }, ["study", "action"]), annotations: write },
@@ -71,6 +72,7 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
   const ctx = { ...runtime, actor, http };
   const dir = (a: Record<string, unknown>) => absolute(a.study, "study");
   const handlers: Record<string, McpHandler> = {
+    ares_manifest: () => ops.manifest(),
     ares_status: a => ops.status(dir(a)),
     ares_scope_set: a => ops.scope(dir(a), a.scope, ctx),
     ares_protocol_set: a => ops.protocol(dir(a), a.protocol, ctx),

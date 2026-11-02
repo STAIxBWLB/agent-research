@@ -56,6 +56,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
   let result: unknown, code = 0;
   switch (spec.name) {
+    case "manifest": count(spec, positional, 0); result = ops.manifest(); break;
     case "playbook": count(spec, positional, 0); return { text: PLAYBOOK.trimEnd(), code: 0 };
     case "mcp": throw new Error("mcp: run `ares mcp` with no other arguments");
     case "init": {

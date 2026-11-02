@@ -100,6 +100,7 @@ export function openStudy(dir: string): { dir: string; study: Study } {
 }
 
 function validStudy(raw: unknown): Study {
+  if (plain(raw) && raw.v !== 1) throw new Error("study.json: unsupported schema version; use an ares version that supports this study, keeping the original file unchanged");
   if (!plain(raw) || raw.v !== 1 || typeof raw.id !== "string" || typeof raw.question !== "string" || typeof raw.createdAt !== "string" ||
     !["survey", "experiment"].includes(raw.mode as string) || !["auto", "gates"].includes(raw.autonomy as string)) throw new Error("study.json: malformed");
   return raw as unknown as Study;
@@ -180,6 +181,7 @@ export function readLedger(dir: string): LedgerEvent[] {
     if (!line.trim()) return;
     let event: unknown;
     try { event = JSON.parse(line); } catch { throw new Error(`ledger.jsonl line ${index + 1}: not JSON`); }
+    if (plain(event) && event.v !== 1) throw new Error(`ledger.jsonl line ${index + 1}: unsupported schema version; use an ares version that supports this ledger, keeping all original lines unchanged`);
     if (!plain(event) || event.v !== 1 || typeof event.type !== "string" || !plain(event.data) || !plain(event.actor)) throw new Error(`ledger.jsonl line ${index + 1}: malformed event`);
     events.push(event as unknown as LedgerEvent);
   });

@@ -129,6 +129,7 @@ Experiment logs and outputs live on the executor at `<workdir>/<study-id>/<attem
 The implemented CLI surface below comes from `src/commands-table.ts`; `ares --help` prints current usage. Every operation exposing `--json` supports structured output.
 
 ```text
+ares manifest [--json]
 ares init <dir> --question TEXT [--mode survey|experiment] [--autonomy auto|gates] [--json]
 ares status <dir> [--json]
 ares scope <dir> --file PATH|- [--json]
@@ -156,6 +157,14 @@ ares mcp
 ```
 
 MCP exposes the same operations through shared command handlers. Experiment tools are `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile` and `ares_attempt_logs`; `ares_gate` accepts `design`. Run is always detached over MCP, and executor-reaching tools carry `openWorldHint`.
+
+## Version and format discovery
+
+`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `study`, `ledgerEvent`, `experimentProtocol`, `executor` and `experimentAttempt`, all version 1, carried by each record's `v` field.
+
+Within a supported schema, readers preserve additive fields on study/attempt records and keep ledger events with unknown kinds. Appending to the ledger leaves prior lines intact; updating an attempt keeps unrecognized fields and stage entries. A future schema version or unknown execution status/stage is refused with an upgrade instruction, leaving the original data unchanged. Command input remains strict so unknown options or protocol fields cannot silently change an experiment.
+
+The private scope/card/candidate storage and evaluator metrics object are not family interchange schemas. Signed runner receipts, campaign contracts, console plugin manifests and vault notes are not implemented or advertised here. `ares setup` and versioned install roots remain A6 work under dotfiles#318.
 
 ## Environment
 
