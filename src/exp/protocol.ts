@@ -53,7 +53,7 @@ export function validateProtocol(raw: unknown): Protocol {
   const limitsRaw = object(p.limits, Object.keys(LIMIT_BOUNDS), "protocol.limits");
   const limits = Object.fromEntries(Object.entries(LIMIT_BOUNDS).map(([key, [min, max]]) => [key, number(limitsRaw[key], `protocol.limits.${key}`, min, max, key !== "cpus")])) as unknown as Limits;
   const budget = object(p.budget, ["maxAttempts", "maxWallHours", "maxGpuHours"], "protocol.budget");
-  const metrics = array(p.metrics, "protocol.metrics", 100).map(rawMetric => {
+  const metrics = array(p.metrics, "protocol.metrics", 100).map((rawMetric): Protocol["metrics"][number] => {
     const m = object(rawMetric, ["name", "unit", "direction"], "metric");
     if (m.direction !== "max" && m.direction !== "min") throw new Error("metric.direction: max or min required");
     return { name: boundedText(m.name, "metric.name", 128), unit: boundedText(m.unit, "metric.unit", 64), direction: m.direction };
