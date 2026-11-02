@@ -358,8 +358,12 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
       if (state.exitCode !== 0) { attempt = await captureStage(dir, attempt, ctx, true); const ended = state; changed.push(await update(dir, attempt.id, ctx, current => { current.stages[current.stage]!.exitCode = ended.exitCode; if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; finish(current, "failed", `${current.stage}-exit`, ctx); return "attempt.failed"; })); continue; }
       try { attempt = await captureStage(dir, attempt, ctx, false); }
       catch (error) {
-        const failure = error as EvidenceError;
-        changed.push(await update(dir, attempt.id, ctx, current => { current.error = failure.message; finish(current, "failed", failure.reason, ctx); return "attempt.failed"; })); continue;
+        const failure = error as EvidenceError, ended = state;
+        changed.push(await update(dir, attempt.id, ctx, current => {
+          current.stages[current.stage]!.exitCode = ended.exitCode;
+          if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt;
+          current.error = failure.message; finish(current, "failed", failure.reason, ctx); return "attempt.failed";
+        })); continue;
       }
       if (attempt.stage === "candidate") {
         const next = await update(dir, attempt.id, ctx, current => { current.stages.candidate!.exitCode = 0; current.stages.candidate!.endedAt = state.finishedAt ?? at(ctx); current.stage = "evaluator"; current.stages.evaluator = stageRecord(current, "evaluator", stage.user, ctx); current.launching = owner(ctx); return "attempt.stage.changed"; });

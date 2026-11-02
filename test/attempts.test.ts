@@ -9,6 +9,7 @@ import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts
 import { readLedger, sha256, withLock } from "../src/study.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
 import { metricLogTar, metricTar } from "./metric-fixtures.ts";
+import { EvidenceError } from "../src/exp/metrics.ts";
 
 const actor = { kind: "person" as const }, commitSha = "a".repeat(40), treeId = "b".repeat(40);
 function protocol(): Protocol {
@@ -356,4 +357,14 @@ test("AC6: evaluator validation failures retain evaluator stage, named reason an
     expect(done.status).toBe("failed"); expect(done.stage).toBe("evaluator"); expect(done.reason).toBe(reason); expect(done.metrics).toEqual([]);
     expect(done.error).toContain("write /result/metrics.json"); expect(JSON.stringify(done)).not.toContain("synthetic-private-response-body");
   }
+});
+test("evidence failure preserves observed exit and finish time instead of charging delayed GPU time", async () => {
+  const p = protocol(); p.limits.gpus = 1; p.budget.maxGpuHours = 1;
+  const { dir, fake } = await setup(p), first = await runAttempt(dir, request, fake.ctx), candidate = running(fake, "candidate");
+  candidate.running = false; candidate.exitCode = 0; candidate.finishedAt = new Date(fake.clock.value + 1000).toISOString(); fake.clock.value += 7_200_000;
+  fake.ctx.collectStageEvidence = async () => { throw new EvidenceError("invalid-artifact", "stage evidence: unsafe output; remove the link and retry"); };
+  await reconcileAttempts(dir, fake.ctx); const done = showAttempt(dir, first.id);
+  expect(done.status).toBe("failed"); expect(done.reason).toBe("invalid-artifact");
+  expect(done.stages.candidate!.exitCode).toBe(0); expect(done.stages.candidate!.endedAt).toBe(candidate.finishedAt);
+  expect(budgetUsage([done], fake.clock.value).gpuHours).toBeCloseTo(1 / 3600);
 });
