@@ -110,10 +110,11 @@ function save(dir: string, attempt: Attempt, ctx: AttemptContext, event: string,
 export function budgetUsage(attempts: Attempt[], time = Date.now()) {
   let wallHours = 0, gpuHours = 0;
   for (const attempt of attempts) {
+    if (Object.keys(attempt.stages).some(name => name !== "candidate" && name !== "evaluator")) throw new Error("budget: unsupported attempt stage kind prevents complete accounting; use an ares version that supports all recorded stages before starting another attempt, keeping the original records unchanged");
     const elapsed = Math.max(0, (attempt.endedAt ? Date.parse(attempt.endedAt) : time) - Date.parse(attempt.startedAt)) / 3_600_000;
     if (!Number.isFinite(elapsed)) throw new Error("attempt timing: malformed; restore valid timestamps before starting an attempt");
     wallHours += elapsed;
-    // Preserve extension entries, but only interpret stages defined by this schema.
+    // Unknown kinds cannot be accounted for safely; read-only operations do not call this function.
     for (const name of ["candidate", "evaluator"] as const) {
     const stage = attempt.stages[name];
     if (!stage) continue;
