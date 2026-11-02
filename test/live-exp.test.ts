@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_LIVE_IMAGE, parseLiveOptions, prepareSyntheticRepository, studyByteSnapshot } from "../scripts/live-exp.ts";
+import { DEFAULT_LIVE_IMAGE, parseLiveOptions, prepareSyntheticRepository, studyByteSnapshot, verifyFixtureAttempt } from "../scripts/live-exp.ts";
 import { spawnRunner } from "../src/exp/executor.ts";
 import { readTextBounded, writeAtomic } from "../src/study.ts";
 import { tempDir } from "./helpers.ts";
@@ -38,4 +38,10 @@ test("live log audit fingerprints raw ledger and record bytes, including whitesp
   const before = studyByteSnapshot(study, [record]); expect(studyByteSnapshot(study, [record])).toEqual(before); expect(before.files).toBe(2);
   writeAtomic(path, JSON.stringify(record) + "\n", ATTEMPT_BYTES);
   expect(studyByteSnapshot(study, [record]).sha256).not.toBe(before.sha256);
+});
+test("live acceptance rejects a successful HEAD result when a different commit-specific score was requested", () => {
+  const attempt = metricAttempt(); attempt.status = "succeeded"; attempt.label = "baseline";
+  attempt.metrics = [{ name: "score", unit: "points", value: 9, provenance: "ares-observed" }];
+  expect(() => verifyFixtureAttempt(attempt, 7)).toThrow("commit-specific fixture score");
+  attempt.metrics[0]!.value = 7; expect(verifyFixtureAttempt(attempt, 7).score).toBe(7);
 });

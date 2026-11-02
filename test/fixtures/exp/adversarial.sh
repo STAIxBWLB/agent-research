@@ -22,6 +22,6 @@ printf 'result_write_error: ' >&2
 cat /out/result-write.stderr >&2
 
 printf '{"score":999}\n'
-printf '7\n' > /out/value.txt
+printf '8\n' > /out/value.txt
 
 test "$eval_read_exit" -ne 0 && test "$result_write_exit" -ne 0
