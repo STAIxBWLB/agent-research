@@ -62,6 +62,7 @@ test("log tails apply the declared credential masks and preserve ordinary contex
   for (const value of [key, "user:pass", "query-value", "assignment-value", "quoted value", "json-value"]) expect(sanitized.tail).not.toContain(value);
   expect(Buffer.byteLength(sanitizeLogTail(Buffer.from("x".repeat(LOG_TAIL_BYTES * 2))).tail)).toBeLessThanOrEqual(LOG_TAIL_BYTES);
   expect(Buffer.byteLength(sanitizeLogTail(Buffer.from("x".repeat(1024 * 1024)), {}).tail)).toBeLessThanOrEqual(LOG_TAIL_BYTES);
+  expect(Buffer.byteLength(sanitizeLogTail(Buffer.from("x-".repeat(512 * 1024)), {}).tail)).toBeLessThanOrEqual(LOG_TAIL_BYTES);
   expect(() => sanitizeLogTail(Buffer.alloc(LOG_COPY_BYTES + 1))).toThrow("log exceeds 16 MiB");
 });
 test("controls normalize before masking, tabs/newlines remain and body markers never erase evidence", () => {

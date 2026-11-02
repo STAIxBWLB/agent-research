@@ -106,7 +106,7 @@ export function sanitizeLogTail(bytes: Uint8Array, env: NodeJS.ProcessEnv = proc
   const original = new TextDecoder().decode(bytes);
   let text = normalizeLog(original);
   text = text.replace(/\b([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/\s@]+@/g, "$1***@");
-  const assignment = /("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|\b[A-Za-z0-9_-]+)\s*(?:=|:)\s*/g;
+  const assignment = /("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|(?<![A-Za-z0-9_-])[A-Za-z0-9_-]+)\s*(?:=|:)\s*/g;
   let masked = "", cursor = 0;
   for (let match = assignment.exec(text); match; match = assignment.exec(text)) {
     let key = match[1]!;
