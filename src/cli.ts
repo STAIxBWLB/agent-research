@@ -6,7 +6,7 @@ import { PLAYBOOK } from "./playbook.ts";
 import { detectActor, readTextBounded } from "./study.ts";
 
 const INPUT_BYTES = 65_536;
-export interface Io { readStdin?: () => Promise<string>; http?: Http; sleep?: (ms: number) => Promise<void> }
+export interface Io extends ops.ExperimentRuntime { readStdin?: () => Promise<string>; http?: Http }
 
 function parse(spec: CommandSpec, args: string[]): { flags: Record<string, string | true>; positional: string[] } {
   const flags: Record<string, string | true> = {}, positional: string[] = [];
@@ -14,10 +14,10 @@ function parse(spec: CommandSpec, args: string[]): { flags: Record<string, strin
     const word = args[i]!;
     if (word === "-" || !word.startsWith("-")) { positional.push(word); continue; }
     const kind = spec.options[word];
-    if (!kind || word in flags) throw new Error(`${spec.name}: unknown or repeated option ${word}`);
+    if (!kind || word in flags) throw new Error(`${spec.name}: unknown or repeated option ${word}; use ares --help and pass each supported option once`);
     if (kind === "value") {
       const value = args[++i];
-      if (value === undefined || (value.startsWith("--") && value !== "-")) throw new Error(`${spec.name}: ${word} needs a value`);
+      if (value === undefined || (value.startsWith("--") && value !== "-")) throw new Error(`${spec.name}: ${word} needs a value; use ares --help for its accepted values`);
       flags[word] = value;
     } else flags[word] = true;
   }
@@ -28,7 +28,12 @@ function count(spec: CommandSpec, positional: string[], min: number, max = min):
 }
 function integer(value: string | true | undefined, what: string): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !/^\d{1,6}$/.test(value)) throw new Error(`${what}: integer required`);
+  if (typeof value !== "string" || !/^\d{1,7}$/.test(value)) throw new Error(`${what}: integer required; pass a nonnegative decimal integer`);
+  return Number(value);
+}
+function seed(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!/^-?\d{1,10}$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < -2_147_483_648 || Number(value) > 2_147_483_647) throw new Error("--seed: invalid integer; use a declared protocol seed in -2147483648..2147483647");
   return Number(value);
 }
 async function readInput(path: string, io: Io): Promise<unknown> {
@@ -47,7 +52,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
   const found = findCommand(args);
   if (!found) throw new Error(`unknown command: ${args.slice(0, 2).join(" ")}; use --help`);
   const { spec, rest } = found, { flags, positional } = parse(spec, rest);
-  const ctx = { actor: detectActor(env), http: io.http ?? createHttp(env), ...(io.sleep ? { sleep: io.sleep } : {}) };
+  const ctx: ops.Ctx = { actor: detectActor(env), http: io.http ?? createHttp(env), ...(io.sleep ? { sleep: io.sleep } : {}), ...(io.runner ? { runner: io.runner } : {}), ...(io.now ? { now: io.now } : {}), ...(io.collectEvaluation ? { collectEvaluation: io.collectEvaluation } : {}), ...(io.collectStageEvidence ? { collectStageEvidence: io.collectStageEvidence } : {}) };
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
   let result: unknown, code = 0;
   switch (spec.name) {
@@ -67,6 +72,40 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       if (file === undefined) throw new Error("scope: --file is required");
       result = await ops.scope(positional[0]!, await readInput(file, io), ctx);
       break;
+    }
+    case "protocol": {
+      count(spec, positional, 1);
+      const file = str("--file");
+      if (file === undefined) throw new Error("protocol: input file missing; use --file PATH or --file - for JSON standard input");
+      result = await ops.protocol(positional[0]!, await readInput(file, io), ctx); break;
+    }
+    case "executor set": {
+      count(spec, positional, 1);
+      const kind = str("--kind"), workdir = str("--workdir");
+      if (!kind || !workdir) throw new Error("executor set: kind/workdir missing; use --kind local|ssh --workdir PATH and --host ALIAS for ssh");
+      result = await ops.executorSet(positional[0]!, { v: 1, kind, workdir, ...(str("--host") !== undefined ? { host: str("--host") } : {}) }, ctx); break;
+    }
+    case "executor check": count(spec, positional, 1); result = await ops.executorCheck(positional[0]!, ctx); break;
+    case "attempt run": {
+      count(spec, positional, 1);
+      const repo = str("--repo"), commit = str("--commit"), chosenSeed = seed(str("--seed"));
+      if (!repo || !commit) throw new Error("attempt run: repo/commit missing; use --repo PATH --commit FULL_40_HEX_SHA");
+      const attempt = await ops.attemptRun(positional[0]!, { repo, commit, ...(chosenSeed !== undefined ? { seed: chosenSeed } : {}), ...(str("--run") !== undefined ? { run: str("--run") } : {}), ...(str("--label") !== undefined ? { label: str("--label") } : {}), ...(str("--retry") !== undefined ? { retry: str("--retry") } : {}), detach: !!flags["--detach"] }, ctx);
+      if (attempt.status !== "running" && attempt.status !== "succeeded") code = 1;
+      result = attempt; break;
+    }
+    case "attempt list": {
+      count(spec, positional, 1); const limit = integer(flags["--limit"], "--limit"), offset = integer(flags["--offset"], "--offset");
+      result = ops.attemptList(positional[0]!, { ...(str("--run") !== undefined ? { run: str("--run") } : {}), ...(str("--status") !== undefined ? { status: str("--status") } : {}), ...(limit !== undefined ? { limit } : {}), ...(offset !== undefined ? { offset } : {}) }); break;
+    }
+    case "attempt show": count(spec, positional, 2); result = ops.attemptShow(positional[0]!, positional[1]!); break;
+    case "attempt cancel": count(spec, positional, 2); result = await ops.attemptCancel(positional[0]!, positional[1]!, str("--reason"), ctx); break;
+    case "attempt reconcile": count(spec, positional, 1); result = await ops.attemptReconcile(positional[0]!, ctx); break;
+    case "attempt logs": {
+      count(spec, positional, 2); const tailBytes = integer(flags["--tail"], "--tail");
+      const logs = await ops.attemptLogs(positional[0]!, positional[1]!, { ...(str("--stage") !== undefined ? { stage: str("--stage") } : {}), ...(str("--stream") !== undefined ? { stream: str("--stream") } : {}), ...(tailBytes !== undefined ? { tailBytes } : {}) }, ctx);
+      if (!flags["--json"]) return { text: logs.logs.map(log => `[${log.stage} ${log.stream}${log.truncated ? ", truncated copy" : ""}]\n${log.text}`).join("\n"), code: 0 };
+      result = logs; break;
     }
     case "gate list": count(spec, positional, 1); result = ops.gateList(positional[0]!); break;
     case "gate approve": case "gate reject":

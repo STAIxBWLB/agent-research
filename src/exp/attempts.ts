@@ -54,8 +54,8 @@ function directoryEntries(path: string): string[] {
   finally { directory.closeSync(); }
   return entries.sort();
 }
-function load(dir: string): Attempt[] {
-  const attempts: Attempt[] = [];
+function* records(dir: string): Generator<Attempt> {
+  let count = 0;
   for (const run of directoryEntries(join(dir, "runs"))) {
     runName(run);
     for (const name of directoryEntries(join(dir, "runs", run, "attempts"))) {
@@ -64,18 +64,39 @@ function load(dir: string): Attempt[] {
       if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("attempt record: regular file required; restore the record without symlinks");
       const raw = readJsonFile(path, ATTEMPT_BYTES);
       if (!plain(raw) || raw.v !== 1 || raw.run !== run || raw.id !== name.slice(0, 16) || !STATUSES.includes(raw.status as AttemptStatus) || !["candidate", "evaluator"].includes(raw.stage as string) || !plain(raw.stages) || !plain(raw.protocol) || !plain(raw.executor) || typeof raw.startedAt !== "string" || !Number.isFinite(Date.parse(raw.startedAt))) throw new Error("attempt record: malformed; restore its last valid version before retrying");
-      if (attempts.length >= 1_000_000) throw new Error("attempt store: more than 1000000 records; archive the study and start a new one");
-      attempts.push(raw as unknown as Attempt);
+      if (++count > 1_000_000) throw new Error("attempt store: more than 1000000 records; archive the study and start a new one");
+      yield raw as unknown as Attempt;
     }
   }
-  return attempts;
 }
+function load(dir: string): Attempt[] { return [...records(dir)]; }
 function studyDir(dirArg: string): string { const { dir, study } = openStudy(dirArg); requireExperiment(study); return dir; }
 export function listAttempts(dirArg: string, options: { run?: string; status?: string } = {}) {
   const dir = studyDir(dirArg), all = load(dir), totals = Object.fromEntries(STATUSES.map(status => [status, all.filter(a => a.status === status).length])) as Record<AttemptStatus, number>;
   if (options.run !== undefined) runName(options.run);
   if (options.status !== undefined && !STATUSES.includes(options.status as AttemptStatus)) throw new Error("status: unknown attempt status; use running, succeeded, failed, cancelled or unknown");
   return { attempts: all.filter(a => (!options.run || a.run === options.run) && (!options.status || a.status === options.status)), totals };
+}
+export interface AttemptListOptions { run?: string; status?: string; limit?: number; offset?: number }
+export interface AttemptSummary { id: string; run: string; commit: string; seed: number; label: string; status: AttemptStatus; stage: Stage; reason?: string; startedAt: string; endedAt?: string; metricCount: number; outputCount: number }
+/** Page summaries while reading one bounded record at a time; totals always cover the whole study. */
+export function listAttemptSummaries(dirArg: string, options: AttemptListOptions = {}) {
+  const dir = studyDir(dirArg), limit = options.limit ?? 50, offset = options.offset ?? 0;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new Error("attempt list: invalid limit; use --limit 1..200");
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000) throw new Error("attempt list: invalid offset; use --offset 0..1000000");
+  if (options.run !== undefined) runName(options.run);
+  if (options.status !== undefined && !STATUSES.includes(options.status as AttemptStatus)) throw new Error("attempt list: invalid status; use running, succeeded, failed, cancelled or unknown");
+  const totals = Object.fromEntries(STATUSES.map(status => [status, 0])) as Record<AttemptStatus, number>, attempts: AttemptSummary[] = [];
+  let total = 0;
+  for (const attempt of records(dir)) {
+    totals[attempt.status]++;
+    if ((options.run && attempt.run !== options.run) || (options.status && attempt.status !== options.status)) continue;
+    const position = total++;
+    if (position < offset || attempts.length >= limit) continue;
+    if (typeof attempt.label !== "string" || attempt.label.length > 128 || typeof attempt.commit !== "string" || !/^[a-f0-9]{40}$/.test(attempt.commit) || !Number.isSafeInteger(attempt.seed) || !Array.isArray(attempt.metrics) || !Array.isArray(attempt.outputs) || attempt.startedAt.length > 64 || (attempt.reason !== undefined && (typeof attempt.reason !== "string" || attempt.reason.length > 500)) || (attempt.endedAt !== undefined && (typeof attempt.endedAt !== "string" || attempt.endedAt.length > 64 || !Number.isFinite(Date.parse(attempt.endedAt))))) throw new Error("attempt list: malformed summary fields; restore the last valid attempt record before retrying");
+    attempts.push({ id: attempt.id, run: attempt.run, commit: attempt.commit, seed: attempt.seed, label: attempt.label, status: attempt.status, stage: attempt.stage, ...(attempt.reason !== undefined ? { reason: attempt.reason } : {}), startedAt: attempt.startedAt, ...(attempt.endedAt ? { endedAt: attempt.endedAt } : {}), metricCount: attempt.metrics.length, outputCount: attempt.outputs.length });
+  }
+  return { attempts, totals, total, offset, limit, remaining: Math.max(0, total - offset - attempts.length) };
 }
 export function showAttempt(dirArg: string, attemptId: string): Attempt {
   const dir = studyDir(dirArg), found = load(dir).find(a => a.id === id(attemptId));
@@ -121,14 +142,21 @@ function alive(attempt: Attempt, ctx: AttemptContext): boolean {
 /** Serialize short control commands without changing records or ledger on read-only observations. */
 async function withControl<T>(dir: string, fn: () => Promise<T>): Promise<T> {
   const path = join(dir, ".ares.control.lock"), token = randomUUID();
+  const waitingSince = performance.now();
   let fd: number;
-  try { fd = openSync(path, "wx", 0o600); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    let age = 0; try { age = Date.now() - statSync(path).mtimeMs; } catch { /* owner removed it */ }
-    if (age >= 0 && age < CONTROL_STALE_MS) throw new Error("attempt control: another operation is active; retry reconcile or cancel when it finishes (abandoned claims expire after 30 minutes)");
-    try { unlinkSync(path); } catch { /* already removed */ }
-    fd = openSync(path, "wx", 0o600);
+  for (;;) {
+    try { fd = openSync(path, "wx", 0o600); break; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      let age = 0; try { age = Date.now() - statSync(path).mtimeMs; } catch { /* owner removed it */ }
+      if (performance.now() - waitingSince >= 2000) throw new Error("attempt control: another operation is active; retry reconcile or cancel when it finishes (abandoned claims expire after 30 minutes)");
+      if (age < 0 || age >= CONTROL_STALE_MS) {
+        try { unlinkSync(path); }
+        catch (failure) { if ((failure as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("attempt control: abandoned lock could not be removed; restore study-directory ownership and permissions, then retry"); }
+        continue;
+      }
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
   }
   try { writeSync(fd, token); } finally { closeSync(fd); }
   try { return await controlScope.run({ dir, token }, fn); }
@@ -147,11 +175,16 @@ async function update(dir: string, attemptId: string, ctx: AttemptContext, fn: (
 }
 function finish(attempt: Attempt, status: AttemptStatus, reason: string | undefined, ctx: AttemptContext): void {
   attempt.status = status; if (reason) attempt.reason = reason; else delete attempt.reason;
+  if (status === "succeeded") delete attempt.error;
   attempt.endedAt = at(ctx); delete attempt.launching; delete attempt.pendingAutoApproval;
   const stage = attempt.stages[attempt.stage]; if (stage && !stage.endedAt) stage.endedAt = attempt.endedAt;
 }
 function hostError(attempt: Attempt, step: string): Error {
   return new Error(`executor ${attempt.executor.host ?? "local"}: ${step} failed; check that step on the executor host and run ares attempt reconcile <dir>`);
+}
+function startupError(attempt: Attempt, step: string): string {
+  const recovery = step === "private workspace preparation" ? "make the configured executor workdir an owned physical directory with mode 0700" : step === "evaluator transfer" || step === "design recheck" ? "restore the task evaluator files and approve the current design" : step === "snapshot transfer" ? "check the repository commit and executor workspace" : step === "controller lock" ? "wait for the active control operation to finish" : "run ares executor check <dir> and fix the reported host or image setup";
+  return `executor ${attempt.executor.host ?? "local"}: ${step} failed; ${recovery}, then retry with the same attempt options and --retry ID`;
 }
 async function command(attempt: Attempt, step: string, executable: string, args: string[], ctx: AttemptContext) {
   try {
@@ -193,6 +226,7 @@ async function recordVerifiedStage(dir: string, attempt: Attempt, state: Observe
     if (current.status !== "running" || current.stage !== attempt.stage) return undefined;
     const stage = current.stages[current.stage]!;
     stage.containerId = state.id; if (state.startedAt) stage.startedAt = state.startedAt;
+    if (current.reason === "executor-start" || current.reason === "executor-start-uncertain") { delete current.reason; delete current.error; }
     delete current.launching;
     if (current.stage === "candidate") {
       current.sealing.candidateHasNoEvaluator = true;
@@ -243,15 +277,15 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
           return recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered");
         }
       } catch {
-        return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start-uncertain"; return "attempt.executor-error"; });
+        return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start-uncertain"; current.error = hostError(current, "container start confirmation").message; return "attempt.executor-error"; });
       }
     }
     // A name conflict can belong to another study with the same identity. Only clean up our returned container id.
     if (startedId) {
       try { await command(attempt, "failed launch cleanup", "docker", ["kill", startedId], ctx); }
-      catch { return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start"; return "attempt.executor-error"; }); }
+      catch { return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start"; current.error = hostError(current, "failed start cleanup").message; return "attempt.executor-error"; }); }
     }
-    return update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; finish(current, "failed", "executor-start", ctx); return "attempt.failed"; });
+    return update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = startupError(current, "container start"); finish(current, "failed", "executor-start", ctx); return "attempt.failed"; });
   }
 }
 
@@ -301,24 +335,30 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     created = true; return record;
   });
   if (created) {
+    let preparationStep = "executor check";
     try {
       const checked = await checkExecutorInputs(attempt.executor, attempt.protocol, ctx.runner ?? spawnRunner);
       const root = posix.dirname(attempt.paths.snapshot), studyRoot = posix.dirname(root), base = executor.workdir;
       // Require a private, owned, physical root. Attempt mkdir is exclusive, never a shared pre-existing directory.
       const script = `set -eu; umask 077; base=${shellQuote(base)}; test -d "$base"; test ! -L "$base"; test -O "$base"; test "$(cd -P "$base" && pwd -P)" = "$base"; mode=$(stat -c %a "$base" 2>/dev/null || stat -f %Lp "$base"); test "$mode" = 700; study=${shellQuote(studyRoot)}; if test ! -e "$study"; then mkdir -m 700 "$study"; fi; test -d "$study"; test ! -L "$study"; test -O "$study"; mode=$(stat -c %a "$study" 2>/dev/null || stat -f %Lp "$study"); test "$mode" = 700; mkdir -m 700 ${shellQuote(root)}; mkdir -m 700 ${[attempt.paths.snapshot, attempt.paths.output, attempt.paths.result, posix.dirname(attempt.paths.evaluator)].map(shellQuote).join(" ")}`;
+      preparationStep = "private workspace preparation";
       await command(attempt, "private workspace preparation", "sh", ["-c", script], ctx);
+      preparationStep = "snapshot transfer";
       const transferred = await transferSnapshot(options.repo, snapshot.commit, executor, attempt.paths.snapshot, ctx.runner ?? spawnRunner);
+      preparationStep = "evaluator transfer";
       await transferTask(join(dir, "task"), executor, posix.dirname(attempt.paths.evaluator), ctx.runner ?? spawnRunner, frozen.treeHash);
+      preparationStep = "design recheck";
       if (designBinding(dir) !== attempt.sealBinding) throw new Error("design changed during preparation");
       const claim = attempt.launching!.token;
       attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running" || current.launching?.token !== claim) throw new Error("attempt preparation: ownership changed; run ares attempt reconcile before retrying"); current.snapshotSha256 = transferred.sha256; current.stages.candidate = stageRecord(current, "candidate", checked.user, ctx); return "attempt.snapshot"; });
+      preparationStep = "controller lock";
       attempt = await withControl(dir, async () => {
         const current = showAttempt(dir, attempt.id);
         if (current.status !== "running" || current.launching?.token !== claim) return current;
         return launch(dir, current, checked.user, ctx);
       });
     } catch {
-      attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; finish(current, "failed", "preparation", ctx); return "attempt.failed"; });
+      attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = startupError(current, preparationStep); finish(current, "failed", "preparation", ctx); return "attempt.failed"; });
     }
   }
   if (!options.detach) {
