@@ -46,7 +46,7 @@ function failed(executor: Executor, step: string): Error {
   return new Error(`executor ${host(executor)}: ${step} failed; check that step on the executor host and rerun ares executor check <dir>`);
 }
 function directory(value: unknown, field: string): string {
-  if (typeof value !== "string" || value.length > 4096 || !value.startsWith("/") || /[\0\r\n,]/.test(value)) throw new Error(`${field}: invalid directory; use an absolute path of at most 4096 characters without NUL, newlines or commas`);
+  if (typeof value !== "string" || value.length > 4096 || !value.startsWith("/") || /[\0\r\n,"]/.test(value)) throw new Error(`${field}: invalid directory; use an absolute path of at most 4096 characters without NUL, newlines, commas or double quotes`);
   return posix.normalize(value);
 }
 export function validateExecutor(raw: unknown): Executor {
@@ -56,7 +56,8 @@ export function validateExecutor(raw: unknown): Executor {
   if (raw.v !== 1 || (raw.kind !== "local" && raw.kind !== "ssh")) throw new Error("executor: invalid version or kind; set v to 1 and kind to local or ssh");
   if (raw.kind === "ssh" && (typeof raw.host !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(raw.host))) throw new Error("executor.host: invalid SSH alias; configure an SSH alias and pass its name only (letters, digits, dot, underscore or hyphen)");
   if (raw.kind === "local" && raw.host !== undefined) throw new Error("executor.host: local executor has no SSH host; remove host or set kind to ssh");
-  return { v: 1, kind: raw.kind, ...(raw.kind === "ssh" ? { host: raw.host as string } : {}), workdir: directory(raw.workdir ?? "/tmp/ares", "executor.workdir") };
+  if (raw.workdir === undefined || raw.workdir === null) throw new Error("executor.workdir: required with no default; run ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH using a private directory on the executor host");
+  return { v: 1, kind: raw.kind, ...(raw.kind === "ssh" ? { host: raw.host as string } : {}), workdir: directory(raw.workdir, "executor.workdir") };
 }
 export function readExecutor(dir: string): Executor | undefined {
   const file = join(dir, "executor.json");
@@ -90,7 +91,7 @@ export interface ExecutorCheck { executor: Executor; serverVersion: string; user
 export async function checkExecutor(dir: string, runner: ProcessRunner = spawnRunner): Promise<ExecutorCheck> {
   requireExperiment(openStudy(dir).study);
   const executor = readExecutor(dir), protocol = readProtocol(dir);
-  if (!executor) throw new Error("executor: not configured; run ares executor set <dir> --kind local|ssh [--host ALIAS]");
+  if (!executor) throw new Error("executor: not configured; run ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH");
   if (!protocol) throw new Error("protocol: missing; run ares protocol <dir> --file PATH before executor check");
   const version = (await step(executor, "Docker server version", "docker", ["version", "--format", "{{.Server.Version}}"], runner)).stdout.trim();
   if (!/^[0-9]+\.[0-9]+(?:\.[0-9]+)?[A-Za-z0-9.+_-]*$/.test(version) || version.length > 128) throw failed(executor, "Docker server version");

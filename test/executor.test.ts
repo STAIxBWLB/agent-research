@@ -45,7 +45,7 @@ test("AC4: candidate and evaluator get separate named containers and fixed isola
 
 test("AC4: builders reject root users, overlapping or injected mounts and invalid identities", () => {
   for (const user of ["0:0", "0:1000", "1000:0", "root", "1000"]) expect(() => buildContainerArgs({ ...options("candidate"), user })).toThrow("non-root");
-  for (const snapshot of ["/executor", "/", "/executor/task/evaluator", "/executor/output/child", "/tmp/a,dst=/eval", "relative"]) expect(() => buildContainerArgs({ ...options("candidate"), paths: { ...options("candidate").paths, snapshot } })).toThrow();
+  for (const snapshot of ["/executor", "/", "/executor/task/evaluator", "/executor/output/child", "/tmp/a,dst=/eval", '/tmp/a"b', "relative"]) expect(() => buildContainerArgs({ ...options("candidate"), paths: { ...options("candidate").paths, snapshot } })).toThrow();
   expect(() => containerName("--bad", "candidate")).toThrow("invalid attempt");
   expect(() => buildContainerArgs({ ...options("candidate"), studyId: "bad\nlabel" })).toThrow("invalid label");
 });
@@ -68,7 +68,15 @@ test("executor config validates before persistence and refuses survey studies", 
     expect(readFileSync(join(dir, "executor.json"))).toEqual(before); expect(readLedger(dir)).toEqual(events);
   }
   expect(readExecutor(dir)).toEqual(local);
-  expect(validateExecutor({ v: 1, kind: "local" }).workdir).toBe("/tmp/ares");
+  for (const raw of [{ v: 1, kind: "local" }, { v: 1, kind: "ssh", host: "fixture-host" }, { ...local, workdir: null }]) {
+    expect(() => validateExecutor(raw)).toThrow("executor.workdir: required with no default; run ares executor set");
+    await expect(withLock(dir, () => setExecutor(dir, raw, actor))).rejects.toThrow("--workdir PATH using a private directory");
+    expect(readFileSync(join(dir, "executor.json"))).toEqual(before); expect(readLedger(dir)).toEqual(events);
+  }
+  for (const workdir of ['/private/a"b', '/private/a",dst=/eval']) {
+    await expect(withLock(dir, () => setExecutor(dir, { ...local, workdir }, actor))).rejects.toThrow("double quotes");
+    expect(readFileSync(join(dir, "executor.json"))).toEqual(before); expect(readLedger(dir)).toEqual(events);
+  }
   const survey = tempDir(); init(survey, { question: "Survey?" }, { actor });
   await expect(withLock(survey, () => setExecutor(survey, local, actor))).rejects.toThrow("--mode experiment");
   await expect(checkExecutor(survey, fakeDocker([]).runner)).rejects.toThrow("--mode experiment");
