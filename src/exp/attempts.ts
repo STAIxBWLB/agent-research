@@ -3,7 +3,7 @@ import { hostname } from "node:os";
 import { join, posix } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, requireExperiment, requireGate, sha256, withLock, type Actor } from "../study.ts";
+import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, requireExperiment, requireGate, sha256, withLock, type Actor, type PendingEvent } from "../study.ts";
 import { designBinding, protocolHash, readDesign, type Protocol } from "./protocol.ts";
 import { buildContainerArgs, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
 import { resolveSnapshot, transferSnapshot, transferTask } from "./snapshot.ts";
@@ -17,6 +17,7 @@ export interface Attempt {
   stages: Partial<Record<Stage, AttemptStage>>; metrics: Evaluation["metrics"]; outputs: Evaluation["outputs"];
   sealing: { separateContainers: boolean; evaluatorReadOnly: boolean; candidateHasNoEvaluator: boolean; verifiedBy: "ares-observed" };
   launching?: { pid: number; host: string; token: string; claimedAt: string; expiresAt: string };
+  pendingAutoApproval?: string;
 }
 export interface AttemptOptions { repo: string; commit: string; seed?: number; run?: string; label?: string; retry?: string; detach?: boolean }
 /** collectEvaluation is T4's validating adapter; T3 does not parse or validate metric schemas. */
@@ -28,7 +29,7 @@ const controlScope = new AsyncLocalStorage<{ dir: string; token: string }>();
 const STATUSES: AttemptStatus[] = ["running", "succeeded", "failed", "cancelled", "unknown"];
 const inspectFields = (prefix: string, fields: string[]) => fields.map(field => `${JSON.stringify(field)}:{{json ${prefix}.${field}}}`).join(",");
 // Exclude inherited image labels/env and other unbounded Docker metadata from the observation.
-const INSPECT_FORMAT = `[{"Id":{{json .Id}},"State":{${inspectFields(".State", ["Running", "ExitCode", "StartedAt", "FinishedAt"])}},"Config":{${inspectFields(".Config", ["Image", "User", "Cmd"])},"Labels":{${["ares.study", "ares.attempt", "ares.stage"].map(key => `${JSON.stringify(key)}:{{json (index .Config.Labels ${JSON.stringify(key)})}}`).join(",")}}},"HostConfig":{${inspectFields(".HostConfig", ["NetworkMode", "ReadonlyRootfs", "CapDrop", "SecurityOpt", "Tmpfs", "Memory", "PidsLimit", "NanoCpus", "DeviceRequests"])}},"Mounts":{{json .Mounts}}}]`;
+const INSPECT_FORMAT = `{{$seed := ""}}{{range .Config.Env}}{{if and (ge (len .) 10) (eq (slice . 0 10) "ARES_SEED=")}}{{$seed = .}}{{end}}{{end}}[{"Id":{{json .Id}},"State":{${inspectFields(".State", ["Running", "ExitCode", "StartedAt", "FinishedAt"])}},"Config":{"Seed":{{json $seed}},${inspectFields(".Config", ["Image", "User", "Cmd"])},"Labels":{${["ares.study", "ares.attempt", "ares.stage"].map(key => `${JSON.stringify(key)}:{{json (index .Config.Labels ${JSON.stringify(key)})}}`).join(",")}}},"HostConfig":{${inspectFields(".HostConfig", ["NetworkMode", "ReadonlyRootfs", "CapDrop", "SecurityOpt", "Tmpfs", "Memory", "PidsLimit", "NanoCpus", "DeviceRequests"])}},"Mounts":{{json .Mounts}}}]`;
 const now = (ctx: AttemptContext) => ctx.now?.() ?? Date.now();
 const at = (ctx: AttemptContext) => new Date(now(ctx)).toISOString();
 function runName(value: string): string {
@@ -80,8 +81,8 @@ export function showAttempt(dirArg: string, attemptId: string): Attempt {
   if (!found) throw new Error("attempt: not found; choose an id from ares attempt list");
   return found;
 }
-function save(dir: string, attempt: Attempt, ctx: AttemptContext, event: string, extra: Record<string, unknown> = {}): void {
-  commit(dir, [[file(dir, attempt), JSON.stringify(attempt, null, 2) + "\n", ATTEMPT_BYTES]], [{ actor: ctx.actor, type: event, data: { id: attempt.id, run: attempt.run, stage: attempt.stage, status: attempt.status, ...(attempt.reason ? { reason: attempt.reason } : {}), ...extra } }]);
+function save(dir: string, attempt: Attempt, ctx: AttemptContext, event: string, approvals: PendingEvent[] = []): void {
+  commit(dir, [[file(dir, attempt), JSON.stringify(attempt, null, 2) + "\n", ATTEMPT_BYTES]], [...approvals, { actor: ctx.actor, type: event, data: { id: attempt.id, run: attempt.run, stage: attempt.stage, status: attempt.status, ...(attempt.reason ? { reason: attempt.reason } : {}) } }]);
 }
 export function budgetUsage(attempts: Attempt[], time = Date.now()) {
   let wallHours = 0, gpuHours = 0;
@@ -132,7 +133,7 @@ async function withControl<T>(dir: string, fn: () => Promise<T>): Promise<T> {
   try { return await controlScope.run({ dir, token }, fn); }
   finally { try { if (readTextBounded(path, 128) === token) unlinkSync(path); } catch { /* stale owner must not remove a newer claim */ } }
 }
-async function update(dir: string, attemptId: string, ctx: AttemptContext, fn: (current: Attempt) => string | undefined): Promise<Attempt> {
+async function update(dir: string, attemptId: string, ctx: AttemptContext, fn: (current: Attempt) => string | undefined, approvals: PendingEvent[] = []): Promise<Attempt> {
   return withLock(dir, () => {
     const scope = controlScope.getStore();
     if (scope?.dir === dir) {
@@ -140,12 +141,12 @@ async function update(dir: string, attemptId: string, ctx: AttemptContext, fn: (
       try { currentToken = readTextBounded(join(dir, ".ares.control.lock"), 128); } catch { /* expired or replaced */ }
       if (currentToken !== scope.token) throw new Error("attempt control: ownership expired or changed; run ares attempt reconcile before retrying this operation");
     }
-    const current = showAttempt(dir, attemptId), event = fn(current); if (event) save(dir, current, ctx, event); return current;
+    const current = showAttempt(dir, attemptId), event = fn(current); if (event) save(dir, current, ctx, event, approvals); return current;
   });
 }
 function finish(attempt: Attempt, status: AttemptStatus, reason: string | undefined, ctx: AttemptContext): void {
   attempt.status = status; if (reason) attempt.reason = reason; else delete attempt.reason;
-  attempt.endedAt = at(ctx); delete attempt.launching;
+  attempt.endedAt = at(ctx); delete attempt.launching; delete attempt.pendingAutoApproval;
   const stage = attempt.stages[attempt.stage]; if (stage && !stage.endedAt) stage.endedAt = attempt.endedAt;
 }
 function hostError(attempt: Attempt, step: string): Error {
@@ -172,11 +173,38 @@ function observed(raw: unknown, attempt: Attempt): { id: string; running: boolea
   const devices = settings.DeviceRequests;
   const gpuMatches = expected.limits.gpus === 0 ? devices === null || devices === undefined || (Array.isArray(devices) && devices.length === 0) : Array.isArray(devices) && devices.length === 1 && plain(devices[0]) && devices[0].Count === expected.limits.gpus && Array.isArray(devices[0].Capabilities) && devices[0].Capabilities.some(c => Array.isArray(c) && c.includes("gpu"));
   if (!gpuMatches) throw hostError(attempt, "GPU limit verification");
+  if (config.Seed !== `ARES_SEED=${attempt.seed}`) throw hostError(attempt, "selected seed verification");
   if (config.Image !== expected.image || config.User !== expected.user || JSON.stringify(config.Cmd) !== JSON.stringify(expected.argv) || !plain(config.Labels) || config.Labels["ares.study"] !== attempt.studyId || config.Labels["ares.attempt"] !== attempt.id || config.Labels["ares.stage"] !== attempt.stage || settings.NetworkMode !== "none" || settings.ReadonlyRootfs !== true || !Array.isArray(settings.CapDrop) || !settings.CapDrop.some(c => c === "ALL" || c === "all") || !Array.isArray(settings.SecurityOpt) || !settings.SecurityOpt.includes("no-new-privileges") || !plain(settings.Tmpfs) || !("/tmp" in settings.Tmpfs) || settings.Memory !== expected.limits.memoryMb * 1024 * 1024 || settings.PidsLimit !== expected.limits.pidsLimit || settings.NanoCpus !== Math.round(expected.limits.cpus * 1e9) || bindMounts.length !== mounts.length || !mounts.every(([source, target, writable]) => bindMounts.some(m => plain(m) && m.Type === "bind" && m.Source === source && m.Destination === target && m.RW === writable))) throw hostError(attempt, "container isolation verification");
   if (expected.containerId && value.Id !== expected.containerId) throw hostError(attempt, "container identity verification");
   const finishedAt = typeof value.State.FinishedAt === "string" && Number.isFinite(Date.parse(value.State.FinishedAt)) ? value.State.FinishedAt : undefined;
   const startedAt = typeof value.State.StartedAt === "string" && Number.isFinite(Date.parse(value.State.StartedAt)) ? value.State.StartedAt : undefined;
   return { id: value.Id, running: value.State.Running, exitCode: value.State.ExitCode as number, ...(finishedAt ? { finishedAt } : {}), ...(startedAt ? { startedAt } : {}) };
+}
+type ObservedStage = ReturnType<typeof observed>;
+function needsReceipt(attempt: Attempt, state: ObservedStage): boolean {
+  const stage = attempt.stages[attempt.stage]!;
+  return !!attempt.launching || stage.containerId !== state.id || (!!state.startedAt && stage.startedAt !== state.startedAt) || (attempt.stage === "candidate" ? !attempt.sealing.candidateHasNoEvaluator || !!attempt.pendingAutoApproval : !attempt.sealing.evaluatorReadOnly || !attempt.sealing.separateContainers);
+}
+/** Every verified path persists the same receipt; auto approval and candidate receipt share one commit. */
+async function recordVerifiedStage(dir: string, attempt: Attempt, state: ObservedStage, ctx: AttemptContext, event: string, approveDesign = true): Promise<Attempt> {
+  const approvals: PendingEvent[] = [];
+  return update(dir, attempt.id, ctx, current => {
+    if (current.status !== "running" || current.stage !== attempt.stage) return undefined;
+    const stage = current.stages[current.stage]!;
+    stage.containerId = state.id; if (state.startedAt) stage.startedAt = state.startedAt;
+    delete current.launching;
+    if (current.stage === "candidate") {
+      current.sealing.candidateHasNoEvaluator = true;
+      if (approveDesign && current.pendingAutoApproval === current.sealBinding && designBinding(dir) === current.sealBinding) {
+        approvals.push(...requireGate(dir, { ...openStudy(dir).study, autonomy: "auto" }, "design", () => current.sealBinding));
+      }
+      delete current.pendingAutoApproval;
+    } else {
+      current.sealing.evaluatorReadOnly = true;
+      current.sealing.separateContainers = !!current.stages.candidate?.containerId && state.id !== current.stages.candidate.containerId;
+    }
+    return event;
+  }, approvals);
 }
 async function inspect(attempt: Attempt, ctx: AttemptContext) {
   let result;
@@ -196,22 +224,14 @@ async function inspect(attempt: Attempt, ctx: AttemptContext) {
 async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptContext): Promise<Attempt> {
   let startedId: string | undefined;
   try {
-    const args = buildContainerArgs({ protocol: attempt.protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, user, paths: attempt.paths });
+    const args = buildContainerArgs({ protocol: attempt.protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths });
     const result = await command(attempt, "container start", "docker", args, ctx), cid = result.stdout.trim();
     if (!/^[a-f0-9]{64}$/.test(cid)) throw hostError(attempt, "container start");
     startedId = cid;
     attempt.stages[attempt.stage]!.containerId = cid;
     await startWatchdog(attempt.executor, attempt.id, attempt.stage, attempt.protocol.limits.wallSeconds, ctx.runner ?? spawnRunner, cid);
     const state = await inspect(attempt, ctx); if (!state) throw hostError(attempt, "container start verification");
-    return update(dir, attempt.id, ctx, current => {
-      if (current.status !== "running" || current.stage !== attempt.stage) return undefined;
-      current.stages[attempt.stage]!.containerId = cid;
-      if (state.startedAt) current.stages[attempt.stage]!.startedAt = state.startedAt;
-      delete current.launching;
-      if (attempt.stage === "candidate") current.sealing.candidateHasNoEvaluator = true;
-      else { current.sealing.evaluatorReadOnly = true; current.sealing.separateContainers = cid !== current.stages.candidate?.containerId; }
-      return "attempt.stage.started";
-    });
+    return recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.started");
   } catch {
     if (!startedId) {
       try {
@@ -219,14 +239,7 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
         const state = await inspect(attempt, ctx);
         if (state) {
           if (state.running) await startWatchdog(attempt.executor, attempt.id, attempt.stage, attempt.protocol.limits.wallSeconds, ctx.runner ?? spawnRunner, state.id);
-          return update(dir, attempt.id, ctx, current => {
-            current.stages[current.stage]!.containerId = state.id;
-            if (state.startedAt) current.stages[current.stage]!.startedAt = state.startedAt;
-            delete current.launching;
-            if (current.stage === "candidate") current.sealing.candidateHasNoEvaluator = true;
-            else { current.sealing.evaluatorReadOnly = true; current.sealing.separateContainers = state.id !== current.stages.candidate?.containerId; }
-            return "attempt.stage.recovered";
-          });
+          return recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered");
         }
       } catch {
         return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start-uncertain"; return "attempt.executor-error"; });
@@ -267,7 +280,8 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     enforceBudget(protocol, attempts, now(ctx));
     const root = posix.join(executor.workdir, study.id, wanted);
     const record: Attempt = { v: 1, id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, protocol, paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };
-    commit(dir, [[file(dir, record), JSON.stringify(record, null, 2) + "\n", ATTEMPT_BYTES]], [...approval, { actor: ctx.actor, type: "attempt.started", data: { id: wanted, run, seed, commit: record.commit, treeId: record.treeId } }]);
+    if (approval.length) record.pendingAutoApproval = binding!;
+    commit(dir, [[file(dir, record), JSON.stringify(record, null, 2) + "\n", ATTEMPT_BYTES]], [{ actor: ctx.actor, type: "attempt.started", data: { id: wanted, run, seed, commit: record.commit, treeId: record.treeId } }]);
     created = true; return record;
   });
   if (created) {
@@ -307,11 +321,14 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
   const dir = studyDir(dirArg);
   return withControl(dir, async () => {
   const changed: Attempt[] = [];
-  for (const attempt of load(dir).filter(a => a.status === "running")) {
+  for (let attempt of load(dir).filter(a => a.status === "running")) {
     if (alive(attempt, ctx)) continue;
     try {
-      const state = await inspect(attempt, ctx), stage = attempt.stages[attempt.stage];
+      const state = await inspect(attempt, ctx);
       if (!state) { changed.push(await update(dir, attempt.id, ctx, current => { finish(current, "unknown", "lost", ctx); return "attempt.unknown"; })); continue; }
+      const recovered = needsReceipt(attempt, state);
+      if (recovered) attempt = await recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered");
+      const stage = attempt.stages[attempt.stage];
       if (!stage) throw hostError(attempt, "stage record");
       const deadline = Date.parse(stage.startedAt) + stage.limits.wallSeconds * 1000;
       if ((state.running && now(ctx) >= deadline) || (!state.running && state.finishedAt !== undefined && Date.parse(state.finishedAt) >= deadline)) {
@@ -319,7 +336,7 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
         changed.push(await update(dir, attempt.id, ctx, current => { if (state.finishedAt) current.stages[current.stage]!.endedAt = state.finishedAt; finish(current, "failed", "wall-clock", ctx); return "attempt.failed"; })); continue;
       }
       if (state.running) {
-        if (attempt.launching || stage.containerId !== state.id) changed.push(await update(dir, attempt.id, ctx, current => { current.stages[current.stage]!.containerId = state.id; if (state.startedAt) current.stages[current.stage]!.startedAt = state.startedAt; delete current.launching; return "attempt.stage.recovered"; }));
+        if (recovered) changed.push(attempt);
         continue;
       }
       if (state.exitCode !== 0) { changed.push(await update(dir, attempt.id, ctx, current => { current.stages[current.stage]!.exitCode = state.exitCode; if (state.finishedAt) current.stages[current.stage]!.endedAt = state.finishedAt; finish(current, "failed", `${current.stage}-exit`, ctx); return "attempt.failed"; })); continue; }
@@ -347,11 +364,12 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
 export async function cancelAttempt(dirArg: string, wanted: string, reason: string | undefined, ctx: AttemptContext): Promise<Attempt> {
   const dir = studyDir(dirArg), why = reason === undefined ? undefined : boundedText(reason, "reason", 500);
   return withControl(dir, async () => {
-  const attempt = showAttempt(dir, id(wanted));
+  let attempt = showAttempt(dir, id(wanted));
   if (attempt.status !== "running") return attempt;
   if (alive(attempt, ctx)) throw new Error("attempt: another startup operation is active; retry cancel when it finishes (abandoned claims expire after 30 minutes)");
   try {
     const state = await inspect(attempt, ctx);
+    if (state && needsReceipt(attempt, state)) attempt = await recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered", false);
     if (state?.running) await command(attempt, "cancel kill", "docker", ["kill", state.id], ctx);
     return update(dir, attempt.id, ctx, current => { finish(current, "cancelled", why ?? "cancelled", ctx); return "attempt.cancelled"; });
   } catch {

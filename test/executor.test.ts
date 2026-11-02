@@ -50,6 +50,20 @@ test("AC4: builders reject root users, overlapping or injected mounts and invali
   expect(() => buildContainerArgs({ ...options("candidate"), studyId: "bad\nlabel" })).toThrow("invalid label");
 });
 
+test("selected declared seed reaches both containers once and defaults to the first protocol seed", () => {
+  const p = { ...protocol(), seeds: [11, 29] };
+  for (const stage of ["candidate", "evaluator"] as const) {
+    for (const seed of p.seeds) {
+      const args = buildContainerArgs({ ...options(stage), protocol: p, seed });
+      const env = args.flatMap((value, i) => value === "--env" ? [args[i + 1]!] : []);
+      expect(env.filter(value => value.startsWith("ARES_SEED="))).toEqual([`ARES_SEED=${seed}`]);
+      expect(args.indexOf(`ARES_SEED=${seed}`)).toBeLessThan(args.indexOf(p[stage].image));
+    }
+    expect(buildContainerArgs({ ...options(stage), protocol: p })).toContain("ARES_SEED=11");
+    for (const seed of [0, 12.5, NaN, Infinity]) expect(() => buildContainerArgs({ ...options(stage), protocol: p, seed })).toThrow("container seed: undeclared or non-integer; choose a seed from protocol.seeds");
+  }
+});
+
 test("AC8: local and SSH transport preserve argv and stdin without connection overrides", async () => {
   const fake = fakeDocker([ok(), ok()]), stdin = new Uint8Array([1, 2, 3]);
   const args = ["run", "argument with spaces", "quote'and;$(false)", ""];

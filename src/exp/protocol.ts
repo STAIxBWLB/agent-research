@@ -43,6 +43,7 @@ function stage(raw: unknown, what: string, envAllowed: boolean): Protocol["candi
   if (Object.keys(rawEnv).length > 64) throw new Error(`${what}.env: too many keys; reduce ${what}.env to at most 64 keys`);
   const entries: [string, string][] = [];
   for (const [key, val] of Object.entries(rawEnv)) {
+    if (key === "ARES_SEED") throw new Error(`${what}.env: key ARES_SEED is reserved for the selected attempt seed; remove it from candidate.env and select a declared seed with ares attempt run --seed N`);
     if (/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(key)) throw new Error(`${what}.env: key ${key} looks like a secret; pass secrets through the image, not the protocol`);
     if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key)) throw new Error(`${what}.env: key ${key} is invalid; use 1..128 letters, digits or underscores, starting with a letter or underscore`);
     entries.push([key, literal(val, `${what}.env.${key}`, 4096, true)]);

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { init, gateDecide } from "../src/commands.ts";
+import { init, gateDecide, gateList } from "../src/commands.ts";
 import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
@@ -14,11 +14,11 @@ function protocol(): Protocol {
   const image = `fixture@sha256:${"a".repeat(64)}`;
   return { v: 1, method: "synthetic", candidate: { image, command: ["/candidate"] }, evaluator: { image, command: ["/evaluator"] }, metrics: [{ name: "score", unit: "points", direction: "max" }], seeds: [1, 2, 3, 4, 5, 6], limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts: 10, maxWallHours: 1, maxGpuHours: 0 } };
 }
-interface FakeContainer { id: string; args: string[]; running: boolean; exitCode: number; finishedAt?: string }
+interface FakeContainer { id: string; args: string[]; running: boolean; exitCode: number; startedAt: string; finishedAt?: string }
 function runtime(dir: string) {
   const requests: ProcessRequest[] = [], containers = new Map<string, FakeContainer>();
   const clock = { value: Date.parse("2030-01-01T00:00:00Z") };
-  let beforeResolve: (() => Promise<void>) | undefined, runFailure = false, daemonDown = false, lostStartResponse = false;
+  let beforeResolve: (() => Promise<void>) | undefined, runFailure = false, daemonDown = false, lostStartResponse = false, versionFailure = false;
   const ok = (stdout = ""): ProcessResult => ({ exitCode: 0, stdout, stderr: "" });
   const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1]!;
   const runner: ProcessRunner = async request => {
@@ -38,12 +38,12 @@ function runtime(dir: string) {
     if (request.command === "id") return ok("1001");
     if (request.command === "docker") {
       if (daemonDown && ["ps", "inspect"].includes(args[0]!)) return { exitCode: 1, stdout: "", stderr: "synthetic daemon unavailable" };
-      if (args[0] === "version") return ok("29.1.3");
+      if (args[0] === "version") return versionFailure ? { exitCode: 1, stdout: "", stderr: "synthetic-sensitive-version-error" } : ok("29.1.3");
       if (args[0] === "image") return ok("sha256:synthetic");
       if (args[0] === "run") {
         const name = value(args, "--name");
         if (runFailure || containers.has(name)) return { exitCode: 125, stdout: "", stderr: "synthetic error must stay private" };
-        const container = { id: sha256(name + args.join("|")), args, running: true, exitCode: 0 };
+        const container = { id: sha256(name + args.join("|")), args, running: true, exitCode: 0, startedAt: new Date(clock.value).toISOString() };
         containers.set(name, container);
         if (lostStartResponse) { lostStartResponse = false; throw new Error("synthetic dropped response"); }
         return ok(container.id);
@@ -60,14 +60,15 @@ function runtime(dir: string) {
           const parts = text.split(","); return { Type: "bind", Source: parts.find(x => x.startsWith("src="))!.slice(4), Destination: parts.find(x => x.startsWith("dst="))!.slice(4), RW: !parts.includes("readonly") };
         });
         const labels = Object.fromEntries(a.flatMap((x, i) => x === "--label" ? [a[i + 1]!] : []).map(x => { const index = x.indexOf("="); return [x.slice(0, index), x.slice(index + 1)]; }));
-        return ok(JSON.stringify([{ Id: found.id, State: { Running: found.running, ExitCode: found.exitCode, ...(found.finishedAt ? { FinishedAt: found.finishedAt } : {}) }, Config: { Image: a[imageAt], User: value(a, "--user"), Cmd: a.slice(imageAt + 1), Labels: labels }, HostConfig: { NetworkMode: "none", ReadonlyRootfs: true, CapDrop: ["ALL"], SecurityOpt: ["no-new-privileges"], Tmpfs: { "/tmp": "" }, Memory: Number.parseInt(value(a, "--memory")) * 1024 * 1024, PidsLimit: Number(value(a, "--pids-limit")), NanoCpus: Number(value(a, "--cpus")) * 1e9, DeviceRequests: a.includes("--gpus") ? [{ Count: Number(value(a, "--gpus")), Capabilities: [["gpu"]] }] : [] }, Mounts: mounts }]));
+        const seed = a.flatMap((x, i) => x === "--env" ? [a[i + 1]!] : []).find(x => x.startsWith("ARES_SEED="));
+        return ok(JSON.stringify([{ Id: found.id, State: { Running: found.running, ExitCode: found.exitCode, StartedAt: found.startedAt, ...(found.finishedAt ? { FinishedAt: found.finishedAt } : {}) }, Config: { Seed: seed, Image: a[imageAt], User: value(a, "--user"), Cmd: a.slice(imageAt + 1), Labels: labels }, HostConfig: { NetworkMode: "none", ReadonlyRootfs: true, CapDrop: ["ALL"], SecurityOpt: ["no-new-privileges"], Tmpfs: { "/tmp": "" }, Memory: Number.parseInt(value(a, "--memory")) * 1024 * 1024, PidsLimit: Number(value(a, "--pids-limit")), NanoCpus: Number(value(a, "--cpus")) * 1e9, DeviceRequests: a.includes("--gpus") ? [{ Count: Number(value(a, "--gpus")), Capabilities: [["gpu"]] }] : [] }, Mounts: mounts }]));
       }
       if (args[0] === "ps") return ok([...containers.entries()].filter(([name]) => args.includes(`name=^/${name}$`)).map(([, c]) => c.id).join("\n"));
     }
     throw new Error(`unscripted synthetic process ${request.command}`);
   };
   const ctx: AttemptContext = { actor, runner, now: () => clock.value, collectEvaluation: async () => ({ metrics: [{ name: "score", unit: "points", value: 7, provenance: "ares-observed" }], outputs: [] }) };
-  return { requests, containers, clock, ctx, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; } };
+  return { requests, containers, clock, ctx, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; } };
 }
 async function setup(p = protocol(), autonomy = "gates", approved = true) {
   const dir = tempDir(); init(dir, { question: "Synthetic?", mode: "experiment", autonomy }, { actor });
@@ -85,7 +86,7 @@ test("AC5: identity binds protocol, commit, tree, seed, run and retry; duplicate
   const again = await runAttempt(dir, request, fake.ctx); expect(again.id).toBe(first.id);
   expect(fake.requests.filter(r => r.command === "docker" && r.args[0] === "run")).toHaveLength(1);
   expect(fake.requests.some(r => r.command === "sh" && r.args.join(" ").includes(`docker kill ${first.stages.candidate!.containerId}`))).toBe(true);
-  expect(fake.requests.filter(r => r.args[0] === "inspect").every(r => r.args.includes("--format") && !r.args.join(" ").includes(".Config.Env"))).toBe(true);
+  expect(fake.requests.filter(r => r.args[0] === "inspect").every(r => r.args.includes("--format") && !r.args.join(" ").includes("{{json .Config.Env}}"))).toBe(true);
   expect(readLedger(dir).filter(e => e.type === "attempt.started")).toHaveLength(1);
   expect(first.id).toBe(attemptId(protocolHash(protocol()), commitSha, treeId, 1, "main"));
   for (const args of [["changed", commitSha, treeId, 1, "main"], [first.protocolHash, "c".repeat(40), treeId, 1, "main"], [first.protocolHash, commitSha, "c".repeat(40), 1, "main"], [first.protocolHash, commitSha, treeId, 2, "main"], [first.protocolHash, commitSha, treeId, 1, "other"]] as const) expect(attemptId(args[0], args[1], args[2], args[3], args[4])).not.toBe(first.id);
@@ -263,4 +264,55 @@ test("an expired controller cannot overwrite a cancellation after its delayed co
   release({ metrics: [{ name: "score", unit: "points", value: 1, provenance: "ares-observed" }], outputs: [] });
   await expect(oldController).rejects.toThrow("ownership expired or changed");
   expect(showAttempt(dir, first.id).status).toBe("cancelled"); expect(showAttempt(dir, first.id).metrics).toEqual([]);
+});
+
+test("selected seeds reach both executed stages rather than only attempt metadata", async () => {
+  const { dir, fake } = await setup();
+  for (const seed of [1, 2]) {
+    const attempt = await runAttempt(dir, { ...request, seed }, fake.ctx), candidate = fake.containers.get(`ares-${attempt.id}-candidate`)!;
+    expect(attempt.status).toBe("running"); expect(candidate.args).toContain(`ARES_SEED=${seed}`);
+    candidate.running = false; candidate.finishedAt = new Date(fake.clock.value).toISOString(); await reconcileAttempts(dir, fake.ctx);
+    expect(fake.containers.get(`ares-${attempt.id}-evaluator`)!.args).toContain(`ARES_SEED=${seed}`);
+    await cancelAttempt(dir, attempt.id, undefined, fake.ctx);
+  }
+});
+
+test("auto design approval waits for verified candidate start and is absent after preparation/start failure", async () => {
+  for (const failure of ["version", "run"] as const) {
+    const { dir, fake } = await setup(protocol(), "auto", false);
+    if (failure === "version") fake.failVersion(); else fake.failRun();
+    expect((await runAttempt(dir, request, fake.ctx)).status).toBe("failed");
+    expect(readLedger(dir).filter(e => e.type === "gate.approve")).toEqual([]);
+    expect(gateList(dir).find(g => g.gate === "design")?.state).toBe("pending");
+  }
+  const { dir, fake } = await setup(protocol(), "auto", false);
+  const result = await runAttempt(dir, request, fake.ctx), events = readLedger(dir), approval = events.findIndex(e => e.type === "gate.approve");
+  expect(result.status).toBe("running"); expect(approval).toBeGreaterThan(events.findIndex(e => e.type === "attempt.started"));
+  expect(events[approval + 1]?.type).toBe("attempt.stage.started"); expect(events[approval + 1]?.at).toBe(events[approval]?.at);
+  expect(gateList(dir).find(g => g.gate === "design")?.state).toBe("approved");
+});
+
+test("interrupted running and exited stages recover complete receipts through succeeded", async () => {
+  for (const exitedBeforeRecovery of [false, true]) {
+    const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
+    for (const stage of ["candidate", "evaluator"] as const) {
+      const record = showAttempt(dir, first.id), container = fake.containers.get(`ares-${first.id}-${stage}`)!;
+      delete record.stages[stage]!.containerId;
+      record.stages[stage]!.startedAt = new Date(fake.clock.value - 1000).toISOString();
+      if (stage === "candidate") record.sealing.candidateHasNoEvaluator = false;
+      else { record.sealing.evaluatorReadOnly = false; record.sealing.separateContainers = false; }
+      record.launching = { pid: process.pid, host: hostname(), token: "interrupted-launch", claimedAt: new Date(fake.clock.value - CONTROL_STALE_MS - 1000).toISOString(), expiresAt: new Date(fake.clock.value - 1).toISOString() };
+      writeFileSync(join(dir, "runs", record.run, "attempts", `${record.id}.json`), JSON.stringify(record));
+      if (exitedBeforeRecovery) { container.running = false; container.finishedAt = new Date(fake.clock.value).toISOString(); }
+      await reconcileAttempts(dir, fake.ctx);
+      const recovered = showAttempt(dir, first.id);
+      expect(recovered.stages[stage]!.containerId).toBe(container.id); expect(recovered.stages[stage]!.startedAt).toBe(container.startedAt);
+      if (!exitedBeforeRecovery) {
+        container.running = false; container.finishedAt = new Date(fake.clock.value).toISOString(); await reconcileAttempts(dir, fake.ctx);
+      }
+    }
+    const done = showAttempt(dir, first.id);
+    expect(done.status).toBe("succeeded"); expect(done.stages.candidate?.containerId).not.toBe(done.stages.evaluator?.containerId);
+    expect(done.sealing).toEqual({ separateContainers: true, evaluatorReadOnly: true, candidateHasNoEvaluator: true, verifiedBy: "ares-observed" });
+  }
 });

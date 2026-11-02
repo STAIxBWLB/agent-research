@@ -154,7 +154,7 @@ export async function checkExecutorInputs(executor: Executor, protocol: Protocol
 
 export type Stage = "candidate" | "evaluator";
 export interface ContainerPaths { snapshot: string; output: string; evaluator: string; result: string }
-export interface ContainerOptions { protocol: Protocol; stage: Stage; studyId: string; attemptId: string; user: string; paths: ContainerPaths }
+export interface ContainerOptions { protocol: Protocol; stage: Stage; studyId: string; attemptId: string; user: string; paths: ContainerPaths; seed?: number }
 export function containerName(attemptId: string, stage: Stage): string {
   if (!/^[a-f0-9]{16}$/.test(attemptId) || !["candidate", "evaluator"].includes(stage)) throw new Error("container identity: invalid attempt or stage; use a 16-hex attempt id and candidate or evaluator stage");
   return `ares-${attemptId}-${stage}`;
@@ -162,6 +162,8 @@ export function containerName(attemptId: string, stage: Stage): string {
 /** Mounts are fixed by stage, never supplied as free-form Docker options. */
 export function buildContainerArgs(options: ContainerOptions): string[] {
   const p = validateProtocol(options.protocol), name = containerName(options.attemptId, options.stage);
+  const seed = options.seed === undefined ? p.seeds[0]! : options.seed;
+  if (!Number.isSafeInteger(seed) || !p.seeds.includes(seed)) throw new Error("container seed: undeclared or non-integer; choose a seed from protocol.seeds for ares attempt run --seed N");
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(options.studyId)) throw new Error("study id: invalid label; use the id from study.json");
   if (!/^[1-9][0-9]{0,9}:[1-9][0-9]{0,9}$/.test(options.user)) throw new Error("container user: non-root uid:gid required; use the user reported by ares executor check");
   const paths = Object.fromEntries(Object.entries(options.paths).map(([key, value]) => [key, directory(value, `container.paths.${key}`)])) as unknown as ContainerPaths;
@@ -173,7 +175,7 @@ export function buildContainerArgs(options: ContainerOptions): string[] {
   }
   const argv = ["run", "--detach", "--pull", "missing", "--name", name, "--label", `ares.study=${options.studyId}`, "--label", `ares.attempt=${options.attemptId}`, "--label", `ares.stage=${options.stage}`,
     "--network", "none", "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", options.user,
-    "--cpus", String(p.limits.cpus), "--memory", `${p.limits.memoryMb}m`, "--pids-limit", String(p.limits.pidsLimit)];
+    "--cpus", String(p.limits.cpus), "--memory", `${p.limits.memoryMb}m`, "--pids-limit", String(p.limits.pidsLimit), "--env", `ARES_SEED=${seed}`];
   if (p.limits.gpus > 0) argv.push("--gpus", String(p.limits.gpus));
   const mount = (source: string, target: string, readonly: boolean) => argv.push("--mount", `type=bind,src=${source},dst=${target}${readonly ? ",readonly" : ""}`);
   if (options.stage === "candidate") {
