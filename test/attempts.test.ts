@@ -1,8 +1,9 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { init, gateDecide } from "../src/commands.ts";
-import { attemptId, budgetUsage, cancelAttempt, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext } from "../src/exp/attempts.ts";
+import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
 import { readLedger, sha256, withLock } from "../src/study.ts";
@@ -116,7 +117,7 @@ test("evaluator cannot succeed without a validated metrics collector", async () 
   const { dir, fake } = await setup(); delete fake.ctx.collectEvaluation;
   const first = await runAttempt(dir, request, fake.ctx); running(fake, "candidate").running = false;
   await reconcileAttempts(dir, fake.ctx); running(fake, "evaluator").running = false;
-  await reconcileAttempts(dir, fake.ctx); expect(showAttempt(dir, first.id).reason).toBe("invalid-metrics"); expect(showAttempt(dir, first.id).metrics).toEqual([]);
+  await reconcileAttempts(dir, fake.ctx); expect(showAttempt(dir, first.id).reason).toBe("missing-metrics"); expect(showAttempt(dir, first.id).metrics).toEqual([]);
 });
 
 test("AC7: reconcile kills a running stage after its deadline and records wall-clock", async () => {
@@ -204,4 +205,62 @@ test("GPU usage ends at observed stage finish, rather than delayed reconciliatio
   const stage = showAttempt(dir, first.id).stages.candidate!;
   expect(Date.parse(stage.endedAt!) - Date.parse(stage.startedAt)).toBe(1000);
   expect(budgetUsage([showAttempt(dir, first.id)], fake.clock.value).gpuHours).toBeCloseTo(1 / 3600);
+});
+
+test("unchanged running polls leave both ledger and attempt file untouched", async () => {
+  const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
+  const path = join(dir, "runs", first.run, "attempts", `${first.id}.json`), record = readFileSync(path), ledger = readFileSync(join(dir, "ledger.jsonl")), modified = statSync(path, { bigint: true }).mtimeNs;
+  for (let i = 0; i < 50; i++) expect(await reconcileAttempts(dir, fake.ctx)).toEqual([]);
+  expect(readFileSync(path)).toEqual(record); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(ledger);
+  expect(statSync(path, { bigint: true }).mtimeNs).toBe(modified);
+  expect(existsSync(join(dir, ".ares.control.lock"))).toBe(false);
+});
+
+test("expired launch owners recover despite a reused current PID or a foreign hostname", async () => {
+  for (const host of [hostname(), "previous-controller-host"]) {
+    const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
+    first.launching = { pid: process.pid, host, token: "synthetic-stale-claim", claimedAt: new Date(fake.clock.value - CONTROL_STALE_MS - 1000).toISOString(), expiresAt: new Date(fake.clock.value - 1000).toISOString() };
+    writeFileSync(join(dir, "runs", first.run, "attempts", `${first.id}.json`), JSON.stringify(first));
+    fake.containers.clear(); await reconcileAttempts(dir, fake.ctx);
+    expect(showAttempt(dir, first.id).status).toBe("unknown"); expect(showAttempt(dir, first.id).reason).toBe("lost");
+    expect((await runAttempt(dir, { ...request, retry: first.id }, fake.ctx)).status).toBe("running");
+  }
+});
+
+test("foreground waiting backs off from one to thirty seconds and resets at a stage transition", async () => {
+  const p = protocol(); p.limits.wallSeconds = 3600;
+  const { dir, fake } = await setup(p), delays: number[] = [];
+  fake.ctx.sleep = async ms => {
+    delays.push(ms); fake.clock.value += ms;
+    if (delays.length === 7 || delays.length === 8) {
+      const container = running(fake, delays.length === 7 ? "candidate" : "evaluator");
+      container.running = false; container.finishedAt = new Date(fake.clock.value).toISOString();
+    }
+  };
+  expect((await runAttempt(dir, { ...request, detach: false }, fake.ctx)).status).toBe("succeeded");
+  expect(delays).toEqual([1000, 2000, 4000, 8000, 16000, 30000, 30000, 1000]);
+});
+
+test("T4 collector errors fail closed without copying raw diagnostics into the record", async () => {
+  const { dir, fake } = await setup(); fake.ctx.collectEvaluation = async () => { throw new Error("synthetic-sensitive-evaluator-error"); };
+  const first = await runAttempt(dir, request, fake.ctx); running(fake, "candidate").running = false;
+  await reconcileAttempts(dir, fake.ctx); running(fake, "evaluator").running = false;
+  await reconcileAttempts(dir, fake.ctx); const record = showAttempt(dir, first.id);
+  expect(record.status).toBe("failed"); expect(record.stage).toBe("evaluator"); expect(record.reason).toBe("invalid-metrics");
+  expect(record.metrics).toEqual([]); expect(JSON.stringify(record)).not.toContain("synthetic-sensitive");
+});
+
+test("an expired controller cannot overwrite a cancellation after its delayed collector returns", async () => {
+  const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
+  running(fake, "candidate").running = false; await reconcileAttempts(dir, fake.ctx); running(fake, "evaluator").running = false;
+  let ready!: () => void, release!: (value: Evaluation) => void;
+  const entered = new Promise<void>(resolve => { ready = resolve; });
+  fake.ctx.collectEvaluation = async () => { ready(); return new Promise<Evaluation>(resolve => { release = resolve; }); };
+  const oldController = reconcileAttempts(dir, fake.ctx);
+  await entered;
+  const expired = new Date(Date.now() - CONTROL_STALE_MS - 1000); utimesSync(join(dir, ".ares.control.lock"), expired, expired);
+  await cancelAttempt(dir, first.id, "new controller cancellation", fake.ctx);
+  release({ metrics: [{ name: "score", unit: "points", value: 1, provenance: "ares-observed" }], outputs: [] });
+  await expect(oldController).rejects.toThrow("ownership expired or changed");
+  expect(showAttempt(dir, first.id).status).toBe("cancelled"); expect(showAttempt(dir, first.id).metrics).toEqual([]);
 });

@@ -1,8 +1,9 @@
-import { existsSync, lstatSync, opendirSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, openSync, opendirSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { hostname } from "node:os";
 import { join, posix } from "node:path";
 import { randomUUID } from "node:crypto";
-import { boundedText, commit, openStudy, plain, readJsonFile, requireExperiment, requireGate, sha256, withLock, type Actor } from "../study.ts";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, requireExperiment, requireGate, sha256, withLock, type Actor } from "../study.ts";
 import { designBinding, protocolHash, readDesign, type Protocol } from "./protocol.ts";
 import { buildContainerArgs, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
 import { resolveSnapshot, transferSnapshot, transferTask } from "./snapshot.ts";
@@ -15,11 +16,15 @@ export interface Attempt {
   executor: Executor; protocol: Protocol; paths: ContainerPaths; status: AttemptStatus; stage: Stage; reason?: string; startedAt: string; endedAt?: string;
   stages: Partial<Record<Stage, AttemptStage>>; metrics: Evaluation["metrics"]; outputs: Evaluation["outputs"];
   sealing: { separateContainers: boolean; evaluatorReadOnly: boolean; candidateHasNoEvaluator: boolean; verifiedBy: "ares-observed" };
-  launching?: { pid: number; host: string; token: string };
+  launching?: { pid: number; host: string; token: string; claimedAt: string; expiresAt: string };
 }
 export interface AttemptOptions { repo: string; commit: string; seed?: number; run?: string; label?: string; retry?: string; detach?: boolean }
+/** collectEvaluation is T4's validating adapter; T3 does not parse or validate metric schemas. */
 export interface AttemptContext { actor: Actor; runner?: ProcessRunner; now?: () => number; sleep?: (ms: number) => Promise<void>; collectEvaluation?: (attempt: Attempt, runner: ProcessRunner) => Promise<Evaluation> }
 export const ATTEMPT_BYTES = 1024 * 1024;
+// Startup includes bounded image pulls and two 5-minute transfers; claims never survive indefinitely after a crash.
+export const CONTROL_STALE_MS = 30 * 60_000;
+const controlScope = new AsyncLocalStorage<{ dir: string; token: string }>();
 const STATUSES: AttemptStatus[] = ["running", "succeeded", "failed", "cancelled", "unknown"];
 const inspectFields = (prefix: string, fields: string[]) => fields.map(field => `${JSON.stringify(field)}:{{json ${prefix}.${field}}}`).join(",");
 // Exclude inherited image labels/env and other unbounded Docker metadata from the observation.
@@ -100,14 +105,43 @@ function enforceBudget(protocol: Protocol, attempts: Attempt[], time: number): v
     if (used >= protocol.budget[key]) throw new Error(`budget ${key}: exhausted; raise protocol.budget.${key}, approve design again, and retry`);
   }
 }
-function alive(attempt: Attempt): boolean {
+function owner(ctx: AttemptContext): NonNullable<Attempt["launching"]> {
+  return { pid: process.pid, host: hostname(), token: randomUUID(), claimedAt: at(ctx), expiresAt: new Date(now(ctx) + CONTROL_STALE_MS).toISOString() };
+}
+function alive(attempt: Attempt, ctx: AttemptContext): boolean {
   const owner = attempt.launching;
   if (!owner) return false;
-  if (owner.host !== hostname()) throw new Error("attempt control: recorded operation belongs to another host; reconcile from the original controller host before moving the study");
+  const claimed = Date.parse(owner.claimedAt), expiry = Math.min(Date.parse(owner.expiresAt), claimed + CONTROL_STALE_MS);
+  if (!Number.isFinite(expiry) || claimed > now(ctx) || now(ctx) >= expiry) return false;
+  if (owner.host !== hostname()) return true;
   try { process.kill(owner.pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH"; }
 }
+/** Serialize short control commands without changing records or ledger on read-only observations. */
+async function withControl<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+  const path = join(dir, ".ares.control.lock"), token = randomUUID();
+  let fd: number;
+  try { fd = openSync(path, "wx", 0o600); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    let age = 0; try { age = Date.now() - statSync(path).mtimeMs; } catch { /* owner removed it */ }
+    if (age >= 0 && age < CONTROL_STALE_MS) throw new Error("attempt control: another operation is active; retry reconcile or cancel when it finishes (abandoned claims expire after 30 minutes)");
+    try { unlinkSync(path); } catch { /* already removed */ }
+    fd = openSync(path, "wx", 0o600);
+  }
+  try { writeSync(fd, token); } finally { closeSync(fd); }
+  try { return await controlScope.run({ dir, token }, fn); }
+  finally { try { if (readTextBounded(path, 128) === token) unlinkSync(path); } catch { /* stale owner must not remove a newer claim */ } }
+}
 async function update(dir: string, attemptId: string, ctx: AttemptContext, fn: (current: Attempt) => string | undefined): Promise<Attempt> {
-  return withLock(dir, () => { const current = showAttempt(dir, attemptId), event = fn(current); if (event) save(dir, current, ctx, event); return current; });
+  return withLock(dir, () => {
+    const scope = controlScope.getStore();
+    if (scope?.dir === dir) {
+      let currentToken: string | undefined;
+      try { currentToken = readTextBounded(join(dir, ".ares.control.lock"), 128); } catch { /* expired or replaced */ }
+      if (currentToken !== scope.token) throw new Error("attempt control: ownership expired or changed; run ares attempt reconcile before retrying this operation");
+    }
+    const current = showAttempt(dir, attemptId), event = fn(current); if (event) save(dir, current, ctx, event); return current;
+  });
 }
 function finish(attempt: Attempt, status: AttemptStatus, reason: string | undefined, ctx: AttemptContext): void {
   attempt.status = status; if (reason) attempt.reason = reason; else delete attempt.reason;
@@ -232,7 +266,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     const binding = designBinding(dir), approval = requireGate(dir, study, "design", () => binding);
     enforceBudget(protocol, attempts, now(ctx));
     const root = posix.join(executor.workdir, study.id, wanted);
-    const record: Attempt = { v: 1, id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, protocol, paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: { pid: process.pid, host: hostname(), token: randomUUID() } };
+    const record: Attempt = { v: 1, id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, protocol, paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };
     commit(dir, [[file(dir, record), JSON.stringify(record, null, 2) + "\n", ATTEMPT_BYTES]], [...approval, { actor: ctx.actor, type: "attempt.started", data: { id: wanted, run, seed, commit: record.commit, treeId: record.treeId } }]);
     created = true; return record;
   });
@@ -246,34 +280,35 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
       const transferred = await transferSnapshot(options.repo, snapshot.commit, executor, attempt.paths.snapshot, ctx.runner ?? spawnRunner);
       await transferTask(join(dir, "task"), executor, posix.dirname(attempt.paths.evaluator), ctx.runner ?? spawnRunner, frozen.treeHash);
       if (designBinding(dir) !== attempt.sealBinding) throw new Error("design changed during preparation");
-      attempt = await update(dir, attempt.id, ctx, current => { current.snapshotSha256 = transferred.sha256; current.stages.candidate = stageRecord(current, "candidate", checked.user, ctx); return "attempt.snapshot"; });
-      attempt = await launch(dir, attempt, checked.user, ctx);
+      const claim = attempt.launching!.token;
+      attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running" || current.launching?.token !== claim) throw new Error("attempt preparation: ownership changed; run ares attempt reconcile before retrying"); current.snapshotSha256 = transferred.sha256; current.stages.candidate = stageRecord(current, "candidate", checked.user, ctx); return "attempt.snapshot"; });
+      attempt = await withControl(dir, async () => {
+        const current = showAttempt(dir, attempt.id);
+        if (current.status !== "running" || current.launching?.token !== claim) return current;
+        return launch(dir, current, checked.user, ctx);
+      });
     } catch {
       attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; finish(current, "failed", "preparation", ctx); return "attempt.failed"; });
     }
   }
   if (!options.detach) {
+    let delay = 1000;
     while (attempt.status === "running") {
-      await (ctx.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms))))(1000);
+      await (ctx.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms))))(delay);
+      const previousStage = attempt.stage;
       await reconcileAttempts(dir, ctx); attempt = showAttempt(dir, wanted);
+      delay = attempt.stage === previousStage ? Math.min(delay * 2, 30_000) : 1000;
     }
   }
   return attempt;
 }
 
-function validEvaluation(evaluation: Evaluation, protocol: Protocol): boolean {
-  return Array.isArray(evaluation.metrics) && evaluation.metrics.length === protocol.metrics.length && new Set(evaluation.metrics.map(m => m.name)).size === evaluation.metrics.length && evaluation.metrics.every(m => Number.isFinite(m.value) && m.provenance === "ares-observed" && protocol.metrics.some(declared => declared.name === m.name && declared.unit === m.unit)) && Array.isArray(evaluation.outputs) && evaluation.outputs.every(o => typeof o.path === "string" && /^[a-f0-9]{64}$/.test(o.sha256) && Number.isSafeInteger(o.bytes) && o.bytes >= 0);
-}
 export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Promise<Attempt[]> {
-  const dir = studyDir(dirArg), changed: Attempt[] = [];
-  for (const original of load(dir).filter(a => a.status === "running")) {
-    if (alive(original)) continue;
-    const claim = randomUUID();
-    const attempt = await update(dir, original.id, ctx, current => {
-      if (current.status !== "running" || alive(current)) return undefined;
-      current.launching = { pid: process.pid, host: hostname(), token: claim }; return "attempt.reconcile";
-    });
-    if (attempt.launching?.token !== claim) continue;
+  const dir = studyDir(dirArg);
+  return withControl(dir, async () => {
+  const changed: Attempt[] = [];
+  for (const attempt of load(dir).filter(a => a.status === "running")) {
+    if (alive(attempt, ctx)) continue;
     try {
       const state = await inspect(attempt, ctx), stage = attempt.stages[attempt.stage];
       if (!state) { changed.push(await update(dir, attempt.id, ctx, current => { finish(current, "unknown", "lost", ctx); return "attempt.unknown"; })); continue; }
@@ -283,10 +318,13 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
         if (state.running) await command(attempt, "wall-clock kill", "docker", ["kill", state.id], ctx);
         changed.push(await update(dir, attempt.id, ctx, current => { if (state.finishedAt) current.stages[current.stage]!.endedAt = state.finishedAt; finish(current, "failed", "wall-clock", ctx); return "attempt.failed"; })); continue;
       }
-      if (state.running) { await update(dir, attempt.id, ctx, current => { delete current.launching; return "attempt.observed"; }); continue; }
+      if (state.running) {
+        if (attempt.launching || stage.containerId !== state.id) changed.push(await update(dir, attempt.id, ctx, current => { current.stages[current.stage]!.containerId = state.id; if (state.startedAt) current.stages[current.stage]!.startedAt = state.startedAt; delete current.launching; return "attempt.stage.recovered"; }));
+        continue;
+      }
       if (state.exitCode !== 0) { changed.push(await update(dir, attempt.id, ctx, current => { current.stages[current.stage]!.exitCode = state.exitCode; if (state.finishedAt) current.stages[current.stage]!.endedAt = state.finishedAt; finish(current, "failed", `${current.stage}-exit`, ctx); return "attempt.failed"; })); continue; }
       if (attempt.stage === "candidate") {
-        const next = await update(dir, attempt.id, ctx, current => { current.stages.candidate!.exitCode = 0; current.stages.candidate!.endedAt = state.finishedAt ?? at(ctx); current.stage = "evaluator"; current.stages.evaluator = stageRecord(current, "evaluator", stage.user, ctx); return "attempt.stage.changed"; });
+        const next = await update(dir, attempt.id, ctx, current => { current.stages.candidate!.exitCode = 0; current.stages.candidate!.endedAt = state.finishedAt ?? at(ctx); current.stage = "evaluator"; current.stages.evaluator = stageRecord(current, "evaluator", stage.user, ctx); current.launching = owner(ctx); return "attempt.stage.changed"; });
         changed.push(await launch(dir, next, stage.user, ctx));
       } else {
         let evaluation: Evaluation | undefined;
@@ -294,7 +332,7 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
         changed.push(await update(dir, attempt.id, ctx, current => {
           current.stages.evaluator!.exitCode = 0;
           if (state.finishedAt) current.stages.evaluator!.endedAt = state.finishedAt;
-          if (!evaluation || !validEvaluation(evaluation, current.protocol)) { finish(current, "failed", "invalid-metrics", ctx); return "attempt.failed"; }
+          if (!evaluation) { finish(current, "failed", ctx.collectEvaluation ? "invalid-metrics" : "missing-metrics", ctx); return "attempt.failed"; }
           current.metrics = evaluation.metrics; current.outputs = evaluation.outputs; finish(current, "succeeded", undefined, ctx); return "attempt.succeeded";
         }));
       }
@@ -304,15 +342,14 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
     }
   }
   return changed;
+  });
 }
 export async function cancelAttempt(dirArg: string, wanted: string, reason: string | undefined, ctx: AttemptContext): Promise<Attempt> {
-  const dir = studyDir(dirArg), why = reason === undefined ? undefined : boundedText(reason, "reason", 500), claim = randomUUID();
-  const attempt = await update(dir, id(wanted), ctx, current => {
-    if (current.status !== "running") return undefined;
-    if (alive(current)) throw new Error("attempt: another control operation is active; retry cancel when that operation finishes");
-    current.launching = { pid: process.pid, host: hostname(), token: claim }; return "attempt.cancel.requested";
-  });
+  const dir = studyDir(dirArg), why = reason === undefined ? undefined : boundedText(reason, "reason", 500);
+  return withControl(dir, async () => {
+  const attempt = showAttempt(dir, id(wanted));
   if (attempt.status !== "running") return attempt;
+  if (alive(attempt, ctx)) throw new Error("attempt: another startup operation is active; retry cancel when it finishes (abandoned claims expire after 30 minutes)");
   try {
     const state = await inspect(attempt, ctx);
     if (state?.running) await command(attempt, "cancel kill", "docker", ["kill", state.id], ctx);
@@ -321,4 +358,5 @@ export async function cancelAttempt(dirArg: string, wanted: string, reason: stri
     await update(dir, attempt.id, ctx, current => { delete current.launching; return "attempt.executor-error"; });
     throw hostError(attempt, "cancel");
   }
+  });
 }
