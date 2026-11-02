@@ -3,6 +3,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach } from "bun:test";
 import { createHttp, type FetchLike } from "../src/http.ts";
+import type { ProcessRequest, ProcessResult, ProcessRunner } from "../src/exp/executor.ts";
+
+/** Scripted process boundary. Unexpected calls fail loudly; no Docker or SSH process is started. */
+export function fakeDocker(script: (ProcessResult | Error | ((request: ProcessRequest) => ProcessResult))[]) {
+  const requests: ProcessRequest[] = [];
+  const runner: ProcessRunner = async request => {
+    requests.push({ ...request, args: [...request.args] });
+    const next = script.shift();
+    if (!next) throw new Error("unscripted process request");
+    if (next instanceof Error) throw next;
+    return typeof next === "function" ? next(request) : next;
+  };
+  return { runner, requests, remaining: () => script.length };
+}
 
 export const fixture = (name: string) => readFileSync(join(import.meta.dir, "fixtures", name), "utf8");
 
