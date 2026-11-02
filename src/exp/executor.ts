@@ -5,7 +5,11 @@ import { commit, openStudy, plain, readJsonFile, requireExperiment, type Actor }
 import { readProtocol, validateProtocol, type Protocol } from "./protocol.ts";
 
 export interface Executor { v: 1; kind: "local" | "ssh"; host?: string; workdir: string }
-export interface ProcessRequest { command: string; args: string[]; stdin?: Uint8Array; timeoutMs?: number; maxOutputBytes?: number }
+export interface ProcessRequest {
+  command: string; args: string[]; stdin?: Uint8Array | AsyncIterable<Uint8Array>;
+  stdoutSink?: (chunk: Uint8Array) => void | Promise<void>; signal?: AbortSignal;
+  timeoutMs?: number; maxOutputBytes?: number;
+}
 export interface ProcessResult { exitCode: number; stdout: string; stderr: string; timedOut?: boolean; truncated?: boolean }
 export type ProcessRunner = (request: ProcessRequest) => Promise<ProcessResult>;
 export const EXECUTOR_BYTES = 8192, PROCESS_OUTPUT_BYTES = 65_536;
@@ -16,30 +20,64 @@ export function processEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 /** Bounded tails and a deadline; callers must never persist raw process diagnostics. */
-export const spawnRunner: ProcessRunner = request => new Promise((resolve, reject) => {
+export const spawnRunner: ProcessRunner = async request => {
   const max = request.maxOutputBytes ?? PROCESS_OUTPUT_BYTES, timeout = request.timeoutMs ?? 30_000;
   if (!Number.isSafeInteger(max) || max < 1 || max > 1024 * 1024 || !Number.isSafeInteger(timeout) || timeout < 1 || timeout > 604_800_000) {
-    reject(new Error("process bounds: invalid; use 1..1048576 output bytes and 1..604800000 timeout milliseconds")); return;
+    throw new Error("process bounds: invalid; use 1..1048576 output bytes and 1..604800000 timeout milliseconds");
   }
+  if (request.signal?.aborted) throw new Error("process cancelled; retry the operation when cancellation is cleared");
   const child = spawn(request.command, request.args, { env: processEnvironment(process.env), detached: true, stdio: ["pipe", "pipe", "pipe"] });
   let stdout: Buffer = Buffer.alloc(0), stderr: Buffer = Buffer.alloc(0), truncated = false, timedOut = false;
   const append = (old: Buffer, chunk: Buffer): Buffer => {
     if (old.length + chunk.length > max) truncated = true;
     return chunk.length >= max ? Buffer.from(chunk.subarray(chunk.length - max)) : Buffer.concat([old.subarray(Math.max(0, old.length + chunk.length - max)), chunk]);
   };
-  child.stdout.on("data", (chunk: Buffer) => { stdout = append(stdout, chunk); });
   child.stderr.on("data", (chunk: Buffer) => { stderr = append(stderr, chunk); });
-  const timer = setTimeout(() => {
-    timedOut = true;
+  const stop = () => {
     try { if (child.pid) process.kill(-child.pid, "SIGKILL"); }
     catch { child.kill("SIGKILL"); }
-  }, timeout);
-  child.once("error", error => { clearTimeout(timer); reject(error); });
-  child.once("close", code => { clearTimeout(timer); resolve({ exitCode: code ?? -1, stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8"), ...(timedOut ? { timedOut } : {}), ...(truncated ? { truncated } : {}) }); });
+  };
+  const timer = setTimeout(() => { timedOut = true; stop(); }, timeout);
+  request.signal?.addEventListener("abort", stop, { once: true });
+  const closed = new Promise<number>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", code => resolve(code ?? -1));
+  });
   // EPIPE is normal if a child exits before consuming its snapshot input.
   child.stdin.on("error", () => {});
-  child.stdin.end(request.stdin);
-});
+  const input = async () => {
+    if (request.stdin && Symbol.asyncIterator in request.stdin) {
+      const iterator = request.stdin[Symbol.asyncIterator]();
+      try {
+        for (;;) {
+          const next = await Promise.race([iterator.next().then(value => ({ value })), closed.then(() => ({ value: undefined }))]);
+          if (!next.value || next.value.done || request.signal?.aborted || child.stdin.destroyed) break;
+          await new Promise<void>((resolve, reject) => child.stdin.write(next.value!.value, error => error ? reject(error) : resolve()));
+        }
+      } finally {
+        // A cancelled producer can have a pending next(); do not wait forever for its return().
+        void iterator.return?.().catch(() => {});
+      }
+      child.stdin.end();
+    } else child.stdin.end(request.stdin);
+  };
+  const output = async () => {
+    for await (const chunk of child.stdout) {
+      if (request.stdoutSink) await request.stdoutSink(chunk as Buffer);
+      else stdout = append(stdout, chunk as Buffer);
+    }
+  };
+  let ioError: unknown;
+  const pumps = [input(), output()].map(pump => pump.catch(error => { ioError ??= error; stop(); }));
+  try {
+    const code = await closed;
+    await Promise.all(pumps);
+    if (ioError) throw ioError;
+    return { exitCode: code, stdout: stdout.toString("utf8"), stderr: stderr.toString("utf8"), ...(timedOut ? { timedOut } : {}), ...(truncated ? { truncated } : {}) };
+  } finally {
+    clearTimeout(timer); request.signal?.removeEventListener("abort", stop);
+  }
+};
 
 function host(executor: Executor): string { return executor.kind === "ssh" ? executor.host! : "local"; }
 function failed(executor: Executor, step: string): Error {
@@ -93,6 +131,10 @@ export async function checkExecutor(dir: string, runner: ProcessRunner = spawnRu
   const executor = readExecutor(dir), protocol = readProtocol(dir);
   if (!executor) throw new Error("executor: not configured; run ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH");
   if (!protocol) throw new Error("protocol: missing; run ares protocol <dir> --file PATH before executor check");
+  return checkExecutorInputs(executor, protocol, runner);
+}
+/** Check a frozen attempt's configuration rather than mutable study files. */
+export async function checkExecutorInputs(executor: Executor, protocol: Protocol, runner: ProcessRunner = spawnRunner): Promise<ExecutorCheck> {
   const version = (await step(executor, "Docker server version", "docker", ["version", "--format", "{{.Server.Version}}"], runner)).stdout.trim();
   if (!/^[0-9]+\.[0-9]+(?:\.[0-9]+)?[A-Za-z0-9.+_-]*$/.test(version) || version.length > 128) throw failed(executor, "Docker server version");
   const uid = (await step(executor, "host uid", "id", ["-u"], runner)).stdout.trim();
@@ -112,7 +154,7 @@ export async function checkExecutor(dir: string, runner: ProcessRunner = spawnRu
 
 export type Stage = "candidate" | "evaluator";
 export interface ContainerPaths { snapshot: string; output: string; evaluator: string; result: string }
-export interface ContainerOptions { protocol: Protocol; stage: Stage; studyId: string; attemptId: string; user: string; paths: ContainerPaths }
+export interface ContainerOptions { protocol: Protocol; stage: Stage; studyId: string; attemptId: string; user: string; paths: ContainerPaths; seed?: number }
 export function containerName(attemptId: string, stage: Stage): string {
   if (!/^[a-f0-9]{16}$/.test(attemptId) || !["candidate", "evaluator"].includes(stage)) throw new Error("container identity: invalid attempt or stage; use a 16-hex attempt id and candidate or evaluator stage");
   return `ares-${attemptId}-${stage}`;
@@ -120,6 +162,8 @@ export function containerName(attemptId: string, stage: Stage): string {
 /** Mounts are fixed by stage, never supplied as free-form Docker options. */
 export function buildContainerArgs(options: ContainerOptions): string[] {
   const p = validateProtocol(options.protocol), name = containerName(options.attemptId, options.stage);
+  const seed = options.seed === undefined ? p.seeds[0]! : options.seed;
+  if (!Number.isSafeInteger(seed) || !p.seeds.includes(seed)) throw new Error("container seed: undeclared or non-integer; choose a seed from protocol.seeds for ares attempt run --seed N");
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(options.studyId)) throw new Error("study id: invalid label; use the id from study.json");
   if (!/^[1-9][0-9]{0,9}:[1-9][0-9]{0,9}$/.test(options.user)) throw new Error("container user: non-root uid:gid required; use the user reported by ares executor check");
   const paths = Object.fromEntries(Object.entries(options.paths).map(([key, value]) => [key, directory(value, `container.paths.${key}`)])) as unknown as ContainerPaths;
@@ -131,7 +175,7 @@ export function buildContainerArgs(options: ContainerOptions): string[] {
   }
   const argv = ["run", "--detach", "--pull", "missing", "--name", name, "--label", `ares.study=${options.studyId}`, "--label", `ares.attempt=${options.attemptId}`, "--label", `ares.stage=${options.stage}`,
     "--network", "none", "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", options.user,
-    "--cpus", String(p.limits.cpus), "--memory", `${p.limits.memoryMb}m`, "--pids-limit", String(p.limits.pidsLimit)];
+    "--cpus", String(p.limits.cpus), "--memory", `${p.limits.memoryMb}m`, "--pids-limit", String(p.limits.pidsLimit), "--env", `ARES_SEED=${seed}`];
   if (p.limits.gpus > 0) argv.push("--gpus", String(p.limits.gpus));
   const mount = (source: string, target: string, readonly: boolean) => argv.push("--mount", `type=bind,src=${source},dst=${target}${readonly ? ",readonly" : ""}`);
   if (options.stage === "candidate") {
@@ -147,9 +191,10 @@ export function buildContainerArgs(options: ContainerOptions): string[] {
 }
 
 /** Launch on the executor host; stdio is detached so SSH returns immediately. T3 reconciles deadlines as a backstop. */
-export async function startWatchdog(executor: Executor, attemptId: string, stage: Stage, wallSeconds: number, runner: ProcessRunner = spawnRunner): Promise<void> {
+export async function startWatchdog(executor: Executor, attemptId: string, stage: Stage, wallSeconds: number, runner: ProcessRunner = spawnRunner, containerId?: string): Promise<void> {
   const name = containerName(attemptId, stage);
+  if (containerId !== undefined && !/^[a-f0-9]{64}$/.test(containerId)) throw new Error("watchdog container id: invalid; use the full id returned by the verified container start");
   if (!Number.isSafeInteger(wallSeconds) || wallSeconds < 1 || wallSeconds > 604_800) throw new Error("watchdog deadline: invalid wallSeconds; use the validated protocol limit (1..604800 seconds)");
-  const script = `nohup sh -c ${shellQuote(`sleep ${wallSeconds}; docker kill ${name}`)} </dev/null >/dev/null 2>&1 &`;
+  const script = `nohup sh -c ${shellQuote(`sleep ${wallSeconds}; docker kill ${containerId ?? name}`)} </dev/null >/dev/null 2>&1 &`;
   await step(executor, "watchdog start", "sh", ["-c", script], runner);
 }

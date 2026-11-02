@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, opendirSync } from "node:fs";
 import { join } from "node:path";
-import { commit, openStudy, plain, readBytesBounded, readJsonFile, requireExperiment, sha256, type Actor } from "../study.ts";
+import { commit, openStudy, plain, readBytesBounded, readJsonFile, readTextBounded, requireExperiment, sha256, type Actor } from "../study.ts";
 
 export interface Limits { cpus: number; memoryMb: number; pidsLimit: number; wallSeconds: number; gpus: number }
 export interface Protocol {
@@ -43,6 +43,7 @@ function stage(raw: unknown, what: string, envAllowed: boolean): Protocol["candi
   if (Object.keys(rawEnv).length > 64) throw new Error(`${what}.env: too many keys; reduce ${what}.env to at most 64 keys`);
   const entries: [string, string][] = [];
   for (const [key, val] of Object.entries(rawEnv)) {
+    if (key === "ARES_SEED") throw new Error(`${what}.env: key ARES_SEED is reserved for the selected attempt seed; remove it from candidate.env and select a declared seed with ares attempt run --seed N`);
     if (/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(key)) throw new Error(`${what}.env: key ${key} looks like a secret; pass secrets through the image, not the protocol`);
     if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(key)) throw new Error(`${what}.env: key ${key} is invalid; use 1..128 letters, digits or underscores, starting with a letter or underscore`);
     entries.push([key, literal(val, `${what}.env.${key}`, 4096, true)]);
@@ -117,10 +118,16 @@ export function taskTreeHash(dir: string): string {
   return sha256(JSON.stringify(entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)));
 }
 export function designBinding(dir: string): string | undefined {
+  return readDesign(dir)?.binding;
+}
+/** Capture the validated protocol and its raw-byte seal together for a frozen attempt. */
+export function readDesign(dir: string): { protocol: Protocol; treeHash: string; binding: string } | undefined {
   const file = join(dir, "design", "protocol.json");
   if (!existsSync(file)) return undefined;
-  readProtocol(dir);
-  return sha256(JSON.stringify([sha256(readBytesBounded(file, PROTOCOL_BYTES)), taskTreeHash(dir)]));
+  const text = readTextBounded(file, PROTOCOL_BYTES);
+  let raw: unknown; try { raw = JSON.parse(text); } catch { throw new Error("protocol: invalid JSON; restore design/protocol.json with a valid ares protocol input"); }
+  const protocol = validateProtocol(raw), treeHash = taskTreeHash(dir);
+  return { protocol, treeHash, binding: sha256(JSON.stringify([sha256(text), treeHash])) };
 }
 /** Caller holds the study lock, as with setScope. Validate everything before any write. */
 export function setProtocol(dir: string, raw: unknown, actor: Actor): Protocol {

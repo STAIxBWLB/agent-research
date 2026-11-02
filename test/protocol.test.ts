@@ -68,6 +68,7 @@ test("AC3: malformed protocols preserve existing file and ledger", async () => {
   const invalid: unknown[] = [
     { ...p, candidate: { ...p.candidate, image: "fixture:latest" } },
     ...["API_KEY", "token", "MY_SECRET", "PASSWORD", "CREDENTIAL"].map(key => ({ ...p, candidate: { ...p.candidate, env: { [key]: "synthetic-value" } } })),
+    { ...p, candidate: { ...p.candidate, env: { ARES_SEED: "999" } } },
     { ...p, network: "host" }, { ...p, metrics: [{ name: "score", unit: "points", direction: "sideways" }] },
     { ...p, candidate: { ...p.candidate, command: "sh -c candidate" } },
     { ...p, evaluator: { ...p.evaluator, command: [] } },
@@ -88,6 +89,11 @@ test("protocol hash ignores JSON key order and keeps argv bytes", () => {
   const p = validateProtocol({ ...fixture(), candidate: { ...fixture().candidate, env: { B: "b", A: "a" } } });
   expect(p.candidate.command[1]).toBe(" spaced argument ");
   expect(protocolHash(p)).toBe(protocolHash({ ...p, candidate: { ...p.candidate, env: { A: "a", B: "b" } } }));
+});
+
+test("candidate cannot override the selected attempt seed through reserved ARES_SEED env", () => {
+  const p = fixture();
+  expect(() => validateProtocol({ ...p, candidate: { ...p.candidate, env: { ARES_SEED: "999" } } })).toThrow("key ARES_SEED is reserved for the selected attempt seed; remove it from candidate.env and select a declared seed with ares attempt run --seed N");
 });
 
 test("task hash binds sorted relative paths and binary contents", () => {
