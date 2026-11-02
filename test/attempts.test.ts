@@ -8,6 +8,7 @@ import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunne
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
 import { readLedger, sha256, withLock } from "../src/study.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
+import { metricTar } from "./metric-fixtures.ts";
 
 const actor = { kind: "person" as const }, commitSha = "a".repeat(40), treeId = "b".repeat(40);
 function protocol(): Protocol {
@@ -19,6 +20,7 @@ function runtime(dir: string) {
   const requests: ProcessRequest[] = [], containers = new Map<string, FakeContainer>();
   const clock = { value: Date.parse("2030-01-01T00:00:00Z") };
   let beforeResolve: (() => Promise<void>) | undefined, runFailure = false, daemonDown = false, lostStartResponse = false, versionFailure = false;
+  let metricsPayload: string | null = '{"score":7}';
   const ok = (stdout = ""): ProcessResult => ({ exitCode: 0, stdout, stderr: "" });
   const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1]!;
   const runner: ProcessRunner = async request => {
@@ -34,12 +36,22 @@ function runtime(dir: string) {
       else for await (const _chunk of request.stdin as AsyncIterable<Uint8Array>) { /* consume without real extraction */ }
       return ok();
     }
-    if (request.command === "sh") return ok();
+    if (request.command === "sh") {
+      if (request.stdoutSink) {
+        const stage = args.join(" ").includes("candidate.stdout.log") ? "candidate" : "evaluator";
+        await request.stdoutSink(metricTar([{ path: `logs/${stage}.stdout.log`, data: `${stage} score=999\n` }, { path: `logs/${stage}.stderr.log`, data: "" }]));
+      }
+      return ok();
+    }
     if (request.command === "id") return ok("1001");
     if (request.command === "docker") {
       if (daemonDown && ["ps", "inspect"].includes(args[0]!)) return { exitCode: 1, stdout: "", stderr: "synthetic daemon unavailable" };
       if (args[0] === "version") return versionFailure ? { exitCode: 1, stdout: "", stderr: "synthetic-sensitive-version-error" } : ok("29.1.3");
       if (args[0] === "image") return ok("sha256:synthetic");
+      if (args[0] === "cp") {
+        const entries = args[1]!.endsWith(":/result/.") ? (metricsPayload === null ? [] : [{ path: "metrics.json", data: metricsPayload }]) : [{ path: "candidate.txt", data: "candidate score=999" }];
+        await request.stdoutSink!(metricTar(entries)); return ok();
+      }
       if (args[0] === "run") {
         const name = value(args, "--name");
         if (runFailure || containers.has(name)) return { exitCode: 125, stdout: "", stderr: "synthetic error must stay private" };
@@ -67,8 +79,11 @@ function runtime(dir: string) {
     }
     throw new Error(`unscripted synthetic process ${request.command}`);
   };
-  const ctx: AttemptContext = { actor, runner, now: () => clock.value, collectEvaluation: async () => ({ metrics: [{ name: "score", unit: "points", value: 7, provenance: "ares-observed" }], outputs: [] }) };
-  return { requests, containers, clock, ctx, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; } };
+  const ctx: AttemptContext = { actor, runner, now: () => clock.value, collectEvaluation: async () => ({ metrics: [{ name: "score", unit: "points", value: 7, provenance: "ares-observed" }], outputs: [] }), collectStageEvidence: async (_attempt, stage) => {
+    const log = { path: `/synthetic/${stage}.log`, sha256: sha256(""), bytes: 0, tail: "", redacted: false };
+    return { logs: { stdout: log, stderr: log }, outputs: [] };
+  } };
+  return { requests, containers, clock, ctx, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; } };
 }
 async function setup(p = protocol(), autonomy = "gates", approved = true) {
   const dir = tempDir(); init(dir, { question: "Synthetic?", mode: "experiment", autonomy }, { actor });
@@ -115,7 +130,7 @@ test("candidate success starts a distinct evaluator, validated metrics alone suc
 });
 
 test("evaluator cannot succeed without a validated metrics collector", async () => {
-  const { dir, fake } = await setup(); delete fake.ctx.collectEvaluation;
+  const { dir, fake } = await setup(); delete fake.ctx.collectEvaluation; fake.setMetrics(null);
   const first = await runAttempt(dir, request, fake.ctx); running(fake, "candidate").running = false;
   await reconcileAttempts(dir, fake.ctx); running(fake, "evaluator").running = false;
   await reconcileAttempts(dir, fake.ctx); expect(showAttempt(dir, first.id).reason).toBe("missing-metrics"); expect(showAttempt(dir, first.id).metrics).toEqual([]);
@@ -314,5 +329,30 @@ test("interrupted running and exited stages recover complete receipts through su
     const done = showAttempt(dir, first.id);
     expect(done.status).toBe("succeeded"); expect(done.stages.candidate?.containerId).not.toBe(done.stages.evaluator?.containerId);
     expect(done.sealing).toEqual({ separateContainers: true, evaluatorReadOnly: true, candidateHasNoEvaluator: true, verifiedBy: "ares-observed" });
+  }
+});
+
+test("AC6: default collector records only evaluator metrics and complete stage/output evidence", async () => {
+  const { dir, fake } = await setup(); delete fake.ctx.collectEvaluation; delete fake.ctx.collectStageEvidence;
+  const first = await runAttempt(dir, request, fake.ctx); running(fake, "candidate").running = false;
+  await reconcileAttempts(dir, fake.ctx); running(fake, "evaluator").running = false;
+  await reconcileAttempts(dir, fake.ctx); const done = showAttempt(dir, first.id);
+  expect(done.status).toBe("succeeded"); expect(done.metrics).toEqual([{ name: "score", unit: "points", value: 7, provenance: "ares-observed" }]);
+  for (const stage of ["candidate", "evaluator"] as const) {
+    const record = done.stages[stage]!; expect(record.containerId).toHaveLength(64); expect(record.exitCode).toBe(0); expect(record.endedAt).toBeDefined();
+    expect(record.evidence!.logs.stdout.tail).toContain(`${stage} score=999`); expect(record.evidence!.logs.stdout.sha256).toHaveLength(64);
+    expect(record.evidence!.logs.stdout.path).toContain(`/logs/${stage}.stdout.log`); expect(record.evidence!.logs.stdout.bytes).toBeGreaterThan(0);
+  }
+  expect(done.outputs).toHaveLength(2); expect(done.outputs.every(file => file.sha256.length === 64 && Number.isSafeInteger(file.bytes))).toBe(true);
+  expect(done.sealing).toEqual({ separateContainers: true, evaluatorReadOnly: true, candidateHasNoEvaluator: true, verifiedBy: "ares-observed" });
+});
+
+test("AC6: evaluator validation failures retain evaluator stage, named reason and no unvalidated numbers", async () => {
+  for (const [payload, reason] of [[null, "missing-metrics"], ["synthetic-private-response-body", "malformed-metrics"], ['{"score":1,"extra":9}', "undeclared-metric"], ['{"score":1e999}', "nonfinite-metric"]] as const) {
+    const { dir, fake } = await setup(); delete fake.ctx.collectEvaluation; fake.setMetrics(payload);
+    const first = await runAttempt(dir, request, fake.ctx); running(fake, "candidate").running = false; await reconcileAttempts(dir, fake.ctx); running(fake, "evaluator").running = false;
+    await reconcileAttempts(dir, fake.ctx); const done = showAttempt(dir, first.id);
+    expect(done.status).toBe("failed"); expect(done.stage).toBe("evaluator"); expect(done.reason).toBe(reason); expect(done.metrics).toEqual([]);
+    expect(done.error).toContain("write /result/metrics.json"); expect(JSON.stringify(done)).not.toContain("synthetic-private-response-body");
   }
 });
