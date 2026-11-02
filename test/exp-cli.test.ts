@@ -53,3 +53,12 @@ test("survey and malformed CLI experiment requests refuse before reaching the ex
   await expect(run(["protocol", dir, "--file", "-", "--file", "-"], {}, io)).rejects.toThrow("repeated option");
   expect(fake.requests).toHaveLength(0); expect(readLedger(dir)).toHaveLength(1); expect(fake.httpCalls()).toBe(0);
 });
+test("CLI startup failures name the blocked step and recovery without persisting backend diagnostics", async () => {
+  const { dir, fake, io, env } = await setup();
+  const runner: typeof fake.runner = async request => request.command === "sh" && request.args[1]?.includes("base=") ? { exitCode: 1, stdout: "", stderr: "synthetic-sensitive-backend-body" } : fake.runner(request);
+  const output = await run(["attempt", "run", dir, "--repo", "/synthetic/repo", "--commit", fixtureCommit, "--detach"], env, { ...io, runner });
+  const result = JSON.parse(output.text);
+  expect(output.code).toBe(1); expect(result.status).toBe("failed"); expect(result.error).toContain("private workspace preparation failed");
+  expect(result.error).toContain("owned physical directory with mode 0700"); expect(result.error).toContain("--retry ID");
+  expect(output.text).not.toContain("synthetic-sensitive-backend-body");
+});

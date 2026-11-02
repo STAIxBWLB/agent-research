@@ -175,11 +175,16 @@ async function update(dir: string, attemptId: string, ctx: AttemptContext, fn: (
 }
 function finish(attempt: Attempt, status: AttemptStatus, reason: string | undefined, ctx: AttemptContext): void {
   attempt.status = status; if (reason) attempt.reason = reason; else delete attempt.reason;
+  if (status === "succeeded") delete attempt.error;
   attempt.endedAt = at(ctx); delete attempt.launching; delete attempt.pendingAutoApproval;
   const stage = attempt.stages[attempt.stage]; if (stage && !stage.endedAt) stage.endedAt = attempt.endedAt;
 }
 function hostError(attempt: Attempt, step: string): Error {
   return new Error(`executor ${attempt.executor.host ?? "local"}: ${step} failed; check that step on the executor host and run ares attempt reconcile <dir>`);
+}
+function startupError(attempt: Attempt, step: string): string {
+  const recovery = step === "private workspace preparation" ? "make the configured executor workdir an owned physical directory with mode 0700" : step === "evaluator transfer" || step === "design recheck" ? "restore the task evaluator files and approve the current design" : step === "snapshot transfer" ? "check the repository commit and executor workspace" : step === "controller lock" ? "wait for the active control operation to finish" : "run ares executor check <dir> and fix the reported host or image setup";
+  return `executor ${attempt.executor.host ?? "local"}: ${step} failed; ${recovery}, then retry with the same attempt options and --retry ID`;
 }
 async function command(attempt: Attempt, step: string, executable: string, args: string[], ctx: AttemptContext) {
   try {
@@ -221,6 +226,7 @@ async function recordVerifiedStage(dir: string, attempt: Attempt, state: Observe
     if (current.status !== "running" || current.stage !== attempt.stage) return undefined;
     const stage = current.stages[current.stage]!;
     stage.containerId = state.id; if (state.startedAt) stage.startedAt = state.startedAt;
+    if (current.reason === "executor-start" || current.reason === "executor-start-uncertain") { delete current.reason; delete current.error; }
     delete current.launching;
     if (current.stage === "candidate") {
       current.sealing.candidateHasNoEvaluator = true;
@@ -271,15 +277,15 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
           return recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered");
         }
       } catch {
-        return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start-uncertain"; return "attempt.executor-error"; });
+        return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start-uncertain"; current.error = hostError(current, "container start confirmation").message; return "attempt.executor-error"; });
       }
     }
     // A name conflict can belong to another study with the same identity. Only clean up our returned container id.
     if (startedId) {
       try { await command(attempt, "failed launch cleanup", "docker", ["kill", startedId], ctx); }
-      catch { return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start"; return "attempt.executor-error"; }); }
+      catch { return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start"; current.error = hostError(current, "failed start cleanup").message; return "attempt.executor-error"; }); }
     }
-    return update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; finish(current, "failed", "executor-start", ctx); return "attempt.failed"; });
+    return update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = startupError(current, "container start"); finish(current, "failed", "executor-start", ctx); return "attempt.failed"; });
   }
 }
 
@@ -329,24 +335,30 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     created = true; return record;
   });
   if (created) {
+    let preparationStep = "executor check";
     try {
       const checked = await checkExecutorInputs(attempt.executor, attempt.protocol, ctx.runner ?? spawnRunner);
       const root = posix.dirname(attempt.paths.snapshot), studyRoot = posix.dirname(root), base = executor.workdir;
       // Require a private, owned, physical root. Attempt mkdir is exclusive, never a shared pre-existing directory.
       const script = `set -eu; umask 077; base=${shellQuote(base)}; test -d "$base"; test ! -L "$base"; test -O "$base"; test "$(cd -P "$base" && pwd -P)" = "$base"; mode=$(stat -c %a "$base" 2>/dev/null || stat -f %Lp "$base"); test "$mode" = 700; study=${shellQuote(studyRoot)}; if test ! -e "$study"; then mkdir -m 700 "$study"; fi; test -d "$study"; test ! -L "$study"; test -O "$study"; mode=$(stat -c %a "$study" 2>/dev/null || stat -f %Lp "$study"); test "$mode" = 700; mkdir -m 700 ${shellQuote(root)}; mkdir -m 700 ${[attempt.paths.snapshot, attempt.paths.output, attempt.paths.result, posix.dirname(attempt.paths.evaluator)].map(shellQuote).join(" ")}`;
+      preparationStep = "private workspace preparation";
       await command(attempt, "private workspace preparation", "sh", ["-c", script], ctx);
+      preparationStep = "snapshot transfer";
       const transferred = await transferSnapshot(options.repo, snapshot.commit, executor, attempt.paths.snapshot, ctx.runner ?? spawnRunner);
+      preparationStep = "evaluator transfer";
       await transferTask(join(dir, "task"), executor, posix.dirname(attempt.paths.evaluator), ctx.runner ?? spawnRunner, frozen.treeHash);
+      preparationStep = "design recheck";
       if (designBinding(dir) !== attempt.sealBinding) throw new Error("design changed during preparation");
       const claim = attempt.launching!.token;
       attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running" || current.launching?.token !== claim) throw new Error("attempt preparation: ownership changed; run ares attempt reconcile before retrying"); current.snapshotSha256 = transferred.sha256; current.stages.candidate = stageRecord(current, "candidate", checked.user, ctx); return "attempt.snapshot"; });
+      preparationStep = "controller lock";
       attempt = await withControl(dir, async () => {
         const current = showAttempt(dir, attempt.id);
         if (current.status !== "running" || current.launching?.token !== claim) return current;
         return launch(dir, current, checked.user, ctx);
       });
     } catch {
-      attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; finish(current, "failed", "preparation", ctx); return "attempt.failed"; });
+      attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = startupError(current, preparationStep); finish(current, "failed", "preparation", ctx); return "attempt.failed"; });
     }
   }
   if (!options.detach) {
