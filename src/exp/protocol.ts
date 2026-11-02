@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, opendirSync } from "node:fs";
 import { join } from "node:path";
-import { commit, openStudy, plain, readBytesBounded, readJsonFile, requireExperiment, sha256, type Actor } from "../study.ts";
+import { commit, openStudy, plain, readBytesBounded, readJsonFile, readTextBounded, requireExperiment, sha256, type Actor } from "../study.ts";
 
 export interface Limits { cpus: number; memoryMb: number; pidsLimit: number; wallSeconds: number; gpus: number }
 export interface Protocol {
@@ -117,10 +117,16 @@ export function taskTreeHash(dir: string): string {
   return sha256(JSON.stringify(entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)));
 }
 export function designBinding(dir: string): string | undefined {
+  return readDesign(dir)?.binding;
+}
+/** Capture the validated protocol and its raw-byte seal together for a frozen attempt. */
+export function readDesign(dir: string): { protocol: Protocol; treeHash: string; binding: string } | undefined {
   const file = join(dir, "design", "protocol.json");
   if (!existsSync(file)) return undefined;
-  readProtocol(dir);
-  return sha256(JSON.stringify([sha256(readBytesBounded(file, PROTOCOL_BYTES)), taskTreeHash(dir)]));
+  const text = readTextBounded(file, PROTOCOL_BYTES);
+  let raw: unknown; try { raw = JSON.parse(text); } catch { throw new Error("protocol: invalid JSON; restore design/protocol.json with a valid ares protocol input"); }
+  const protocol = validateProtocol(raw), treeHash = taskTreeHash(dir);
+  return { protocol, treeHash, binding: sha256(JSON.stringify([sha256(text), treeHash])) };
 }
 /** Caller holds the study lock, as with setScope. Validate everything before any write. */
 export function setProtocol(dir: string, raw: unknown, actor: Actor): Protocol {
