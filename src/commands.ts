@@ -1,3 +1,4 @@
+export { manifest } from "./manifest.ts";
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Http } from "./http.ts";
