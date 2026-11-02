@@ -1,6 +1,6 @@
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export type Mode = "survey" | "experiment";
 export type Autonomy = "auto" | "gates";
@@ -9,7 +9,7 @@ export const GATES: readonly GateName[] = ["scope", "screen", "design"];
 export interface Study { v: 1; id: string; question: string; mode: Mode; autonomy: Autonomy; createdAt: string }
 export interface Actor { kind: "person" | "agent" | "auto"; id?: string }
 export function requireExperiment(study: Study): void {
-  if (study.mode !== "experiment") throw new Error("experiment command: study mode must be experiment");
+  if (study.mode !== "experiment") throw new Error("experiment command: study mode must be experiment; create a study with ares init <dir> --question TEXT --mode experiment");
 }
 export interface LedgerEvent { v: 1; at: string; actor: Actor; type: string; data: Record<string, unknown> }
 
@@ -161,7 +161,7 @@ export function commit(dir: string, files: FileWrite[], pending: PendingEvent[])
   const ledger = join(dir, "ledger.jsonl"), size = existsSync(ledger) ? statSync(ledger).size : 0;
   if (size + Buffer.byteLength(lines.join("")) > LEDGER_BYTES) throw new Error(`ledger.jsonl would exceed ${LEDGER_BYTES} bytes; start a new study`);
   for (const [path, text, max] of files) assertWritable(text, max, path);
-  for (const [path, text, max] of files) writeAtomic(path, text, max);
+  for (const [path, text, max] of files) { mkdirSync(dirname(path), { recursive: true }); writeAtomic(path, text, max); }
   if (lines.length) appendFileSync(ledger, lines.join(""), { mode: 0o644 });
   return events;
 }

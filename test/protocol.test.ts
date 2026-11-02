@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, truncateSync, unlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { binder, gateDecide, gateList, init } from "../src/commands.ts";
+import { binder, gateDecide, gateList, init, status } from "../src/commands.ts";
 import { designBinding, LIMIT_BOUNDS, protocolHash, readProtocol, setProtocol, TASK_BYTES, taskTreeHash, validateProtocol } from "../src/exp/protocol.ts";
 import { commit, openStudy, readLedger, requireExperiment, requireGate, withLock } from "../src/study.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
@@ -138,4 +139,45 @@ test("task tree bounds are inclusive and bytes are summed across files", async (
   writeFileSync(join(dir, "task", "one-more-byte"), "x");
   await expect(set(dir, fixture())).rejects.toThrow("larger than");
   expect(readLedger(dir).map(e => e.type)).toEqual(["study.init"]);
+});
+
+test("missing task tree names recovery before protocol set and after design approval", async () => {
+  const dir = study(); rmSync(join(dir, "task"), { recursive: true });
+  const message = "task/: missing; write task/task.md and task/evaluator/ before ares protocol";
+  const before = readFileSync(join(dir, "ledger.jsonl"));
+  await expect(set(dir, fixture())).rejects.toThrow(message);
+  expect(existsSync(join(dir, "design"))).toBe(false);
+  expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
+  mkdirSync(join(dir, "task", "evaluator"), { recursive: true });
+  writeFileSync(join(dir, "task", "task.md"), "synthetic");
+  await set(dir, fixture()); await gateDecide(dir, "design", "approve", undefined, ctx);
+  rmSync(join(dir, "task"), { recursive: true });
+  const protocol = readFileSync(join(dir, "design", "protocol.json")), ledger = readFileSync(join(dir, "ledger.jsonl"));
+  for (const read of [() => taskTreeHash(dir), () => designBinding(dir), () => gateList(dir), () => status(dir)]) expect(read).toThrow(message);
+  await expect(set(dir, fixture())).rejects.toThrow(message);
+  expect(readFileSync(join(dir, "design", "protocol.json"))).toEqual(protocol);
+  expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(ledger);
+});
+
+test("refusals identify the field or relative path, rule and recovery without echoing values", async () => {
+  const p = fixture(), secret = "synthetic-value-not-for-errors";
+  expect(() => validateProtocol({ ...p, candidate: { ...p.candidate, env: { API_KEY: secret } } })).toThrow("key API_KEY looks like a secret; pass secrets through the image, not the protocol");
+  expect(() => validateProtocol({ ...p, candidate: { ...p.candidate, env: { "BAD-NAME": secret } } })).toThrow("key BAD-NAME is invalid; use 1..128 letters");
+  expect(() => validateProtocol({ ...p, candidate: { ...p.candidate, env: { SAFE: 123 } } })).toThrow("candidate.env.SAFE: invalid text; set candidate.env.SAFE");
+  expect(() => validateProtocol({ ...p, candidate: { ...p.candidate, command: ["run", 123] } })).toThrow("candidate.command[1]: invalid text; set candidate.command[1]");
+  const survey = study("survey");
+  await expect(set(survey, p)).rejects.toThrow("create a study with ares init <dir> --question TEXT --mode experiment");
+  const dir = study(); symlinkSync(join(dir, "task", "task.md"), join(dir, "task", "evaluator", "linked"));
+  expect(() => taskTreeHash(dir)).toThrow("task/evaluator/linked: symlink refused; replace it");
+  unlinkSync(join(dir, "task", "evaluator", "linked"));
+  const fifo = join(dir, "task", "evaluator", "pipe");
+  expect(spawnSync("mkfifo", [fifo]).status).toBe(0);
+  expect(() => taskTreeHash(dir)).toThrow("task/evaluator/pipe: regular files only; replace this special file");
+  expect(existsSync(join(dir, "design"))).toBe(false);
+});
+
+test("commit preflight refusal creates no design directory", async () => {
+  const dir = study(); truncateSync(join(dir, "ledger.jsonl"), 64 * 1024 * 1024);
+  await expect(set(dir, fixture())).rejects.toThrow("ledger.jsonl would exceed");
+  expect(existsSync(join(dir, "design"))).toBe(false);
 });
