@@ -7,10 +7,10 @@ import * as ops from "../src/commands.ts";
 import { ATTEMPT_BYTES, type Attempt } from "../src/exp/attempts.ts";
 import { readArtifactArchive } from "../src/exp/artifacts.ts";
 import { runOnExecutor, spawnRunner, validateExecutor, type Executor, type ProcessRunner } from "../src/exp/executor.ts";
-import { METRICS_BYTES, parseMetrics } from "../src/exp/metrics.ts";
+import { LOG_COPY_BYTES, METRICS_BYTES, parseMetrics } from "../src/exp/metrics.ts";
 import { validateProtocol } from "../src/exp/protocol.ts";
 import { createHttp } from "../src/http.ts";
-import { readLedger, readTextBounded, sha256, writeAtomic } from "../src/study.ts";
+import { readBytesBounded, readLedger, readTextBounded, sha256, writeAtomic } from "../src/study.ts";
 import { probeSnapshotExtraction } from "./live-exp-probe.ts";
 
 export const DEFAULT_LIVE_IMAGE = "busybox@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec";
@@ -24,6 +24,8 @@ export interface LiveSummary {
   attempts: { label: string; id: string; commit: string; status: string; score: number; candidateContainer: string; evaluatorContainer: string; separateContainers: boolean; evaluatorReadOnly: boolean; candidateHasNoEvaluator: boolean }[];
   isolation: { evaluatorReadExit: number; resultWriteExit: number; stderr: string; printedScoreIgnored: boolean };
   stoppedEvaluatorResult: { containerStopped: boolean; metricsSha256: string };
+  oversizedLog: { attempt: string; status: string; observedStdoutAtLeastBytes: number; retainedBytes: number; sha256: string; truncated: boolean };
+  logRead: { command: string; attempt: string; tailBytes: number; returnedStreams: number; returnedCandidateStderrBytes: number; studyBytesUnchanged: boolean; files: number; bytes: number; beforeSha256: string; afterSha256: string };
   snapshotProbe: Awaited<ReturnType<typeof probeSnapshotExtraction>>;
   removedContainers: number;
 }
@@ -49,7 +51,7 @@ async function checked(command: string, args: string[], runner: ProcessRunner): 
   if (response.exitCode !== 0 || response.timedOut || response.truncated) throw new Error("live-exp: local fixture command failed; check Git/Bun and rerun the live fixture");
   return response.stdout.trim();
 }
-/** Build both commits before execution, proving the selected archive ignores the current worktree. */
+/** Build all commits before execution, proving the selected archive ignores the current worktree. */
 export async function prepareSyntheticRepository(root: string, runner: ProcessRunner = spawnRunner) {
   const repo = join(root, "candidate"), emptyTemplate = join(root, "empty-git-template");
   mkdirSync(repo, { recursive: true }); mkdirSync(emptyTemplate, { recursive: true });
@@ -59,8 +61,21 @@ export async function prepareSyntheticRepository(root: string, runner: ProcessRu
   await git(["add", "candidate.sh"]); await git(["commit", "-qm", "Synthetic baseline"]); const baseline = await git(["rev-parse", "HEAD"]);
   writeAtomic(join(repo, "candidate.sh"), readTextBounded(join(fixtures, "adversarial.sh"), FILE_BYTES), FILE_BYTES);
   await git(["add", "candidate.sh"]); await git(["commit", "-qm", "Synthetic isolation adversary"]); const adversarial = await git(["rev-parse", "HEAD"]);
-  if (!/^[a-f0-9]{40}$/.test(baseline) || !/^[a-f0-9]{40}$/.test(adversarial) || baseline === adversarial) throw new Error("live-exp: fixture commits invalid; restore the synthetic candidate fixtures and retry");
-  return { repo, baseline, adversarial };
+  writeAtomic(join(repo, "candidate.sh"), readTextBounded(join(fixtures, "noisy.sh"), FILE_BYTES), FILE_BYTES);
+  await git(["add", "candidate.sh"]); await git(["commit", "-qm", "Synthetic oversized stdout"]); const noisy = await git(["rev-parse", "HEAD"]);
+  if (![baseline, adversarial, noisy].every(commit => /^[a-f0-9]{40}$/.test(commit)) || new Set([baseline, adversarial, noisy]).size !== 3) throw new Error("live-exp: fixture commits invalid; restore the synthetic candidate fixtures and retry");
+  return { repo, baseline, adversarial, noisy };
+}
+/** Compare raw ledger/record bytes, not parsed JSON, around explicit read-only CLI access. */
+export function studyByteSnapshot(study: string, attempts: Pick<Attempt, "id" | "run">[]) {
+  const files: [string, number][] = [["ledger.jsonl", 64 * 1024 * 1024]];
+  for (const attempt of attempts) {
+    if (!/^[a-f0-9]{16}$/.test(attempt.id) || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(attempt.run)) throw new Error("live log audit: invalid attempt identity; use records returned by attempt run");
+    files.push([`runs/${attempt.run}/attempts/${attempt.id}.json`, ATTEMPT_BYTES]);
+  }
+  let bytes = 0;
+  const manifest = files.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([path, bound]) => { const content = readBytesBounded(join(study, path), bound); bytes += content.length; return [path, content.length, sha256(content)]; });
+  return { files: files.length, bytes, sha256: sha256(JSON.stringify(manifest)) };
 }
 async function remote(executor: Executor, command: string, args: string[], runner: ProcessRunner, trim = true): Promise<string> {
   let response;
@@ -94,8 +109,16 @@ export async function runLiveExperiment(options: LiveOptions, runtime: LiveRunti
     const run = `live-${randomUUID().slice(0, 8)}`;
     const baseline = await ops.attemptRun(study, { repo: repository.repo, commit: repository.baseline, run, label: "baseline" }, ctx); successful(baseline);
     const adversarial = await ops.attemptRun(study, { repo: repository.repo, commit: repository.adversarial, run, label: "adversarial" }, ctx); successful(adversarial);
-    const stderr = (await ops.attemptLogs(study, adversarial.id, { stage: "candidate", stream: "stderr", tailBytes: 2048 }, ctx)).logs[0]!.text;
-    const stdout = (await ops.attemptLogs(study, adversarial.id, { stage: "candidate", stream: "stdout", tailBytes: 2048 }, ctx)).logs[0]!.text;
+    const noisy = await ops.attemptRun(study, { repo: repository.repo, commit: repository.noisy, run, label: "oversized-stdout" }, ctx); successful(noisy);
+    const noisyLog = noisy.stages.candidate!.evidence?.logs.stdout;
+    const volume = Number(await remote(executor, "sh", ["-c", `docker logs ${noisy.stages.candidate!.containerId!} 2>/dev/null | head -c ${LOG_COPY_BYTES + 1} | wc -c`], runner));
+    if (!noisyLog || noisyLog.bytes !== LOG_COPY_BYTES || !noisyLog.truncated || !Number.isSafeInteger(volume) || volume <= LOG_COPY_BYTES) throw new Error("live-exp: oversized stdout did not succeed with capped/truncated evidence; inspect host log capture before acceptance");
+    const records = [baseline, adversarial, noisy], beforeLogs = studyByteSnapshot(study, records);
+    const cliLogs = JSON.parse(await checked(process.execPath, [join(sourceRoot, "bin", "ares.js"), "attempt", "logs", study, adversarial.id, "--tail", "2048", "--json"], runner)) as { id: string; logs: { stage: string; stream: string; text: string; tailBytes: number }[] };
+    const afterLogs = studyByteSnapshot(study, records);
+    const stderrEntry = cliLogs.logs.find(log => log.stage === "candidate" && log.stream === "stderr"), stdoutEntry = cliLogs.logs.find(log => log.stage === "candidate" && log.stream === "stdout");
+    if (cliLogs.id !== adversarial.id || !stderrEntry || !stdoutEntry || beforeLogs.sha256 !== afterLogs.sha256 || beforeLogs.bytes !== afterLogs.bytes) throw new Error("live-exp: CLI log read changed study bytes or omitted the requested tail; inspect read-only log access before acceptance");
+    const stderr = stderrEntry.text, stdout = stdoutEntry.text;
     const markerFile = posix.join(adversarial.paths.output, "isolation.txt"), marker = await remote(executor, "head", ["-c", "4097", markerFile], runner, false);
     const expected = adversarial.outputs.find(output => output.path === markerFile);
     if (!expected || Buffer.byteLength(marker) > 4096 || sha256(marker) !== expected.sha256) throw new Error("live-exp: isolation marker differs from its artifact receipt; inspect the private executor output before retrying");
@@ -106,10 +129,9 @@ export async function runLiveExperiment(options: LiveOptions, runtime: LiveRunti
     if (stopped !== "false 0" || !copied.captured || parseMetrics(copied.captured, protocol)[0]?.value !== 1) throw new Error("live-exp: stopped evaluator bind-mount readback failed; inspect Docker cp behavior before accepting the fixture");
     const snapshotProbe = await probeSnapshotExtraction(executor, root, runner);
     if (!snapshotProbe.outsideUnchanged) throw new Error("live-exp: adversarial archive escaped its snapshot; stop acceptance and fix executor extraction");
-    const records = [baseline, adversarial];
     const audit = [readTextBounded(join(study, "study.json"), FILE_BYTES), readTextBounded(join(study, "design", "protocol.json"), FILE_BYTES), readTextBounded(join(study, "executor.json"), 8192), JSON.stringify(readLedger(study)), ...records.map(attempt => readTextBounded(join(study, "runs", attempt.run, "attempts", `${attempt.id}.json`), ATTEMPT_BYTES))];
     if (audit.some(text => text.includes(sentinel) || text.includes('{"score":999}'))) throw new Error("live-exp: private process/log content entered the study; stop acceptance and inspect record persistence");
-    summary = { v: 1, host: options.host, image: options.image, harnessCommit, controllerBun: process.versions.bun ?? null, dockerVersion: checkedExecutor.serverVersion, user: checkedExecutor.user, study, privateExecutorWorkdir: root, parentSecretAbsent: true, attempts: records.map(successful), isolation: { evaluatorReadExit: readExit, resultWriteExit: writeExit, stderr, printedScoreIgnored: adversarial.metrics[0]!.value === 1 }, stoppedEvaluatorResult: { containerStopped: true, metricsSha256: sha256(copied.captured) }, snapshotProbe, removedContainers: 0 };
+    summary = { v: 1, host: options.host, image: options.image, harnessCommit, controllerBun: process.versions.bun ?? null, dockerVersion: checkedExecutor.serverVersion, user: checkedExecutor.user, study, privateExecutorWorkdir: root, parentSecretAbsent: true, attempts: records.map(successful), isolation: { evaluatorReadExit: readExit, resultWriteExit: writeExit, stderr, printedScoreIgnored: adversarial.metrics[0]!.value === 1 }, stoppedEvaluatorResult: { containerStopped: true, metricsSha256: sha256(copied.captured) }, oversizedLog: { attempt: noisy.id, status: noisy.status, observedStdoutAtLeastBytes: volume, retainedBytes: noisyLog.bytes, sha256: noisyLog.sha256, truncated: noisyLog.truncated }, logRead: { command: "ares attempt logs", attempt: adversarial.id, tailBytes: 2048, returnedStreams: cliLogs.logs.length, returnedCandidateStderrBytes: stderrEntry.tailBytes, studyBytesUnchanged: true, files: beforeLogs.files, bytes: beforeLogs.bytes, beforeSha256: beforeLogs.sha256, afterSha256: afterLogs.sha256 }, snapshotProbe, removedContainers: 0 };
     return summary;
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.message : "live-exp failed"}; fixture study=${study}; private executor workdir=${root}`);
