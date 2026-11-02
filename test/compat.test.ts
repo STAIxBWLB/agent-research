@@ -73,7 +73,7 @@ test("newer billable stage remains readable but blocks budget-gated starts witho
   await ops.protocol(dir, metricProtocol(), ctx);
   await ops.executorSet(dir, { v: 1, kind: "local", workdir: "/private/synthetic" }, ctx);
   await ops.gateDecide(dir, "design", "approve", undefined, ctx);
-  const attempt = metricAttempt(); attempt.status = "succeeded"; attempt.endedAt = "2030-01-02T00:00:00Z";
+  const attempt = metricAttempt(); attempt.studyId = openStudy(dir).study.id; attempt.status = "succeeded"; attempt.endedAt = "2030-01-02T00:00:00Z";
   const root = `/private/synthetic/${attempt.studyId}/${attempt.id}`;
   attempt.paths.snapshot = `${root}/snapshot`;
   const emptyLog = { path: `${root}/logs/candidate.stdout.log`, sha256: sha256(""), bytes: 0, truncated: false };
