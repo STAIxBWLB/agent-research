@@ -1,3 +1,4 @@
+import { proposeSkill, decideSkill, listSkills } from "./memory/skills.ts";
 import { rankLessons, type LessonRankOptions } from "./memory/lessons.ts";
 import { createAmemClient } from "./memory/amem.ts";
 import { previewArchive, exportArchive, type ArchivePreview, type ArchiveResult } from "./memory/archive.ts";
@@ -447,3 +448,11 @@ export async function lessons(dirArg: string, options: LessonRankOptions & { for
   const brief = options.for === undefined ? undefined : await client.brief(options.for, 2048);
   return { lessons: ranked, ...(brief === undefined ? {} : { brief }) };
 }
+
+export async function skillPropose(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
+  const { dir } = openStudy(dirArg); return withLock(dir, () => proposeSkill(dir, raw, ctx.actor));
+}
+export async function skillDecide(dirArg: string, name: string, decision: string, reason: string, pr: string | undefined, ctx: Pick<Ctx, "actor">) {
+  const { dir } = openStudy(dirArg); return withLock(dir, () => decideSkill(dir, name, decision, reason, pr, ctx.actor));
+}
+export const skillList = (dir: string) => listSkills(dir);
