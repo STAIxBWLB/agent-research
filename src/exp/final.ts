@@ -127,8 +127,7 @@ function canonical(value: unknown): string {
 }
 export function finalResultPath(dir: string): string { return join(dir, "runs", "final", "final.json"); }
 /** Earliest start decides even on failure; newer retries never replace its outcome. */
-export function closeFinal(dirArg: string, actor: Actor): FinalResult {
-  const input = requireFinalInputs(dirArg), file = finalResultPath(input.dir), old = resultBytes(file, FINAL_RESULT_BYTES, "final");
+function calculateFinal(input: ReturnType<typeof requireFinalInputs>): FinalResult {
   const attempts = listAttempts(input.dir, { run: "final" }).attempts;
   if (attempts.some(a => a.status === "running")) throw new Error("final close: a final attempt is running; run ares attempt reconcile before closing");
   const events = readLedger(input.dir);
@@ -161,8 +160,24 @@ export function closeFinal(dirArg: string, actor: Actor): FinalResult {
   const result: FinalResult = { v: 1, status: reason ? "not_qualified" : "qualified", ...(reason ? { reason } : {}), winner: input.winner, baseline: input.baseline, seeds: input.final.seeds, pairs: paired.pairs, mean: paired.mean, baselineMean: paired.referenceMean, delta: paired.delta, decisive, attempts: rows, investigateSha256: input.investigate.sha256, ...(input.ablate ? { ablateSha256: input.ablate.sha256 } : {}), sealBinding: input.design.binding,
     inputsSha256: sha256(canonical({ binding: input.binding, attempts: ordered.map(a => ({ record: sha256(canonical(a)), start: starts.get(a.id)?.index ?? null })) })) };
   const text = JSON.stringify(result, null, 2) + "\n"; assertWritable(text, FINAL_RESULT_BYTES, "final result; archive the study and start a new bounded run");
+  return result;
+}
+/** Caller holds the study lock; calculation and output bytes are shared with the read-only closed reader. */
+export function closeFinal(dirArg: string, actor: Actor): FinalResult {
+  const input = requireFinalInputs(dirArg), file = finalResultPath(input.dir), old = resultBytes(file, FINAL_RESULT_BYTES, "final");
+  const result = calculateFinal(input), text = JSON.stringify(result, null, 2) + "\n";
   if (old !== text) commit(input.dir, [[file, text, FINAL_RESULT_BYTES]], [{ actor, type: "final.closed", data: { sha256: sha256(text), status: result.status, investigateSha256: result.investigateSha256 } }]);
   return result;
+}
+/** Only the exact currently computable result, under current gate approval, is a closed source. */
+export function readClosedFinal(dirArg: string): { result: FinalResult; sha256: string } {
+  const input = requireFinalInputs(dirArg), text = resultBytes(finalResultPath(input.dir), FINAL_RESULT_BYTES, "final");
+  if (text === undefined) throw new Error("final result: not closed; run ares final close before using final results");
+  const hash = sha256(text), receipt = readLedger(input.dir).findLast(event => event.type === "final.closed");
+  if (!receipt || receipt.data.sha256 !== hash) throw new Error("final result: bytes disagree with the latest close receipt; run ares final close again");
+  const result = calculateFinal(input);
+  if (text !== JSON.stringify(result, null, 2) + "\n") throw new Error("final result: stale inputs; approve current final inputs and run ares final close again");
+  return { result, sha256: hash };
 }
 
 

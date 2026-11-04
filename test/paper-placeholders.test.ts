@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as ops from "../src/commands.ts";
 import { parsePlaceholders, resolvePlaceholders, MANUSCRIPT_BYTES } from "../src/paper/placeholders.ts";
+import { readClosedFinal } from "../src/exp/final.ts";
 import { protocolHash, readProtocol } from "../src/exp/protocol.ts";
 import { appendEvent, openStudy, sha256 } from "../src/study.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
@@ -122,4 +123,18 @@ test("negative final status/reason, final attempt edits and stale protocol metri
   const protocol = readProtocol(dir)!; await ops.protocol(dir, { ...protocol, method: "changed" }, ctx);
   expect(resolvePlaceholders(dir, `{{n:attempt:${measured.id}.score}}`).findings[0]?.code).toBe("unresolved-ref");
   expect(resolvePlaceholders(dir, `{{n:attempt:${failed.id}.score}}`).findings[0]?.code).toBe("unresolved-ref");
+});
+
+
+test("rejected final gate makes final refs unresolved until approval, without any reader writes", async () => {
+  const { dir } = await setup(), file = join(dir, "runs", "final", "final.json"), bytes = readFileSync(file);
+  expect(readClosedFinal(dir).sha256).toBe(sha256(bytes));
+  await ops.gateDecide(dir, "final", "reject", "Synthetic reconsideration", ctx);
+  const ledger = readFileSync(join(dir, "ledger.jsonl"));
+  expect(() => readClosedFinal(dir)).toThrow("not currently approved");
+  expect(resolvePlaceholders(dir, "{{n:final.status}} {{n:final.delta}}").findings.map(f => f.code)).toEqual(["unresolved-ref", "unresolved-ref"]);
+  await expect(ops.finalClose(dir, ctx)).rejects.toThrow("not currently approved");
+  expect(readFileSync(file)).toEqual(bytes); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(ledger);
+  await ops.gateDecide(dir, "final", "approve", undefined, ctx); await ops.finalClose(dir, ctx);
+  expect(readFileSync(file)).toEqual(bytes); expect(resolvePlaceholders(dir, "{{n:final.status}}").rendered).toBe("qualified");
 });

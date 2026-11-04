@@ -4,7 +4,7 @@ import { ATTEMPT_BYTES, listAttempts, type Attempt, type AttemptStatus } from ".
 import { protocolHash, readProtocol } from "../exp/protocol.ts";
 import { INVESTIGATE_BYTES, investigateResultPath, metricValue, readClosedInvestigation } from "../exp/investigate.ts";
 import { ABLATE_BYTES, ablateResultPath, readClosedAblate } from "../exp/ablate.ts";
-import { FINAL_RESULT_BYTES, finalResultPath, requireFinalInputs, requirePosthocClosed, type FinalResult } from "../exp/final.ts";
+import { FINAL_RESULT_BYTES, finalResultPath, readClosedFinal, requirePosthocClosed } from "../exp/final.ts";
 
 export const MANUSCRIPT_BYTES = 2 * 1024 * 1024, MAX_PLACEHOLDERS = 5000;
 interface Position { start: number; end: number; line: number; column: number; raw: string }
@@ -51,21 +51,6 @@ function source<T>(dir: string, file: string, bound: number, value: T, expected?
   if (expected !== undefined && hash !== expected) throw new Error("source bytes changed during resolution");
   return { value, source: { file: relative(dir, file), sha256: hash } };
 }
-/** Final has no public read helper yet. Validate its receipt and the same input fingerprint used by closeFinal, without committing. */
-function closedFinal(dir: string): Source<FinalResult> {
-  const file = finalResultPath(dir), text = readTextBounded(file, FINAL_RESULT_BYTES), raw: unknown = JSON.parse(text), hash = sha256(text);
-  if (!plain(raw) || raw.v !== 1 || !["qualified", "not_qualified"].includes(raw.status as string)) throw new Error("final result unsupported or malformed");
-  const events = readLedger(dir), receipt = events.findLast(event => event.type === "final.closed");
-  if (receipt?.data.sha256 !== hash) throw new Error("final result has no matching close receipt");
-  const input = requireFinalInputs(dir), attempts = listAttempts(dir, { run: "final" }).attempts;
-  if (attempts.some(a => a.status === "running")) throw new Error("final work is running");
-  const starts = new Map<string, number>();
-  events.forEach((event, index) => { if (event.type === "attempt.started" && typeof event.data.id === "string") { if (starts.has(event.data.id)) throw new Error("duplicate start receipt"); starts.set(event.data.id, index); } });
-  const ordered = [...attempts].sort((a, b) => (starts.get(a.id) ?? -1) - (starts.get(b.id) ?? -1) || a.id.localeCompare(b.id));
-  const fingerprint = sha256(canonical({ binding: input.binding, attempts: ordered.map(a => ({ record: sha256(canonical(a)), start: starts.get(a.id) ?? null })) }));
-  if (raw.inputsSha256 !== fingerprint || raw.investigateSha256 !== input.investigate.sha256 || raw.ablateSha256 !== input.ablate?.sha256 || raw.sealBinding !== input.design.binding) throw new Error("final result inputs are stale");
-  return { value: raw as unknown as FinalResult, source: { file: relative(dir, file), sha256: hash } };
-}
 const statuses: readonly string[] = ["running", "succeeded", "failed", "cancelled", "unknown"];
 function validValue(value: unknown): value is string | number { return typeof value === "string" ? value.length > 0 : typeof value === "number" && Number.isFinite(value); }
 /** A per-call cache keeps repeated placeholders tied to the same checked source bytes. No writes, network or process execution. */
@@ -78,7 +63,7 @@ export function resolvePlaceholders(dirArg: string, text: string) {
   };
   const investigate = () => cached("investigate", () => { const closed = readClosedInvestigation(dir); return source(dir, investigateResultPath(dir, closed.result.run), INVESTIGATE_BYTES, closed.result, closed.sha256); });
   const ablate = () => cached("ablate", () => { const closed = readClosedAblate(dir); return source(dir, ablateResultPath(dir), ABLATE_BYTES, closed.result, closed.sha256); });
-  const final = () => cached("final", () => closedFinal(dir));
+  const final = () => cached("final", () => { const closed = readClosedFinal(dir); return source(dir, finalResultPath(dir), FINAL_RESULT_BYTES, closed.result, closed.sha256); });
   let attemptIndex: Map<string, Attempt[]> | undefined;
   const attempt = (id: string, posthoc: boolean): Source<Attempt> => cached(`attempt:${id}:${posthoc}`, () => {
     if (!attemptIndex) {
