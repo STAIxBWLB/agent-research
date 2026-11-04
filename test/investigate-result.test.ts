@@ -142,3 +142,17 @@ test("finite extreme means remain finite, and overflowing deltas refuse instead 
   await expect(ops.investigateClose(bad, ctx)).rejects.toThrow("delta overflows");
   expect(readFileSync(join(bad, "ledger.jsonl"))).toEqual(before); expect(existsSync(investigateResultPath(bad, "investigate"))).toBe(false);
 });
+
+
+test("different paired seed sets rank by direction-adjusted delta, and equal deltas tie even with different means", async () => {
+  for (const direction of ["max", "min"]) {
+    const dir = await setup(direction, 1, 1); baseline(dir, direction === "max" ? [100, 0, 50] : [0, 100, 50]);
+    attempt(dir, BETTER, 1, direction === "max" ? 101 : -1);
+    attempt(dir, OTHER, 2, direction === "max" ? 2 : 98);
+    const result = ops.investigateShow(dir);
+    expect(result.winner?.commit).toBe(OTHER); expect(result.winner?.delta).toBe(2);
+  }
+  const tied = await setup("max", 1, 1); baseline(tied, [100, 0]);
+  attempt(tied, BETTER, 1, 101); attempt(tied, OTHER, 2, 1);
+  expect(ops.investigateShow(tied).reason).toBe("tie"); expect(ops.investigateShow(tied).winner).toBeNull();
+});

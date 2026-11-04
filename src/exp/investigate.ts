@@ -112,13 +112,13 @@ function calculate(input: ReturnType<typeof inputs>): InvestigateResult {
     row.reason = !baseline.perSeed.length ? "no-baseline" : !baseline.eligible ? "baseline-seeds" : !row.perSeed.length ? "no-counted-success" : row.pairs.length < rule.minSeeds ? "candidate-seeds" : row.delta! <= 0 || row.delta! < rule.minDelta ? "below-margin" : "eligible";
     row.eligible = row.reason === "eligible";
   }
-  const eligible = candidates.filter(row => row.eligible).sort((a, b) => metric.direction === "max" ? b.mean! - a.mean! : a.mean! - b.mean!);
+  const eligible = candidates.filter(row => row.eligible).sort((a, b) => b.delta! - a.delta!);
   let winner: InvestigateResult["winner"] = null, reason: NoWinner | undefined;
   if (!baseline.perSeed.length) reason = "no-baseline";
   else if (!baseline.eligible) reason = "baseline-seeds";
   else if (!candidates.some(row => row.pairedSeeds.length >= rule.minSeeds)) reason = "no-candidate";
   else if (!eligible.length) reason = "below-margin";
-  else if (eligible.length > 1 && eligible[0]!.mean === eligible[1]!.mean) reason = "tie";
+  else if (eligible.length > 1 && eligible[0]!.delta === eligible[1]!.delta) reason = "tie";
   else { const row = eligible[0]!; winner = { commit: row.commit, attempts: row.pairs.map(p => p.attempt), mean: row.mean!, delta: row.delta! }; }
   const result: InvestigateResult = {
     v: 1, run: rule.run, ruleSha256: ruleSha, protocolHash: hash,
