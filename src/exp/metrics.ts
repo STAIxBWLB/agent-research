@@ -103,7 +103,8 @@ export async function collectStageEvidence(attempt: Attempt, stage: Stage, runne
     'if test "$status" -ne 0; then if test "$outcut" = true || test "$errcut" = true; then outcut=true; errcut=true; else exit "$status"; fi; fi',
     'printf \'{"stdout":%s,"stderr":%s}\\n\' "$outcut" "$errcut" > "$statetmp"',
     'mv "$outtmp" "$out"; mv "$errtmp" "$err"; mv "$statetmp" "$state"', 'fi',
-    `tar -C ${shellQuote(root)} -cf - ${shellQuote(`logs/${stage}.stdout.log`)} ${shellQuote(`logs/${stage}.stderr.log`)} ${shellQuote(statePath)}`,
+    // Archive content only: BSD tar otherwise emits binary xattr PAX and AppleDouble entries.
+    `COPYFILE_DISABLE=1 tar --no-xattrs -C ${shellQuote(root)} -cf - ${shellQuote(`logs/${stage}.stdout.log`)} ${shellQuote(`logs/${stage}.stderr.log`)} ${shellQuote(statePath)}`,
   ].join("\n");
   let logArchive;
   try { logArchive = await readArtifactArchive(attempt.executor, "sh", ["-c", script], runner, { capture: statePath, captureBytes: 1024, maxFiles: 3, maxBytes: LOG_COPY_BYTES * 2 + 1024 }); }
