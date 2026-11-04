@@ -151,3 +151,16 @@ test("unconsumed definition edits stay ready, and invalid controls leave the led
   ] as const) await expect(ops.planControl(dir, input, ctx)).rejects.toThrow("run ares plan show");
   expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
 });
+
+
+test("uncertain missing attempt records can be explicitly retried or cancelled", async () => {
+  for (const action of ["retry", "cancel"] as const) {
+    const dir = join(tempDir(), "study"); ops.init(dir, { question: "synthetic", mode: "experiment" }, ctx);
+    await ops.planSet(dir, { v: 1, nodes: [step("base")], edges: [] }, ctx);
+    appendEvent(dir, actor, "node.intent", { revision: 1, node: "base", attemptId: "a".repeat(16) });
+    appendEvent(dir, actor, "node.observed", { revision: 1, node: "base", status: "uncertain", reason: "missing record" });
+    const result = await control(dir, action, action, "base");
+    expect(result.status).toBe(action === "retry" ? "ready" : "cancelled");
+    expect(readLedger(dir).filter(e => e.type === "attempt.started")).toHaveLength(0);
+  }
+});

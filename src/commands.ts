@@ -15,7 +15,7 @@ import { cardPath, validateCard } from "./lit/cards.ts";
 import { designBinding, protocolHash, setProtocol } from "./exp/protocol.ts";
 import { requireExperiment } from "./study.ts";
 import { checkExecutor, setExecutor } from "./exp/executor.ts";
-import { cancelAttempt, listAttemptSummaries, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type AttemptListOptions, type AttemptOptions } from "./exp/attempts.ts";
+import { cancelAttempt, listAttempts, listAttemptSummaries, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type AttemptListOptions, type AttemptOptions } from "./exp/attempts.ts";
 import { readAttemptLogs, type LogOptions } from "./exp/logs.ts";
 
 export type ExperimentRuntime = Omit<AttemptContext, "actor">;
@@ -233,9 +233,10 @@ export async function planControl(dirArg: string, request: ControlRequest, ctx: 
     const prepared = prepareControl(state, events, request, ctx.actor);
     if (!prepared.event) return { result: prepared.result };
     const node = state.nodes.find(n => n.id === request.node);
-    if (request.action === "cancel" && node?.attemptId) return { attemptId: node.attemptId };
-    // Do not retry an edited running attempt before its executor outcome is known.
-    if (request.action === "retry" && node?.attemptId && showAttempt(dir, node.attemptId).status === "running") throw new Error(`plan node ${node.id}: attempt is still running; cancel it or run ares attempt reconcile before retry`);
+    const attempt = node?.attemptId ? listAttempts(dir).attempts.find(a => a.id === node.attemptId) : undefined;
+    if (request.action === "cancel" && attempt) return { attemptId: attempt.id };
+    // A missing record after a crash is uncertain, and explicit retry/cancel may release it.
+    if ((request.action === "retry" || request.action === "skip") && attempt?.status === "running") throw new Error(`plan node ${node!.id}: attempt is still running; cancel it or run ares attempt reconcile before retry`);
     commit(dir, [], [prepared.event]);
     return { result: prepared.result };
   });
