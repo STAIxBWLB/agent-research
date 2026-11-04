@@ -109,3 +109,60 @@ test("Markdown punctuation inside metric refs and literal payloads is preserved 
   const report = draft(dir, `{{n:final.status}} {{n:attempt:${id}.${metric}|.1f}} {{lit:year 2026 with \`literal\`}}`);
   expect(report.ok).toBe(true); expect(report.rendered).toBe("qualified 12.0 year 2026 with `literal`");
 });
+
+
+test("citation brackets permit only citekey digits and explicit locator integers or ranges", () => {
+  const dir = study(); references(dir);
+  for (const term of ["p.", "pp.", "sec.", "§", "ch.", "chap.", "fig.", "tbl.", "table", "eq.", "l.", "ll.", "para."]) {
+    for (const numbers of ["3", "3-5", "3--5", "3, 7"]) expect(draft(dir, `Evidence [@good2026, ${term} ${numbers}].`).findings).toEqual([]);
+  }
+  const fabricated = draft(dir, "Evidence [@good2026, improved accuracy by 12.5%].");
+  expect(fabricated.findings.map(f => [f.code, f.column])).toEqual([["bare-number", 43]]);
+  for (const tail of ["12.5%", "page 12", "help. 12", "p. 12.5%", "p. 12%", "p. 12values", "pp. 3, improved by 99"]) {
+    expect(draft(dir, `Evidence [@good2026, ${tail}].`).findings.some(f => f.code === "bare-number")).toBe(true);
+  }
+  expect(draft(dir, "[see @good2026, pp. 3--5; @good2026, fig. 7, improved by 88]").findings.filter(f => f.code === "bare-number")).toHaveLength(1);
+});
+
+test("code digits remain nonblocking but have original value and position in a reviewer list", () => {
+  const dir = study(), report = draft(dir, "A `12.5`.\n```\n3\n```\n    x=4\n[link](url99)\n{{lit:year 2026}}");
+  expect(report.ok).toBe(true); expect(report.codeNumberCount).toBe(3);
+  expect(report.codeNumbers).toEqual([{ value: "12.5", line: 1, column: 4 }, { value: "3", line: 3, column: 1 }, { value: "4", line: 5, column: 7 }]);
+  expect(report.literals).toHaveLength(1);
+  expect(draft(dir, "Unmatched `code 12").codeNumberCount).toBe(0);
+});
+
+test("code number list caps at 500 while total includes every occurrence", async () => {
+  const dir = study(), values = Array.from({ length: 507 }, (_, index) => String(index));
+  const report = draft(dir, "```\n" + values.join(" ") + "\n```");
+  expect(report.ok).toBe(true); expect(report.codeNumbers).toHaveLength(500); expect(report.codeNumberCount).toBe(507);
+  expect(report.codeNumbers[499]?.value).toBe("499");
+  const cli = JSON.parse((await run(["paper", "check", dir, "--json"], {}, { http: ctx.http })).text);
+  expect(cli.codeNumberCount).toBe(507); expect(cli.codeNumbers).toHaveLength(500);
+  expect(await createAresMcp({}, ctx.http).handlers.ares_paper_check!({ study: dir })).toEqual(report);
+});
+
+
+test("hidden comments and reference metadata cannot satisfy negative-result prose", async () => {
+  for (const winner of [true, false]) {
+    const { dir } = await results(winner), ref = winner ? "final.status" : "investigate.reason";
+    for (const hidden of [`<!-- {{n:${ref}}} -->`, `<!--\n{{n:${ref}}}\n-->`, `[{{n:${ref}}}]: https://example.test`]) {
+      expect(draft(dir, "Nothing to report.\n" + hidden).findings.some(f => f.code === "missing-negative-result")).toBe(true);
+    }
+    expect(draft(dir, `Visible {{n:${ref}}}.`).ok).toBe(true);
+  }
+  const dir = study();
+  const comment = draft(dir, "<!--\n```\n-->\nWe improved 42 percent.");
+  expect(comment.findings.map(f => f.code)).toEqual(["bare-number"]); expect(comment.codeNumberCount).toBe(0);
+});
+
+test("paragraph and list continuations stay prose while genuine indented blocks remain code", () => {
+  const dir = study();
+  for (const text of ["Results:\n    We improved 42 percent.", "- Results:\n    We improved 42 percent.", "- Results:\n\n    We improved 42 percent.", "- Outer\n  - Inner\n    - Deep\n\n        We improved 42 percent."]) {
+    const report = draft(dir, text); expect(report.findings.some(f => f.code === "bare-number")).toBe(true); expect(report.codeNumberCount).toBe(0);
+  }
+  expect(draft(dir, "Results:\n    Claim [@missing2026].").findings[0]?.code).toBe("unknown-citation");
+  for (const text of ["Results:\n\n    code42", "- Results:\n\n      code42", "    code42\n    code43"]) {
+    const report = draft(dir, text); expect(report.ok).toBe(true); expect(report.codeNumberCount).toBeGreaterThan(0);
+  }
+});
