@@ -1,3 +1,4 @@
+import { addReview, resolveReview, reviewReadiness, reviewBinding, requireReviewReady } from "./paper/review.ts";
 import { buildPaper } from "./paper/build.ts";
 import { checkPaper } from "./paper/check.ts";
 import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
@@ -34,7 +35,7 @@ export interface Ctx extends ExperimentRuntime { actor: Actor; http: Http; signa
 const MAX_IDS = 200, DRAFT_BYTES = 2 * 1024 * 1024, BIB_BYTES = 16 * 1024 * 1024, CARD_BYTES = 65_536;
 
 export function binder(dir: string): Binder {
-  return gate => gate === "final" ? finalGateBinding(dir) : gate.startsWith("plan:") ? planGateBinding(readPlanState(dir, readLedger(dir)), gate) : gate === "scope" ? scopeHash(dir) : gate === "design" ? designBinding(dir) : includedHash(loadCandidates(dir));
+  return gate => gate === "review" ? reviewBinding(dir) : gate === "final" ? finalGateBinding(dir) : gate.startsWith("plan:") ? planGateBinding(readPlanState(dir, readLedger(dir)), gate) : gate === "scope" ? scopeHash(dir) : gate === "design" ? designBinding(dir) : includedHash(loadCandidates(dir));
 }
 function gateName(value: string): GateName {
   if (!GATES.includes(value as GateName) && !value.startsWith("plan:")) throw new Error(`unknown gate: ${value} (${GATES.join(", ")})`);
@@ -114,6 +115,7 @@ export async function gateDecide(dirArg: string, gate: string, decision: "approv
   if (name === "design" || name === "final") requireExperiment(study);
   return withLock(dir, () => {
     if (name === "final") requireFinalInputs(dir);
+    if (name === "review" && decision === "approve") requireReviewReady(dir);
     if (name.startsWith("plan:") && !readPlanState(dir, readLedger(dir)).definition.nodes.some(n => n.id === name.slice(5) && n.kind === "gate")) throw new Error(`gate ${name}: no gate node ${name.slice(5)} in the plan; run ares gate list and select an existing gate`);
     return decideGate(dir, name, decision, ctx.actor, binder(dir), why);
   });
@@ -412,3 +414,11 @@ export const paperCheck = (dir: string) => checkPaper(dir);
 export async function paperBuild(dirArg: string, ctx: Pick<Ctx, "actor">) {
   const { dir } = openStudy(dirArg); return withLock(dir, () => buildPaper(dir, ctx.actor));
 }
+
+export async function reviewAdd(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
+  const { dir } = openStudy(dirArg); return withLock(dir, () => addReview(dir, raw, ctx.actor));
+}
+export async function reviewResolve(dirArg: string, target: string, reason: string, ctx: Pick<Ctx, "actor">) {
+  const { dir } = openStudy(dirArg); return withLock(dir, () => resolveReview(dir, target, reason, ctx.actor));
+}
+export const reviewShow = (dir: string) => reviewReadiness(dir);

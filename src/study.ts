@@ -6,8 +6,8 @@ import { dirname, join, resolve } from "node:path";
 
 export type Mode = "survey" | "experiment";
 export type Autonomy = "auto" | "gates";
-export type GateName = "scope" | "screen" | "design" | "final" | `plan:${string}`;
-export const GATES: readonly GateName[] = ["scope", "screen", "design", "final"];
+export type GateName = "scope" | "screen" | "design" | "final" | "review" | `plan:${string}`;
+export const GATES: readonly GateName[] = ["scope", "screen", "design", "final", "review"];
 export interface Study { v: 1; id: string; question: string; mode: Mode; autonomy: Autonomy; createdAt: string }
 export interface Actor { kind: "person" | "agent" | "auto"; id?: string }
 export function requireExperiment(study: Study): void {
