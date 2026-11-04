@@ -3,7 +3,7 @@ import { listAttempts } from "./attempts.ts";
 
 export const MAX_IDEAS = 1000, MAX_DECISION_ATTEMPTS = 200;
 export interface IdeaInput { id: string; title: string; hypothesis: string; parent?: string; commit?: string }
-export interface IdeaDecision { decision: "refine" | "pivot"; reason: string; attempts: string[]; commit?: string }
+export interface IdeaDecision { decision: "refine" | "pivot"; reason: string; attempts: string[]; commit?: string; cause?: string; retryWhen?: string }
 export interface Idea { id: string; title: string; hypothesis: string; parent?: string; commits: string[]; state: "open" | "pivoted"; decisions: IdeaDecision[] }
 const recovery = "; correct the idea input and retry ares idea add or ares idea decide";
 function bad(reason: string): never { throw new Error(`idea: ${reason}${recovery}`); }
@@ -21,17 +21,28 @@ function validateIdea(raw: unknown, strict: boolean): IdeaInput {
   return { id: name(raw.id, "id"), title: boundedText(raw.title, "idea.title", 500), hypothesis: boundedText(raw.hypothesis, "idea.hypothesis", 4000),
     ...(raw.parent !== undefined ? { parent: name(raw.parent, "parent") } : {}), ...(raw.commit !== undefined ? { commit: commitId(raw.commit) } : {}) };
 }
+function pivotContext(raw: Record<string, unknown>, strict: boolean): Pick<IdeaDecision, "cause" | "retryWhen"> {
+  if (strict && raw.decision !== "pivot" && (raw.cause !== undefined || raw.retryWhen !== undefined)) bad("cause and retryWhen are pivot-only; omit --cause and --retry-when for refine");
+  const extra: { cause?: string; retryWhen?: string } = {};
+  for (const field of ["cause", "retryWhen"] as const) if (raw[field] !== undefined && raw.decision === "pivot") {
+    const value = boundedText(raw[field], `idea ${field}`, 2000);
+    if (Buffer.byteLength(value) > 2000) bad(`${field}: at most 2000 bytes required`);
+    extra[field] = value;
+  }
+  return extra;
+}
 function validateDecision(raw: unknown, strict: boolean): IdeaDecision {
   if (!plain(raw)) bad("decision object required");
-  if (strict) onlyKeys(raw, ["decision", "reason", "attempts", "commit"], "idea decision");
+  if (strict) onlyKeys(raw, ["decision", "reason", "attempts", "commit", "cause", "retryWhen"], "idea decision");
   if (raw.decision !== "refine" && raw.decision !== "pivot") bad("decision: use refine or pivot");
   // Reject new pivot commit options; keep older ledger entries readable on replay.
   if (strict && raw.decision === "pivot" && raw.commit !== undefined) bad("pivot does not take --commit; omit --commit, or use refine to attach a commit");
+  const extra = pivotContext(raw, strict);
   const reason = boundedText(raw.reason, "idea reason", 2000);
   if (Buffer.byteLength(reason) > 2000) bad("reason: at most 2000 bytes required");
   if (raw.attempts !== undefined && (!Array.isArray(raw.attempts) || raw.attempts.length > MAX_DECISION_ATTEMPTS || raw.attempts.some(a => typeof a !== "string" || !/^[a-f0-9]{16}$/.test(a)))) bad(`attempts: name at most ${MAX_DECISION_ATTEMPTS} 16-hex attempt ids from ares attempt list`);
   if (raw.decision === "refine" && raw.commit === undefined) bad("refine requires --commit with a full frozen SHA");
-  return { decision: raw.decision, reason, attempts: [...new Set((raw.attempts as string[] | undefined) ?? [])], ...(raw.commit !== undefined ? { commit: commitId(raw.commit) } : {}) };
+  return { decision: raw.decision, reason, ...extra, attempts: [...new Set((raw.attempts as string[] | undefined) ?? [])], ...(raw.commit !== undefined ? { commit: commitId(raw.commit) } : {}) };
 }
 function claim(ideas: Iterable<Idea>, id: string, frozen?: string): void {
   if (!frozen) return;
