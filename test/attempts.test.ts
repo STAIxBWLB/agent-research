@@ -2,11 +2,11 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { init, gateDecide, gateList } from "../src/commands.ts";
+import { init, gateDecide, gateList, planSet, planControl, planShow } from "../src/commands.ts";
 import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
-import { readLedger, sha256, withLock } from "../src/study.ts";
+import { readLedger, sha256, withLock, appendEvent } from "../src/study.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
 import { logCaptureFixtureRunner, metricLogTar, metricTar } from "./metric-fixtures.ts";
 import { collectStageEvidence, EvidenceError, LOG_COPY_BYTES } from "../src/exp/metrics.ts";
@@ -387,3 +387,35 @@ test("oversized stage logs are capped and marked truncated without failing a suc
     expect(Object.keys(done.stages[stage]!.evidence!.logs.stdout).sort()).toEqual(["bytes", "path", "sha256", "truncated"]);
   }
 }, 10_000);
+
+
+test("plan cancellation uses attempt cancel, commits its receipt with the terminal record, and replays without executor access", async () => {
+  const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
+  const ctx = { ...fake.ctx, http: fakeHttp([]).http };
+  await planSet(dir, { v: 1, nodes: [{ id: "work", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }], edges: [] }, ctx);
+  appendEvent(dir, actor, "node.intent", { revision: 1, node: "work", attemptId: first.id });
+  const input = { action: "cancel" as const, node: "work", commandId: "cancel-work", expectedRevision: 1 };
+  const result = await planControl(dir, input, ctx);
+  expect(result.status).toBe("cancelled"); expect(showAttempt(dir, first.id).status).toBe("cancelled");
+  expect(running(fake, "candidate").running).toBe(false);
+  expect(listAttempts(dir, {}).totals.cancelled).toBe(1);
+  const requests = fake.requests.length, events = readLedger(dir);
+  expect(events.filter(e => e.type === "plan.control")).toHaveLength(1);
+  expect(events.find(e => e.type === "plan.control")!.at).toBe(events.find(e => e.type === "attempt.cancelled")!.at);
+  expect(await planControl(dir, input, ctx)).toEqual(result);
+  expect(fake.requests).toHaveLength(requests); expect(readLedger(dir)).toEqual(events);
+  expect(planShow(dir).nodes[0]!.status).toBe("cancelled");
+});
+
+test("failed plan cancellation records no control receipt; a later cancel can complete", async () => {
+  const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
+  const ctx = { ...fake.ctx, http: fakeHttp([]).http };
+  await planSet(dir, { v: 1, nodes: [{ id: "work", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }], edges: [] }, ctx);
+  appendEvent(dir, actor, "node.intent", { revision: 1, node: "work", attemptId: first.id });
+  const input = { action: "cancel" as const, node: "work", commandId: "cancel-work", expectedRevision: 1 };
+  const badCtx = { ...ctx, runner: async () => { throw new Error("synthetic unreachable executor"); } };
+  await expect(planControl(dir, input, badCtx)).rejects.toThrow();
+  expect(readLedger(dir).filter(e => e.type === "plan.control")).toHaveLength(0);
+  expect(planShow(dir).nodes[0]!.status).toBe("dispatched");
+  expect((await planControl(dir, input, ctx)).status).toBe("cancelled");
+});

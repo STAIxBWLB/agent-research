@@ -54,10 +54,11 @@ const PLAN = obj({
 export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_manifest", description: "Read this ares version, implemented commands and shared schema versions without opening a study or reaching an executor.", inputSchema: obj({}, []), annotations: read },
   { name: "ares_plan_set", description: "Validate and set a bounded plan definition, creating a paused revision.", inputSchema: obj({ study, plan: PLAN }, ["study", "plan"]), annotations: write },
+  { name: "ares_plan_control", description: "Pause/resume admission or retry/cancel/skip a node using a durable command id and expected definition revision. Cancelling an attempt may contact its executor.", inputSchema: obj({ study, action: { type: "string", enum: ["pause", "resume", "retry", "cancel", "skip"] }, node: text(128), commandId: text(128), expectedRevision: integer(1, Number.MAX_SAFE_INTEGER) }, ["study", "action", "commandId", "expectedRevision"]), annotations: net },
   { name: "ares_plan_show", description: "Read the plan definition without taking a lock.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_status", description: "Study summary: gates, candidate counts, verification counts, bibliography.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_scope_set", description: "Set scope.json (question, subquestions, include, exclude, yearFrom, yearTo, maxCandidates). A change returns the scope gate to pending.", inputSchema: obj({ study, scope: SCOPE }, ["study", "scope"]), annotations: write },
-  { name: "ares_gate", description: "List gates, or approve or reject scope, screen or experiment design. The ledger records the actor; who may approve is workspace policy.", inputSchema: obj({ study, action: { type: "string", enum: ["list", "approve", "reject"] }, gate: { type: "string", enum: ["scope", "screen", "design"] }, reason }, ["study", "action"]), annotations: write },
+  { name: "ares_gate", description: "List gates, or approve or reject scope, screen, experiment design or plan:node-id. The ledger records the actor; who may approve is workspace policy.", inputSchema: obj({ study, action: { type: "string", enum: ["list", "approve", "reject"] }, gate: text(133), reason }, ["study", "action"]), annotations: write },
   { name: "ares_protocol_set", description: "Set an experiment protocol after bounded validation of protocol and task/. Changes reopen design approval; attempt protocol identity excludes budget.", inputSchema: obj({ study, protocol: PROTOCOL }, ["study", "protocol"]), annotations: write },
   { name: "ares_executor_set", description: "Configure local or SSH Docker execution with an explicit private absolute workdir. Stores the host alias only, never credentials.", inputSchema: obj({ study, kind: { type: "string", enum: ["local", "ssh"] }, host: text(128), workdir: text(4096) }, ["study", "kind", "workdir"]), annotations: write },
   { name: "ares_executor_check", description: "Check executor Docker server, non-root uid:gid and digest-pinned image availability; pulls missing images.", inputSchema: obj({ study }, ["study"]), annotations: net },
@@ -90,6 +91,7 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
   const handlers: Record<string, McpHandler> = {
     ares_manifest: () => ops.manifest(),
     ares_plan_set: a => ops.planSet(dir(a), a.plan, ctx),
+    ares_plan_control: a => ops.planControl(dir(a), { action: a.action as Parameters<typeof ops.planControl>[1]["action"], commandId: a.commandId as string, expectedRevision: a.expectedRevision as number, ...(a.node !== undefined ? { node: a.node as string } : {}) }, ctx),
     ares_plan_show: a => ops.planShow(dir(a)),
     ares_status: a => ops.status(dir(a)),
     ares_scope_set: a => ops.scope(dir(a), a.scope, ctx),
