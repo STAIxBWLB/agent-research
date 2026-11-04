@@ -85,3 +85,26 @@ test("undo can remove unchanged registration after its plugin module is removed"
   const f = fixture(), action = consoleManifest("apply", f.env, f.root).actions[0]!; fs.unlinkSync(f.module);
   expect(consoleManifest("undo", f.env, f.root).applied).toBe(true); expect(fs.existsSync(action.file)).toBe(false);
 });
+
+test("explicit root versions match the pinned console loader's VERSION and filename bounds", async () => {
+  const base = "123456789.123456789.123456789", loader = fs.existsSync(new URL("../node_modules/@staix/agent-console/src/plugins.ts", import.meta.url))
+    ? await import("../node_modules/@staix/agent-console/src/plugins.ts") : null;
+  const valid = [base, `1.2.3+${"x".repeat(40)}`, `${base}-${"x".repeat(34)}`];
+  expect(valid[2]!.length).toBe(64);
+  for (const version of valid) {
+    const f = fixture(version), report = runSetup("console", "apply", { env: f.env, root: f.root }), action = report.actions[0]!;
+    expect(report.applied).toBe(true); expect(action.file).toBe(join(f.family, "console", "plugins", `ares@${version}.json`));
+    if (loader) expect(loader.scanPlugins(f.family).entries[0]!.status).toBe("verified");
+    expect(runSetup("console", "undo", { env: f.env, root: f.root }).applied).toBe(true);
+  }
+  const invalid = ["1234567890.0.0", `1.2.3-${"x".repeat(41)}`, `${base}-${"x".repeat(35)}`];
+  expect(invalid[2]!.length).toBe(65);
+  for (const version of invalid) {
+    const f = fixture(version);
+    for (const mode of ["dry-run", "apply", "undo"] as const) {
+      expect(() => runSetup("console", mode, { env: f.env, root: f.root })).toThrow("release version cannot name a console registration");
+      expect(() => runSetup("console", mode, { env: f.env, root: f.root })).toThrow("three 1..9-digit parts");
+      expect(fs.existsSync(f.family)).toBe(false);
+    }
+  }
+});

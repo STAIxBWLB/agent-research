@@ -284,7 +284,7 @@ export function consoleManifest(mode: SetupMode, env: NodeJS.ProcessEnv, request
     desired = { api: 1, tool: "ares", module, sha256: sha256(bytes) };
   }
   const pkg = record(JSON.parse(read(join(root, "package.json"), 65_536, false)!)), version = pkg.version;
-  if (versioned && (typeof version !== "string" || version.length > 128 || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))) fail("release version cannot name a console registration", "use an agent-research root with a semantic package version");
+  if (versioned && (typeof version !== "string" || version.length > 64 || !/^\d{1,9}\.\d{1,9}\.\d{1,9}(?:[-+][0-9A-Za-z.+-]{1,40})?$/.test(version))) fail("release version cannot name a console registration", "use an agent-research root with a semantic package version: three 1..9-digit parts, optional -/+ suffix of 1..40 characters from 0-9A-Za-z.+-, and at most 64 characters total");
   const family = absolute(env.AGENTHUB_HOME?.trim() || join(absolute(env.HOME?.trim() || homedir(), "HOME"), ".agenthub"), "AGENTHUB_HOME");
   const file = join(family, "console", "plugins", versioned ? `ares@${version}.json` : "ares.json");
   const host: Host = { target: "console", file, key: "", format: "manifest" }, receiptPath = join(family, "research", "setup", `console-${sha256(file).slice(0, 16)}.json`);

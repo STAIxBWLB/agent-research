@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { version } from "../../package.json";
 import * as ops from "../commands.ts";
+import { foldPlan } from "../plan/state.ts";
 import { readRegistry, MAX_REGISTERED_STUDIES } from "../console/registry.ts";
+import { readAttemptRecords, type Attempt } from "../exp/attempts.ts";
 import { readClosedFinal } from "../exp/final.ts";
 import { readCurrentBuild } from "../paper/build.ts";
 import { loadCandidates } from "../lit/candidates.ts";
@@ -28,17 +30,50 @@ const stamp = (value: unknown, fallback = EPOCH) => typeof value === "string" &&
 function readCall<T>(name: string, fn: () => T, errors: Record<string, string>): T | null {
   try { return fn(); } catch (cause) { errors[name] = error(cause); return null; }
 }
-function gateTime(gate: string, events: LedgerEvent[], fallback: string): string {
-  const types: Record<string, string[]> = { scope: ["scope.set"], screen: ["lit.screen"], design: ["protocol.set", "selection.set", "final.seeds.set"], final: ["investigate.closed", "ablate.closed", "final.seeds.set"], review: ["paper.built", "review.added", "review.resolved"] };
-  const event = events.findLast(row => (types[gate] ?? ["plan.set", "node.observed"]).includes(row.type));
-  return stamp(event?.at, fallback);
+function planGateTimes(events: LedgerEvent[]): Map<string, string> {
+  const waiting = new Map<string, string>(); let previous = new Map<string, string | undefined>();
+  foldPlan(events, (state, event) => {
+    const current = new Map<string, string | undefined>();
+    for (const node of state.nodes) if (node.kind === "gate") {
+      const gate = `plan:${node.id}`, binding = node.gate?.current; current.set(gate, binding);
+      if (binding === undefined) waiting.delete(gate);
+      else if (previous.get(gate) !== binding) waiting.set(gate, event.at);
+    }
+    for (const gate of waiting.keys()) if (!current.has(gate)) waiting.delete(gate);
+    previous = current;
+  });
+  return waiting;
+}
+function gateTime(gate: string, events: LedgerEvent[], fallback: string, planTimes: ReadonlyMap<string, string>): string {
+  if (gate.startsWith("plan:")) return stamp(planTimes.get(gate), fallback);
+  const types: Record<string, string[]> = { scope: ["scope.set"], screen: ["lit.screen"], design: ["protocol.set", "selection.set", "final.seeds.set"], final: ["protocol.set", "selection.set", "final.seeds.set", "investigate.closed", "ablate.closed"], review: ["paper.built", "review.added", "review.resolved"] };
+  const previous = new Map<string, string>(), included = new Set<string>(); let at = fallback;
+  for (const event of events) {
+    if (!(types[gate] ?? []).includes(event.type)) continue;
+    let signature: string;
+    if (event.type === "lit.screen") {
+      let changed = false;
+      for (const id of Array.isArray(event.data.ids) ? event.data.ids : []) if (typeof id === "string") {
+        if (event.data.decision === "include" && !included.has(id)) { included.add(id); changed = true; }
+        else if (event.data.decision === "exclude" && included.delete(id)) changed = true;
+      }
+      if (!changed) continue;
+      signature = JSON.stringify([...included].sort());
+    } else signature = event.type === "protocol.set" ? JSON.stringify([event.data.sha256, event.data.treeHash]) : typeof event.data.sha256 === "string" ? event.data.sha256 : JSON.stringify(event.data);
+    if (previous.get(event.type) !== signature) { previous.set(event.type, signature); at = stamp(event.at, at); }
+  }
+  return at;
 }
 function attempts(dir: string, all: boolean) {
-  const first = ops.attemptList(dir, { limit: 200 }), rows = [...first.attempts];
-  for (let offset = rows.length; all && offset < first.total; offset = rows.length) {
-    const page = ops.attemptList(dir, { limit: 200, offset }); if (!page.attempts.length) break; rows.push(...page.attempts);
+  const byStatus = { running: 0, succeeded: 0, failed: 0, cancelled: 0, unknown: 0 }, rows: Pick<Attempt, "id" | "status" | "reason">[] = [];
+  let total = 0;
+  for (const row of readAttemptRecords(dir)) {
+    total++; byStatus[row.status]++;
+    if (!all || (row.status !== "failed" && row.status !== "unknown")) continue;
+    if (row.reason !== undefined && (typeof row.reason !== "string" || row.reason.length > 500)) throw new Error("attempt inbox: malformed reason; restore the last valid bounded attempt record and refresh");
+    rows.push({ id: row.id, status: row.status, ...(row.reason === undefined ? {} : { reason: row.reason }) });
   }
-  return { total: first.total, byStatus: first.totals, rows };
+  return { total, byStatus, rows };
 }
 function loadStudy(dir: string, features: readonly string[], input: { panel: string; study?: string; id?: string }) {
   const { study } = openStudy(dir), events = readLedger(dir), errors: Record<string, string> = {}, key = sha256(dir).slice(0, 16);
@@ -53,7 +88,8 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
   const review = readCall("review", () => ops.reviewShow(dir), errors), skills = detailed || inbox ? readCall("skills", () => ops.skillList(dir), errors) : null;
   const watch = readCall("watch", () => ops.watchShow(dir), errors), lastWatch = watch?.runs[0] ?? null;
   if (inbox) {
-  for (const gate of gates.filter(row => row.state === "pending")) add("gate", `${gate.gate}:${gate.current}`, "decision", `Approve or reject ${gate.gate}`, gateTime(gate.gate, events, stamp(events[0]?.at, stamp(study.createdAt))), study.question,
+  const planTimes = gates.some(row => row.gate.startsWith("plan:")) ? planGateTimes(events) : new Map<string, string>();
+  for (const gate of gates.filter(row => row.state === "pending")) add("gate", `${gate.gate}:${gate.current}`, "decision", `Approve or reject ${gate.gate}`, gateTime(gate.gate, events, stamp(events[0]?.at, stamp(study.createdAt)), planTimes), study.question,
     [{ id: "gate.approve", label: "Approve", destructive: true }, { id: "gate.reject", label: "Reject", destructive: true, reason: "required" }]);
   const current = new Map(loadCandidates(dir).filter(row => row.status === "new").map(row => [row.id, row])), watched = new Map<string, LedgerEvent>();
   for (const event of events) if (event.type === "watch.ran" && Array.isArray(event.data.addedIds)) for (const id of event.data.addedIds) if (typeof id === "string" && current.has(id)) watched.set(id, event);
@@ -73,8 +109,10 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
     const row = review!.reviews.find(row => row.id === finding.reviewId);
     add("review", `${finding.reviewId}/${finding.findingId}`, "review", `${finding.kind}: ${finding.text}`, row?.at ?? at, finding.location);
   }
+  const attemptEvents = new Map<string, LedgerEvent>();
+  for (const event of events) if (typeof event.data.id === "string" && (event.data.status === "failed" || event.data.status === "unknown")) attemptEvents.set(`${event.data.id}:${event.data.status}`, event);
   for (const row of attempt?.rows ?? []) if (row.status === "failed" || row.status === "unknown") {
-    const event = events.findLast(event => event.data.id === row.id && event.data.status === row.status);
+    const event = attemptEvents.get(`${row.id}:${row.status}`);
     add("attempt", row.id, "alert", `${row.status} attempt ${row.id}`, event?.at ?? at, row.reason ?? "Inspect ares attempt show before retrying");
   }
   for (const event of events) if (event.type === "watch.ran" && event.data.ok === false) add("watch", event.at + events.indexOf(event), "alert", "Every watch source failed", event.at, "Inspect ares watch show and retry after restoring source access");
@@ -111,6 +149,7 @@ export const plugin = {
           catch (cause) {
             const key = sha256(dir).slice(0, 16), reason = error(cause);
             let at = lastAt.get(dir) ?? EPOCH; try { at = stamp(readLedger(dir).at(-1)?.at, at); } catch { /* no readable ledger; keep stable fallback */ }
+            lastAt.set(dir, at);
             const row = { id: key, dir, available: false, reason }; studies.push(row); details.set(dir, row);
             items.push({ id: `unavailable:${key}`, group: "alert", kind: "unavailable", title: "Study unavailable", detail: `${reason}${at === EPOCH ? "; ledger time unavailable" : ""}`, project: key, at, verbs: [], link: { panel: "study", params: { study: dir } } });
           }

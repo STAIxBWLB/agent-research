@@ -169,3 +169,83 @@ test("truncated watch receipts show one event-timed overflow notice without infe
   const notices = items.filter(row => row.kind === "watch-overflow"); expect(notices).toHaveLength(1); expect(notices[0]!.title).toContain("3 watch candidate ids"); expect(notices[0]!.at).toBe(event.at); expect(notices[0]!.verbs).toEqual([]);
   expect(rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.id === notices[0]!.id)?.at).toBe(event.at);
 });
+
+
+function lastEventTime(dir: string, at: string) {
+  const events = readLedger(dir); events.at(-1)!.at = at; fs.writeFileSync(join(dir, "ledger.jsonl"), events.map(event => JSON.stringify(event)).join("\n") + "\n");
+}
+
+test("inbox totals and failure alerts read each bounded attempt record once across multiple pages", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "many-attempts", "experiment"), folder = join(study, "runs", "investigate", "attempts");
+  fs.mkdirSync(folder, { recursive: true }); const count = 401;
+  for (let i = 0; i < count; i++) {
+    const id = (i + 1).toString(16).padStart(16, "0"), status = ["succeeded", "failed", "unknown"][i % 3]!;
+    fs.writeFileSync(join(folder, `${id}.json`), JSON.stringify({ v: 1, id, run: "investigate", stage: "evaluator", status, stages: {}, protocol: {}, executor: {}, startedAt: "2030-01-01T00:00:00Z", label: "synthetic", commit: BASE, seed: 1, metrics: [], outputs: [] }));
+  }
+  addStudy(family, study); const provider = await typed.open(context(family)), original = fs.openSync, reads = new Map<string, number>();
+  const spy = spyOn(fs, "openSync").mockImplementation(((file: fs.PathLike, flags: fs.OpenMode, mode?: fs.Mode) => {
+    if (String(file).startsWith(folder + "/") && String(file).endsWith(".json")) reads.set(String(file), (reads.get(String(file)) ?? 0) + 1);
+    return original(file, flags, mode);
+  }) as typeof fs.openSync);
+  let snapshot: Record<string, unknown>;
+  try { snapshot = await provider.snapshot({ panel: "inbox", after: 0 }); } finally { spy.mockRestore(); }
+  expect(reads.size).toBe(count); expect([...reads.values()].every(value => value === 1)).toBe(true);
+  expect(rows(snapshot.items).filter(row => row.kind === "attempt")).toHaveLength(267);
+  const studies = await provider.snapshot({ panel: "studies", after: 0 }); expect(rows(studies.studies)[0]!.attempts).toEqual({ total: count, byStatus: { running: 0, succeeded: 134, failed: 134, cancelled: 0, unknown: 133 } });
+});
+
+test("an unavailable study caches a readable ledger time before its ledger also becomes unreadable", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "partial-unavailable"); addStudy(family, study);
+  const at = "2030-02-01T00:00:00.000Z"; lastEventTime(study, at); fs.writeFileSync(join(study, "study.json"), "invalid study JSON");
+  const provider = await typed.open(context(family)), first = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.kind === "unavailable")!;
+  expect(first.at).toBe(at); fs.unlinkSync(join(study, "ledger.jsonl"));
+  const second = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.kind === "unavailable")!;
+  expect(second.id).toBe(first.id); expect(second.at).toBe(at); expect(second.detail).not.toContain("ledger time unavailable");
+});
+
+test("plan gate waiting time follows accepted ancestor outputs and approvals, not unrelated observations", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "plan-times");
+  const step = (id: string, query = "synthetic") => ({ id, kind: "step", command: "lit.search", args: { query } });
+  const nodes = [step("base"), { id: "upstream", kind: "gate", needs: ["base"], binds: ["base"] }, { id: "decision", kind: "gate", needs: ["upstream"], binds: ["upstream"] }, step("unrelated")];
+  await ops.planSet(study, { v: 1, nodes, edges: [] }, ctx);
+  appendEvent(study, actor, "node.intent", { revision: 1, node: "base", dispatchId: "base-1" });
+  appendEvent(study, actor, "node.observed", { revision: 1, node: "base", dispatchId: "base-1", status: "done", output: { sha256: "a".repeat(64) } });
+  await ops.gateDecide(study, "plan:upstream", "approve", undefined, ctx);
+  const at = "2030-03-01T00:00:00.000Z"; lastEventTime(study, at); addStudy(family, study);
+  const provider = await typed.open(context(family));
+  const waiting = async () => rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.kind === "gate" && row.title.includes("plan:decision"))!;
+  const first = await waiting(); expect(first.at).toBe(at);
+  appendEvent(study, actor, "node.intent", { revision: 1, node: "unrelated", dispatchId: "other-1" });
+  appendEvent(study, actor, "node.observed", { revision: 1, node: "unrelated", dispatchId: "other-1", status: "done", output: { sha256: "b".repeat(64) } }); lastEventTime(study, "2030-03-02T00:00:00.000Z");
+  expect((await waiting()).at).toBe(first.at);
+  appendEvent(study, actor, "node.observed", { revision: 1, node: "base", dispatchId: "base-1", status: "done", output: { sha256: "c".repeat(64) } }); lastEventTime(study, "2030-03-03T00:00:00.000Z");
+  expect((await waiting()).at).toBe(first.at);
+  await ops.planSet(study, { v: 1, nodes: [...nodes.slice(0, 3), step("unrelated", "changed")], edges: [] }, ctx); lastEventTime(study, "2030-03-04T00:00:00.000Z");
+  const second = await waiting(); expect(second.id).toBe(first.id); expect(second.at).toBe(first.at);
+});
+
+test("final gate waiting time follows protocol and selection changes in its design binding", async () => {
+  for (const input of ["protocol", "selection"]) {
+    const f = await fixtures(fs.realpathSync(tempDir())), old = finalGateBinding(f.experiment);
+    if (input === "protocol") await ops.protocol(f.experiment, { ...readProtocol(f.experiment)!, method: "Changed synthetic method" }, ctx);
+    else await ops.selection(f.experiment, { v: 1, run: "investigate", metric: "score", baseline: { commit: BASE }, minSeeds: 1, minDelta: 2 }, ctx);
+    const at = "2030-04-01T00:00:00.000Z"; lastEventTime(f.experiment, at); expect(finalGateBinding(f.experiment)).not.toBe(old);
+    const provider = await typed.open(context(f.family)), items = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items), gate = items.find(row => row.kind === "gate" && row.title === "Approve or reject final")!;
+    expect(gate.at).toBe(at);
+    await ops.protocol(f.experiment, readProtocol(f.experiment)!, ctx); lastEventTime(f.experiment, "2030-04-02T00:00:00.000Z");
+    expect(rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.id === gate.id)?.at).toBe(at);
+    appendEvent(f.experiment, actor, "synthetic.unrelated", {}); lastEventTime(f.experiment, "2030-04-03T00:00:00.000Z");
+    expect(rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.id === gate.id)?.at).toBe(at);
+  }
+});
+
+
+test("screen waiting time does not move when excluding an unrelated new candidate", async () => {
+  const f = await fixtures(fs.realpathSync(tempDir())); await ops.gateDecide(f.survey, "scope", "approve", undefined, ctx);
+  const file = join(f.survey, "literature", "candidates.json"), candidates = JSON.parse(fs.readFileSync(file, "utf8")); candidates[1].status = "new"; fs.writeFileSync(file, JSON.stringify(candidates));
+  await ops.screen(f.survey, ["doi:10.0000/live"], "include", "Synthetic inclusion", ctx); const at = "2030-05-01T00:00:00.000Z"; lastEventTime(f.survey, at);
+  const provider = await typed.open(context(f.family)); const waiting = async () => rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.kind === "gate" && row.title === "Approve or reject screen")!;
+  const first = await waiting(); expect(first.at).toBe(at);
+  await ops.screen(f.survey, ["doi:10.0000/screened"], "exclude", "Synthetic exclusion", ctx); lastEventTime(f.survey, "2030-05-02T00:00:00.000Z");
+  const second = await waiting(); expect(second.id).toBe(first.id); expect(second.at).toBe(first.at);
+});

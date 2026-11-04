@@ -92,7 +92,8 @@ function refresh(state: PlanState, decisions: Map<string, LedgerEvent>): void {
   else if (state.state === "done") state.state = "paused";
 }
 /** Sole state authority: replay ledger events; no cache or snapshot is written. */
-export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
+/** Optional observer sees each effective, refreshed event; it must not mutate the folded state. */
+export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, event: LedgerEvent) => void): PlanState | undefined {
   let state: PlanState | undefined;
   const decisions = new Map<string, LedgerEvent>();
   const dispatches = new Set<string>();
@@ -100,7 +101,7 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
     const d = event.data;
     if (event.type === "gate.approve" || event.type === "gate.reject") {
       if (typeof d.gate === "string") decisions.set(d.gate, event);
-      if (state) refresh(state, decisions);
+      if (state) { refresh(state, decisions); onEvent?.(state, event); }
       continue;
     }
     if (event.type === "plan.set") {
@@ -120,7 +121,7 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
         if (stale.has(n.id) && consumed(value)) reset(value, "stale");
         return value;
       }), uncertain: [] };
-      refresh(state, decisions); continue;
+      refresh(state, decisions); onEvent?.(state, event); continue;
     }
     if (!state) continue;
     if (!["plan.control", "plan.paused", "node.intent", "node.observed", "node.stale"].includes(event.type)) continue;
@@ -166,7 +167,7 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
             node.status = "failed"; delete node.output;
             node.reason = "hub child task binding changed or invalid; inspect ahub study show and retry explicitly";
             node.lastObserved = { revision: d.revision as number, dispatchId, status: "failed", at: event.at, reason: node.reason };
-            refresh(state, decisions); continue;
+            refresh(state, decisions); onEvent?.(state, event); continue;
           }
           node.taskId = d.taskId as number;
         }
@@ -178,7 +179,7 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
         node.lastObserved = { revision: d.revision as number, dispatchId, status: node.status, at: event.at, ...(d.output !== undefined ? { output: d.output } : {}), ...(node.reason !== undefined ? { reason: node.reason } : {}) };
       }
     }
-    refresh(state, decisions);
+    refresh(state, decisions); onEvent?.(state, event);
   }
   return state;
 }
