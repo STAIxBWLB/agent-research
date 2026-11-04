@@ -104,6 +104,8 @@ export async function collectStageEvidence(attempt: Attempt, stage: Stage, runne
     'printf \'{"stdout":%s,"stderr":%s}\\n\' "$outcut" "$errcut" > "$statetmp"',
     'mv "$outtmp" "$out"; mv "$errtmp" "$err"; mv "$statetmp" "$state"', 'fi',
     // Archive content only: BSD tar otherwise emits binary xattr PAX and AppleDouble entries.
+    // ponytail: requires GNU tar >= 1.27 or bsdtar with --no-xattrs; unsupported tar
+    // (e.g. BusyBox) fails closed with the generic stage-log collection error, never a metadata fallback.
     `COPYFILE_DISABLE=1 tar --no-xattrs -C ${shellQuote(root)} -cf - ${shellQuote(`logs/${stage}.stdout.log`)} ${shellQuote(`logs/${stage}.stderr.log`)} ${shellQuote(statePath)}`,
   ].join("\n");
   let logArchive;
