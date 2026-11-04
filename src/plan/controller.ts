@@ -37,8 +37,8 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
     const locked = <T>(fn: () => T) => transaction(dir, () => { assertPlanOwner(dir, owner); return fn(); });
     const observe = async (node: NodeState, observation: Observation) => locked(() => {
       const current = state(), target = current.nodes.find(n => n.id === node.id);
-      if (target?.dispatchId !== node.dispatchId || !["dispatched", "uncertain"].includes(target.status)) return;
-      if (observation.status === "dispatched" && target.status === "dispatched" && target.reason === observation.reason) return;
+      if (!target || target.dispatchId !== node.dispatchId || !["dispatched", "uncertain"].includes(target.status)) return;
+      if (observation.status === "dispatched" && target.status === "dispatched" && target.lastObserved?.dispatchId === node.dispatchId && target.lastObserved.status === "dispatched" && target.reason === observation.reason) return;
       commit(dir, [], [{ actor: runtime.actor, type: "node.observed", data: { revision: current.revision, node: node.id, dispatchId: node.dispatchId, ...observation } }]);
     });
     const reconcile = async (node: NodeState): Promise<void> => {

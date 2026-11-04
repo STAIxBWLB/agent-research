@@ -141,3 +141,30 @@ test("production CLI executes a study-relative cite step and records a bounded o
   expect(observed.data.dispatchId).toBe(intent.data.dispatchId);
   expect(observed.data.output).toEqual({ sha256: expect.stringMatching(/^[a-f0-9]{64}$/) });
 });
+
+
+test("pause during read-only preparation prevents intent and execution", async () => {
+  const dir = await study(), stop = new AbortController(); let preparations = 0, executions = 0;
+  const state = await runPlan(dir, {}, runtime({ signal: stop.signal,
+    sleep: async () => { if (!preparations) await resume(dir); else stop.abort(); await Bun.sleep(1); },
+    prepare: async () => { preparations++; await ops.planControl(dir, { action: "pause", commandId: "pause-preparation", expectedRevision: 1 }, ctx); return {}; },
+    execute: async () => { executions++; return { status: "done" }; },
+  }));
+  expect(state.state).toBe("paused"); expect(executions).toBe(0);
+  expect(readLedger(dir).filter(e => e.type === "node.intent")).toHaveLength(0);
+});
+
+test("parallel admission preserves the existing one-active-attempt invariant", async () => {
+  const attempt = (id: string) => ({ id, kind: "step", command: "attempt.run", args: { repo: "repo", commit: "a".repeat(40) } });
+  const dir = await study([attempt("first"), attempt("second"), step("other")]), stop = new AbortController();
+  const executed: string[] = []; let resumed = false;
+  await runPlan(dir, { parallel: 2 }, runtime({ signal: stop.signal,
+    prepare: async n => n.command === "attempt.run" ? { attemptId: "b".repeat(16) } : {},
+    execute: async n => { executed.push(n.id); return n.command === "attempt.run" ? { status: "dispatched" } : { status: "done", output: {} }; },
+    reconcile: async () => ({ status: "dispatched" }),
+    sleep: async () => { if (!resumed) { resumed = true; await resume(dir); } else if (executed.includes("other")) stop.abort(); await Bun.sleep(1); },
+  }));
+  expect(executed).toEqual(["first", "other"]);
+  expect(ops.planShow(dir).nodes.find(n => n.id === "second")!.status).toBe("ready");
+  expect(readLedger(dir).filter(e => e.type === "node.observed" && e.data.node === "first")).toHaveLength(1);
+});
