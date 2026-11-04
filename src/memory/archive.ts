@@ -49,6 +49,6 @@ export async function exportArchive(dirArg: string, fingerprint: string, actor: 
     catch (error) { failure = error; break; }
   }
   if (written.length) commit(dir, [], [{ actor, type: "archive.exported", data: { fingerprint, notes: written } }]);
-  if (failure) throw failure;
+  if (failure) throw new Error(`archive: ${written.length} note(s) written and receipted; rerun with the same --confirm to continue; ${failure instanceof Error ? failure.message : "amem failure; check amem --version before retrying"}`);
   return { ...preview, written, remaining: preview.notes.length - written.length };
 }

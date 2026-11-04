@@ -40,7 +40,8 @@ test("confirmation writes exact fields once and persists only hashes and ids in 
   for (const [index, request] of fake.requests.entries()) {
     const note = preview.notes[index]!.note;
     expect(request.cwd).toBe(dir); expect(request.command).toBe("amem");
-    expect(request.args).toEqual(["note", "add", note.text, "--kind", note.kind, "--approach", note.approach!, "--symptom", note.symptom!, "--cause", note.cause!, "--retry-when", note.retryWhen!, "--title", note.title!, "--json"]);
+    expect(request.args).toEqual(["note", "add", "-", "--kind", note.kind, "--approach", note.approach!, "--symptom", note.symptom!, "--cause", note.cause!, "--retry-when", note.retryWhen!, "--title", note.title!, "--json"]);
+    expect(Buffer.from(request.stdin as Uint8Array).toString("utf8")).toBe(note.text);
     expect(request.env).toMatchObject({ AGENTHUB_PEER_ID: "synthetic-agent", AMEM_HOME: "/synthetic/memory" });
   }
   const events = readLedger(dir); expect(events).toHaveLength(before + 1);
@@ -70,13 +71,13 @@ test("stale and malformed confirmations refuse before process or receipt writes"
 test("a partial amem failure persists successful ids, stops immediately and resumes the remainder", async () => {
   const dir = await setup(3), preview = previewArchive(dir), fake = fakeRunner([result(first), { exitCode: 2, stdout: secret, stderr: secret }, result(second), result("c".repeat(32))]);
   const before = readLedger(dir).length;
-  await expect(ops.archive(dir, { confirm: preview.fingerprint }, { actor, runner: fake.runner })).rejects.toThrow("nonzero exit");
+  await expect(ops.archive(dir, { confirm: preview.fingerprint }, { actor, runner: fake.runner })).rejects.toThrow("1 note(s) written and receipted; rerun with the same --confirm to continue; amem nonzero exit");
   expect(fake.requests).toHaveLength(2); expect(readLedger(dir)).toHaveLength(before + 1);
   expect(readLedger(dir).at(-1)!.data.notes).toEqual([{ sha256: preview.notes[0]!.sha256, id: first }]);
   expect(ledger(dir)).not.toContain(secret); expect(existsSync(join(dir, ".ares.lock"))).toBe(false);
   const remaining = previewArchive(dir); expect(remaining.notes).toEqual(preview.notes.slice(1)); expect(remaining.fingerprint).toBe(preview.fingerprint);
   await ops.archive(dir, { confirm: remaining.fingerprint }, { actor, runner: fake.runner });
-  expect(fake.requests).toHaveLength(4); expect(fake.requests[2]!.args[2]).toBe(preview.notes[1]!.note.text);
+  expect(fake.requests).toHaveLength(4); expect(Buffer.from(fake.requests[2]!.stdin as Uint8Array).toString("utf8")).toBe(preview.notes[1]!.note.text);
   expect(previewArchive(dir).notes).toEqual([]); expect(readLedger(dir)).toHaveLength(before + 2);
 });
 
@@ -108,7 +109,7 @@ test("exports 200 pending notes per batch and continues with the same fingerprin
   expect(next.fingerprint).toBe(preview.fingerprint); expect(next.notes).toEqual(preview.notes.slice(200));
   const lastBatch = await ops.archive(dir, { confirm: preview.fingerprint }, { actor, runner: fake.runner });
   expect("remaining" in lastBatch && lastBatch.remaining).toBe(0); expect(fake.requests).toHaveLength(201);
-  expect(fake.requests.map(request => request.args[2])).toEqual(preview.notes.map(item => item.note.text));
+  expect(fake.requests.map(request => Buffer.from(request.stdin as Uint8Array).toString("utf8"))).toEqual(preview.notes.map(item => item.note.text));
   expect(readLedger(dir).filter(event => event.type === "archive.exported")).toHaveLength(2);
   expect((readLedger(dir).at(-1)!.data.notes as unknown[]).length).toBe(1); expect(previewArchive(dir).notes).toEqual([]);
 });
@@ -149,4 +150,19 @@ test("receipt bounds are checked before the first outward write", async () => {
   await expect(ops.archive(dir, { confirm: preview.fingerprint }, { actor: { kind: "agent", id: "x".repeat(65_536) }, runner: fake.runner }))
     .rejects.toThrow("archive receipt: capacity check failed");
   expect(fake.requests).toEqual([]); expect(ledger(dir)).toBe(before);
+});
+
+test("hyphen-led idea title and pivot reason can be confirmed and exported", async () => {
+  for (const prefix of ["-", "--"]) {
+    const dir = await setup(0), title = `${prefix}no-cache title`, reason = `${prefix}no-cache reason`;
+    await ops.ideaAdd(dir, { id: "hyphen", title, hypothesis: `${prefix}hypothesis` }, { actor });
+    await ops.ideaDecide(dir, "hyphen", { decision: "pivot", reason, cause: `${prefix}cause`, retryWhen: `${prefix}retry` }, { actor });
+    const preview = previewArchive(dir), fake = fakeRunner([result(first)]);
+    await ops.archive(dir, { confirm: preview.fingerprint }, { actor, runner: fake.runner });
+    const request = fake.requests[0]!;
+    expect(request.args[request.args.indexOf("--title") + 1]).toBe(prefix === "--" ? ` ${title}` : title);
+    expect(request.args[request.args.indexOf("--symptom") + 1]).toBe(prefix === "--" ? ` ${reason}` : reason);
+    expect(Buffer.from(request.stdin as Uint8Array).toString("utf8")).toBe(preview.notes[0]!.note.text);
+    expect(previewArchive(dir).notes).toEqual([]);
+  }
 });

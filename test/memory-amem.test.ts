@@ -16,15 +16,16 @@ describe("amem process client", () => {
   test("note add passes literal fields, repeated evidence, and returns only the id", async () => {
     const fake = fakeRunner([response({ id, kind: "fail", text: secret })]);
     expect(await clientFor(fake.runner).add(note)).toBe(id);
-    expect(fake.requests).toEqual([{ command: "amem", args: ["note", "add", note.text, "--kind", "fail", "--approach", "baseline", "--symptom", "lower score",
+    expect(fake.requests).toEqual([{ command: "amem", args: ["note", "add", "-", "--kind", "fail", "--approach", "baseline", "--symptom", "lower score",
       "--cause", "not recorded", "--evidence", "ares:synthetic/attempt:one", "--evidence", "doi:10.0000/synthetic", "--retry-when", "new evidence", "--title", "Synthetic failure", "--json"],
-    cwd, env: {}, timeoutMs: 30_000, maxOutputBytes: AMEM_OUTPUT_BYTES }]);
+    cwd, env: {}, stdin: Buffer.from(note.text, "utf8"), timeoutMs: 30_000, maxOutputBytes: AMEM_OUTPUT_BYTES }]);
     expect(fake.remaining()).toBe(0);
   });
-  test("optional note fields are omitted; shell metacharacters stay in one argument", async () => {
+  test("optional note fields are omitted; shell metacharacters stay literal on stdin", async () => {
     const fake = fakeRunner([response({ id })]);
     await clientFor(fake.runner).add({ text: "Question $(literal); 'quoted' 제주", kind: "finding" });
-    expect(fake.requests[0]!.args).toEqual(["note", "add", "Question $(literal); 'quoted' 제주", "--kind", "finding", "--json"]);
+    expect(fake.requests[0]!.args).toEqual(["note", "add", "-", "--kind", "finding", "--json"]);
+    expect(Buffer.from(fake.requests[0]!.stdin as Uint8Array).toString("utf8")).toBe("Question $(literal); 'quoted' 제주");
   });
   test("search projects typed metadata without raw note text", async () => {
     const fake = fakeRunner([response([{ ...row, text: secret }]), response([]), response([{ ...row, title: null }])]);
@@ -81,7 +82,7 @@ describe("amem process client", () => {
   });
   test("invalid inputs never invoke a runner or an interactive note editor", async () => {
     const fake = fakeRunner([]), client = clientFor(fake.runner);
-    for (const text of ["", " ", "-", "--json", "bad\0text"]) {
+    for (const text of ["", " ", "bad\0text"]) {
       await expect(client.add({ text, kind: "finding" })).rejects.toThrow("input");
       await expect(client.search(text)).rejects.toThrow("input");
       await expect(client.brief(text, 100)).rejects.toThrow("input");
@@ -137,5 +138,24 @@ test("missing, non-positive, non-finite or overflowing score factors refuse with
 test("search limit is bounded before any subprocess", async () => {
   const fake = fakeRunner([]);
   for (const limit of [0, -1, 101, 1.5, NaN]) await expect(clientFor(fake.runner).search("question", undefined, limit)).rejects.toThrow("1..100");
+  expect(fake.requests).toEqual([]);
+});
+
+test("note text uses stdin and single/double-hyphen fields remain literal", async () => {
+  for (const prefix of ["-", "--"]) {
+    const text = `${prefix}no-cache body`, value = `${prefix}no-cache approach`, fake = fakeRunner([response({ id })]);
+    await clientFor(fake.runner).add({ ...note, text, title: value, approach: value, symptom: value, cause: value, retryWhen: value, evidence: [value] });
+    const request = fake.requests[0]!, expected = prefix === "--" ? ` ${value}` : value;
+    expect(request.args.slice(0, 3)).toEqual(["note", "add", "-"]);
+    expect(Buffer.from(request.stdin as Uint8Array).toString("utf8")).toBe(text);
+    for (const flag of ["--title", "--approach", "--symptom", "--cause", "--retry-when", "--evidence"]) expect(request.args[request.args.indexOf(flag) + 1]).toBe(expected);
+  }
+});
+
+test("empty and NUL option values still refuse before any process", async () => {
+  const fake = fakeRunner([]);
+  for (const field of ["title", "approach", "symptom", "cause", "retryWhen"] as const) {
+    for (const value of ["", " ", "bad\0value"]) await expect(clientFor(fake.runner).add({ ...note, [field]: value })).rejects.toThrow("input");
+  }
   expect(fake.requests).toEqual([]);
 });
