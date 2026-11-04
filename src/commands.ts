@@ -1,3 +1,4 @@
+import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
 import { setFinalSeeds } from "./exp/final.ts";
 import { addIdea, decideIdea } from "./exp/ideas.ts";
 import { showInvestigation, closeInvestigation } from "./exp/investigate.ts";
@@ -374,4 +375,15 @@ export async function finalSeeds(dirArg: string, raw: unknown, ctx: Pick<Ctx, "a
     });
     return { ...result, gate: gateState("design", readLedger(dir), binder(dir)) };
   });
+}
+
+
+export async function ablateAdd(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
+  const { dir, study } = openStudy(dirArg); requireExperiment(study);
+  return withLock(dir, () => addAblation(dir, raw, ctx.actor));
+}
+export const ablateShow = (dir: string) => showAblate(dir);
+export async function ablateClose(dirArg: string, ctx: Pick<Ctx, "actor">) {
+  const { dir, study } = openStudy(dirArg); requireExperiment(study);
+  return withLock(dir, () => closeAblate(dir, ctx.actor));
 }

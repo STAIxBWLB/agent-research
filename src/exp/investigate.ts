@@ -10,7 +10,7 @@ import { readSelection, selectionHash } from "./selection.ts";
 export const INVESTIGATE_BYTES = 1_048_576;
 export type NoWinner = "no-baseline" | "baseline-seeds" | "no-candidate" | "below-margin" | "tie";
 type Exclusion = "other-protocol" | "before-selection" | "missing-start-event" | "undeclared-seed" | "later-success" | "reserved-seed";
-interface Sample { seed: number; attempt: string; value: number }
+export interface Sample { seed: number; attempt: string; value: number }
 export interface CommitResult {
   commit: string; idea?: string; attempts: Record<AttemptStatus, string[]>; perSeed: Sample[];
   pairedSeeds: number[]; pairs: { seed: number; attempt: string; baselineAttempt: string; value: number; baselineValue: number }[];
@@ -40,12 +40,27 @@ function mean(values: number[]): number | null {
   // Normalize before summing so finite evaluator values never overflow their mean.
   return Math.max(-1, Math.min(1, values.reduce((sum, v) => sum + v / scale / values.length, 0))) * scale;
 }
-function metricValue(attempt: Attempt, metric: InvestigateResult["metric"]): number {
+export function metricValue(attempt: Attempt, metric: InvestigateResult["metric"]): number {
   if (!Array.isArray(attempt.metrics)) bad(`attempt ${attempt.id}: primary metrics missing`);
   const values = attempt.metrics.filter(m => m?.name === metric.name);
   const value = values[0];
   if (values.length !== 1 || !value || value.unit !== metric.unit || value.provenance !== "ares-observed" || typeof value.value !== "number" || !Number.isFinite(value.value)) bad(`attempt ${attempt.id}: primary metric missing, duplicate, non-finite or unvalidated`);
   return value.value;
+}
+export interface PairedSamples {
+  pairedSeeds: number[]; pairs: { seed: number; attempt: string; referenceAttempt: string; value: number; referenceValue: number }[];
+  mean: number | null; referenceMean: number | null; delta: number | null;
+}
+/** Descriptive shared-seed comparison; callers decide eligibility and never infer significance. */
+export function pairSamples(samples: Sample[], reference: Sample[], direction: "max" | "min", commit: string): PairedSamples {
+  const pairs = [...samples].sort((a, b) => a.seed - b.seed).flatMap(sample => {
+    const base = reference.find(b => b.seed === sample.seed);
+    return base ? [{ seed: sample.seed, attempt: sample.attempt, referenceAttempt: base.attempt, value: sample.value, referenceValue: base.value }] : [];
+  });
+  const candidateMean = mean(pairs.map(p => p.value)), referenceMean = mean(pairs.map(p => p.referenceValue));
+  const delta = candidateMean === null || referenceMean === null ? null : direction === "max" ? candidateMean - referenceMean : referenceMean - candidateMean;
+  if (delta !== null && !Number.isFinite(delta)) bad(`commit ${commit}: primary metric delta overflows; rescale the metric's unit in a new protocol and rerun attempts`);
+  return { pairedSeeds: pairs.map(p => p.seed), pairs, mean: candidateMean, referenceMean, delta };
 }
 function empty(commit: string): CommitResult {
   return { commit, attempts: { running: [], succeeded: [], failed: [], cancelled: [], unknown: [] }, perSeed: [], pairedSeeds: [], pairs: [], mean: null, baselineMean: null, delta: null, eligible: false, reason: "no-counted-success" };
@@ -108,15 +123,9 @@ function calculate(input: ReturnType<typeof inputs>): InvestigateResult {
   baseline.reason = !baseline.perSeed.length ? "no-baseline" : baseline.eligible ? "baseline" : "baseline-seeds";
   const candidates = [...rows.values()].filter(row => row !== baseline).sort((a, b) => a.commit.localeCompare(b.commit));
   for (const row of candidates) {
-    row.pairs = row.perSeed.flatMap(sample => {
-      const base = baseline.perSeed.find(b => b.seed === sample.seed);
-      return base ? [{ seed: sample.seed, attempt: sample.attempt, baselineAttempt: base.attempt, value: sample.value, baselineValue: base.value }] : [];
-    });
-    row.pairedSeeds = row.pairs.map(p => p.seed); row.mean = mean(row.pairs.map(p => p.value)); row.baselineMean = mean(row.pairs.map(p => p.baselineValue));
-    if (row.mean !== null && row.baselineMean !== null) {
-      row.delta = metric.direction === "max" ? row.mean - row.baselineMean : row.baselineMean - row.mean;
-      if (!Number.isFinite(row.delta)) bad(`commit ${row.commit}: primary metric delta overflows; rescale the metric's unit in a new protocol and rerun attempts`);
-    }
+    const paired = pairSamples(row.perSeed, baseline.perSeed, metric.direction, row.commit);
+    row.pairedSeeds = paired.pairedSeeds; row.mean = paired.mean; row.baselineMean = paired.referenceMean; row.delta = paired.delta;
+    row.pairs = paired.pairs.map(p => ({ seed: p.seed, attempt: p.attempt, baselineAttempt: p.referenceAttempt, value: p.value, baselineValue: p.referenceValue }));
     row.reason = !baseline.perSeed.length ? "no-baseline" : !baseline.eligible ? "baseline-seeds" : !row.perSeed.length ? "no-counted-success" : row.pairs.length < rule.minSeeds ? "candidate-seeds" : row.delta! <= 0 || row.delta! < rule.minDelta ? "below-margin" : "eligible";
     row.eligible = row.reason === "eligible";
   }
@@ -158,4 +167,16 @@ export function closeInvestigation(dirArg: string, actor: Actor): InvestigateRes
   const result = calculate(input), text = JSON.stringify(result, null, 2) + "\n";
   if (previous !== text) commit(input.dir, [[file, text, INVESTIGATE_BYTES]], [{ actor, type: "investigate.closed", data: { run: input.rule.run, sha256: sha256(text), ruleSha256: input.ruleSha, winner: result.winner?.commit ?? null } }]);
   return result;
+}
+
+
+/** Read only a current, committed investigation result, never a hand-edited or stale winner. */
+export function readClosedInvestigation(dirArg: string): { result: InvestigateResult; sha256: string } {
+  const input = inputs(dirArg), text = previousResult(investigateResultPath(input.dir, input.rule.run));
+  if (text === undefined) throw new Error("investigate result: not closed; run ares investigate close before the next phase");
+  const hash = sha256(text), receipt = input.events.findLast(e => e.type === "investigate.closed" && e.data.run === input.rule.run);
+  if (!receipt || receipt.data.sha256 !== hash) throw new Error("investigate result: bytes do not match the latest close receipt; run ares investigate close to restore the committed result");
+  const result = calculate(input);
+  if (text !== JSON.stringify(result, null, 2) + "\n") throw new Error("investigate result: stale inputs; run ares investigate close again before the next phase");
+  return { result, sha256: hash };
 }
