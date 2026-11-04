@@ -1,4 +1,6 @@
-import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync } from "node:fs";
+import { hostname } from "node:os";
+import { spawnSync } from "node:child_process";
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync, lstatSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 
@@ -228,4 +230,55 @@ export function requireGate(dir: string, study: Study, gate: GateName, binder: B
   if (state.state === "none") throw new Error(gate === "scope" ? "gate scope: no scope yet (run ares scope)" : gate === "design" ? "gate design: no protocol yet (run ares protocol)" : "gate screen: no included candidates yet");
   if (state.state === "rejected") throw new Error(`gate ${gate} is rejected${state.decided?.reason ? `: ${state.decided.reason}` : ""}; change the content and ask again`);
   throw new Error(`gate ${gate} is pending: run ares gate approve <dir> ${gate}`);
+}
+
+
+export interface PlanOwner { pid: number; host: string; startedAt: string; token: string }
+/** Kernel process start identity, rather than lock age, detects a reused PID. */
+export function processStart(pid: number): string | undefined {
+  const result = spawnSync("ps", ["-p", String(pid), "-o", "lstart="], { encoding: "utf8", timeout: 2000, maxBuffer: 4096, env: { PATH: process.env.PATH ?? "/usr/bin:/bin", LC_ALL: "C" } });
+  if (result.status === 0 && result.stdout.trim()) return result.stdout.trim();
+  return undefined;
+}
+export function readPlanOwner(dir: string): PlanOwner | undefined {
+  const file = join(dir, ".ares.plan.lock");
+  let stat;
+  try { stat = lstatSync(file); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; }
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("plan controller lock: regular file required; restore the study lock file without links before running ares run");
+  const raw = readJsonFile(file, 4096);
+  if (!plain(raw) || !Number.isSafeInteger(raw.pid) || (raw.pid as number) < 1 || typeof raw.host !== "string" || !raw.host || typeof raw.startedAt !== "string" || !raw.startedAt || typeof raw.token !== "string" || !raw.token) throw new Error("plan controller lock: malformed owner; inspect the owner process and restore a valid lock before ares run");
+  return raw as unknown as PlanOwner;
+}
+export function assertPlanOwner(dir: string, owner: PlanOwner): void {
+  const current = readPlanOwner(dir);
+  if (!current || current.token !== owner.token || current.pid !== owner.pid || current.host !== owner.host || current.startedAt !== owner.startedAt) throw new Error("plan controller: ownership changed; stop this controller and inspect ares plan show before restarting");
+}
+export async function withPlanLock<T>(dir: string, fn: (owner: PlanOwner) => Promise<T>): Promise<T> {
+  const startedAt = processStart(process.pid);
+  if (!startedAt) throw new Error("plan controller: process start identity unavailable; check local ps access before running ares run");
+  const owner: PlanOwner = { pid: process.pid, host: hostname(), startedAt, token: randomUUID() };
+  await withLock(dir, () => {
+    const previous = readPlanOwner(dir);
+    if (previous) {
+      const busy = () => new Error(`plan controller: owned by pid ${previous.pid} on ${previous.host} (started ${previous.startedAt}); stop that controller or run on its host after it exits`);
+      if (previous.host !== owner.host) throw busy();
+      let alive = true;
+      try { process.kill(previous.pid, 0); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") alive = false; else throw busy(); }
+      if (alive) {
+        const observed = processStart(previous.pid);
+        if (!observed || observed === previous.startedAt) throw busy();
+      }
+      // Short study lock serializes contenders. Never recover by age.
+      unlinkSync(join(dir, ".ares.plan.lock"));
+    }
+    const fd = openSync(join(dir, ".ares.plan.lock"), "wx", 0o600);
+    try { writeSync(fd, JSON.stringify(owner) + "\n"); fsyncSync(fd); } finally { closeSync(fd); }
+  });
+  try { return await fn(owner); }
+  finally {
+    // A live matching owner cannot be replaced by any valid contender.
+    const current = readPlanOwner(dir);
+    if (current?.token === owner.token) unlinkSync(join(dir, ".ares.plan.lock"));
+  }
 }

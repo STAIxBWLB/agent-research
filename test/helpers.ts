@@ -45,3 +45,10 @@ export const searchRoutes = (s2: Route = ok(fixture("s2.json"))): [string, Route
   ["https://api.semanticscholar.org/graph/v1/paper/search", s2],
   ["https://export.arxiv.org/api/query?search_query", ok(fixture("arxiv-search.xml"))],
 ];
+
+/** Explicit barriers for controller tests; no timers, Docker, hub or network. */
+export function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void, reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}

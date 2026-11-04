@@ -1,3 +1,6 @@
+import { runPlan, type ControllerRuntime, type Observation, type StepNode } from "./plan/controller.ts";
+import { resolveSnapshot } from "./exp/snapshot.ts";
+import { spawnRunner } from "./exp/executor.ts";
 import { foldPlan, readPlanState, planGateBinding, prepareControl, type ControlRequest, type ControlResult } from "./plan/state.ts";
 import { setPlan } from "./plan/definition.ts";
 export { manifest } from "./manifest.ts";
@@ -5,21 +8,21 @@ import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Http } from "./http.ts";
 import { readScope, scopeHash, setScope } from "./scope.ts";
-import { boundedText, commit, decideGate, gateState, GATES, initStudy, openStudy, readBytesBounded, readLedger, readTextBounded, requireGate, sha256, withLock, type Actor, type Binder, type GateName } from "./study.ts";
+import { boundedText, commit, decideGate, gateState, GATES, initStudy, openStudy, readBytesBounded, readLedger, readTextBounded, requireGate, sha256, withLock, readPlanOwner, type Actor, type Binder, type GateName } from "./study.ts";
 import { candidatesFile, includedHash, isVerified, loadCandidates, mergeCandidates, sameWork, verifySubject, type Candidate } from "./lit/candidates.ts";
 import { searchSource, SOURCES, type SourceName } from "./lit/sources.ts";
 import { verifyCandidates } from "./lit/verify.ts";
 import { assignCitekeys, renderBib } from "./lit/bibtex.ts";
 import { checkCitations } from "./lit/cite.ts";
 import { cardPath, validateCard } from "./lit/cards.ts";
-import { designBinding, protocolHash, setProtocol } from "./exp/protocol.ts";
+import { designBinding, protocolHash, readDesign, setProtocol } from "./exp/protocol.ts";
 import { requireExperiment } from "./study.ts";
 import { checkExecutor, setExecutor } from "./exp/executor.ts";
 import { cancelAttempt, listAttempts, listAttemptSummaries, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type AttemptListOptions, type AttemptOptions } from "./exp/attempts.ts";
 import { readAttemptLogs, type LogOptions } from "./exp/logs.ts";
 
 export type ExperimentRuntime = Omit<AttemptContext, "actor">;
-export interface Ctx extends ExperimentRuntime { actor: Actor; http: Http }
+export interface Ctx extends ExperimentRuntime { actor: Actor; http: Http; signal?: AbortSignal }
 const MAX_IDS = 200, DRAFT_BYTES = 2 * 1024 * 1024, BIB_BYTES = 16 * 1024 * 1024, CARD_BYTES = 65_536;
 
 export function binder(dir: string): Binder {
@@ -226,7 +229,10 @@ export async function planSet(dirArg: string, raw: unknown, ctx: Pick<Ctx, "acto
 }
 export function planShow(dirArg: string) {
   const { dir } = openStudy(dirArg);
-  return readPlanState(dir, readLedger(dir));
+  let controller: ReturnType<typeof readPlanOwner> | "none" | { error: string };
+  try { controller = readPlanOwner(dir) ?? "none"; }
+  catch { controller = { error: "controller owner unreadable; inspect .ares.plan.lock before ares run" }; }
+  return { ...readPlanState(dir, readLedger(dir)), controller };
 }
 
 export async function planControl(dirArg: string, request: ControlRequest, ctx: Ctx): Promise<ControlResult> {
@@ -252,4 +258,62 @@ export async function planControl(dirArg: string, request: ControlRequest, ctx: 
     return prepared.event ? [prepared.event] : [];
   });
   return result!;
+}
+
+
+function stepText(node: StepNode, key: string): string {
+  return boundedText(node.args[key], `plan step ${node.id}.${key}`, 4096);
+}
+function stepNumber(node: StepNode, key: string): number | undefined {
+  const value = node.args[key];
+  if (value === undefined) return undefined;
+  if ((typeof value !== "string" && typeof value !== "number") || !/^-?\d+$/.test(String(value)) || !Number.isSafeInteger(Number(value))) throw new Error(`plan step ${node.id}.${key}: integer required; correct the argument with ares plan set`);
+  return Number(value);
+}
+export async function planRun(dirArg: string, options: { parallel?: number }, ctx: Ctx) {
+  const { dir } = openStudy(dirArg);
+  const attemptOptions = (node: StepNode, retryOf?: string) => ({
+    repo: resolve(dir, stepText(node, "repo")), commit: stepText(node, "commit"),
+    ...(stepNumber(node, "seed") !== undefined ? { seed: stepNumber(node, "seed")! } : {}),
+    ...(node.args.run !== undefined ? { run: stepText(node, "run") } : {}),
+    ...(node.args.label !== undefined ? { label: stepText(node, "label") } : {}),
+    ...(retryOf ?? node.args.retry ? { retry: retryOf ?? stepText(node, "retry") } : {}), detach: true,
+  });
+  const observed = (attempt: ReturnType<typeof showAttempt>): Observation => ({
+    status: attempt.status === "running" ? "dispatched" : attempt.status === "succeeded" ? "done" : attempt.status === "unknown" ? "uncertain" : attempt.status,
+    ...(attempt.status === "succeeded" ? { output: { attemptId: attempt.id, sha256: sha256(JSON.stringify(attempt)) } } : {}),
+    ...(attempt.status !== "running" && attempt.status !== "succeeded" ? { reason: `attempt ${attempt.status}; inspect ares attempt show before retrying this node` } : {}),
+  });
+  const runtime: ControllerRuntime = {
+    actor: ctx.actor, ...(ctx.signal ? { signal: ctx.signal } : {}), ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
+    prepare: async (node, state) => {
+      if (node.command !== "attempt.run") return {};
+      const design = readDesign(dir);
+      if (!design) throw new Error("plan attempt: protocol missing; run ares protocol before resume");
+      const options = attemptOptions(node, state.retryOf), snapshot = await resolveSnapshot(options.repo, options.commit, ctx.runner ?? spawnRunner);
+      const { attemptId } = await import("./exp/attempts.ts");
+      return { attemptId: attemptId(protocolHash(design.protocol), snapshot.commit, snapshot.treeId, options.seed ?? design.protocol.seeds[0]!, options.run ?? "main", options.retry) };
+    },
+    execute: async (node, state) => {
+      if (node.command === "attempt.run") return observed(await runAttempt(dir, { ...attemptOptions(node, state.retryOf), expectedId: state.attemptId! }, ctx));
+      let result: unknown, ok = true;
+      switch (node.command) {
+        case "lit.search": {
+          const value = await search(dir, stepText(node, "query"), { ...(node.args.source !== undefined ? { source: stepText(node, "source") } : {}), ...(stepNumber(node, "limit") !== undefined ? { limit: stepNumber(node, "limit")! } : {}), ...(stepNumber(node, "year-from") !== undefined ? { yearFrom: stepNumber(node, "year-from")! } : {}) }, ctx);
+          ok = value.sources.some(s => s.ok); result = value; break;
+        }
+        case "lit.verify": result = await verify(dir, (node.args.ids as string[] | undefined) ?? [], ctx); break;
+        case "lit.bib": result = await bib(dir, ctx); break;
+        case "cite.check": { const value = cite(dir, resolve(dir, stepText(node, "draft"))); result = value; ok = value.ok; break; }
+      }
+      return { status: ok ? "done" : "failed", ...(ok ? { output: { sha256: sha256(JSON.stringify(result)) } } : { reason: "step reported failure; inspect its command result and inputs before retry" }) };
+    },
+    reconcile: async (_node, state) => {
+      if (!state.attemptId || !listAttempts(dir).attempts.some(a => a.id === state.attemptId)) return { status: "uncertain", reason: "expected attempt record missing; explicitly retry or skip this node" };
+      const before = showAttempt(dir, state.attemptId);
+      if (before.status === "running") await reconcileAttempts(dir, ctx);
+      return observed(showAttempt(dir, state.attemptId));
+    },
+  };
+  return runPlan(dir, options, runtime);
 }

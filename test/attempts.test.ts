@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { init, gateDecide, gateList, planSet, planControl, planShow } from "../src/commands.ts";
+import { init, gateDecide, gateList, planSet, planControl, planShow, planRun } from "../src/commands.ts";
 import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
@@ -434,4 +434,37 @@ test("plan retry passes the previous attempt id and creates a child instead of r
   const child = await runAttempt(dir, { ...request, retry: node.retryOf! }, fake.ctx);
   expect(child.id).not.toBe(first.id); expect(child.retryOf).toBe(first.id);
   expect(child.status).toBe("running"); expect(listAttempts(dir).totals).toMatchObject({ running: 1, cancelled: 1 });
+});
+
+
+test("plan controller commits expected attempt id, always detaches and reconciles the recorded attempt", async () => {
+  const { dir, fake } = await setup();
+  const ctx = { ...fake.ctx, http: fakeHttp([]).http };
+  await planSet(dir, { v: 1, nodes: [{ id: "work", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }], edges: [] }, ctx);
+  let resumed = false, intentSeen = false;
+  const original = fake.ctx.runner!;
+  const state = await planRun(dir, {}, { ...ctx,
+    runner: async r => {
+      if (r.command === "docker" && r.args[0] === "run") {
+        const intent = readLedger(dir).find(e => e.type === "node.intent")!;
+        expect(intent.data.attemptId).toMatch(/^[a-f0-9]{16}$/); intentSeen = true;
+      }
+      return original(r);
+    },
+    sleep: async () => {
+      if (!resumed) { resumed = true; await planControl(dir, { action: "resume", commandId: "resume-controller", expectedRevision: 1 }, ctx); }
+      for (const container of fake.containers.values()) { container.running = false; container.exitCode = 0; }
+      await Bun.sleep(1);
+    },
+  });
+  expect(state.state).toBe("done"); expect(intentSeen).toBe(true);
+  expect(state.nodes[0]!.output).toMatchObject({ attemptId: readLedger(dir).find(e => e.type === "node.intent")!.data.attemptId });
+});
+
+test("expected attempt identity drift refuses before creating an attempt", async () => {
+  const { dir, fake } = await setup();
+  const before = readLedger(dir);
+  await expect(runAttempt(dir, { ...request, expectedId: "0".repeat(16) }, fake.ctx)).rejects.toThrow("changed since plan intent");
+  expect(listAttempts(dir).attempts).toHaveLength(0); expect(readLedger(dir)).toEqual(before);
+  expect(fake.requests.some(r => r.command === "docker")).toBe(false);
 });

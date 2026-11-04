@@ -6,7 +6,7 @@ import { PLAYBOOK } from "./playbook.ts";
 import { detectActor, readTextBounded } from "./study.ts";
 
 const INPUT_BYTES = 65_536;
-export interface Io extends ops.ExperimentRuntime { readStdin?: () => Promise<string>; http?: Http }
+export interface Io extends ops.ExperimentRuntime { readStdin?: () => Promise<string>; http?: Http; signal?: AbortSignal }
 
 function parse(spec: CommandSpec, args: string[]): { flags: Record<string, string | true>; positional: string[] } {
   const flags: Record<string, string | true> = {}, positional: string[] = [];
@@ -52,10 +52,14 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
   const found = findCommand(args);
   if (!found) throw new Error(`unknown command: ${args.slice(0, 2).join(" ")}; use --help`);
   const { spec, rest } = found, { flags, positional } = parse(spec, rest);
-  const ctx: ops.Ctx = { actor: detectActor(env), http: io.http ?? createHttp(env), ...(io.sleep ? { sleep: io.sleep } : {}), ...(io.runner ? { runner: io.runner } : {}), ...(io.now ? { now: io.now } : {}), ...(io.collectEvaluation ? { collectEvaluation: io.collectEvaluation } : {}), ...(io.collectStageEvidence ? { collectStageEvidence: io.collectStageEvidence } : {}) };
+  const ctx: ops.Ctx = { actor: detectActor(env), http: io.http ?? createHttp(env), ...(io.signal ? { signal: io.signal } : {}), ...(io.sleep ? { sleep: io.sleep } : {}), ...(io.runner ? { runner: io.runner } : {}), ...(io.now ? { now: io.now } : {}), ...(io.collectEvaluation ? { collectEvaluation: io.collectEvaluation } : {}), ...(io.collectStageEvidence ? { collectStageEvidence: io.collectStageEvidence } : {}) };
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
   let result: unknown, code = 0;
   switch (spec.name) {
+    case "run": {
+      count(spec, positional, 1); const parallel = integer(flags["--parallel"], "--parallel");
+      result = await ops.planRun(positional[0]!, { ...(parallel !== undefined ? { parallel } : {}) }, ctx); break;
+    }
     case "manifest": count(spec, positional, 0); result = ops.manifest(); break;
     case "playbook": count(spec, positional, 0); return { text: PLAYBOOK.trimEnd(), code: 0 };
     case "mcp": throw new Error("mcp: run `ares mcp` with no other arguments");
@@ -187,12 +191,16 @@ async function readStdinBounded(): Promise<string> {
 }
 
 export async function main(args: string[]): Promise<number> {
+  const stop = new AbortController(), interrupt = () => stop.abort();
+  if (args[0] === "run") { process.on("SIGINT", interrupt); process.on("SIGTERM", interrupt); }
   try {
-    const output = await run(args, process.env, { readStdin: readStdinBounded });
+    const output = await run(args, process.env, { readStdin: readStdinBounded, signal: stop.signal });
     console.log(output.text);
     return output.code;
   } catch (error) {
     console.error(`ares: ${error instanceof Error ? error.message : "operation failed"}`);
     return 1;
+  } finally {
+    if (args[0] === "run") { process.off("SIGINT", interrupt); process.off("SIGTERM", interrupt); }
   }
 }
