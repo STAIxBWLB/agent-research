@@ -159,6 +159,10 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
         if (dispatchId !== node.dispatchId || !Number.isSafeInteger(d.revision) || (d.revision as number) > state.revision) continue;
         if (!statuses.includes(d.status as NodeStatus) || !["done", "failed", "cancelled", "uncertain", "dispatched"].includes(d.status as string)) bad(`node.observed ${node.id} has unknown status ${String(d.status)}`);
         if (node.status !== "dispatched" && node.status !== "uncertain") continue;
+        if (d.taskId !== undefined) {
+          if (node.kind !== "hub" || !Number.isSafeInteger(d.taskId) || (d.taskId as number) < 1 || (node.taskId !== undefined && node.taskId !== d.taskId)) bad(`node.observed ${node.id}: child task binding changed or invalid; restore the committed binding before retry`);
+          node.taskId = d.taskId as number;
+        }
         node.status = d.status as NodeStatus;
         if (node.status === "done" && d.output !== undefined) node.output = d.output;
         delete node.reason;

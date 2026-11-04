@@ -52,3 +52,14 @@ export function deferred<T = void>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
+
+
+/** Read-only scripted hub boundary. Records references, never contacts a daemon. */
+export function fakeHubClient(read: (campaign: string, unit: string, taskId?: number) => Promise<import("../src/plan/hub.ts").HubObservation>) {
+  const calls: { campaign: string; unit: string; taskId?: number }[] = [];
+  const client: import("../src/plan/hub.ts").HubClient = { observe: async (campaign, unit, taskId) => {
+    calls.push({ campaign, unit, ...(taskId !== undefined ? { taskId } : {}) });
+    return read(campaign, unit, taskId);
+  } };
+  return { client, calls };
+}
