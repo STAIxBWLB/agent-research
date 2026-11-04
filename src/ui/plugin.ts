@@ -127,7 +127,7 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
     const event = attemptEvents.get(`${row.id}:${row.status}`);
     add("attempt", row.id, "alert", `${row.status} attempt ${row.id}`, event?.at ?? at, row.reason ?? "Inspect ares attempt show before retrying");
   }
-  for (const event of events) if (event.type === "watch.ran" && event.data.ok === false) add("watch", event.at + events.indexOf(event), "alert", "Every watch source failed", event.at, "Inspect ares watch show and retry after restoring source access");
+  for (const [index, event] of events.entries()) if (event.type === "watch.ran" && event.data.ok === false) add("watch", event.at + index, "alert", "Every watch source failed", event.at, "Inspect ares watch show and retry after restoring source access");
   }
   const archive = detailed ? readCall("archive", () => { const preview = previewArchive(dir); return { pendingCount: preview.notes.length, fingerprint: preview.fingerprint }; }, errors) : null;
   const manuscript = detailed && readCall("manuscript", () => readCurrentBuild(dir), errors) ? { id: `manuscript:${study.id}` } : null;

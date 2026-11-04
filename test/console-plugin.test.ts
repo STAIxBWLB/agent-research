@@ -10,7 +10,7 @@ import plugin from "../src/ui/plugin.ts";
 import * as ops from "../src/commands.ts";
 import { run } from "../src/cli.ts";
 import { addStudy, readRegistry } from "../src/console/registry.ts";
-import { appendEvent, openStudy, readLedger } from "../src/study.ts";
+import { appendEvent, commit, openStudy, readLedger } from "../src/study.ts";
 import { readProtocol, protocolHash, designBinding } from "../src/exp/protocol.ts";
 import { finalGateBinding, requireFinalInputs } from "../src/exp/final.ts";
 import { runSetup } from "../src/setup.ts";
@@ -268,4 +268,20 @@ test("manuscript source and build edits refresh same-cursor views and invalidate
     fs.writeFileSync(file, original);
     const restored = await provider.snapshot({ ...input, after: changed.cursor as number }); expect(restored.changed).toBe(true); expect(restored.cursor).toBe(first.cursor); expect((restored.study as Record<string, any>).manuscript).not.toBeNull();
   }
+});
+
+
+test("many failed watch receipts keep distinct event-timed alerts stable across snapshots and appends", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "failed-watch-runs"), count = 250, at = "2030-06-01T00:00:00.000Z";
+  commit(study, [], Array.from({ length: count }, () => ({ actor, type: "watch.ran", data: { configSha256: "a".repeat(64), queries: [], added: 0, addedIds: [], addedIdsTotal: 0, ok: false } })));
+  const events = readLedger(study); for (const event of events) if (event.type === "watch.ran") event.at = at;
+  fs.writeFileSync(join(study, "ledger.jsonl"), events.map(event => JSON.stringify(event)).join("\n") + "\n"); addStudy(family, study);
+  const provider = await typed.open(context(family)), first = await provider.snapshot({ panel: "inbox", after: 0 });
+  const alerts = rows(first.items).filter(row => row.kind === "watch"); expect(alerts).toHaveLength(count); expect(new Set(alerts.map(row => row.id)).size).toBe(count);
+  for (const alert of alerts) { expect(alert.at).toBe(at); expect(alert.group).toBe("alert"); expect(alert.verbs).toEqual([]); }
+  const identities = alerts.map(row => [row.id, row.at]);
+  expect(rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).filter(row => row.kind === "watch").map(row => [row.id, row.at])).toEqual(identities);
+  expect(await provider.snapshot({ panel: "inbox", after: first.cursor as number })).toEqual({ cursor: first.cursor, changed: false });
+  appendEvent(study, actor, "synthetic.unrelated", {});
+  expect(rows((await provider.snapshot({ panel: "inbox", after: first.cursor as number })).items).filter(row => row.kind === "watch").map(row => [row.id, row.at])).toEqual(identities);
 });
