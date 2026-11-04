@@ -208,7 +208,7 @@ export function gateState(gate: GateName, events: LedgerEvent[], binder: Binder)
 export function decideGate(dir: string, gate: GateName, decision: "approve" | "reject", actor: Actor, binder: Binder, reason?: string): GateState {
   if (!GATES.includes(gate) && !gate.startsWith("plan:")) throw new Error(`unknown gate: ${gate}; run ares gate list to select a gate`);
   const before = gateState(gate, readLedger(dir), binder);
-  if (before.state === "none") throw new Error(`gate ${gate}: nothing to decide yet`);
+  if (before.state === "none") throw new Error(`gate ${gate}: nothing to decide yet${gate.startsWith("plan:") ? "; finish every upstream node with output references, then run ares gate list" : ""}`);
   if (decision === "reject" && !reason) throw new Error(`gate ${gate}: a rejection needs --reason`);
   appendEvent(dir, actor, decision === "approve" ? "gate.approve" : "gate.reject", { gate, binding: before.current!, ...(reason ? { reason } : {}) });
   return gateState(gate, readLedger(dir), binder);

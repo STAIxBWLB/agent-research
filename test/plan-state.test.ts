@@ -114,3 +114,40 @@ test("CLI and MCP controls and plan gates share receipts and agent attribution",
   observe(dir, "base"); await mcp.handlers.ares_gate!({ study: dir, action: "approve", gate: "plan:approve" });
   expect(node(dir, "approve").status).toBe("done");
 });
+
+
+test("skipping an intermediate step cannot release work past a pending ancestor gate", async () => {
+  const dir = await study({ v: 1, nodes: [step("base"), { id: "g", kind: "gate", needs: ["base"], binds: ["base"] }, step("middle", ["g"]), step("last", ["middle"])], edges: [] });
+  await control(dir, "skip", "skip-middle", "middle");
+  expect(node(dir, "last").status).toBe("pending");
+  observe(dir, "base"); expect(node(dir, "last").status).toBe("pending");
+  await ops.gateDecide(dir, "plan:g", "approve", undefined, ctx);
+  expect(node(dir, "last").status).toBe("ready");
+});
+
+test("gate rejection invalidates completed consumers and done without output references cannot pass a gate", async () => {
+  const dir = await study(); observe(dir, "base");
+  await ops.gateDecide(dir, "plan:approve", "approve", undefined, ctx); observe(dir, "final");
+  await ops.gateDecide(dir, "plan:approve", "reject", "recheck", ctx);
+  expect(node(dir, "final").status).toBe("stale");
+  const other = await study();
+  appendEvent(other, actor, "node.intent", { revision: 1, node: "base" });
+  appendEvent(other, actor, "node.observed", { revision: 1, node: "base", status: "done" });
+  expect(planGateBinding(ops.planShow(other), "plan:approve")).toBeUndefined();
+  await expect(ops.gateDecide(other, "plan:approve", "approve", undefined, ctx)).rejects.toThrow("nothing to decide");
+});
+
+
+test("unconsumed definition edits stay ready, and invalid controls leave the ledger unchanged", async () => {
+  const dir = await study();
+  const raw = definition(); raw.nodes[0] = step("base", [], "edited before consumption");
+  await ops.planSet(dir, raw, ctx); expect(node(dir, "base").status).toBe("ready");
+  const before = readFileSync(join(dir, "ledger.jsonl"));
+  for (const input of [
+    { action: "retry", node: "base", commandId: "retry", expectedRevision: 2 },
+    { action: "skip", node: "missing", commandId: "missing", expectedRevision: 2 },
+    { action: "pause", node: "base", commandId: "extra-node", expectedRevision: 2 },
+    { action: "cancel", commandId: "no-node", expectedRevision: 2 },
+  ] as const) await expect(ops.planControl(dir, input, ctx)).rejects.toThrow("run ares plan show");
+  expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
+});

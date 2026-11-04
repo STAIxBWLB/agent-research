@@ -44,7 +44,7 @@ export function planGateBinding(state: PlanState, gate: GateName): string | unde
   const refs = [];
   for (const parent of upstream) {
     const value = state.nodes.find(n => n.id === parent)!;
-    if (value.status !== "done") return undefined;
+    if (value.status !== "done" || value.output === undefined) return undefined;
     refs.push({ node: parent, output: value.output ?? null });
   }
   return sha256(canonical({ gate: node, upstream: refs }));
@@ -69,6 +69,9 @@ function refresh(state: PlanState, decisions: Map<string, LedgerEvent>): void {
       node.status = dependencies(state.definition, id).every(parent => {
         const previous = state.nodes.find(n => n.id === parent)!;
         return previous.status === "done" || (previous.kind !== "gate" && previous.status === "skipped");
+      }) && ancestors(state.definition, id).every(parent => {
+        const previous = state.nodes.find(n => n.id === parent)!;
+        return previous.kind !== "gate" || previous.status === "done";
       }) ? "ready" : "pending";
     }
   }
@@ -95,7 +98,7 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
       const changed = new Set<string>();
       if (previous) for (const node of previous.definition.nodes) {
         const next = definition.nodes.find(n => n.id === node.id);
-        if (!next || canonical(node) !== canonical(next) || canonical(dependencies(previous.definition, node.id)) !== canonical(dependencies(definition, node.id))) changed.add(node.id);
+        if ((!next || canonical(node) !== canonical(next) || canonical(dependencies(previous.definition, node.id)) !== canonical(dependencies(definition, node.id))) && !["pending", "ready"].includes(previous.nodes.find(n => n.id === node.id)!.status)) changed.add(node.id);
       }
       const stale = descendants(definition, descendants(previous?.definition ?? definition, changed));
       state = { definition, revision: definition.revision, state: "paused", nodes: definition.nodes.map(n => {
