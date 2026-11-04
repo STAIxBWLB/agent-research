@@ -54,7 +54,7 @@ test("successful repeats skip exported hashes and write no second event", async 
   await ops.archive(dir, { confirm: preview.fingerprint }, { actor, runner: fake.runner });
   const before = ledger(dir), next = previewArchive(dir);
   expect(next.notes).toEqual([]); expect(next.fingerprint).toBe(preview.fingerprint);
-  expect(await ops.archive(dir, { confirm: preview.fingerprint }, { actor, runner: fake.runner })).toEqual({ ...next, written: [] });
+  expect(await ops.archive(dir, { confirm: preview.fingerprint }, { actor, runner: fake.runner })).toEqual({ ...next, written: [], remaining: 0 });
   expect(ledger(dir)).toBe(before); expect(fake.requests).toHaveLength(2);
 });
 
@@ -92,20 +92,25 @@ test("failure on the first call writes no receipt and never copies raw diagnosti
 test("empty archive is a read-only no-op on confirmation", async () => {
   const dir = await setup(0), preview = previewArchive(dir), before = ledger(dir), fake = fakeRunner([]);
   expect(preview).toEqual({ fingerprint: sha256("[]"), notes: [] });
-  expect(await ops.archive(dir, { confirm: preview.fingerprint }, { actor, runner: fake.runner })).toEqual({ ...preview, written: [] });
+  expect(await ops.archive(dir, { confirm: preview.fingerprint }, { actor, runner: fake.runner })).toEqual({ ...preview, written: [], remaining: 0 });
   expect(ledger(dir)).toBe(before); expect(fake.requests).toEqual([]);
 });
 
-test("200 pending notes are inclusive; 201 refuse without outward calls", async () => {
-  const dir = await setup(200), preview = previewArchive(dir); expect(preview.notes).toHaveLength(200);
-  const success = fakeRunner(Array.from({ length: 200 }, (_, i) => result(i.toString(16).padStart(32, "0"))));
-  await ops.archive(dir, { confirm: preview.fingerprint }, { actor, runner: success.runner });
+test("exports 200 pending notes per batch and continues with the same fingerprint", async () => {
+  const dir = await setup(201), preview = previewArchive(dir);
+  expect(preview.notes).toHaveLength(201);
+  const fake = fakeRunner(Array.from({ length: 201 }, (_, i) => result(i.toString(16).padStart(32, "0"))));
+  const firstBatch = await ops.archive(dir, { confirm: preview.fingerprint }, { actor, runner: fake.runner });
+  expect("remaining" in firstBatch && firstBatch.remaining).toBe(1); expect(fake.requests).toHaveLength(200);
   expect(readLedger(dir).filter(event => event.type === "archive.exported")).toHaveLength(1);
   expect((readLedger(dir).at(-1)!.data.notes as unknown[]).length).toBe(200);
-  const tooMany = await setup(201), before = ledger(tooMany), fake = fakeRunner([]);
-  expect(() => previewArchive(tooMany)).toThrow("200 new notes");
-  await expect(ops.archive(tooMany, { confirm: "a".repeat(64) }, { actor, runner: fake.runner })).rejects.toThrow("200 new notes");
-  expect(ledger(tooMany)).toBe(before); expect(fake.requests).toEqual([]);
+  const next = previewArchive(dir);
+  expect(next.fingerprint).toBe(preview.fingerprint); expect(next.notes).toEqual(preview.notes.slice(200));
+  const lastBatch = await ops.archive(dir, { confirm: preview.fingerprint }, { actor, runner: fake.runner });
+  expect("remaining" in lastBatch && lastBatch.remaining).toBe(0); expect(fake.requests).toHaveLength(201);
+  expect(fake.requests.map(request => request.args[2])).toEqual(preview.notes.map(item => item.note.text));
+  expect(readLedger(dir).filter(event => event.type === "archive.exported")).toHaveLength(2);
+  expect((readLedger(dir).at(-1)!.data.notes as unknown[]).length).toBe(1); expect(previewArchive(dir).notes).toEqual([]);
 });
 
 test("malformed and conflicting stored receipts fail closed before new exports", async () => {
