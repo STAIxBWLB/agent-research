@@ -11,6 +11,7 @@ export const FORMAT_VERSIONS = {
   experimentSelection: 1,
   experimentFinalSeeds: 1,
   ablateResult: 1,
+  finalResult: 1,
   investigateResult: 1,
   executor: 1,
   experimentAttempt: 1,

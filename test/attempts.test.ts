@@ -2,11 +2,12 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { init, gateDecide, gateList, planSet, planControl, planShow, planRun } from "../src/commands.ts";
+import { init, gateDecide, gateList, planSet, planControl, planShow, planRun, finalSeeds, selection, investigateClose } from "../src/commands.ts";
 import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
-import { readLedger, sha256, withLock, appendEvent } from "../src/study.ts";
+import { finalGateBinding } from "../src/exp/final.ts";
+import { readLedger, sha256, withLock, appendEvent, openStudy } from "../src/study.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
 import { logCaptureFixtureRunner, metricLogTar, metricTar } from "./metric-fixtures.ts";
 import { collectStageEvidence, EvidenceError, LOG_COPY_BYTES } from "../src/exp/metrics.ts";
@@ -500,4 +501,48 @@ test("controller retry of a predicted but uncreated attempt launches without a n
   expect(second.state).toBe("done");
   const attempt = showAttempt(dir, second.nodes[0]!.attemptId!);
   expect(attempt.id).toBe(predicted); expect(attempt.retryOf).toBeUndefined();
+});
+
+
+async function finalReady(autonomy = "gates", approved = true) {
+  const p = protocol(), { dir, fake } = await setup(p, autonomy, false), ctx = { ...fake.ctx, http: fakeHttp([]).http }, winner = "e".repeat(40);
+  await finalSeeds(dir, { v: 1, seeds: [5] }, ctx);
+  await selection(dir, { v: 1, run: "investigate", metric: "score", baseline: { commit: commitSha }, minSeeds: 1, minDelta: 1 }, ctx);
+  const folder = join(dir, "runs", "investigate", "attempts"); mkdirSync(folder, { recursive: true });
+  for (const [n, commit, value] of [[1, commitSha, 1], [2, winner, 2]] as const) {
+    const id = `f${String(n).padStart(15, "0")}`;
+    writeFileSync(join(folder, `${id}.json`), JSON.stringify({ v: 1, id, studyId: openStudy(dir).study.id, run: "investigate", commit, seed: 1, protocolHash: protocolHash(p), protocol: p, executor: {}, stages: {}, stage: "evaluator", status: "succeeded", startedAt: "2030-01-01T00:00:00Z", metrics: [{ name: "score", value, unit: "points", provenance: "ares-observed" }], outputs: [] }));
+    appendEvent(dir, actor, "attempt.started", { id, run: "investigate", commit, seed: 1 });
+  }
+  await investigateClose(dir, ctx);
+  if (approved) { await gateDecide(dir, "design", "approve", undefined, ctx); await gateDecide(dir, "final", "approve", undefined, ctx); }
+  return { dir, fake, ctx, winner };
+}
+
+test("final auto approval is committed only with the verified candidate start", async () => {
+  const { dir, fake, winner } = await finalReady("auto", false), original = fake.ctx.runner!;
+  const first = await runAttempt(dir, { ...request, commit: winner, run: "final", seed: 5 }, { ...fake.ctx, runner: async r => {
+    if (r.command === "docker" && r.args[0] === "run") expect(readLedger(dir).some(e => e.type === "gate.approve" && e.data.gate === "final")).toBe(false);
+    return original(r);
+  } });
+  expect(first.status).toBe("running"); expect(first.finalBinding).toBe(finalGateBinding(dir)); expect(first.pendingFinalApproval).toBeUndefined();
+  const approval = readLedger(dir).find(e => e.type === "gate.approve" && e.data.gate === "final")!;
+  expect(approval.actor.kind).toBe("auto"); expect(approval.at).toBe(readLedger(dir).find(e => e.type === "attempt.stage.started" && e.data.id === first.id)!.at);
+});
+
+test("failed final preparation records no auto final approval and a rejected gate starts nothing", async () => {
+  const { dir, fake, winner } = await finalReady("auto", false); fake.failVersion();
+  expect((await runAttempt(dir, { ...request, commit: winner, run: "final", seed: 5 }, fake.ctx)).status).toBe("failed");
+  expect(readLedger(dir).filter(e => e.type === "gate.approve" && e.data.gate === "final")).toHaveLength(0);
+  const second = await finalReady("auto", false); await gateDecide(second.dir, "final", "reject", "Synthetic refusal", second.ctx);
+  await expect(runAttempt(second.dir, { ...request, commit: second.winner, run: "final", seed: 5 }, second.fake.ctx)).rejects.toThrow("rejected");
+  expect(second.fake.requests).toHaveLength(0);
+});
+
+test("changed final design during snapshot resolution refuses before final record or container", async () => {
+  const { dir, fake, winner } = await finalReady();
+  fake.resolveHook(async () => { writeFileSync(join(dir, "task", "task.md"), "new final inputs"); });
+  await expect(runAttempt(dir, { ...request, commit: winner, run: "final", seed: 5 }, fake.ctx)).rejects.toThrow("gate final is pending");
+  expect(readLedger(dir).some(e => e.type === "attempt.started" && e.data.run === "final")).toBe(false);
+  expect(fake.requests.some(r => r.command === "docker")).toBe(false);
 });
