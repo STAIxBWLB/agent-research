@@ -4,7 +4,7 @@ import { ATTEMPT_BYTES, listAttempts, type Attempt, type AttemptStatus } from ".
 import { protocolHash, readProtocol } from "../exp/protocol.ts";
 import { INVESTIGATE_BYTES, investigateResultPath, metricValue, readClosedInvestigation } from "../exp/investigate.ts";
 import { ABLATE_BYTES, ablateResultPath, readClosedAblate } from "../exp/ablate.ts";
-import { FINAL_RESULT_BYTES, finalResultPath, requireFinalInputs, type FinalResult } from "../exp/final.ts";
+import { FINAL_RESULT_BYTES, finalResultPath, requireFinalInputs, requirePosthocClosed, type FinalResult } from "../exp/final.ts";
 
 export const MANUSCRIPT_BYTES = 2 * 1024 * 1024, MAX_PLACEHOLDERS = 5000;
 interface Position { start: number; end: number; line: number; column: number; raw: string }
@@ -46,7 +46,8 @@ function canonical(value: unknown): string {
 }
 interface Source<T> { value: T; source: { file: string; sha256: string } }
 function source<T>(dir: string, file: string, bound: number, value: T, expected?: string): Source<T> {
-  const hash = sha256(readTextBounded(file, bound));
+  const text = readTextBounded(file, bound), hash = sha256(text);
+  if (expected === undefined && canonical(JSON.parse(text)) !== canonical(value)) throw new Error("source value changed during resolution");
   if (expected !== undefined && hash !== expected) throw new Error("source bytes changed during resolution");
   return { value, source: { file: relative(dir, file), sha256: hash } };
 }
@@ -87,6 +88,7 @@ export function resolvePlaceholders(dirArg: string, text: string) {
     const found = attemptIndex.get(id) ?? [];
     if (found.length !== 1) throw new Error("attempt missing or ambiguous");
     const a = found[0]!, protocol = readProtocol(dir);
+    if (posthoc) requirePosthocClosed(dir);
     if (a.studyId !== study.id || a.status !== "succeeded" || !protocol || a.protocolHash !== protocolHash(protocol) || a.protocolHash !== protocolHash(a.protocol) || (a.run === "posthoc") !== posthoc) throw new Error("attempt is not a current completed metric source");
     if (!readLedger(dir).some(e => e.type === "attempt.started" && e.data.id === a.id && e.data.run === a.run && e.data.commit === a.commit && e.data.seed === a.seed)) throw new Error("attempt start receipt missing");
     return source(dir, join(dir, "runs", a.run, "attempts", `${a.id}.json`), ATTEMPT_BYTES, a);
