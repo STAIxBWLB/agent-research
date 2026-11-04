@@ -33,7 +33,7 @@ test("ledger fold restores states, readiness and pause without touching study by
   observe(dir, "final"); expect(ops.planShow(dir).state).toBe("done");
   const bytes = readFileSync(join(dir, "ledger.jsonl"));
   writeFileSync(join(dir, ".ares.lock"), "live"); writeFileSync(join(dir, ".ares.plan.lock"), "live");
-  expect(foldPlan(readLedger(dir))).toEqual(ops.planShow(dir));
+  expect({ ...foldPlan(readLedger(dir)), controller: ops.planShow(dir).controller }).toEqual(ops.planShow(dir));
   expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(bytes);
 });
 

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { init, gateDecide, gateList, planSet, planControl, planShow } from "../src/commands.ts";
+import { init, gateDecide, gateList, planSet, planControl, planShow, planRun } from "../src/commands.ts";
 import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
@@ -434,4 +434,68 @@ test("plan retry passes the previous attempt id and creates a child instead of r
   const child = await runAttempt(dir, { ...request, retry: node.retryOf! }, fake.ctx);
   expect(child.id).not.toBe(first.id); expect(child.retryOf).toBe(first.id);
   expect(child.status).toBe("running"); expect(listAttempts(dir).totals).toMatchObject({ running: 1, cancelled: 1 });
+});
+
+
+test("plan controller commits expected attempt id, always detaches and reconciles the recorded attempt", async () => {
+  const { dir, fake } = await setup();
+  const ctx = { ...fake.ctx, http: fakeHttp([]).http };
+  await planSet(dir, { v: 1, nodes: [{ id: "work", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }], edges: [] }, ctx);
+  let resumed = false, intentSeen = false;
+  const original = fake.ctx.runner!;
+  const state = await planRun(dir, {}, { ...ctx,
+    runner: async r => {
+      if (r.command === "docker" && r.args[0] === "run") {
+        const intent = readLedger(dir).find(e => e.type === "node.intent")!;
+        expect(intent.data.attemptId).toMatch(/^[a-f0-9]{16}$/); intentSeen = true;
+      }
+      return original(r);
+    },
+    sleep: async () => {
+      if (!resumed) { resumed = true; await planControl(dir, { action: "resume", commandId: "resume-controller", expectedRevision: 1 }, ctx); }
+      for (const container of fake.containers.values()) { container.running = false; container.exitCode = 0; }
+      await Bun.sleep(1);
+    },
+  });
+  expect(state.state).toBe("done"); expect(intentSeen).toBe(true);
+  expect(state.nodes[0]!.output).toMatchObject({ attemptId: readLedger(dir).find(e => e.type === "node.intent")!.data.attemptId });
+});
+
+test("expected attempt identity drift refuses before creating an attempt", async () => {
+  const { dir, fake } = await setup();
+  const before = readLedger(dir);
+  await expect(runAttempt(dir, { ...request, expectedId: "0".repeat(16) }, fake.ctx)).rejects.toThrow("changed since plan intent");
+  expect(listAttempts(dir).attempts).toHaveLength(0); expect(readLedger(dir)).toEqual(before);
+  expect(fake.requests.some(r => r.command === "docker")).toBe(false);
+});
+
+
+test("controller retry of a predicted but uncreated attempt launches without a nonexistent parent", async () => {
+  const { dir, fake } = await setup(protocol(), "gates", false);
+  const ctx = { ...fake.ctx, http: fakeHttp([]).http };
+  await planSet(dir, { v: 1, nodes: [{ id: "work", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }], edges: [] }, ctx);
+  const stop = new AbortController(); let resumed = false;
+  const first = await planRun(dir, {}, { ...ctx, signal: stop.signal,
+    sleep: async () => {
+      if (!resumed) { resumed = true; await planControl(dir, { action: "resume", commandId: "resume-missing", expectedRevision: 1 }, ctx); }
+      if (planShow(dir).nodes[0]!.status === "uncertain") stop.abort();
+      await Bun.sleep(1);
+    },
+  });
+  const predicted = first.nodes[0]!.attemptId!;
+  expect(first.nodes[0]!.status).toBe("uncertain"); expect(listAttempts(dir).attempts).toHaveLength(0);
+  await gateDecide(dir, "design", "approve", undefined, ctx);
+  await planControl(dir, { action: "retry", node: "work", commandId: "retry-uncreated", expectedRevision: 1 }, ctx);
+  expect(planShow(dir).nodes[0]!.retryOf).toBe(predicted);
+  resumed = false;
+  const second = await planRun(dir, {}, { ...ctx,
+    sleep: async () => {
+      if (!resumed) { resumed = true; await planControl(dir, { action: "resume", commandId: "resume-after-retry", expectedRevision: 1 }, ctx); }
+      for (const container of fake.containers.values()) { container.running = false; container.exitCode = 0; }
+      await Bun.sleep(1);
+    },
+  });
+  expect(second.state).toBe("done");
+  const attempt = showAttempt(dir, second.nodes[0]!.attemptId!);
+  expect(attempt.id).toBe(predicted); expect(attempt.retryOf).toBeUndefined();
 });

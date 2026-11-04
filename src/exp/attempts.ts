@@ -20,7 +20,7 @@ export interface Attempt {
   launching?: { pid: number; host: string; token: string; claimedAt: string; expiresAt: string };
   pendingAutoApproval?: string;
 }
-export interface AttemptOptions { repo: string; commit: string; seed?: number; run?: string; label?: string; retry?: string; detach?: boolean }
+export interface AttemptOptions { repo: string; commit: string; seed?: number; run?: string; label?: string; retry?: string; detach?: boolean; expectedId?: string }
 /** collectEvaluation is T4's validating adapter; T3 does not parse or validate metric schemas. */
 export interface AttemptContext { actor: Actor; runner?: ProcessRunner; now?: () => number; sleep?: (ms: number) => Promise<void>; collectEvaluation?: (attempt: Attempt, runner: ProcessRunner) => Promise<Evaluation>; collectStageEvidence?: (attempt: Attempt, stage: Stage, runner: ProcessRunner) => Promise<StageEvidence> }
 export const ATTEMPT_BYTES = 1024 * 1024;
@@ -325,6 +325,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   const initialBinding = frozen.binding;
   const snapshot = await resolveSnapshot(options.repo, options.commit, ctx.runner ?? spawnRunner), hash = protocolHash(protocol);
   const wanted = attemptId(hash, snapshot.commit, snapshot.treeId, seed, run, options.retry);
+  if (options.expectedId !== undefined && wanted !== options.expectedId) throw new Error("attempt identity: changed since plan intent; reconcile the plan node before retrying");
   let created = false;
   let attempt = await withLock(dir, () => {
     const attempts = load(dir), existing = attempts.find(a => a.id === wanted); if (existing) return existing;
