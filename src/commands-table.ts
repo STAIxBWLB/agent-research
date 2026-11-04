@@ -17,6 +17,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "ablate add", usage: "ablate add <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "ablate show", usage: "ablate show <dir> [--json]", mutates: false, options: json },
   { name: "ablate close", usage: "ablate close <dir> [--json]", mutates: true, options: json },
+  { name: "posthoc show", usage: "posthoc show <dir> [--json]", mutates: false, options: json },
   { name: "final close", usage: "final close <dir> [--json]", mutates: true, options: json },
   { name: "final seeds", usage: "final seeds <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "selection", usage: "selection <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },

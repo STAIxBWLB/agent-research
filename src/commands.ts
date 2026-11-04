@@ -1,5 +1,5 @@
 import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
-import { setFinalSeeds, finalGateBinding, requireFinalInputs, closeFinal } from "./exp/final.ts";
+import { setFinalSeeds, finalGateBinding, requireFinalInputs, closeFinal, showPosthoc } from "./exp/final.ts";
 import { addIdea, decideIdea } from "./exp/ideas.ts";
 import { showInvestigation, closeInvestigation } from "./exp/investigate.ts";
 import { setSelection } from "./exp/selection.ts";
@@ -394,3 +394,5 @@ export async function finalClose(dirArg: string, ctx: Pick<Ctx, "actor">) {
   const { dir, study } = openStudy(dirArg); requireExperiment(study);
   return withLock(dir, () => closeFinal(dir, ctx.actor));
 }
+
+export const posthocShow = (dir: string) => showPosthoc(dir);

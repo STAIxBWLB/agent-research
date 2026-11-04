@@ -110,6 +110,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     }
     case "ablate show": count(spec, positional, 1); result = ops.ablateShow(positional[0]!); break;
     case "ablate close": count(spec, positional, 1); result = await ops.ablateClose(positional[0]!, ctx); break;
+    case "posthoc show": count(spec, positional, 1); result = ops.posthocShow(positional[0]!); break;
     case "final close": count(spec, positional, 1); result = await ops.finalClose(positional[0]!, ctx); break;
     case "final seeds": {
       count(spec, positional, 1); const file = str("--file");

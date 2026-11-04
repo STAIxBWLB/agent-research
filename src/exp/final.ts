@@ -164,3 +164,19 @@ export function closeFinal(dirArg: string, actor: Actor): FinalResult {
   if (old !== text) commit(input.dir, [[file, text, FINAL_RESULT_BYTES]], [{ actor, type: "final.closed", data: { sha256: sha256(text), status: result.status, investigateSha256: result.investigateSha256 } }]);
   return result;
 }
+
+
+/** Historical closure is sufficient: exploratory work never refreshes or rewrites final inputs. */
+export function requirePosthocClosed(dir: string): void {
+  requireExperiment(openStudy(dir).study);
+  if (!readLedger(dir).some(event => event.type === "final.closed")) throw new Error("posthoc: final has not been closed; run ares final close <dir> before starting exploratory attempts");
+}
+export function showPosthoc(dirArg: string) {
+  const { dir, study } = openStudy(dirArg); requireExperiment(study);
+  const attempts = listAttempts(dir, { run: "posthoc" }).attempts.map(attempt => ({
+    id: attempt.id, commit: attempt.commit, seed: attempt.seed, status: attempt.status,
+    label: "exploratory" as const, metrics: attempt.metrics,
+    ...(attempt.reason ? { reason: attempt.reason } : {}), ...(attempt.retryOf ? { retryOf: attempt.retryOf } : {}),
+  }));
+  return { run: "posthoc" as const, label: "exploratory" as const, attempts };
+}
