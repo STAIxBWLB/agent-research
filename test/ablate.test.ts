@@ -72,7 +72,7 @@ test("all statuses and exclusions remain in totals; reserved and later successes
   for (const status of ["failed", "cancelled", "unknown"] as const) attempt(dir, ABL, 2, 0, { status });
   const result = ops.ablateShow(dir);
   expect(result.totals).toMatchObject({ attempts: 11, byStatus: { succeeded: 8, failed: 1, cancelled: 1, unknown: 1 }, countedSuccesses: 2, excluded: 6 });
-  for (const [id, reason] of [[later, "later-success"], [reserved, "reserved-seed"], [other, "other-protocol"], [missing, "missing-start-event"], [unknownCommit, "undeclared-ablation"], [undeclared, "undeclared-seed"]]) expect(result.excluded.find(e => e.id === id)?.reasons).toContain(reason);
+  for (const [id, reason] of [[later, "later-success"], [reserved, "reserved-seed"], [other, "other-protocol"], [missing, "missing-start-event"], [unknownCommit, "undeclared-ablation"], [undeclared, "undeclared-seed"]] as const) expect(result.excluded.find(e => e.id === id)?.reasons).toContain(reason);
   expect(result.ablations[0]!.perSeed[0]!.attempt).toBe(first);
 });
 
