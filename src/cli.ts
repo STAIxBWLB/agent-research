@@ -91,6 +91,16 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       result = await ops.scope(positional[0]!, await readInput(file, io), ctx);
       break;
     }
+    case "idea add": {
+      count(spec, positional, 1); const file = str("--file");
+      if (file === undefined) throw new Error("idea add: input missing; pass --file PATH or --file - for JSON");
+      result = await ops.ideaAdd(positional[0]!, await readInput(file, io), ctx); break;
+    }
+    case "idea decide": {
+      count(spec, positional, 3); const reason = str("--reason"), attempts = str("--attempts");
+      if (reason === undefined || attempts === undefined) throw new Error("idea decide: evidence missing; pass --reason TEXT --attempts ID[,ID...] and --commit SHA for refine");
+      result = await ops.ideaDecide(positional[0]!, positional[1]!, { decision: positional[2], reason, attempts: attempts.split(","), ...(str("--commit") !== undefined ? { commit: str("--commit") } : {}) }, ctx); break;
+    }
     case "investigate show": count(spec, positional, 1); result = ops.investigateShow(positional[0]!); break;
     case "investigate close": count(spec, positional, 1); result = await ops.investigateClose(positional[0]!, ctx); break;
     case "selection": {

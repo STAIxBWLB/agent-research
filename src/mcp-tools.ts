@@ -57,6 +57,8 @@ const SELECTION = obj({
   minSeeds: integer(1, 1000), minDelta: { type: "number", minimum: 0 },
 }, ["v", "run", "metric", "baseline", "minSeeds", "minDelta"]);
 
+const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), parent: text(64), commit: { type: "string", minLength: 40, maxLength: 40 } }, ["id", "title", "hypothesis"]);
+
 export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_manifest", description: "Read this ares version, implemented commands and shared schema versions without opening a study or reaching an executor.", inputSchema: obj({}, []), annotations: read },
   { name: "ares_plan_set", description: "Validate a bounded revisioned DAG of existing steps, local gates and read-only hub references. Set it paused; changed consumed inputs become stale and need explicit retry. Never starts a controller.", inputSchema: obj({ study, plan: PLAN }, ["study", "plan"]), annotations: write },
@@ -65,6 +67,8 @@ export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_status", description: "Study summary: gates, candidate counts, verification counts, bibliography.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_scope_set", description: "Set scope.json (question, subquestions, include, exclude, yearFrom, yearTo, maxCandidates). A change returns the scope gate to pending.", inputSchema: obj({ study, scope: SCOPE }, ["study", "scope"]), annotations: write },
   { name: "ares_gate", description: "List gates, or approve/reject scope, screen, design or plan:node-id. Plan approvals bind all upstream output references and need complete upstream outputs; skip never bypasses them. The ledger records the actor; approval authority is workspace policy.", inputSchema: obj({ study, action: { type: "string", enum: ["list", "approve", "reject"] }, gate: text(133), reason }, ["study", "action"]), annotations: write },
+  { name: "ares_idea_add", description: "Add an experiment idea to the ledger, with optional existing parent and frozen commit. Unique run-name ids; at most 1000 ideas. Starts no work.", inputSchema: obj({ study, idea: IDEA }, ["study", "idea"]), annotations: write },
+  { name: "ares_idea_decide", description: "Record refine/pivot with 1..200 terminal attempts from the idea existing commits and a reason of at most 2000 bytes. Refine requires --commit; pivot closes further decisions. Starts no attempt or hub work.", inputSchema: obj({ study, id: text(64), decision: { type: "string", enum: ["refine", "pivot"] }, reason: text(2000), attempts: { type: "array", minItems: 1, maxItems: 200, items: attemptId }, commit: { type: "string", minLength: 40, maxLength: 40 } }, ["study", "id", "decision", "reason", "attempts"]), annotations: write },
   { name: "ares_investigate_show", description: "Read investigation candidate/baseline paired-seed scores, winner or no-winner reason and all run attempt totals/exclusions. No executor or network calls.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_investigate_close", description: "Close the selected investigation run after all its attempts stop. Write a deterministic result and ledger receipt; identical inputs write nothing. Starts no attempts.", inputSchema: obj({ study }, ["study"]), annotations: write },
   { name: "ares_selection_set", description: "Set a declared investigation selection rule before results: run, primary metric, frozen baseline commit, minimum paired seeds and nonnegative improvement. Changes reopen the design gate; identical bytes leave the cutoff unchanged. Requires experiment mode and a protocol; starts no investigation or executor.", inputSchema: obj({ study, selection: SELECTION }, ["study", "selection"]), annotations: write },
@@ -104,6 +108,8 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
     ares_plan_show: a => ops.planShow(dir(a)),
     ares_status: a => ops.status(dir(a)),
     ares_scope_set: a => ops.scope(dir(a), a.scope, ctx),
+    ares_idea_add: a => ops.ideaAdd(dir(a), a.idea, ctx),
+    ares_idea_decide: a => ops.ideaDecide(dir(a), a.id as string, { decision: a.decision, reason: a.reason, attempts: a.attempts, ...(a.commit !== undefined ? { commit: a.commit } : {}) }, ctx),
     ares_investigate_show: a => ops.investigateShow(dir(a)),
     ares_investigate_close: a => ops.investigateClose(dir(a), ctx),
     ares_selection_set: a => ops.selection(dir(a), a.selection, ctx),
