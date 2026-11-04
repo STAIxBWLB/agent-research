@@ -78,7 +78,7 @@ test("reserved attempts refuse before Git, records, containers or auto approval;
   const dir = await study(undefined, "auto"); await ops.finalSeeds(dir, { v: 1, seeds: [1] }, ctx);
   await ops.executorSet(dir, { v: 1, kind: "local", workdir: "/private/synthetic" }, ctx);
   const ledger = readFileSync(join(dir, "ledger.jsonl")); let calls = 0;
-  for (const run of ["main", "investigate", "ablate", "posthoc", "final"]) await expect(runAttempt(dir, { repo: "/synthetic", commit: BASE, seed: 1, run, detach: true }, { actor, runner: async () => { calls++; throw new Error("must not run"); } })).rejects.toThrow(run === "final" ? "final authorization" : "reserved");
+  for (const run of ["main", "investigate", "ablate", "posthoc", "final"]) await expect(runAttempt(dir, { repo: "/synthetic", commit: BASE, seed: 1, run, detach: true }, { actor, runner: async () => { calls++; throw new Error("must not run"); } })).rejects.toThrow(run === "final" ? "selection missing" : "reserved");
   await expect(runAttempt(dir, { repo: "/synthetic", commit: BASE, detach: true }, { actor, runner: async () => { calls++; throw new Error("must not run"); } })).rejects.toThrow("reserved");
   expect(calls).toBe(0); expect(existsSync(join(dir, "runs"))).toBe(false); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(ledger);
   const other = await study(); await ops.finalSeeds(other, { v: 1, seeds: [4] }, ctx); await ops.executorSet(other, { v: 1, kind: "local", workdir: "/private/synthetic" }, ctx);

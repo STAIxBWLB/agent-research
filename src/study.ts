@@ -6,8 +6,8 @@ import { dirname, join, resolve } from "node:path";
 
 export type Mode = "survey" | "experiment";
 export type Autonomy = "auto" | "gates";
-export type GateName = "scope" | "screen" | "design" | `plan:${string}`;
-export const GATES: readonly GateName[] = ["scope", "screen", "design"];
+export type GateName = "scope" | "screen" | "design" | "final" | `plan:${string}`;
+export const GATES: readonly GateName[] = ["scope", "screen", "design", "final"];
 export interface Study { v: 1; id: string; question: string; mode: Mode; autonomy: Autonomy; createdAt: string }
 export interface Actor { kind: "person" | "agent" | "auto"; id?: string }
 export function requireExperiment(study: Study): void {
@@ -223,10 +223,11 @@ export function decideGate(dir: string, gate: GateName, decision: "approve" | "r
  * changes a gate.
  */
 export function requireGate(dir: string, study: Study, gate: GateName, binder: Binder): PendingEvent[] {
-  if (gate === "design") requireExperiment(study);
+  if (gate === "design" || gate === "final") requireExperiment(study);
   const state = gateState(gate, readLedger(dir), binder);
   if (state.state === "approved") return [];
   if (state.state === "pending" && study.autonomy === "auto") return [{ actor: { kind: "auto" }, type: "gate.approve", data: { gate, binding: state.current! } }];
+  if (state.state === "none" && gate === "final") throw new Error("gate final: complete reserved seeds and close investigate/required ablate inputs before final approval");
   if (state.state === "none" && gate.startsWith("plan:")) throw new Error(`gate ${gate}: upstream outputs are not complete; finish every upstream node and run ares gate list again`);
   if (state.state === "none") throw new Error(gate === "scope" ? "gate scope: no scope yet (run ares scope)" : gate === "design" ? "gate design: no protocol yet (run ares protocol)" : "gate screen: no included candidates yet");
   if (state.state === "rejected") throw new Error(`gate ${gate} is rejected${state.decided?.reason ? `: ${state.decided.reason}` : ""}; change the content and ask again`);

@@ -1,5 +1,5 @@
 import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
-import { setFinalSeeds } from "./exp/final.ts";
+import { setFinalSeeds, finalGateBinding, requireFinalInputs, closeFinal } from "./exp/final.ts";
 import { addIdea, decideIdea } from "./exp/ideas.ts";
 import { showInvestigation, closeInvestigation } from "./exp/investigate.ts";
 import { setSelection } from "./exp/selection.ts";
@@ -32,7 +32,7 @@ export interface Ctx extends ExperimentRuntime { actor: Actor; http: Http; signa
 const MAX_IDS = 200, DRAFT_BYTES = 2 * 1024 * 1024, BIB_BYTES = 16 * 1024 * 1024, CARD_BYTES = 65_536;
 
 export function binder(dir: string): Binder {
-  return gate => gate.startsWith("plan:") ? planGateBinding(readPlanState(dir, readLedger(dir)), gate) : gate === "scope" ? scopeHash(dir) : gate === "design" ? designBinding(dir) : includedHash(loadCandidates(dir));
+  return gate => gate === "final" ? finalGateBinding(dir) : gate.startsWith("plan:") ? planGateBinding(readPlanState(dir, readLedger(dir)), gate) : gate === "scope" ? scopeHash(dir) : gate === "design" ? designBinding(dir) : includedHash(loadCandidates(dir));
 }
 function gateName(value: string): GateName {
   if (!GATES.includes(value as GateName) && !value.startsWith("plan:")) throw new Error(`unknown gate: ${value} (${GATES.join(", ")})`);
@@ -81,7 +81,7 @@ export function status(dirArg: string) {
   return {
     study: dir, question: study.question, mode: study.mode, autonomy: study.autonomy,
     scope: { set: scopeHash(dir) !== undefined },
-    gates: GATES.filter(g => g !== "design" || study.mode === "experiment").map(g => gateState(g, events, bind)),
+    gates: GATES.filter(g => (g !== "design" && g !== "final") || study.mode === "experiment").map(g => gateState(g, events, bind)),
     literature: {
       candidates: list.length, new: count("new"), included: included.length, excluded: count("excluded"),
       verified: included.filter(isVerified).length, unverified: included.filter(c => !isVerified(c)).length,
@@ -103,14 +103,15 @@ export async function scope(dirArg: string, raw: unknown, ctx: Ctx) {
 export function gateList(dirArg: string) {
   const { dir, study } = openStudy(dirArg), events = readLedger(dir), bind = binder(dir);
   const plan = foldPlan(events);
-  const gates: GateName[] = [...GATES.filter(g => g !== "design" || study.mode === "experiment"), ...(plan?.nodes.filter(n => n.kind === "gate").map(n => `plan:${n.id}` as GateName) ?? [])];
+  const gates: GateName[] = [...GATES.filter(g => (g !== "design" && g !== "final") || study.mode === "experiment"), ...(plan?.nodes.filter(n => n.kind === "gate").map(n => `plan:${n.id}` as GateName) ?? [])];
   return gates.map(g => gateState(g, events, bind));
 }
 
 export async function gateDecide(dirArg: string, gate: string, decision: "approve" | "reject", reason: string | undefined, ctx: Ctx) {
   const { dir, study } = openStudy(dirArg), name = gateName(gate), why = reason === undefined ? undefined : boundedText(reason, "--reason", 500);
-  if (name === "design") requireExperiment(study);
+  if (name === "design" || name === "final") requireExperiment(study);
   return withLock(dir, () => {
+    if (name === "final") requireFinalInputs(dir);
     if (name.startsWith("plan:") && !readPlanState(dir, readLedger(dir)).definition.nodes.some(n => n.id === name.slice(5) && n.kind === "gate")) throw new Error(`gate ${name}: no gate node ${name.slice(5)} in the plan; run ares gate list and select an existing gate`);
     return decideGate(dir, name, decision, ctx.actor, binder(dir), why);
   });
@@ -386,4 +387,10 @@ export const ablateShow = (dir: string) => showAblate(dir);
 export async function ablateClose(dirArg: string, ctx: Pick<Ctx, "actor">) {
   const { dir, study } = openStudy(dirArg); requireExperiment(study);
   return withLock(dir, () => closeAblate(dir, ctx.actor));
+}
+
+
+export async function finalClose(dirArg: string, ctx: Pick<Ctx, "actor">) {
+  const { dir, study } = openStudy(dirArg); requireExperiment(study);
+  return withLock(dir, () => closeFinal(dir, ctx.actor));
 }

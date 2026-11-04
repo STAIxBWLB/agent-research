@@ -128,3 +128,13 @@ export function closeAblate(dirArg: string, actor: Actor): AblateResult {
   if (old !== text) commit(input.dir, [[file, text, ABLATE_BYTES]], [{ actor, type: "ablate.closed", data: { sha256: sha256(text), investigateSha256: input.closed.sha256 } }]);
   return next.result;
 }
+
+export function readClosedAblate(dirArg: string): { result: AblateResult; sha256: string } {
+  const input = context(dirArg), text = previous(ablateResultPath(input.dir));
+  if (text === undefined) throw new Error("ablate result: not closed; run ares ablate close before final approval");
+  const hash = sha256(text), receipt = input.events.findLast(e => e.type === "ablate.closed");
+  if (!receipt || receipt.data.sha256 !== hash) throw new Error("ablate result: bytes disagree with the latest close receipt; run ares ablate close again");
+  const next = calculate(input);
+  if (next.running || text !== JSON.stringify(next.result, null, 2) + "\n") throw new Error("ablate result: stale inputs or running work; reconcile attempts and run ares ablate close again");
+  return { result: next.result, sha256: hash };
+}
