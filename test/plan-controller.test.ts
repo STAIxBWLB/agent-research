@@ -268,16 +268,68 @@ test("survey CLI and MCP refuse every investigation command without writing even
     [["selection", dir, "--file", "-"], selection], [["idea", "add", dir, "--file", "-"], idea],
     [["idea", "decide", dir, "idea", "pivot", "--reason", "synthetic"], {}],
     [["investigate", "show", dir], {}], [["investigate", "close", dir], {}],
+    [["final", "seeds", dir, "--file", "-"], { v: 1, seeds: [2] }], [["final", "close", dir], {}],
+    [["ablate", "add", dir, "--file", "-"], { id: "without", commit: "c".repeat(40), removes: "synthetic" }],
+    [["ablate", "show", dir], {}], [["ablate", "close", dir], {}], [["posthoc", "show", dir], {}],
   ] as [string[], unknown][]) await expect(run(args, {}, { http: ctx.http, readStdin: async () => JSON.stringify(payload) })).rejects.toThrow("experiment");
   const server = createAresMcp({}, ctx.http);
   for (const [name, args] of [
     ["ares_selection_set", { study: dir, selection }], ["ares_idea_add", { study: dir, idea }],
     ["ares_idea_decide", { study: dir, id: "idea", decision: "pivot", reason: "synthetic" }],
     ["ares_investigate_show", { study: dir }], ["ares_investigate_close", { study: dir }],
+    ["ares_final_seeds", { study: dir, final: { v: 1, seeds: [2] } }], ["ares_final_close", { study: dir }],
+    ["ares_ablate_add", { study: dir, ablation: { id: "without", commit: "c".repeat(40), removes: "synthetic" } }],
+    ["ares_ablate_show", { study: dir }], ["ares_ablate_close", { study: dir }], ["ares_posthoc_show", { study: dir }],
   ] as [string, Record<string, unknown>][]) {
     let error: unknown;
     try { await server.handlers[name]!(args); } catch (failure) { error = failure; }
     expect((error as Error).message).toContain("experiment");
   }
   expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
+});
+
+
+test("production phase close steps bind committed result sha/status to a gate for either final qualification", async () => {
+  for (const qualified of [true, false]) {
+    const dir = tempDir(), baseline = "a".repeat(40), winner = "b".repeat(40); ops.init(dir, { question: "synthetic", mode: "experiment" }, ctx);
+    mkdirSync(join(dir, "task", "evaluator"), { recursive: true }); writeFileSync(join(dir, "task", "task.md"), "synthetic"); writeFileSync(join(dir, "task", "evaluator", "run"), "synthetic");
+    const image = `fixture@sha256:${"a".repeat(64)}`;
+    await ops.protocol(dir, { v: 1, method: "synthetic", candidate: { image, command: ["candidate"] }, evaluator: { image, command: ["evaluator"] }, metrics: [{ name: "score", unit: "points", direction: "max" }], seeds: [1, 2], limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts: 100, maxWallHours: 1, maxGpuHours: 0 } }, ctx);
+    await ops.finalSeeds(dir, { v: 1, seeds: [2] }, ctx);
+    await ops.selection(dir, { v: 1, run: "investigate", metric: "score", baseline: { commit: baseline }, minSeeds: 1, minDelta: 1 }, ctx);
+    let serial = 0;
+    const sample = (run: string, commit: string, seed: number, value: number) => {
+      const id = String(++serial).padStart(16, "0"), protocol = readProtocol(dir)!, folder = join(dir, "runs", run, "attempts"); mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, `${id}.json`), JSON.stringify({ v: 1, id, studyId: openStudy(dir).study.id, run, commit, seed, protocolHash: protocolHash(protocol), protocol, executor: {}, stages: {}, stage: "evaluator", status: "succeeded", startedAt: "2030-01-01T00:00:00Z", metrics: [{ name: "score", value, unit: "points", provenance: "ares-observed" }], outputs: [] }));
+      appendEvent(dir, actor, "attempt.started", { id, run, commit, seed });
+    };
+    sample("investigate", baseline, 1, 10); sample("investigate", winner, 1, 12); await ops.investigateClose(dir, ctx);
+    await ops.ablateAdd(dir, { id: "without", commit: "c".repeat(40), removes: "synthetic component" }, ctx);
+    // A closed no-data ablation is valid; every declaration remains listed.
+    await ops.ablateClose(dir, ctx); await ops.gateDecide(dir, "final", "approve", undefined, ctx);
+    sample("final", baseline, 2, 10); sample("final", winner, 2, qualified ? 12 : 10);
+    await ops.planSet(dir, { v: 1, nodes: [
+      { id: "ablate", kind: "step", command: "ablate.close", args: {} },
+      { id: "final", kind: "step", command: "final.close", args: {}, needs: ["ablate"] },
+      { id: "review", kind: "gate", needs: ["final"], binds: ["ablate", "final"] },
+    ], edges: [] }, ctx);
+    let resumed = false, approved = false;
+    const state = await ops.planRun(dir, {}, { ...ctx, runner: async () => { throw new Error("close steps must not start executor or hub"); }, sleep: async () => {
+      if (!resumed) { resumed = true; await resume(dir); }
+      else if (!approved && ops.gateList(dir).find(g => g.gate === "plan:review")?.state === "pending") { approved = true; await ops.gateDecide(dir, "plan:review", "approve", undefined, ctx); }
+      await Bun.sleep(1);
+    } });
+    expect(state.state).toBe("done");
+    for (const [id, status] of [["ablate", "closed"], ["final", qualified ? "qualified" : "not_qualified"]]) {
+      const bytes = readFileSync(join(dir, "runs", id!, `${id}.json`));
+      expect(state.nodes.find(n => n.id === id)!.output).toEqual({ sha256: sha256(bytes), status });
+      expect(state.nodes.find(n => n.id === id)!.status).toBe("done");
+    }
+    expect(ops.gateList(dir).find(g => g.gate === "plan:review")!.state).toBe("approved");
+    // New consumed outputs invalidate the downstream approval binding.
+    await ops.planControl(dir, { action: "retry", node: "final", commandId: "refresh-final", expectedRevision: 1 }, ctx);
+    appendEvent(dir, actor, "node.intent", { revision: 1, node: "final", dispatchId: "1:final:2" });
+    appendEvent(dir, actor, "node.observed", { revision: 1, node: "final", dispatchId: "1:final:2", status: "done", output: { sha256: "changed", status: "not_qualified" } });
+    expect(ops.gateList(dir).find(g => g.gate === "plan:review")!.state).toBe("pending");
+  }
 });
