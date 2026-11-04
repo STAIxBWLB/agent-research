@@ -56,6 +56,10 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
   let result: unknown, code = 0;
   switch (spec.name) {
+    case "archive": {
+      count(spec, positional, 1); const confirm = str("--confirm");
+      result = await ops.archive(positional[0]!, { ...(confirm !== undefined ? { confirm } : {}) }, ctx, env); break;
+    }
     case "run": {
       count(spec, positional, 1); const parallel = integer(flags["--parallel"], "--parallel");
       result = await ops.planRun(positional[0]!, { ...(parallel !== undefined ? { parallel } : {}) }, ctx); break;
