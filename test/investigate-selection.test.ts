@@ -138,3 +138,16 @@ test("raw selection formatting is sealed and failed auto-mode validation records
   expect(ops.gateList(dir).find(g => g.gate === "design")!.state).toBe("pending");
   expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
 });
+
+
+test("reserved phase run names refuse new selection rules on API, CLI and MCP without writes", async () => {
+  const dir = await study(); await ops.selection(dir, rule(), ctx);
+  const bytes = readFileSync(selectionPath(dir)), ledger = readFileSync(join(dir, "ledger.jsonl")), server = createAresMcp({}, ctx.http);
+  for (const name of ["ablate", "final", "posthoc"]) {
+    const payload = { ...rule(), run: name };
+    await expect(ops.selection(dir, payload, ctx)).rejects.toThrow(`${name} is a reserved phase run`);
+    await expect(run(["selection", dir, "--file", "-"], {}, { http: ctx.http, readStdin: async () => JSON.stringify(payload) })).rejects.toThrow("choose another run such as investigate");
+    await expect(server.handlers.ares_selection_set!({ study: dir, selection: payload })).rejects.toThrow("reserved phase run");
+    expect(readFileSync(selectionPath(dir))).toEqual(bytes); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(ledger);
+  }
+});

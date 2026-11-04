@@ -10,6 +10,7 @@ export const FORMAT_VERSIONS = {
   experimentProtocol: 1,
   experimentSelection: 1,
   experimentFinalSeeds: 1,
+  ablateResult: 1,
   investigateResult: 1,
   executor: 1,
   experimentAttempt: 1,
