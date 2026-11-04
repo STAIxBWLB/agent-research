@@ -59,6 +59,11 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
   for (const event of events) if (event.type === "watch.ran" && Array.isArray(event.data.addedIds)) for (const id of event.data.addedIds) if (typeof id === "string" && current.has(id)) watched.set(id, event);
   for (const [id, event] of watched) add("candidate", id, "candidate", current.get(id)!.title, event.at, `${watch?.config?.rubric ?? ""}\n${id}`,
     [{ id: "screen.include", label: "Include", destructive: true, reason: "required" }, { id: "screen.exclude", label: "Exclude", destructive: true, reason: "required" }]);
+  for (const [index, event] of events.entries()) if (event.type === "watch.ran" && Array.isArray(event.data.addedIds) && Number.isSafeInteger(event.data.addedIdsTotal)) {
+    const overflow = Number(event.data.addedIdsTotal) - event.data.addedIds.length;
+    if (overflow > 0) add("watch-overflow", String(index), "alert", `${overflow} watch candidate ids exceed the receipt list`, event.at,
+      "Only recorded ids appear as candidate items. Unrecorded ids have no individual watch provenance; inspect ares watch show and the study's new candidates.");
+  }
   for (const skill of skills ?? []) if (skill.state === "proposed") {
     const verbs: Verb[] = [{ id: "skill.reject", label: "Reject", destructive: true, reason: "required" }, { id: "skill.withdraw", label: "Withdraw", destructive: true, reason: "required" }];
     if (features.includes("inbox.form")) verbs.unshift({ id: "skill.accept", label: "Accept", destructive: true, reason: "required", form: { questions: [{ id: "pr", prompt: "Provide the reviewed PR URL", options: [{ id: "reviewed", label: "Reviewed PR is ready" }, { id: "pending", label: "Keep proposed" }], other: { label: "Reviewed PR URL", maxLength: 1000 } }] } });

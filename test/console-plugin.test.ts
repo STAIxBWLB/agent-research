@@ -145,3 +145,27 @@ test("an unrelated ledger event does not change when an unchanged pending gate s
   const next = await provider.snapshot({ panel: "inbox", after: first.cursor as number });
   expect(rows(next.items).find(row => row.id === scope.id)?.at).toBe(scope.at);
 });
+
+
+test("unavailable alerts keep the last read event time or an explicit stable epoch sentinel", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "unavailable"); addStudy(family, study);
+  const provider = await typed.open(context(family)); await provider.snapshot({ panel: "studies", after: 0 });
+  const latest = readLedger(study).at(-1)!.at; fs.renameSync(study, join(home, "moved-unavailable"));
+  const unavailable = async (reader: Awaited<ReturnType<typeof typed.open>>) => rows((await reader.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.kind === "unavailable")!;
+  const cached = await unavailable(provider); expect(cached.at).toBe(latest); expect((await unavailable(provider)).at).toBe(cached.at);
+  const fresh = await typed.open(context(family)), first = await unavailable(fresh);
+  expect(first.at).toBe("1970-01-01T00:00:00.000Z"); expect(first.detail).toContain("ledger time unavailable");
+  addStudy(family, makeStudy(home, "unrelated-registration")); const second = await unavailable(fresh);
+  expect(second.id).toBe(first.id); expect(second.at).toBe(first.at);
+});
+
+test("truncated watch receipts show one event-timed overflow notice without inferring candidate provenance", async () => {
+  const f = await fixtures(fs.realpathSync(tempDir())), file = join(f.survey, "literature", "candidates.json");
+  const candidates = JSON.parse(fs.readFileSync(file, "utf8")); candidates.push({ ...candidates[0], id: "doi:10.0000/unrecorded", title: "Synthetic unrecorded new candidate" }); fs.writeFileSync(file, JSON.stringify(candidates));
+  appendEvent(f.survey, actor, "watch.ran", { added: 5, addedIds: [candidates[0].id, candidates[1].id], addedIdsTotal: 5, ok: true });
+  const event = readLedger(f.survey).at(-1)!, provider = await typed.open(context(f.family));
+  const items = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items), candidatesShown = items.filter(row => row.kind === "candidate");
+  expect(candidatesShown).toHaveLength(1); expect(candidatesShown[0]!.title).toBe("Synthetic live candidate");
+  const notices = items.filter(row => row.kind === "watch-overflow"); expect(notices).toHaveLength(1); expect(notices[0]!.title).toContain("3 watch candidate ids"); expect(notices[0]!.at).toBe(event.at); expect(notices[0]!.verbs).toEqual([]);
+  expect(rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.id === notices[0]!.id)?.at).toBe(event.at);
+});
