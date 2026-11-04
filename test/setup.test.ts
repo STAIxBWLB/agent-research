@@ -257,3 +257,18 @@ test("receipt-first recovery re-applies an unchanged prior TOML datetime/nonfini
   const resumed = runSetup("codex", "apply", f.options); expect(resumed.actions.filter(row => row.change === "refused")).toEqual([]); expect(resumed.applied).toBe(true);
   expect(runSetup("codex", "undo", f.options).applied).toBe(true); expect(Bun.TOML.parse(fs.readFileSync(file, "utf8"))).toEqual(Bun.TOML.parse(content));
 });
+
+test("stale setup lock refusal names its path and safe manual cleanup, then setup proceeds", () => {
+  const f = fixture(), action = runSetup("claude", "dry-run", f.options).actions[0]!;
+  fs.writeFileSync(action.lock, "synthetic exited owner\n", { mode: 0o600 });
+  const lockBytes = fs.readFileSync(action.lock);
+  for (const mode of ["dry-run", "apply", "undo"] as const) {
+    const report = runSetup("claude", mode, f.options); refuse(report);
+    expect(report.actions[0]!.reason).toContain(action.lock);
+    expect(report.actions[0]!.reason).toContain(`if no ares setup is running, remove ${action.lock} and rerun ares setup`);
+    expect(fs.readFileSync(action.lock)).toEqual(lockBytes); expect(fs.existsSync(action.file)).toBe(false); expect(fs.existsSync(action.receipt)).toBe(false);
+  }
+  fs.unlinkSync(action.lock);
+  const applied = runSetup("claude", "apply", f.options); expect(applied.applied).toBe(true);
+  expect(json(action.file).mcpServers.ares).toEqual(applied.entry); expect(fs.existsSync(action.lock)).toBe(false);
+});

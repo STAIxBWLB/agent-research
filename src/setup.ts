@@ -21,6 +21,9 @@ function fail(message: string, nextStep = "correct the config or restore its set
 function failureReason(error: unknown): string {
   return error instanceof SetupError ? error.message : `setup: ${error instanceof Error ? error.message : "file operation failed"}; check file permissions and the setup receipt, then rerun ares setup`;
 }
+function setupLockRefusal(file: string): never {
+  fail(`target is locked by another setup: ${file}`, `if no ares setup is running, remove ${file} and rerun ares setup`);
+}
 function absolute(value: string, label: string): string {
   if (!isAbsolute(value) || value.includes("\0")) fail(`${label} must be an absolute path`, label === "--root" ? "pass --root ABS for an existing agent-research release" : `set ${label} to an absolute path and rerun ares setup`);
   return resolve(value);
@@ -172,7 +175,7 @@ function receipt(source: string | null, host: Host): Receipt | undefined {
 function plan(host: Host, receiptPath: string, mode: SetupMode, desired: McpEntry, ownsLock = false): Plan {
   const action: SetupAction = { target: host.target, file: host.file, entry: `${host.key}.ares`, receipt: receiptPath, lock: `${host.file}.ares-setup.lock`, change: "none", receiptChange: "none" };
   guard(action.lock);
-  if (!ownsLock && existsSync(action.lock)) fail("target is locked by another setup", "retry after that setup finishes");
+  if (!ownsLock && existsSync(action.lock)) setupLockRefusal(action.lock);
   const before = read(host.file, SETUP_CONFIG_BYTES), receiptBefore = read(receiptPath, SETUP_RECEIPT_BYTES), prior = receipt(receiptBefore, host), current = entry(host, before);
   const result: Plan = { host, action, before, after: before, receiptBefore, receiptAfter: receiptBefore };
   if (mode === "undo") {
@@ -198,7 +201,7 @@ function acquireSetupLock(file: string): () => void {
   guard(file); mkdirSync(dirname(file), { recursive: true, mode: 0o700 }); guard(file);
   let fd: number;
   try { fd = openSync(file, "wx", 0o600); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") fail("target is locked by another setup", "retry after that setup finishes"); throw error; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") setupLockRefusal(file); throw error; }
   return () => { try { closeSync(fd); } finally { unlinkSync(file); } };
 }
 /** Agent setup only. Console dispatch is deliberately separate for the plugin integration. */
