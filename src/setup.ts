@@ -78,7 +78,7 @@ function tomlKey(raw: string): string[] | undefined {
   while (pattern.lastIndex < raw.length) {
     const match = pattern.exec(raw); if (!match) return undefined;
     const token = match[1]!;
-    try { parts.push(token.startsWith('"') || token.startsWith("'") ? Bun.TOML.parse(`key = ${token}`).key as string : token); } catch { return undefined; }
+    try { parts.push(token.startsWith('"') || token.startsWith("'") ? record(Bun.TOML.parse(`key = ${token}`)).key as string : token); } catch { return undefined; }
   }
   return parts;
 }
@@ -116,7 +116,7 @@ function spans(lines: string[]): [number, number][] {
   }
   return result;
 }
-const linesOf = (source: string) => source.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+const linesOf = (source: string): string[] => source.match(/[^\n]*\n|[^\n]+$/g) ?? [];
 function priorToml(source: string | null): string | undefined {
   const lines = linesOf(source ?? ""), owned = spans(lines);
   return owned.length ? owned.map(([start, stop]) => lines.slice(start, stop).join("")).join("") : undefined;

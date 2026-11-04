@@ -37,7 +37,7 @@ test("all client shapes match vmem, apply is private/idempotent and undo removes
   }
   const snapshots = report.actions.map(action => [fs.readFileSync(action.file), fs.readFileSync(action.receipt)]);
   expect(runSetup("all", "apply", f.options).actions.every(action => action.change === "unchanged")).toBe(true);
-  report.actions.forEach((action, index) => { expect(fs.readFileSync(action.file)).toEqual(snapshots[index]![0]); expect(fs.readFileSync(action.receipt)).toEqual(snapshots[index]![1]); });
+  report.actions.forEach((action, index) => { expect(fs.readFileSync(action.file)).toEqual(snapshots[index]![0]!); expect(fs.readFileSync(action.receipt)).toEqual(snapshots[index]![1]!); });
   expect(runSetup("all", "undo", f.options).applied).toBe(true);
   for (const action of report.actions) { expect(fs.existsSync(action.file)).toBe(false); expect(fs.existsSync(action.receipt)).toBe(false); }
 });
