@@ -155,3 +155,15 @@ test("investigate.close is an implemented no-argument step on CLI and MCP plan p
   await server.handlers.ares_plan_set!({ study: dir, plan: raw });
   expect(ops.planShow(dir).definition.nodes[0]).toMatchObject({ command: "investigate.close" });
 });
+
+
+test("ablate.close and final.close are no-argument steps with MCP schema parity", async () => {
+  const dir = study(), server = createAresMcp({}, ctx.http), tool = ARES_TOOLS.find(t => t.name === "ares_plan_set")!;
+  for (const command of ["ablate.close", "final.close"]) {
+    const raw = { v: 1, nodes: [{ id: "close", kind: "step", command, args: {} }], edges: [] };
+    expect(validatePlan(raw).nodes[0]).toMatchObject({ command, args: {} });
+    expect(validArguments({ study: dir, plan: raw }, tool.inputSchema)).toBe(true);
+    await server.handlers.ares_plan_set!({ study: dir, plan: raw });
+    for (const args of [{ run: "other" }, { file: "result.json" }, { json: true }]) expect(() => validatePlan({ ...raw, nodes: [{ ...raw.nodes[0], args }] })).toThrow();
+  }
+});
