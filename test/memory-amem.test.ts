@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { AMEM_OUTPUT_BYTES, createAmemClient, type AmemNote } from "../src/memory/amem.ts";
+import { AMEM_OUTPUT_BYTES, createAmemClient, type AmemNote, type AmemHit } from "../src/memory/amem.ts";
 import type { ProcessResult } from "../src/exp/executor.ts";
 import { fakeRunner } from "./helpers.ts";
 
 const id = "a".repeat(32), secret = "PRIVATE PROCESS DIAGNOSTIC";
-const response = (value: unknown): ProcessResult => ({ exitCode: 0, stdout: JSON.stringify(value), stderr: secret });
-const row = { id, kind: "fail", title: "Synthetic failure", at: "2026-11-04T00:00:00Z", score: 0.8, about: ["run:synthetic"] };
+const response = (value: unknown, overrides: Partial<ProcessResult> = {}): ProcessResult => ({ exitCode: 0, stdout: JSON.stringify(value), stderr: secret, ...overrides });
+const row: AmemHit = { id, kind: "fail", title: "Synthetic failure", at: "2026-11-04T00:00:00Z", score: 0.8, about: ["run:synthetic"] };
 const note: AmemNote = { text: "Synthetic study: test question", kind: "fail", approach: "baseline", symptom: "lower score", cause: "not recorded",
   evidence: ["ares:synthetic/attempt:one", "doi:10.0000/synthetic"], retryWhen: "new evidence", title: "Synthetic failure" };
 
@@ -40,21 +40,19 @@ describe("amem process client", () => {
   });
   for (const [name, result, message] of [
     ["spawn", new Error(secret), "spawn failure"],
-    ["exit", { exitCode: 2, stdout: secret, stderr: secret }, "nonzero exit"],
+    ["exit", response(secret, { exitCode: 2 }), "nonzero exit"],
     ["JSON", { exitCode: 0, stdout: secret, stderr: secret }, "bad JSON"],
-    ["truncation", { ...response({ id }), truncated: true }, "over-bound"],
+    ["truncation", response({ id }, { truncated: true }), "over-bound"],
     ["UTF-8 bytes", { exitCode: 0, stdout: "제".repeat(Math.floor(AMEM_OUTPUT_BYTES / 3) + 1), stderr: secret }, "over-bound"],
-    ["deadline", { ...response({ id }), timedOut: true }, "timeout"],
+    ["deadline", response({ id }, { timedOut: true }), "timeout"],
   ] as const) {
     test(`${name} failure is classified without process diagnostics`, async () => {
       const client = createAmemClient(fakeRunner([result]).runner);
-      for (const operation of [() => client.add(note)]) {
-        try { await operation(); throw new Error("expected rejection"); }
-        catch (error) {
-          expect(error).toBeInstanceOf(Error);
-          expect((error as Error).message).toContain(message);
-          expect((error as Error).message).not.toContain(secret);
-        }
+      try { await client.add(note); throw new Error("expected rejection"); }
+      catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toContain(message);
+        expect((error as Error).message).not.toContain(secret);
       }
     });
   }
