@@ -1,3 +1,4 @@
+import { runSetup, type SetupMode } from "./setup.ts";
 import { proposeSkill, decideSkill, listSkills } from "./memory/skills.ts";
 import { rankLessons, type LessonRankOptions } from "./memory/lessons.ts";
 import { createAmemClient } from "./memory/amem.ts";
@@ -456,3 +457,5 @@ export async function skillDecide(dirArg: string, name: string, decision: string
   const { dir } = openStudy(dirArg); return withLock(dir, () => decideSkill(dir, name, decision, reason, pr, ctx.actor));
 }
 export const skillList = (dir: string) => listSkills(dir);
+
+export const setup = (target: string, mode: SetupMode, env: NodeJS.ProcessEnv, options: { cwd?: string; root?: string } = {}) => runSetup(target, mode, { ...options, env });

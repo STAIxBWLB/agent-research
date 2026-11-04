@@ -38,20 +38,23 @@ export const sha256 = (data: string | Uint8Array) => createHash("sha256").update
  * Write a file by temp + fsync + rename so readers never see a partial file. `maxBytes` must be the bound the
  * file's reader uses, so nothing is written that the tool cannot read back.
  */
-export function writeAtomic(path: string, text: string, maxBytes: number): void {
+export function writeAtomic(path: string, text: string, maxBytes: number, mode = 0o644): void {
   assertWritable(text, maxBytes, path);
   const tmp = `${path}.${randomUUID()}.tmp`;
-  const fd = openSync(tmp, "wx", 0o644);
+  const fd = openSync(tmp, "wx", mode);
   try { writeSync(fd, text); fsyncSync(fd); } finally { closeSync(fd); }
   try { renameSync(tmp, path); } catch (error) { try { unlinkSync(tmp); } catch { /* already gone */ } throw error; }
 }
 
 /** Read a regular file, stopping one byte past `maxBytes`: special files and oversize files are refused without buffering them. */
-export function readBytesBounded(path: string, maxBytes: number): Buffer {
+export interface ReadOptions { noFollow?: boolean; uid?: number }
+export function readBytesBounded(path: string, maxBytes: number, options: ReadOptions = {}): Buffer {
   // Non-blocking open: a FIFO without a writer would otherwise block before the type check.
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | (options.noFollow ? constants.O_NOFOLLOW : 0));
   try {
-    if (!fstatSync(fd).isFile()) throw new Error(`${path}: not a regular file`);
+    const info = fstatSync(fd);
+    if (!info.isFile()) throw new Error(`${path}: not a regular file`);
+    if (options.uid !== undefined && info.uid !== options.uid) throw new Error(`${path}: owned by another user`);
     const buffer = Buffer.alloc(Math.min(maxBytes + 1, 1 << 20)), parts: Buffer[] = [];
     let total = 0;
     for (;;) {
@@ -64,8 +67,8 @@ export function readBytesBounded(path: string, maxBytes: number): Buffer {
     return Buffer.concat(parts);
   } finally { closeSync(fd); }
 }
-export function readTextBounded(path: string, maxBytes: number): string {
-  try { return new TextDecoder("utf-8", { fatal: true }).decode(readBytesBounded(path, maxBytes)); }
+export function readTextBounded(path: string, maxBytes: number, options: ReadOptions = {}): string {
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(readBytesBounded(path, maxBytes, options)); }
   catch (error) { if (error instanceof TypeError) throw new Error(`${path}: not valid UTF-8`); throw error; }
 }
 export function readJsonFile(path: string, maxBytes: number): unknown {
