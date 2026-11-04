@@ -314,6 +314,10 @@ export async function planRun(dirArg: string, options: { parallel?: number }, ct
         }
         case "lit.verify": result = await verify(dir, (node.args.ids as string[] | undefined) ?? [], ctx); break;
         case "lit.bib": result = await bib(dir, ctx); break;
+        case "investigate.close": {
+          const result = await investigateClose(dir, ctx);
+          return { status: "done", output: { sha256: sha256(JSON.stringify(result, null, 2) + "\n"), winner: result.winner } };
+        }
         case "cite.check": { const value = cite(dir, resolve(dir, stepText(node, "draft"))); result = value; ok = value.ok; break; }
       }
       return { status: ok ? "done" : "failed", ...(ok ? { output: { sha256: sha256(JSON.stringify(result)) } } : { reason: "step reported failure; inspect its command result and inputs before retry" }) };

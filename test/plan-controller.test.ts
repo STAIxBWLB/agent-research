@@ -1,13 +1,15 @@
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync, utimesSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, utimesSync, mkdirSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import * as ops from "../src/commands.ts";
 import { run } from "../src/cli.ts";
 import { runPlan, type ControllerRuntime } from "../src/plan/controller.ts";
 import { nextDispatchId } from "../src/plan/state.ts";
-import { appendEvent, processStart, readLedger, readPlanOwner, withPlanLock, StudyLockBusyError } from "../src/study.ts";
-import { ARES_TOOLS } from "../src/mcp-tools.ts";
+import { appendEvent, processStart, readLedger, readPlanOwner, withPlanLock, StudyLockBusyError, openStudy, sha256 } from "../src/study.ts";
+import { readProtocol, protocolHash } from "../src/exp/protocol.ts";
+import { investigateResultPath } from "../src/exp/investigate.ts";
+import { ARES_TOOLS, createAresMcp } from "../src/mcp-tools.ts";
 import { deferred, fakeHttp, tempDir, fixture } from "./helpers.ts";
 const actor = { kind: "person" as const }, ctx = { actor, http: fakeHttp([]).http };
 const step = (id: string, needs: string[] = []) => ({ id, kind: "step", command: "lit.bib", args: {}, needs });
@@ -225,3 +227,57 @@ test("slow search study locks never stop the controller at parallel 1 or 2", asy
     expect(fake.requested).toHaveLength(1);
   }
 }, 15_000);
+
+
+test("production investigate.close step emits saved-result sha/winner and a downstream gate binds winner and no-winner outcomes", async () => {
+  for (const withWinner of [false, true]) {
+    const dir = join(tempDir(), "experiment"); ops.init(dir, { question: "synthetic", mode: "experiment" }, ctx);
+    mkdirSync(join(dir, "task", "evaluator"), { recursive: true }); writeFileSync(join(dir, "task", "task.md"), "synthetic"); writeFileSync(join(dir, "task", "evaluator", "run"), "synthetic");
+    await ops.protocol(dir, { v: 1, method: "synthetic", candidate: { image: `fixture@sha256:${"a".repeat(64)}`, command: ["candidate"] }, evaluator: { image: `fixture@sha256:${"b".repeat(64)}`, command: ["evaluator"] }, metrics: [{ name: "score", unit: "points", direction: "max" }], seeds: [1], limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts: 10, maxWallHours: 1, maxGpuHours: 0 } }, ctx);
+    await ops.selection(dir, { v: 1, run: "investigate", metric: "score", baseline: { commit: "a".repeat(40) }, minSeeds: 1, minDelta: 1 }, ctx);
+    if (withWinner) for (const [index, commit, value] of [[1, "a".repeat(40), 10], [2, "b".repeat(40), 12]] as const) {
+      const id = String(index).padStart(16, "0"), protocol = readProtocol(dir)!, run = "investigate";
+      const folder = join(dir, "runs", run, "attempts"); mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, `${id}.json`), JSON.stringify({ v: 1, id, studyId: openStudy(dir).study.id, run, commit, seed: 1, protocolHash: protocolHash(protocol), protocol, executor: {}, stages: {}, stage: "evaluator", status: "succeeded", startedAt: "2030-01-01T00:00:00Z", metrics: [{ name: "score", value, unit: "points", provenance: "ares-observed" }], outputs: [] }));
+      appendEvent(dir, actor, "attempt.started", { id, run, commit, seed: 1 });
+    }
+    await ops.planSet(dir, { v: 1, nodes: [{ id: "close", kind: "step", command: "investigate.close", args: {} }, { id: "review", kind: "gate", needs: ["close"], binds: ["close"] }], edges: [] }, ctx);
+    let resumed = false, approved = false;
+    const forbidden = async () => { throw new Error("investigate close must not execute Docker/hub"); };
+    const state = await ops.planRun(dir, {}, { ...ctx, runner: forbidden,
+      sleep: async () => {
+        if (!resumed) { resumed = true; await resume(dir); }
+        else if (!approved && ops.gateList(dir).find(g => g.gate === "plan:review")?.state === "pending") { approved = true; await ops.gateDecide(dir, "plan:review", "approve", undefined, ctx); }
+        await Bun.sleep(1);
+      },
+    });
+    const bytes = readFileSync(investigateResultPath(dir, "investigate")), saved = JSON.parse(bytes.toString());
+    const output = state.nodes.find(n => n.id === "close")!.output;
+    expect(output).toEqual({ sha256: sha256(bytes), winner: saved.winner });
+    expect(saved.winner === null).toBe(!withWinner); expect(state.state).toBe("done");
+    expect(ops.gateList(dir).find(g => g.gate === "plan:review")!.state).toBe("approved");
+    expect(readLedger(dir).filter(e => e.type === "investigate.closed")).toHaveLength(1);
+  }
+});
+
+test("survey CLI and MCP refuse every investigation command without writing events", async () => {
+  const dir = await study(), before = readFileSync(join(dir, "ledger.jsonl"));
+  const selection = { v: 1, run: "investigate", metric: "score", baseline: { commit: "a".repeat(40) }, minSeeds: 1, minDelta: 1 };
+  const idea = { id: "idea", title: "Synthetic", hypothesis: "Untested" };
+  for (const [args, payload] of [
+    [["selection", dir, "--file", "-"], selection], [["idea", "add", dir, "--file", "-"], idea],
+    [["idea", "decide", dir, "idea", "pivot", "--reason", "synthetic"], {}],
+    [["investigate", "show", dir], {}], [["investigate", "close", dir], {}],
+  ] as [string[], unknown][]) await expect(run(args, {}, { http: ctx.http, readStdin: async () => JSON.stringify(payload) })).rejects.toThrow("experiment");
+  const server = createAresMcp({}, ctx.http);
+  for (const [name, args] of [
+    ["ares_selection_set", { study: dir, selection }], ["ares_idea_add", { study: dir, idea }],
+    ["ares_idea_decide", { study: dir, id: "idea", decision: "pivot", reason: "synthetic" }],
+    ["ares_investigate_show", { study: dir }], ["ares_investigate_close", { study: dir }],
+  ] as [string, Record<string, unknown>][]) {
+    let error: unknown;
+    try { await server.handlers[name]!(args); } catch (failure) { error = failure; }
+    expect((error as Error).message).toContain("experiment");
+  }
+  expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
+});
