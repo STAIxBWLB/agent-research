@@ -132,6 +132,7 @@ export function initStudy(dir: string, options: { question: string; mode?: strin
  * Exclusive write lock for one study. A lock older than 10 minutes is treated as abandoned and replaced.
  * ponytail: mtime-based staleness, no owner liveness check; add a pid probe if two hosts share a study.
  */
+export class StudyLockBusyError extends Error {}
 export async function withLock<T>(dir: string, fn: () => Promise<T> | T): Promise<T> {
   const path = join(dir, ".ares.lock");
   let fd: number;
@@ -140,7 +141,7 @@ export async function withLock<T>(dir: string, fn: () => Promise<T> | T): Promis
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     let age = 0;
     try { age = Date.now() - statSync(path).mtimeMs; } catch { /* removed meanwhile */ }
-    if (age < LOCK_STALE_MS) throw new Error(`study is locked by another ares command (${path}); retry when it finishes`);
+    if (age < LOCK_STALE_MS) throw new StudyLockBusyError(`study is locked by another ares command (${path}); retry when it finishes`);
     try { unlinkSync(path); } catch { /* raced with another cleaner */ }
     fd = openSync(path, "wx", 0o600);
   }
@@ -278,7 +279,9 @@ export async function withPlanLock<T>(dir: string, fn: (owner: PlanOwner) => Pro
   try { return await fn(owner); }
   finally {
     // A live matching owner cannot be replaced by any valid contender.
-    const current = readPlanOwner(dir);
-    if (current?.token === owner.token) unlinkSync(join(dir, ".ares.plan.lock"));
+    try {
+      const current = readPlanOwner(dir);
+      if (current?.token === owner.token) unlinkSync(join(dir, ".ares.plan.lock"));
+    } catch { /* Preserve the original failure; never remove a malformed or unverified owner. */ }
   }
 }

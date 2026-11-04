@@ -468,3 +468,34 @@ test("expected attempt identity drift refuses before creating an attempt", async
   expect(listAttempts(dir).attempts).toHaveLength(0); expect(readLedger(dir)).toEqual(before);
   expect(fake.requests.some(r => r.command === "docker")).toBe(false);
 });
+
+
+test("controller retry of a predicted but uncreated attempt launches without a nonexistent parent", async () => {
+  const { dir, fake } = await setup(protocol(), "gates", false);
+  const ctx = { ...fake.ctx, http: fakeHttp([]).http };
+  await planSet(dir, { v: 1, nodes: [{ id: "work", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }], edges: [] }, ctx);
+  const stop = new AbortController(); let resumed = false;
+  const first = await planRun(dir, {}, { ...ctx, signal: stop.signal,
+    sleep: async () => {
+      if (!resumed) { resumed = true; await planControl(dir, { action: "resume", commandId: "resume-missing", expectedRevision: 1 }, ctx); }
+      if (planShow(dir).nodes[0]!.status === "uncertain") stop.abort();
+      await Bun.sleep(1);
+    },
+  });
+  const predicted = first.nodes[0]!.attemptId!;
+  expect(first.nodes[0]!.status).toBe("uncertain"); expect(listAttempts(dir).attempts).toHaveLength(0);
+  await gateDecide(dir, "design", "approve", undefined, ctx);
+  await planControl(dir, { action: "retry", node: "work", commandId: "retry-uncreated", expectedRevision: 1 }, ctx);
+  expect(planShow(dir).nodes[0]!.retryOf).toBe(predicted);
+  resumed = false;
+  const second = await planRun(dir, {}, { ...ctx,
+    sleep: async () => {
+      if (!resumed) { resumed = true; await planControl(dir, { action: "resume", commandId: "resume-after-retry", expectedRevision: 1 }, ctx); }
+      for (const container of fake.containers.values()) { container.running = false; container.exitCode = 0; }
+      await Bun.sleep(1);
+    },
+  });
+  expect(second.state).toBe("done");
+  const attempt = showAttempt(dir, second.nodes[0]!.attemptId!);
+  expect(attempt.id).toBe(predicted); expect(attempt.retryOf).toBeUndefined();
+});

@@ -272,14 +272,19 @@ function stepNumber(node: StepNode, key: string): number | undefined {
 }
 export async function planRun(dirArg: string, options: { parallel?: number }, ctx: Ctx) {
   const { dir } = openStudy(dirArg);
-  const attemptOptions = (node: StepNode, retryOf?: string) => ({
-    repo: resolve(dir, stepText(node, "repo")), commit: stepText(node, "commit"),
-    ...(stepNumber(node, "seed") !== undefined ? { seed: stepNumber(node, "seed")! } : {}),
-    ...(node.args.run !== undefined ? { run: stepText(node, "run") } : {}),
-    ...(node.args.label !== undefined ? { label: stepText(node, "label") } : {}),
-    ...(retryOf ?? node.args.retry ? { retry: retryOf ?? stepText(node, "retry") } : {}), detach: true,
-  });
+  const attemptOptions = (node: StepNode, retryOf?: string) => {
+    const parent = retryOf ?? (node.args.retry !== undefined ? stepText(node, "retry") : undefined);
+    const retry = parent && listAttempts(dir).attempts.some(a => a.id === parent) ? parent : undefined;
+    return {
+      repo: resolve(dir, stepText(node, "repo")), commit: stepText(node, "commit"),
+      ...(stepNumber(node, "seed") !== undefined ? { seed: stepNumber(node, "seed")! } : {}),
+      ...(node.args.run !== undefined ? { run: stepText(node, "run") } : {}),
+      ...(node.args.label !== undefined ? { label: stepText(node, "label") } : {}),
+      ...(retry ? { retry } : {}), detach: true,
+    };
+  };
   const observed = (attempt: ReturnType<typeof showAttempt>): Observation => ({
+    progress: sha256(JSON.stringify(attempt)),
     status: attempt.status === "running" ? "dispatched" : attempt.status === "succeeded" ? "done" : attempt.status === "unknown" ? "uncertain" : attempt.status,
     ...(attempt.status === "succeeded" ? { output: { attemptId: attempt.id, sha256: sha256(JSON.stringify(attempt)) } } : {}),
     ...(attempt.status !== "running" && attempt.status !== "succeeded" ? { reason: `attempt ${attempt.status}; inspect ares attempt show before retrying this node` } : {}),

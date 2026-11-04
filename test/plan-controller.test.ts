@@ -6,9 +6,9 @@ import * as ops from "../src/commands.ts";
 import { run } from "../src/cli.ts";
 import { runPlan, type ControllerRuntime } from "../src/plan/controller.ts";
 import { nextDispatchId } from "../src/plan/state.ts";
-import { appendEvent, processStart, readLedger, readPlanOwner, withPlanLock } from "../src/study.ts";
+import { appendEvent, processStart, readLedger, readPlanOwner, withPlanLock, StudyLockBusyError } from "../src/study.ts";
 import { ARES_TOOLS } from "../src/mcp-tools.ts";
-import { deferred, fakeHttp, tempDir } from "./helpers.ts";
+import { deferred, fakeHttp, tempDir, fixture } from "./helpers.ts";
 const actor = { kind: "person" as const }, ctx = { actor, http: fakeHttp([]).http };
 const step = (id: string, needs: string[] = []) => ({ id, kind: "step", command: "lit.bib", args: {}, needs });
 async function study(nodes: unknown[] = [step("a")], autonomy = "gates") {
@@ -168,3 +168,60 @@ test("parallel admission preserves the existing one-active-attempt invariant", a
   expect(ops.planShow(dir).nodes.find(n => n.id === "second")!.status).toBe("ready");
   expect(readLedger(dir).filter(e => e.type === "node.observed" && e.data.node === "first")).toHaveLength(1);
 });
+
+
+test("cleanup preserves the original failure if the controller lock becomes malformed", async () => {
+  const dir = await study();
+  await expect(withPlanLock(dir, async () => { writeFileSync(join(dir, ".ares.plan.lock"), "malformed"); throw new Error("original failure"); })).rejects.toThrow("original failure");
+  expect(readFileSync(join(dir, ".ares.plan.lock"), "utf8")).toBe("malformed");
+});
+
+test("lock-busy at step entry backs off without uncertain or duplicate dispatch", async () => {
+  const dir = await study(), waits: number[] = []; let attempts = 0, resumed = false;
+  const state = await runPlan(dir, {}, runtime({
+    sleep: async ms => { waits.push(ms); if (!resumed) { resumed = true; await resume(dir); } await Bun.sleep(1); },
+    execute: async () => { if (++attempts < 3) throw new StudyLockBusyError("study is locked by another ares command"); return { status: "done", output: {} }; },
+  }));
+  expect(state.state).toBe("done"); expect(attempts).toBe(3);
+  expect(waits).toContain(1000); expect(waits).toContain(2000);
+  expect(readLedger(dir).filter(e => e.type === "node.intent")).toHaveLength(1);
+  expect(readLedger(dir).filter(e => e.type === "node.observed" && e.data.status === "uncertain")).toHaveLength(0);
+});
+
+test("attempt observation grows from 1s to 30s, resets on progress, and unchanged polls do not write", async () => {
+  const dir = await study([{ id: "work", kind: "step", command: "attempt.run", args: { repo: "repo", commit: "a".repeat(40) } }]);
+  const stop = new AbortController(); let time = 0, resumed = false;
+  const calls: number[] = [], bytes: string[] = [];
+  await runPlan(dir, {}, runtime({ signal: stop.signal, clock: () => time,
+    sleep: async ms => { time += ms; if (!resumed) { resumed = true; await resume(dir); } await Bun.sleep(1); },
+    prepare: async () => ({ attemptId: "a".repeat(16) }),
+    execute: async () => ({ status: "dispatched", progress: "candidate" }),
+    reconcile: async () => {
+      calls.push(time); bytes.push(readFileSync(join(dir, "ledger.jsonl"), "utf8"));
+      if (calls.length === 9) return { status: "done", output: {} };
+      return { status: "dispatched", progress: calls.length >= 7 ? "evaluator" : "candidate" };
+    },
+  }));
+  const intervals = calls.slice(1).map((value, i) => value - calls[i]!);
+  expect(intervals).toEqual([2000, 4000, 8000, 16000, 30000, 30000, 1000, 2000]);
+  expect(bytes.slice(0, 7).every(value => value === bytes[0])).toBe(true);
+});
+
+test("slow search study locks never stop the controller at parallel 1 or 2", async () => {
+  for (const parallel of [1, 2]) {
+    const dir = await study([
+      { id: "search", kind: "step", command: "lit.search", args: { query: "synthetic", source: "openalex" } },
+      { id: "cite", kind: "step", command: "cite.check", args: { draft: "draft.md" }, needs: parallel === 1 ? ["search"] : [] },
+    ], "auto");
+    writeFileSync(join(dir, "draft.md"), "Synthetic draft.");
+    await ops.scope(dir, { question: "synthetic" }, ctx);
+    const fake = fakeHttp([["https://api.openalex.org/works", { status: 200, body: fixture("openalex.json") }]]);
+    const http = { ...fake.http, json: async (...args: Parameters<typeof fake.http.json>) => { await Bun.sleep(2600); return fake.http.json(...args); } };
+    let resumed = false;
+    const result = await ops.planRun(dir, { parallel }, { ...ctx, http,
+      sleep: async ms => { if (!resumed) { resumed = true; await resume(dir); } await Bun.sleep(Math.min(ms, 50)); },
+    });
+    expect(result.state).toBe("done"); expect(result.nodes.map(n => n.status)).toEqual(["done", "done"]);
+    expect(fake.requested).toHaveLength(1);
+  }
+}, 15_000);
