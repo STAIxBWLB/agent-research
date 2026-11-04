@@ -1,3 +1,4 @@
+import { SETUP_TARGETS, type SetupMode } from "./setup.ts";
 import { isAbsolute } from "node:path";
 import * as ops from "./commands.ts";
 import { createHttp, type Http } from "./http.ts";
@@ -67,6 +68,7 @@ const SELECTION = obj({
 const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), parent: text(64), commit: { type: "string", minLength: 40, maxLength: 40 } }, ["id", "title", "hypothesis"]);
 
 export const ARES_TOOLS: readonly McpTool[] = [
+  { name: "ares_setup", description: "Preview, apply or undo the local ares MCP registration for an agent client. Defaults to dry-run and lists config/receipt actions. Apply writes the receipt first; undo refuses entry drift. Root pins a release; cwd selects the workspace for agy. Never changes instruction blocks or contacts the network.", inputSchema: obj({ target: { type: "string", enum: [...SETUP_TARGETS, "all"] }, mode: { type: "string", enum: ["dry-run", "apply", "undo"] }, root: text(4096), cwd: text(4096) }, ["target"]), annotations: write },
   { name: "ares_manifest", description: "Read this ares version, implemented commands and shared schema versions without opening a study or reaching an executor.", inputSchema: obj({}, []), annotations: read },
   { name: "ares_archive", description: "Preview pending derived lessons without writes. With the current full-list fingerprint, export up to 200 new amem notes and commit returned ids/hashes; remaining reports later batches. A partial failure records successes; repeat the same confirmation to continue. Applies to survey and experiment studies.", inputSchema: obj({ study, confirm: { type: "string", minLength: 64, maxLength: 64 } }, ["study"]), annotations: net },
   { name: "ares_lessons", description: "Read project-scoped amem lessons with half-life ranking. Query intent when supplied, otherwise the study question; intent also returns a brief. Output relevance, decayed score, ordinal rank and age in days. No study write or lock. Survey and experiment.", inputSchema: obj({ study, for: text(1000), halfLife: { type: "number", minimum: 1, maximum: 3650 }, limit: integer(1, 50) }, ["study"]), annotations: { ...read, openWorldHint: true } },
@@ -126,6 +128,7 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
   const dir = (a: Record<string, unknown>) => absolute(a.study, "study");
   const handlers: Record<string, McpHandler> = {
     ares_manifest: () => ops.manifest(),
+    ares_setup: a => ops.setup(a.target as string, (a.mode ?? "dry-run") as SetupMode, env, { ...(a.root === undefined ? {} : { root: absolute(a.root, "root") }), ...(a.cwd === undefined ? {} : { cwd: absolute(a.cwd, "cwd") }) }),
     ares_archive: a => ops.archive(dir(a), { ...(a.confirm === undefined ? {} : { confirm: a.confirm as string }) }, ctx, memoryEnv),
     ares_lessons: a => ops.lessons(dir(a), { ...(a.for === undefined ? {} : { for: a.for as string }), ...(a.halfLife === undefined ? {} : { halfLife: a.halfLife as number }), ...(a.limit === undefined ? {} : { limit: a.limit as number }) }, ctx, memoryEnv),
     ares_skill_propose: a => ops.skillPropose(dir(a), a.proposal, ctx),

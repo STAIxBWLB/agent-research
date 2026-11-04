@@ -3,8 +3,10 @@ import * as fs from "node:fs";
 import { dirname, join } from "node:path";
 import { runSetup, SETUP_CONFIG_BYTES } from "../src/setup.ts";
 import { run } from "../src/cli.ts";
+import { ARES_TOOLS, createAresMcp } from "../src/mcp-tools.ts";
+import { validArguments } from "../src/mcp.ts";
 import { readTextBounded } from "../src/study.ts";
-import { tempDir } from "./helpers.ts";
+import { tempDir, fakeHttp, fakeRunner } from "./helpers.ts";
 function fixture() {
   const home = fs.realpathSync(tempDir()), family = join(home, "family"), cwd = join(home, "workspace"); fs.mkdirSync(cwd);
   const env = { HOME: home, AGENTHUB_HOME: family }, options = { env, cwd };
@@ -186,4 +188,35 @@ test("argument refusals give the relevant next step and file refusals are not do
   fs.writeFileSync(join(f.home, ".claude.json"), "not JSON");
   const reason = runSetup("claude", "dry-run", f.options).actions[0]!.reason!;
   expect(reason).toContain("invalid JSON"); expect(reason.match(/restore its setup receipt/g)).toHaveLength(1); expect(reason).not.toContain("correct the file or receipt and retry");
+});
+
+test("MCP setup previews, applies and undoes via the same operation with only fake HOME", async () => {
+  const f = fixture(), location = root(), fake = fakeRunner([]), server = createAresMcp(f.env, fakeHttp([]).http, { runner: fake.runner });
+  const tool = ARES_TOOLS.find(tool => tool.name === "ares_setup")!;
+  expect(tool.annotations).toMatchObject({ readOnlyHint: false, openWorldHint: false });
+  expect(validArguments({ target: "claude" }, tool.inputSchema)).toBe(true);
+  expect(validArguments({ target: "claude", mode: "invalid" }, tool.inputSchema)).toBe(false);
+  const args = { target: "claude", root: location, cwd: f.cwd };
+  const preview = await server.handlers.ares_setup!(args);
+  expect(preview).toEqual(JSON.parse((await run(["setup", "claude", "--root", location, "--json"], f.env)).text));
+  expect(fs.existsSync(f.family)).toBe(false);
+  const applied = await server.handlers.ares_setup!({ ...args, mode: "apply" }) as ReturnType<typeof runSetup>;
+  expect(applied.applied).toBe(true); expect(json(applied.actions[0]!.file).mcpServers.ares).toEqual(applied.entry);
+  const undone = await server.handlers.ares_setup!({ ...args, mode: "undo" }) as ReturnType<typeof runSetup>;
+  expect(undone.applied).toBe(true); expect(fs.existsSync(applied.actions[0]!.file)).toBe(false); expect(fake.requests).toEqual([]);
+});
+
+test("readable administrator-owned release files register without weakening config ownership checks", () => {
+  const f = fixture(), location = root(), uid = process.getuid!(), foreign = uid === 0 ? 1 : 0;
+  fs.chmodSync(location, 0o755); fs.chmodSync(join(location, "bin"), 0o755); fs.chmodSync(join(location, "package.json"), 0o644); fs.chmodSync(join(location, "bin", "ares.js"), 0o644);
+  const originalStat = fs.lstatSync, originalFdStat = fs.fstatSync;
+  const proxy = (info: fs.Stats) => new Proxy(info, { get: (target, key) => key === "uid" ? foreign : Reflect.get(target, key) });
+  const stat = spyOn(fs, "lstatSync").mockImplementation(((value: fs.PathLike, ...rest: unknown[]) => {
+    const info = (originalStat as any)(value, ...rest); return String(value).startsWith(location) ? proxy(info) : info;
+  }) as typeof fs.lstatSync);
+  // Only the release package is read from an fd in this first registration; configs/receipts do not exist yet.
+  const fdStat = spyOn(fs, "fstatSync").mockImplementation(((fd: number, ...rest: unknown[]) => proxy((originalFdStat as any)(fd, ...rest))) as typeof fs.fstatSync);
+  try { expect(runSetup("claude", "apply", { ...f.options, root: location }).applied).toBe(true); }
+  finally { stat.mockRestore(); fdStat.mockRestore(); }
+  expect(json(join(f.home, ".claude.json")).mcpServers.ares.args[1]).toBe(join(location, "bin", "ares.js"));
 });

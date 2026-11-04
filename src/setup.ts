@@ -25,8 +25,8 @@ function absolute(value: string, label: string): string {
   if (!isAbsolute(value) || value.includes("\0")) fail(`${label} must be an absolute path`, label === "--root" ? "pass --root ABS for an existing agent-research release" : `set ${label} to an absolute path and rerun ares setup`);
   return resolve(value);
 }
-/** Refuse links anywhere along a config/receipt path, including not-yet-created descendants. */
-function guard(file: string): void {
+/** Links are always refused. Ownership checks protect mutable config/receipts; release reads may be administrator-owned. */
+function guard(file: string, owned = true): void {
   const parts: string[] = []; for (let current = resolve(file); ; current = dirname(current)) { parts.unshift(current); if (current === dirname(current)) break; }
   for (const part of parts) {
     let info;
@@ -34,16 +34,16 @@ function guard(file: string): void {
     if (info.isSymbolicLink()) fail("links are refused in config and receipt paths");
     if (part === resolve(file)) {
       if (!info.isFile()) fail("config or receipt is not a regular file");
-      if (info.uid !== process.getuid!()) fail("config or receipt is owned by another user");
+      if (owned && info.uid !== process.getuid!()) fail("config or receipt is owned by another user");
     } else {
       if (!info.isDirectory()) fail("config or receipt parent is not a directory");
-      if (info.uid !== 0 && info.uid !== process.getuid!()) fail("config or receipt parent is owned by another user");
+      if (owned && info.uid !== 0 && info.uid !== process.getuid!()) fail("config or receipt parent is owned by another user");
     }
   }
 }
-function read(file: string, max: number): string | null {
-  guard(file);
-  try { return readTextBounded(file, max, { noFollow: true, uid: process.getuid!() }); }
+function read(file: string, max: number, owned = true): string | null {
+  guard(file, owned);
+  try { return readTextBounded(file, max, { noFollow: true, ...(owned ? { uid: process.getuid!() } : {}) }); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
 }
 function write(file: string, value: string | null, max: number): void {
@@ -154,10 +154,10 @@ function install(root: string): string {
   const requested = absolute(root, "--root");
   let location: string;
   try { location = realpathSync(requested); } catch { fail("install root is unreadable or missing", "pass --root ABS for an existing agent-research release"); }
-  const source = read(join(location, "package.json"), 65_536);
+  const source = read(join(location, "package.json"), 65_536, false);
   let pkg: unknown; try { pkg = source === null ? null : JSON.parse(source); } catch { fail("install root package.json is not valid JSON", "select or reinstall an intact agent-research release root"); }
   if (!plain(pkg) || pkg.name !== "@staix/agent-research" || typeof pkg.version !== "string") fail("--root is not an agent-research installation", "select a release root containing package.json and bin/ares.js");
-  const bootstrap = join(location, "bin", "ares.js"); guard(bootstrap);
+  const bootstrap = join(location, "bin", "ares.js"); guard(bootstrap, false);
   try { if (!lstatSync(bootstrap).isFile()) throw new Error(); } catch { fail("install root has no regular bin/ares.js", "select or reinstall an intact agent-research release root"); }
   return location;
 }
