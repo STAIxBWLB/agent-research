@@ -1,3 +1,4 @@
+import { readWatch, setWatch, runWatch, showWatch } from "./lit/watch.ts";
 import { runSetup, type SetupMode } from "./setup.ts";
 import { proposeSkill, decideSkill, listSkills } from "./memory/skills.ts";
 import { rankLessons, type LessonRankOptions } from "./memory/lessons.ts";
@@ -18,7 +19,7 @@ import { spawnRunner } from "./exp/executor.ts";
 import { foldPlan, readPlanState, planGateBinding, prepareControl, type ControlRequest, type ControlResult } from "./plan/state.ts";
 import { setPlan } from "./plan/definition.ts";
 export { manifest } from "./manifest.ts";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, utimesSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Http } from "./http.ts";
 import { readScope, scopeHash, setScope } from "./scope.ts";
@@ -127,28 +128,30 @@ export async function gateDecide(dirArg: string, gate: string, decision: "approv
 }
 
 export async function search(dirArg: string, query: string, options: { source?: string; limit?: number; yearFrom?: number }, ctx: Ctx) {
+  const { dir } = openStudy(dirArg); return withLock(dir, () => searchLocked(dir, query, options, ctx));
+}
+async function searchLocked(dirArg: string, query: string, options: { source?: string; limit?: number; yearFrom?: number }, ctx: Ctx) {
   const { dir, study } = openStudy(dirArg), q = boundedText(query, "query", 500);
   const source = options.source ?? "all";
   if (source !== "all" && !SOURCES.includes(source as SourceName)) throw new Error("--source: openalex, s2, arxiv or all");
   const limit = options.limit ?? 20;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new Error("--limit: 1..50");
   if (options.yearFrom !== undefined && (!Number.isSafeInteger(options.yearFrom) || options.yearFrom < 1000 || options.yearFrom > 2100)) throw new Error("--year-from: year 1000..2100");
-  return withLock(dir, async () => {
-    const sc = readScope(dir);
-    if (!sc) throw new Error("gate scope: no scope yet (run ares scope)");
-    const yearFrom = options.yearFrom ?? sc.yearFrom;
-    if (yearFrom !== undefined && sc.yearTo !== undefined && yearFrom > sc.yearTo) throw new Error(`--year-from: after the scope's yearTo ${sc.yearTo}`);
-    const approval = requireGate(dir, study, "scope", binder(dir));
-    const names = source === "all" ? SOURCES : [source as SourceName];
-    const results = [];
-    for (const name of names) results.push(await searchSource(ctx.http, name, q, { limit, ...(yearFrom !== undefined ? { yearFrom } : {}), ...(sc.yearTo !== undefined ? { yearTo: sc.yearTo } : {}) }));
-    const list = loadCandidates(dir), counts = mergeCandidates(list, results.flatMap(r => r.records), sc.maxCandidates);
-    const sources = results.map(r => ({ source: r.source, ok: r.ok, returned: r.records.length, ...(r.error ? { error: r.error } : {}) }));
-    // A search where every source failed is recorded but is not a success, so it approves nothing.
-    const answered = sources.some(r => r.ok);
-    commit(dir, [candidatesFile(dir, list)], [...(answered ? approval : []), { actor: ctx.actor, type: "lit.search", data: { query: q, sources, ...counts } }]);
-    return { query: q, sources, ...counts, candidates: list.length };
-  });
+  const sc = readScope(dir);
+  if (!sc) throw new Error("gate scope: no scope yet (run ares scope)");
+  const yearFrom = options.yearFrom ?? sc.yearFrom;
+  if (yearFrom !== undefined && sc.yearTo !== undefined && yearFrom > sc.yearTo) throw new Error(`--year-from: after the scope's yearTo ${sc.yearTo}`);
+  const approval = requireGate(dir, study, "scope", binder(dir));
+  const names = source === "all" ? SOURCES : [source as SourceName];
+  const results = [];
+  for (const name of names) results.push(await searchSource(ctx.http, name, q, { limit, ...(yearFrom !== undefined ? { yearFrom } : {}), ...(sc.yearTo !== undefined ? { yearTo: sc.yearTo } : {}) }));
+  const list = loadCandidates(dir), counts = mergeCandidates(list, results.flatMap(r => r.records), sc.maxCandidates);
+  const sources = results.map(r => ({ source: r.source, ok: r.ok, returned: r.records.length, ...(r.error ? { error: r.error } : {}) }));
+  // A search where every source failed is recorded but is not a success, so it approves nothing.
+  const answered = sources.some(r => r.ok);
+  commit(dir, [candidatesFile(dir, list)], [...(answered ? approval : []), { actor: ctx.actor, type: "lit.search", data: { query: q, sources, ...counts } }]);
+  return { query: q, sources, ...counts, candidates: list.length };
+
 }
 
 export function list(dirArg: string, options: { status?: string; limit?: number }) {
@@ -320,6 +323,10 @@ export async function planRun(dirArg: string, options: { parallel?: number }, ct
       if (node.command === "attempt.run") return observed(await runAttempt(dir, { ...attemptOptions(node, state.retryOf), expectedId: state.attemptId! }, ctx));
       let result: unknown, ok = true;
       switch (node.command) {
+        case "watch.run": {
+          const result = await watchRun(dir, ctx);
+          return result.ok ? { status: "done", output: { added: result.added } } : { status: "failed", reason: "watch: every source failed; inspect ares watch show and retry the plan node" };
+        }
         case "lit.search": {
           const value = await search(dir, stepText(node, "query"), { ...(node.args.source !== undefined ? { source: stepText(node, "source") } : {}), ...(stepNumber(node, "limit") !== undefined ? { limit: stepNumber(node, "limit")! } : {}), ...(stepNumber(node, "year-from") !== undefined ? { yearFrom: stepNumber(node, "year-from")! } : {}) }, ctx);
           ok = value.sources.some(s => s.ok); result = value; break;
@@ -459,3 +466,23 @@ export async function skillDecide(dirArg: string, name: string, decision: string
 export const skillList = (dir: string) => listSkills(dir);
 
 export const setup = (target: string, mode: SetupMode, env: NodeJS.ProcessEnv, options: { cwd?: string; root?: string } = {}) => runSetup(target, mode, { ...options, env });
+
+export async function watchSet(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
+  const { dir } = openStudy(dirArg); return withLock(dir, () => setWatch(dir, raw, ctx.actor));
+}
+export async function watchRun(dirArg: string, ctx: Ctx) {
+  const { dir, study } = openStudy(dirArg);
+  return withLock(dir, async () => {
+    const config = readWatch(dir), scope = readScope(dir);
+    if (!config) throw new Error("watch: no config; run ares watch set <dir> --file PATH before watch run");
+    if (!scope) throw new Error("gate scope: no scope yet; run ares scope before watch run");
+    requireGate(dir, study, "scope", binder(dir));
+    for (const query of config.queries) if ((query.yearFrom ?? scope.yearFrom ?? 1000) > (scope.yearTo ?? 2100)) throw new Error("watch yearFrom exceeds scope yearTo; correct the watch query or scope before running");
+    return runWatch(dir, config, ctx.actor, query => {
+      // A bounded search is at most three HTTP deadlines; refresh between queries, with no timer, for long passes.
+      const time = new Date(); utimesSync(join(dir, ".ares.lock"), time, time);
+      return searchLocked(dir, query.query, query, ctx);
+    });
+  });
+}
+export const watchShow = (dir: string) => ({ ...showWatch(dir), newCandidates: list(dir, { status: "new", limit: 500 }) });

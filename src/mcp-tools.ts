@@ -4,6 +4,7 @@ import * as ops from "./commands.ts";
 import { createHttp, type Http } from "./http.ts";
 import type { McpHandler, McpTool } from "./mcp.ts";
 import { PLAYBOOK } from "./playbook.ts";
+import { STEP_COMMANDS } from "./plan/definition.ts";
 import { detectActor, type Actor } from "./study.ts";
 
 const study = { type: "string", minLength: 1, maxLength: 4096, description: "Absolute path of the study directory (holds study.json)" };
@@ -51,7 +52,7 @@ const PLAN = obj({
   nodes: { type: "array", maxItems: 128, items: obj({
     id: planId, kind: { type: "string", enum: ["step", "hub", "gate"] },
     needs: { type: "array", maxItems: 128, items: planId },
-    command: { type: "string", enum: ["lit.search", "lit.verify", "lit.bib", "cite.check", "attempt.run", "investigate.close", "ablate.close", "final.close", "paper.build"] },
+    command: { type: "string", enum: [...STEP_COMMANDS] },
     args: { type: "object", maxProperties: 32, properties: {}, additionalProperties: { type: ["string", "number", "boolean", "array"], maxLength: 4096, maxItems: 500, items: text(300) } },
     campaign: planId, unit: planId,
     binds: { type: "array", maxItems: 128, items: planId },
