@@ -17,12 +17,14 @@ async function study() {
 test("half-life ranking uses an explicit fixed clock and only one recency decay", () => {
   const hits = [hit(1, 0, 1), hit(2, 180, 3), hit(3, 360, 4)], before = JSON.stringify(hits);
   expect(rankLessons(hits, now)).toEqual([
-    { id: hits[1]!.id, kind: "finding", title: "Synthetic 2", age: 180, score: 3, rank: 1.5 },
-    { id: hits[0]!.id, kind: "finding", title: "Synthetic 1", age: 0, score: 1, rank: 1 },
-    { id: hits[2]!.id, kind: "finding", title: "Synthetic 3", age: 360, score: 4, rank: 1 },
+    { id: hits[1]!.id, kind: "finding", title: "Synthetic 2", age: 180, relevance: 3, score: 1.5, rank: 1 },
+    { id: hits[0]!.id, kind: "finding", title: "Synthetic 1", age: 0, relevance: 1, score: 1, rank: 2 },
+    { id: hits[2]!.id, kind: "finding", title: "Synthetic 3", age: 360, relevance: 4, score: 1, rank: 3 },
   ]);
+  expect(rankLessons(hits, now).map(row => row.rank)).toEqual([1, 2, 3]);
+  expect(rankLessons(hits, now, { limit: 2 }).map(row => row.rank)).toEqual([1, 2]);
   expect(JSON.stringify(hits)).toBe(before);
-  expect(rankLessons([hit(1, 1.5)], now, { halfLife: 1.5 })[0]!.rank).toBe(0.5);
+  expect(rankLessons([hit(1, 1.5)], now, { halfLife: 1.5 })[0]!.score).toBe(0.5);
 });
 
 test("equal ranks put fail first, then lexical id independently of input order", () => {
@@ -33,9 +35,9 @@ test("equal ranks put fail first, then lexical id independently of input order",
 });
 
 test("fractional age is days and future timestamps do not boost relevance", () => {
-  expect(rankLessons([hit(1, 0.5)], now, { halfLife: 1 })[0]!.rank).toBeCloseTo(Math.SQRT1_2);
-  expect(rankLessons([{ ...hit(2, -1), title: null }], now)[0]).toMatchObject({ title: null, age: 0, score: 1, rank: 1 });
-  expect(rankLessons([hit(3, 100_000)], now, { halfLife: 1 })[0]!.rank).toBe(0);
+  expect(rankLessons([hit(1, 0.5)], now, { halfLife: 1 })[0]!.score).toBeCloseTo(Math.SQRT1_2);
+  expect(rankLessons([{ ...hit(2, -1), title: null }], now)[0]).toMatchObject({ title: null, age: 0, relevance: 1, score: 1, rank: 1 });
+  expect(rankLessons([hit(3, 100_000)], now, { halfLife: 1 })[0]!.score).toBe(0);
 });
 
 test("defaults and inclusive bounds cap the sorted output at 50", () => {
@@ -53,7 +55,7 @@ test("lessons searches in the study project with injected identity and clock, wi
   const dir = await study(), before = readFileSync(join(dir, "ledger.jsonl")), files = readdirSync(dir), row = hit(1, 180, 2);
   const fake = fakeRunner([response([searchRow(row)])]); let clocks = 0;
   const result = await ops.lessons(dir, {}, { runner: fake.runner, now: () => { clocks++; return now; } }, { CODEX_THREAD_ID: "synthetic", ANTHROPIC_API_KEY: "secret" });
-  expect(result).toEqual({ lessons: [{ id: row.id, kind: row.kind, title: row.title, age: 180, score: 2, rank: 1 }] });
+  expect(result).toEqual({ lessons: [{ id: row.id, kind: row.kind, title: row.title, age: 180, relevance: 2, score: 1, rank: 1 }] });
   expect(clocks).toBe(1); expect(fake.requests).toHaveLength(1);
   expect(fake.requests[0]!.command).toBe("amem"); expect(fake.requests[0]!.cwd).toBe(dir);
   expect(fake.requests[0]!.args).toEqual(["search", "Synthetic project question", "--json", "--explain", "--limit", "100"]);
@@ -66,7 +68,8 @@ test("--for adds the typed brief and CLI forwards ranking options with no ledger
   const brief = { brief: "Synthetic phase context", bytes: 23, truncated: false, state: "known" };
   const fake = fakeRunner([response({ engine: "fts5", hits: [hit(2, 180, 2), hit(1, 0, 1, "fail")].map(row => ({ source: "curated", view: row, scoreDetails: searchRow(row).scoreDetails })) }), response(brief)]);
   const output = await run(["lessons", dir, "--for", "investigate phase", "--half-life", "180", "--limit", "1", "--json"], {}, { runner: fake.runner, now: () => now });
-  expect(output.code).toBe(0); expect(JSON.parse(output.text)).toEqual({ lessons: [{ id: hit(1, 0).id, kind: "fail", title: "Synthetic 1", age: 0, score: 1, rank: 1 }], brief });
+  expect(output.code).toBe(0); expect(JSON.parse(output.text)).toEqual({ lessons: [{ id: hit(1, 0).id, kind: "fail", title: "Synthetic 1", age: 0, relevance: 1, score: 1, rank: 1 }], brief });
+  expect(fake.requests[0]!.args).toEqual(["search", "investigate phase", "--json", "--explain", "--limit", "100"]);
   expect(fake.requests[1]!.args).toEqual(["brief", "--for", "investigate phase", "--json", "--bytes", "2048"]);
   expect(fake.requests.every(request => request.cwd === dir)).toBe(true); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
 });

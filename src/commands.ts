@@ -442,7 +442,7 @@ export async function lessons(dirArg: string, options: LessonRankOptions & { for
   const { dir, study } = openStudy(dirArg), now = ctx.now?.() ?? Date.now();
   rankLessons([], now, options);
   if (options.for !== undefined && (!options.for.trim() || options.for.includes("\0") || options.for.length > 1000)) throw new Error("lessons intent: blank, NUL or over 1000 characters; pass --for with nonblank intent text within that bound");
-  const client = createAmemClient(dir, ctx.runner, env), hits = await client.search(study.question);
+  const client = createAmemClient(dir, ctx.runner, env), hits = await client.search(options.for ?? study.question);
   const ranked = rankLessons(hits, now, options);
   const brief = options.for === undefined ? undefined : await client.brief(options.for, 2048);
   return { lessons: ranked, ...(brief === undefined ? {} : { brief }) };
