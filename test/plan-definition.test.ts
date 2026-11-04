@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { validatePlan, readPlan } from "../src/plan/definition.ts";
+import { validatePlan, readPlan, STEP_COMMANDS } from "../src/plan/definition.ts";
 import * as ops from "../src/commands.ts";
 import { run } from "../src/cli.ts";
 import { createAresMcp, ARES_TOOLS } from "../src/mcp-tools.ts";
@@ -165,5 +165,25 @@ test("phase close and paper.build are no-argument steps with MCP schema parity",
     expect(validArguments({ study: dir, plan: raw }, tool.inputSchema)).toBe(true);
     await server.handlers.ares_plan_set!({ study: dir, plan: raw });
     for (const args of [{ run: "other" }, { file: "result.json" }, { json: true }]) expect(() => validatePlan({ ...raw, nodes: [{ ...raw.nodes[0], args }] })).toThrow();
+  }
+});
+
+
+test("watch.run is a no-argument plan step and MCP command discovery shares STEP_COMMANDS", async () => {
+  const dir = study(), server = createAresMcp({}, ctx.http), tool = ARES_TOOLS.find(row => row.name === "ares_plan_set")!;
+  const raw = { v: 1, nodes: [{ id: "watch", kind: "step", command: "watch.run", args: {} }], edges: [] };
+  expect(validatePlan(raw).nodes[0]).toMatchObject({ command: "watch.run", args: {} });
+  const schema = tool.inputSchema as Record<string, any>;
+  expect(schema.properties.plan.properties.nodes.items.properties.command.enum).toEqual([...STEP_COMMANDS]);
+  expect(validArguments({ study: dir, plan: raw }, tool.inputSchema)).toBe(true);
+  await server.handlers.ares_plan_set!({ study: dir, plan: raw });
+  expect(ops.planShow(dir).definition.nodes[0]).toMatchObject({ command: "watch.run", args: {} });
+  const file = join(dir, "plan.json"), ledger = join(dir, "ledger.jsonl"), before = readFileSync(file), events = readFileSync(ledger);
+  for (const args of [{ query: "unexpected" }, { file: "watch.json" }, { json: true }]) {
+    const invalid = { ...raw, nodes: [{ ...raw.nodes[0], args }] };
+    expect(() => validatePlan(invalid)).toThrow("watch");
+    await expect(server.handlers.ares_plan_set!({ study: dir, plan: invalid })).rejects.toThrow();
+    await expect(run(["plan", "set", dir, "--file", "-"], {}, { http: ctx.http, readStdin: async () => JSON.stringify(invalid) })).rejects.toThrow();
+    expect(readFileSync(file)).toEqual(before); expect(readFileSync(ledger)).toEqual(events);
   }
 });

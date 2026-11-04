@@ -56,6 +56,16 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
   let result: unknown, code = 0;
   switch (spec.name) {
+    case "watch set": {
+      count(spec, positional, 1); const file = str("--file");
+      if (file === undefined) throw new Error("watch set: input missing; pass --file PATH or --file - for watch JSON");
+      result = await ops.watchSet(positional[0]!, await readInput(file, io), ctx); break;
+    }
+    case "watch run": {
+      count(spec, positional, 1); const output = await ops.watchRun(positional[0]!, ctx);
+      result = output; if (!output.ok) code = 1; break;
+    }
+    case "watch show": count(spec, positional, 1); result = ops.watchShow(positional[0]!); break;
     case "setup": {
       count(spec, positional, 1);
       if (flags["--apply"] && flags["--undo"]) throw new Error("setup: --apply and --undo conflict; choose one or omit both for preview");
