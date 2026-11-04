@@ -1,18 +1,20 @@
-import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { assertWritable, boundedText, commit, onlyKeys, openStudy, plain, readLedger, readTextBounded, sha256, type Actor } from "../study.ts";
+import { assertWritable, boundedText, commit, onlyKeys, openStudy, plain, readLedger, readBytesBounded, sha256, type Actor } from "../study.ts";
 import { loadCandidates } from "./candidates.ts";
 import { SOURCES, type SourceName } from "./sources.ts";
 
 export const WATCH_BYTES = 65_536, WATCH_QUERIES = 20, WATCH_IDS = 500, WATCH_RUN_BYTES = 60 * 1024, WATCH_RECENT = 10;
 export interface WatchQuery { id: string; query: string; source?: SourceName | "all"; yearFrom?: number; limit?: number }
 export interface WatchConfig { v: 1; queries: WatchQuery[]; rubric?: string }
+export interface WatchSnapshot { config: WatchConfig; sha256: string }
 export interface SearchResult { added: number; merged: number; dropped: number; linked: number; sources: { source: SourceName; ok: boolean; returned: number; error?: string }[] }
 export interface WatchError { host: string; status: number | null }
 export interface WatchQueryResult { id: string; added: number; merged: number; dropped: number; linked: number; sources: { source: SourceName; ok: boolean; returned: number }[]; errors: WatchError[] }
-export interface WatchRun { configSha256: string; queries: WatchQueryResult[]; added: number; addedIds: string[]; addedIdsTotal: number; ok: boolean; rubric?: string }
+export interface WatchRun { configSha256: string; queries: WatchQueryResult[]; added: number; addedIds: string[]; addedIdsTotal: number; ok: boolean }
 const HOSTS: Record<SourceName, string> = { openalex: "api.openalex.org", s2: "api.semanticscholar.org", arxiv: "export.arxiv.org" };
 class WatchInputError extends Error {}
+class WatchVersionError extends WatchInputError {}
+class WatchStoredError extends Error {}
 function bad(message: string): never { throw new WatchInputError(`watch: ${message}; correct the watch input and rerun ares watch set before ares watch run`); }
 function query(raw: unknown): WatchQuery {
   if (!plain(raw)) bad("query must be an object");
@@ -27,7 +29,8 @@ function query(raw: unknown): WatchQuery {
 export function validateWatch(raw: unknown): WatchConfig {
   try {
     if (!plain(raw)) bad("config must be an object");
-    if (raw.v !== 1) throw new WatchInputError("watch config: unsupported version; use an ares version supporting this config and keep literature/watch.json unchanged");
+    if (Object.hasOwn(raw, "v") && raw.v !== 1) throw new WatchVersionError("watch config: unsupported version; use an ares version supporting this config and keep literature/watch.json unchanged");
+    if (raw.v !== 1) bad("config requires v: 1");
     onlyKeys(raw, ["v", "queries", "rubric"], "watch config");
     if (!Array.isArray(raw.queries) || raw.queries.length < 1 || raw.queries.length > WATCH_QUERIES) bad("queries must contain 1..20 entries");
     const queries = raw.queries.map(query);
@@ -43,17 +46,28 @@ export function validateWatch(raw: unknown): WatchConfig {
   }
 }
 export const watchPath = (dir: string) => join(dir, "literature", "watch.json");
-function stored(dir: string): { config: WatchConfig; text: string } | undefined {
-  const file = watchPath(dir); if (!existsSync(file)) return undefined;
-  let text: string; try { text = readTextBounded(file, WATCH_BYTES); } catch { bad("watch file is unreadable, non-regular or over 65536 bytes; restore its bounded regular file"); }
-  let raw: unknown; try { raw = JSON.parse(text); } catch { bad("watch file is not valid JSON"); }
-  return { config: validateWatch(raw), text };
+function stored(dir: string): WatchSnapshot | undefined {
+  const file = watchPath(dir);
+  let bytes: Buffer, text: string;
+  try { bytes = readBytesBounded(file, WATCH_BYTES); text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw new WatchStoredError("watch: literature/watch.json is unreadable, non-regular or over 65536 bytes; rerun ares watch set <dir> --file PATH with valid input, or restore literature/watch.json as a bounded regular file");
+  }
+  try { return { config: validateWatch(JSON.parse(text)), sha256: sha256(bytes) }; }
+  catch (error) {
+    if (error instanceof WatchVersionError) throw error;
+    throw new WatchStoredError("watch: literature/watch.json is invalid; rerun ares watch set <dir> --file PATH with valid v1 input, or restore literature/watch.json");
+  }
 }
+export const readWatchSnapshot = (dir: string): WatchSnapshot | undefined => stored(dir);
 export function readWatch(dir: string): WatchConfig | undefined { return stored(dir)?.config; }
 /** Caller holds study lock; identical bytes never add a second event. */
 export function setWatch(dir: string, raw: unknown, actor: Actor) {
-  const config = validateWatch(raw), before = stored(dir), text = JSON.stringify(config, null, 2) + "\n";
-  if (before?.text === text) return { config, changed: false };
+  const config = validateWatch(raw), text = JSON.stringify(config, null, 2) + "\n";
+  let before: WatchSnapshot | undefined;
+  try { before = stored(dir); } catch (error) { if (!(error instanceof WatchStoredError)) throw error; }
+  if (before?.sha256 === sha256(text)) return { config, changed: false };
   commit(dir, [[watchPath(dir), text, WATCH_BYTES]], [{ actor, type: "watch.set", data: { sha256: sha256(text) } }]);
   return { config, changed: true };
 }
@@ -65,7 +79,8 @@ function sourceErrors(sources: SearchResult["sources"]): WatchError[] {
   });
 }
 /** One finite pass, using the caller's existing locked lit-search operation. No timer or screening. */
-export async function runWatch(dir: string, config: WatchConfig, actor: Actor, search: (query: WatchQuery) => Promise<SearchResult>): Promise<WatchRun> {
+export async function runWatch(dir: string, snapshot: WatchSnapshot, actor: Actor, search: (query: WatchQuery) => Promise<SearchResult>): Promise<WatchRun> {
+  const { config } = snapshot;
   const known = new Set(loadCandidates(dir).map(row => row.id)), addedIds = new Set<string>(), queries: WatchQueryResult[] = [];
   for (const query of config.queries) {
     const result = await search(query);
@@ -73,14 +88,14 @@ export async function runWatch(dir: string, config: WatchConfig, actor: Actor, s
     queries.push({ id: query.id, added: result.added, merged: result.merged, dropped: result.dropped, linked: result.linked,
       sources: result.sources.map(({ source, ok, returned }) => ({ source, ok, returned })), errors: sourceErrors(result.sources) });
   }
-  const run: WatchRun = { configSha256: sha256(JSON.stringify(config)), queries, added: queries.reduce((sum, row) => sum + row.added, 0), addedIds: [], addedIdsTotal: addedIds.size,
-    ok: queries.some(row => row.sources.some(source => source.ok)), ...(config.rubric === undefined ? {} : { rubric: config.rubric }) };
+  const run: WatchRun = { configSha256: snapshot.sha256, queries, added: queries.reduce((sum, row) => sum + row.added, 0), addedIds: [], addedIdsTotal: addedIds.size,
+    ok: queries.some(row => row.sources.some(source => source.ok)) };
   for (const id of addedIds) {
     if (run.addedIds.length >= WATCH_IDS) break;
     run.addedIds.push(id);
     if (Buffer.byteLength(JSON.stringify(run)) > WATCH_RUN_BYTES) { run.addedIds.pop(); break; }
   }
-  assertWritable(JSON.stringify(run), WATCH_RUN_BYTES, "watch run; shorten the rubric before the next run");
+  assertWritable(JSON.stringify(run), WATCH_RUN_BYTES, "watch run; reduce watched queries before the next run");
   commit(dir, [], [{ actor, type: "watch.ran", data: { ...run } }]); return run;
 }
 export function showWatch(dirArg: string) {

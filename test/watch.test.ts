@@ -3,7 +3,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as ops from "../src/commands.ts";
 import { run } from "../src/cli.ts";
-import { readLedger } from "../src/study.ts";
+import { readLedger, sha256 } from "../src/study.ts";
 import { loadCandidates } from "../src/lit/candidates.ts";
 import { readWatch, validateWatch, watchPath, type WatchConfig } from "../src/lit/watch.ts";
 import { deferred, fakeHttp, ok, status, tempDir, type Route } from "./helpers.ts";
@@ -38,7 +38,7 @@ test("one pass uses lit search gates/merge/events and never screens or scores", 
     const dir = await study("gates", mode); await ops.watchSet(dir, { ...config, queries: [{ id: "a", query: "first query" }, { id: "b", query: "second query" }] }, { actor });
     const fake = fakeHttp(routes()), ctx = { actor, http: fake.http }, result = await ops.watchRun(dir, ctx);
     expect(result.ok).toBe(true); expect(result.added).toBe(1); expect(result.queries.map(row => [row.added, row.merged])).toEqual([[1, 0], [0, 1]]);
-    expect(result.addedIds).toEqual(["doi:10.0000/synthetic-one"]); expect(result.addedIdsTotal).toBe(1); expect(result.rubric).toBe(config.rubric);
+    expect(result.addedIds).toEqual(["doi:10.0000/synthetic-one"]); expect(result.addedIdsTotal).toBe(1); expect("rubric" in result).toBe(false); expect(ops.watchShow(dir).config?.rubric).toBe(config.rubric);
     expect(fake.requested).toHaveLength(6); expect(fake.requested[0]!.url).toContain("from_publication_date:2020"); expect(fake.requested[0]!.url).toContain("to_publication_date:2025");
     expect(readLedger(dir).filter(event => event.type === "lit.search")).toHaveLength(2); expect(readLedger(dir).filter(event => event.type === "watch.ran")).toHaveLength(1);
     expect(readLedger(dir).filter(event => event.type === "lit.screen")).toEqual([]); expect(loadCandidates(dir).every(row => row.status === "new")).toBe(true);
@@ -72,7 +72,7 @@ test("all-source failure is recorded with non-zero CLI exit and never auto-appro
 test("all queries are checked against scope before any search, and pending gates refuse", async () => {
   const dir = await study(), fake = fakeHttp(routes()), ctx = { actor, http: fake.http };
   await ops.watchSet(dir, { v: 1, queries: [{ id: "first", query: "valid" }, { id: "later", query: "bad", yearFrom: 2026 }] }, { actor });
-  const before = ledger(dir); await expect(ops.watchRun(dir, ctx)).rejects.toThrow("yearFrom"); expect(fake.requested).toEqual([]); expect(ledger(dir)).toBe(before);
+  const before = ledger(dir); await expect(ops.watchRun(dir, ctx)).rejects.toThrow("watch query later: yearFrom"); expect(fake.requested).toEqual([]); expect(ledger(dir)).toBe(before);
   await ops.watchSet(dir, config, { actor }); await ops.scope(dir, { question: "Changed scope" }, ctx);
   await expect(ops.watchRun(dir, ctx)).rejects.toThrow("pending"); expect(fake.requested).toEqual([]);
 });
@@ -135,4 +135,32 @@ test("show returns only the ten most recent run records without writing", async 
   for (let i = 0; i < 11; i++) await ops.watchRun(dir, { actor, http: fake.http });
   const before = ledger(dir), shown = ops.watchShow(dir), last = readLedger(dir).filter(event => event.type === "watch.ran").slice(-10).reverse();
   expect(shown.runs).toHaveLength(10); expect(shown.runs.map(row => row.at)).toEqual(last.map(event => event.at)); expect(ledger(dir)).toBe(before);
+});
+
+test("valid watch set repairs corrupt/unreadable configs while run/show name the file and recovery command", async () => {
+  for (const content of [Buffer.from("not JSON"), Buffer.from(JSON.stringify({ ...config, unknown: true })),
+    Buffer.from(JSON.stringify({ ...config, queries: [{ id: "bad", query: "synthetic", limit: 0 }] })),
+    Buffer.from(JSON.stringify({ queries: config.queries })), Buffer.from([255]), Buffer.from("x".repeat(65_537))]) {
+    const dir = await study(); await ops.watchSet(dir, config, { actor }); writeFileSync(watchPath(dir), content);
+    const before = ledger(dir), fake = fakeHttp(routes());
+    try { ops.watchShow(dir); throw new Error("expected refusal"); } catch (error) { expect((error as Error).message).toContain("literature/watch.json"); expect((error as Error).message).toContain("ares watch set"); }
+    await expect(ops.watchRun(dir, { actor, http: fake.http })).rejects.toThrow("literature/watch.json");
+    expect(fake.requested).toEqual([]); expect(ledger(dir)).toBe(before); expect(readFileSync(watchPath(dir))).toEqual(content);
+    await expect(ops.watchSet(dir, { ...config, queries: [] }, { actor })).rejects.toThrow(); expect(readFileSync(watchPath(dir))).toEqual(content);
+    expect((await ops.watchSet(dir, config, { actor })).changed).toBe(true); expect(readWatch(dir)).toEqual(config);
+    expect((await ops.watchRun(dir, { actor, http: fake.http })).ok).toBe(true);
+  }
+});
+
+test("run config hash matches stored bytes and watch.set, while rubric remains config-only", async () => {
+  const dir = await study(); await ops.watchSet(dir, config, { actor }); const hash = sha256(readFileSync(watchPath(dir)));
+  expect(readLedger(dir).findLast(event => event.type === "watch.set")!.data.sha256).toBe(hash);
+  const result = await ops.watchRun(dir, { actor, http: fakeHttp(routes()).http });
+  expect(result.configSha256).toBe(hash); const receipt = readLedger(dir).at(-1)!;
+  expect(receipt.data.configSha256).toBe(hash); expect(Object.hasOwn(receipt.data, "rubric")).toBe(false);
+  expect(ops.watchShow(dir).config!.rubric).toBe(config.rubric);
+  const formatted = JSON.stringify(config, null, 4).replaceAll("\n", "\r\n") + "\r\n"; writeFileSync(watchPath(dir), formatted);
+  const second = await ops.watchRun(dir, { actor, http: fakeHttp(routes()).http });
+  expect(second.configSha256).toBe(sha256(readFileSync(watchPath(dir)))); expect(second.configSha256).not.toBe(hash);
+  expect(Object.hasOwn(readLedger(dir).at(-1)!.data, "rubric")).toBe(false);
 });

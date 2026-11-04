@@ -1,4 +1,4 @@
-import { readWatch, setWatch, runWatch, showWatch } from "./lit/watch.ts";
+import { readWatchSnapshot, setWatch, runWatch, showWatch } from "./lit/watch.ts";
 import { runSetup, type SetupMode } from "./setup.ts";
 import { proposeSkill, decideSkill, listSkills } from "./memory/skills.ts";
 import { rankLessons, type LessonRankOptions } from "./memory/lessons.ts";
@@ -473,12 +473,13 @@ export async function watchSet(dirArg: string, raw: unknown, ctx: Pick<Ctx, "act
 export async function watchRun(dirArg: string, ctx: Ctx) {
   const { dir, study } = openStudy(dirArg);
   return withLock(dir, async () => {
-    const config = readWatch(dir), scope = readScope(dir);
-    if (!config) throw new Error("watch: no config; run ares watch set <dir> --file PATH before watch run");
+    const snapshot = readWatchSnapshot(dir), scope = readScope(dir);
+    if (!snapshot) throw new Error("watch: no config; run ares watch set <dir> --file PATH before watch run");
+    const { config } = snapshot;
     if (!scope) throw new Error("gate scope: no scope yet; run ares scope before watch run");
     requireGate(dir, study, "scope", binder(dir));
-    for (const query of config.queries) if ((query.yearFrom ?? scope.yearFrom ?? 1000) > (scope.yearTo ?? 2100)) throw new Error("watch yearFrom exceeds scope yearTo; correct the watch query or scope before running");
-    return runWatch(dir, config, ctx.actor, query => {
+    for (const query of config.queries) if ((query.yearFrom ?? scope.yearFrom ?? 1000) > (scope.yearTo ?? 2100)) throw new Error(`watch query ${query.id}: yearFrom exceeds scope yearTo; correct that query or the scope before running`);
+    return runWatch(dir, snapshot, ctx.actor, query => {
       // A bounded search is at most three HTTP deadlines; refresh between queries, with no timer, for long passes.
       const time = new Date(); utimesSync(join(dir, ".ares.lock"), time, time);
       return searchLocked(dir, query.query, query, ctx);
