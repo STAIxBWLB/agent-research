@@ -8,7 +8,7 @@ import { createAresMcp, ARES_TOOLS } from "../src/mcp-tools.ts";
 import { validArguments } from "../src/mcp.ts";
 import { readLedger } from "../src/study.ts";
 import { tempDir, fakeHttp } from "./helpers.ts";
-const ctx = { actor: { kind: "human" as const }, http: fakeHttp([]).http };
+const ctx = { actor: { kind: "person" as const }, http: fakeHttp([]).http };
 const step = (id = "base") => ({ id, kind: "step", command: "attempt.run", args: { repo: "../model", commit: "a".repeat(40), seed: 1 } });
 const plan = () => ({ v: 1, nodes: [step(), { id: "approval", kind: "gate", binds: ["base"], needs: ["base"] }], edges: [] });
 function study() { const dir = join(tempDir(), "study"); ops.init(dir, { question: "synthetic" }, ctx); return dir; }
