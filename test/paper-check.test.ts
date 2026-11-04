@@ -50,6 +50,7 @@ test("unclosed fences are code but unmatched inline backticks and malformed link
   const dir = study(); expect(draft(dir, "```\n123\n").ok).toBe(true);
   expect(draft(dir, "`value 123").findings[0]?.code).toBe("bare-number");
   expect(draft(dir, "[label](url123").findings[0]?.code).toBe("bare-number");
+  expect(draft(dir, "No link ](hidden123)").findings[0]?.code).toBe("bare-number");
   expect(draft(dir, "``code 12` still prose").findings[0]?.code).toBe("bare-number");
 });
 
@@ -89,10 +90,12 @@ test("literal metric whitespace/punctuation is referenceable; delimiters remain 
 test("survey is citation-only, experiment placeholders refuse, CLI/MCP share read-only reports", async () => {
   const dir = study("survey"); references(dir); const text = "Year 2026 with [@good2026]."; expect(draft(dir, text).ok).toBe(true);
   const ledger = readFileSync(join(dir, "ledger.jsonl")), file = readFileSync(join(dir, "paper", "manuscript.md")), direct = ops.paperCheck(dir);
-  expect(JSON.parse((await run(["paper", "check", dir, "--json"], {}, { http: ctx.http })).text)).toEqual(direct);
+  const cli = await run(["paper", "check", dir, "--json"], {}, { http: ctx.http });
+  expect(cli.code).toBe(0); expect(JSON.parse(cli.text)).toEqual(direct);
   expect(await createAresMcp({}, ctx.http).handlers.ares_paper_check!({ study: dir })).toEqual(direct);
   expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(ledger); expect(readFileSync(join(dir, "paper", "manuscript.md"))).toEqual(file);
   expect(draft(dir, "{{n:final.status}}").findings[0]?.code).toBe("unresolved-ref");
+  expect((await run(["paper", "check", dir, "--json"], {}, { http: ctx.http })).code).toBe(1);
 });
 
 test("missing and oversized manuscript reads refuse with a repair command and preserve records", () => {

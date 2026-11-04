@@ -191,7 +191,11 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     }
     case "lit verify": if (!positional.length) throw new Error(`usage: ares ${spec.usage}`); result = await ops.verify(positional[0]!, positional.slice(1), ctx); break;
     case "lit bib": count(spec, positional, 1); result = await ops.bib(positional[0]!, ctx); break;
-    case "paper check": count(spec, positional, 1); result = ops.paperCheck(positional[0]!); break;
+    case "paper check": {
+      count(spec, positional, 1); const report = ops.paperCheck(positional[0]!);
+      if (!report.ok) code = 1;
+      result = report; break;
+    }
     case "cite check": {
       count(spec, positional, 2);
       const report = ops.cite(positional[0]!, positional[1]!);

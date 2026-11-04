@@ -48,13 +48,17 @@ function markdownMask(text: string): Uint8Array {
     const close = next.get(i);
     if (close !== undefined) { mark(mask, runs[i]!.index, runs[close]!.index + runs[close]![0].length); i = close; }
   }
+  const labels: number[] = [];
   for (let i = 0; i < text.length; i++) {
-    if (mask[i] || protectedText[i] || (text[i] !== "<" && text[i] !== "]") || escaped(text, i)) continue;
+    if (mask[i] || protectedText[i] || (text[i] !== "<" && text[i] !== "]" && text[i] !== "[") || escaped(text, i)) continue;
+    if (text[i] === "[") { labels.push(i); continue; }
     if (text[i] === "<") {
       const end = text.indexOf(">", i + 1), target = text.slice(i + 1, end < 0 ? i + 1 : end);
       if (end >= 0 && /^(?:[A-Za-z][A-Za-z0-9+.-]{1,31}:[^\s<>]*|[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+)$/.test(target)) { mark(mask, i, end + 1); i = end; }
     }
-    if (text[i] !== "]" || text[i + 1] !== "(") continue;
+    if (text[i] !== "]") continue;
+    const label = labels.pop();
+    if (label === undefined || text[i + 1] !== "(") continue;
     let start = i + 2; while (/\s/.test(text[start] ?? "") && start < text.length) start++;
     let end = start, depth = 0;
     if (text[start] === "<") { end = text.indexOf(">", start + 1); if (end < 0) continue; end++; }
