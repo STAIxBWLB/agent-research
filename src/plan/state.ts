@@ -2,7 +2,7 @@ import { gateState, plain, sha256, boundedText, onlyKeys, type Actor, type GateN
 import { readPlan, validatePlan, type PlanDefinition, type PlanNode } from "./definition.ts";
 
 export type NodeStatus = "pending" | "ready" | "dispatched" | "done" | "failed" | "cancelled" | "uncertain" | "stale" | "skipped";
-export interface NodeState { id: string; kind: PlanNode["kind"]; status: NodeStatus; output?: unknown; attemptId?: string; taskId?: number; reason?: string; gate?: GateState }
+export interface NodeState { id: string; kind: PlanNode["kind"]; status: NodeStatus; output?: unknown; attemptId?: string; taskId?: number; reason?: string; gate?: GateState; lastObserved?: { revision: number; status: NodeStatus; at: string; output?: unknown; reason?: string } }
 export interface ControlRequest { action: "pause" | "resume" | "retry" | "cancel" | "skip"; node?: string; commandId: string; expectedRevision: number }
 export interface ControlResult { commandId: string; revision: number; action: ControlRequest["action"]; node?: string; state: "paused" | "running" | "done"; status?: NodeStatus }
 export interface PlanState { definition: PlanDefinition; revision: number; state: "paused" | "running" | "done"; nodes: NodeState[]; uncertain: string[] }
@@ -142,6 +142,7 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
         node.status = d.status as NodeStatus;
         if (node.status === "done" && d.output !== undefined) node.output = d.output;
         if (typeof d.reason === "string") node.reason = boundedText(d.reason, `node ${node.id} reason`, 500);
+        node.lastObserved = { revision: state.revision, status: node.status, at: event.at, ...(d.output !== undefined ? { output: d.output } : {}), ...(node.reason !== undefined ? { reason: node.reason } : {}) };
       }
     }
     refresh(state, decisions);

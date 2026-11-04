@@ -164,3 +164,43 @@ test("uncertain missing attempt records can be explicitly retried or cancelled",
     expect(readLedger(dir).filter(e => e.type === "attempt.started")).toHaveLength(0);
   }
 });
+
+
+test("cancelling an undispatched step never touches attempt storage or any runner", async () => {
+  const dir = await study();
+  const forbidden = async () => { throw new Error("runner must not be called"); };
+  const result = await ops.planControl(dir, { action: "cancel", node: "base", commandId: "cancel-undispatched", expectedRevision: 1 }, { ...ctx, runner: forbidden });
+  expect(result.status).toBe("cancelled");
+  expect(node(dir, "base").status).toBe("cancelled");
+  expect(readLedger(dir).filter(e => e.type.startsWith("attempt."))).toHaveLength(0);
+});
+
+test("cancelling a dispatched hub node is local only and preserves the referenced task", async () => {
+  const dir = await study({ v: 1, nodes: [{ id: "hub", kind: "hub", campaign: "c-7", unit: "u2" }], edges: [] });
+  appendEvent(dir, actor, "node.intent", { revision: 1, node: "hub", taskId: 42 });
+  let calls = 0;
+  const runner = async () => { calls++; throw new Error("hub subprocess must not be called"); };
+  const result = await ops.planControl(dir, { action: "cancel", node: "hub", commandId: "cancel-hub", expectedRevision: 1 }, { ...ctx, runner });
+  expect(result.status).toBe("cancelled"); expect(calls).toBe(0);
+  expect(node(dir, "hub").taskId).toBe(42);
+  expect(readLedger(dir).filter(e => e.type.startsWith("attempt."))).toHaveLength(0);
+});
+
+test("stale and uncertain retry admits a new current-revision intent while preserving old observations", async () => {
+  for (const outcome of ["done", "uncertain"] as const) {
+    const dir = await study({ v: 1, nodes: [step("base")], edges: [] });
+    observe(dir, "base", outcome, { hash: "old-reference" });
+    const observed = readLedger(dir).find(e => e.type === "node.observed")!;
+    if (outcome === "done") await ops.planSet(dir, { v: 1, nodes: [step("base", [], "changed")], edges: [] }, ctx);
+    const revision = ops.planShow(dir).revision;
+    expect(node(dir, "base").status).toBe(outcome === "done" ? "stale" : "uncertain");
+    await control(dir, "retry", "explicit-retry", "base", revision);
+    expect(node(dir, "base").status).toBe("ready");
+    expect(node(dir, "base").output).toBeUndefined();
+    appendEvent(dir, actor, "node.intent", { revision, node: "base" });
+    expect(node(dir, "base").status).toBe("dispatched");
+    expect(node(dir, "base").lastObserved).toMatchObject({ revision: 1, status: outcome, output: { hash: "old-reference" } });
+    expect(readLedger(dir).filter(e => e.type === "node.observed")).toEqual([observed]);
+    expect(readLedger(dir).filter(e => e.type === "node.intent").at(-1)!.data.revision).toBe(revision);
+  }
+});
