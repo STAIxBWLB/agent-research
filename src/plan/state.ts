@@ -2,7 +2,7 @@ import { gateState, plain, sha256, boundedText, onlyKeys, type Actor, type GateN
 import { readPlan, validatePlan, type PlanDefinition, type PlanNode } from "./definition.ts";
 
 export type NodeStatus = "pending" | "ready" | "dispatched" | "done" | "failed" | "cancelled" | "uncertain" | "stale" | "skipped";
-export interface NodeState { id: string; kind: PlanNode["kind"]; status: NodeStatus; output?: unknown; attemptId?: string; taskId?: number; reason?: string; gate?: GateState; lastObserved?: { revision: number; status: NodeStatus; at: string; output?: unknown; reason?: string } }
+export interface NodeState { id: string; kind: PlanNode["kind"]; status: NodeStatus; dispatchId?: string; dispatchCount?: number; retryOf?: string; output?: unknown; attemptId?: string; taskId?: number; reason?: string; gate?: GateState; lastObserved?: { revision: number; dispatchId: string; status: NodeStatus; at: string; output?: unknown; reason?: string } }
 export interface ControlRequest { action: "pause" | "resume" | "retry" | "cancel" | "skip"; node?: string; commandId: string; expectedRevision: number }
 export interface ControlResult { commandId: string; revision: number; action: ControlRequest["action"]; node?: string; state: "paused" | "running" | "done"; status?: NodeStatus }
 export interface PlanState { definition: PlanDefinition; revision: number; state: "paused" | "running" | "done"; nodes: NodeState[]; uncertain: string[] }
@@ -33,8 +33,19 @@ function descendants(definition: PlanDefinition, roots: Set<string>): Set<string
 }
 function reset(node: NodeState, status: NodeStatus): void {
   node.status = status; delete node.output; delete node.reason; delete node.gate;
-  // Keep attempt/task identity visible until retry explicitly creates a fresh dispatch.
-  if (status === "pending") { delete node.attemptId; delete node.taskId; }
+  delete node.dispatchId;
+  // A retry must create a child attempt, while hub task references stay read-only.
+  if (status === "pending" && node.attemptId) { node.retryOf = node.attemptId; delete node.attemptId; }
+}
+function consumed(node: NodeState): boolean { return node.status !== "pending" && node.status !== "ready"; }
+export function nextDispatchId(state: PlanState, id: string): string {
+  const node = state.nodes.find(n => n.id === id);
+  if (!node) bad(`dispatch references missing node ${id}`);
+  return `${state.revision}:${id}:${(node.dispatchCount ?? 0) + 1}`;
+}
+function dispatchIdentity(value: unknown, node: string): string {
+  if (typeof value !== "string" || !value.trim() || value.includes("\0") || Buffer.byteLength(value) > 256) bad(`node ${node}: dispatchId must be nonempty text of at most 256 bytes; record the intent id on its observation`);
+  return value;
 }
 export function planGateBinding(state: PlanState, gate: GateName): string | undefined {
   if (!gate.startsWith("plan:")) return undefined;
@@ -84,6 +95,7 @@ function refresh(state: PlanState, decisions: Map<string, LedgerEvent>): void {
 export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
   let state: PlanState | undefined;
   const decisions = new Map<string, LedgerEvent>();
+  const dispatches = new Set<string>();
   for (const event of events) {
     const d = event.data;
     if (event.type === "gate.approve" || event.type === "gate.reject") {
@@ -105,14 +117,14 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
         const old = previous?.nodes.find(p => p.id === n.id);
         if (!old) return { id: n.id, kind: n.kind, status: "pending" };
         const value = { ...old, kind: n.kind };
-        if (stale.has(n.id)) reset(value, "stale");
+        if (stale.has(n.id) && consumed(value)) reset(value, "stale");
         return value;
       }), uncertain: [] };
       refresh(state, decisions); continue;
     }
     if (!state) continue;
     if (!["plan.control", "plan.paused", "node.intent", "node.observed", "node.stale"].includes(event.type)) continue;
-    if (d.revision !== state.revision) continue; // Delayed observations cannot mutate another definition.
+    if (event.type !== "node.observed" && d.revision !== state.revision) continue;
     if (event.type === "plan.paused") state.state = "paused";
     else if (event.type === "plan.control") {
       const request = validateControl(d.request);
@@ -123,26 +135,35 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
         const target = state.nodes.find(n => n.id === request.node);
         if (!target) bad(`control references missing node ${request.node}`);
         const affected = descendants(state.definition, new Set([target.id]));
-        for (const node of state.nodes) if (affected.has(node.id) && node.id !== target.id && (request.action === "retry" || !["pending", "ready"].includes(node.status))) reset(node, "stale");
+        for (const node of state.nodes) if (affected.has(node.id) && node.id !== target.id && consumed(node)) reset(node, "stale");
         reset(target, request.action === "retry" ? "pending" : request.action === "skip" ? "skipped" : "cancelled");
       }
     } else {
       const node = state.nodes.find(n => n.id === d.node);
-      if (!node) bad(`${event.type} references missing node ${String(d.node)}`);
+      if (!node) {
+        if (event.type === "node.observed") continue; // Removed nodes have no current dispatch.
+        bad(`${event.type} references missing node ${String(d.node)}`);
+      }
       if (event.type === "node.stale") {
-        for (const value of state.nodes) if (descendants(state.definition, new Set([node.id])).has(value.id)) reset(value, "stale");
+        for (const value of state.nodes) if (descendants(state.definition, new Set([node.id])).has(value.id) && consumed(value)) reset(value, "stale");
       } else if (event.type === "node.intent") {
         if (node.status !== "ready") bad(`node.intent ${node.id} is ${node.status}, not ready; reconcile the ledger before dispatch`);
+        const dispatchId = dispatchIdentity(d.dispatchId, node.id), key = canonical([node.id, dispatchId]);
+        if (dispatches.has(key)) bad(`node ${node.id}: dispatchId ${dispatchId} is already used; choose a fresh dispatch id`);
+        dispatches.add(key); node.dispatchId = dispatchId; node.dispatchCount = (node.dispatchCount ?? 0) + 1;
         node.status = "dispatched";
         if (typeof d.attemptId === "string") node.attemptId = d.attemptId;
         if (Number.isSafeInteger(d.taskId)) node.taskId = d.taskId as number;
       } else {
+        const dispatchId = dispatchIdentity(d.dispatchId, node.id);
+        if (dispatchId !== node.dispatchId || !Number.isSafeInteger(d.revision) || (d.revision as number) > state.revision) continue;
         if (!statuses.includes(d.status as NodeStatus) || !["done", "failed", "cancelled", "uncertain", "dispatched"].includes(d.status as string)) bad(`node.observed ${node.id} has unknown status ${String(d.status)}`);
         if (node.status !== "dispatched" && node.status !== "uncertain") continue;
         node.status = d.status as NodeStatus;
         if (node.status === "done" && d.output !== undefined) node.output = d.output;
+        delete node.reason;
         if (typeof d.reason === "string") node.reason = boundedText(d.reason, `node ${node.id} reason`, 500);
-        node.lastObserved = { revision: state.revision, status: node.status, at: event.at, ...(d.output !== undefined ? { output: d.output } : {}), ...(node.reason !== undefined ? { reason: node.reason } : {}) };
+        node.lastObserved = { revision: d.revision as number, dispatchId, status: node.status, at: event.at, ...(d.output !== undefined ? { output: d.output } : {}), ...(node.reason !== undefined ? { reason: node.reason } : {}) };
       }
     }
     refresh(state, decisions);

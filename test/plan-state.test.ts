@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as ops from "../src/commands.ts";
-import { foldPlan, planGateBinding } from "../src/plan/state.ts";
+import { foldPlan, planGateBinding, nextDispatchId } from "../src/plan/state.ts";
 import { appendEvent, commit, readLedger, requireGate, openStudy, type Actor } from "../src/study.ts";
 import { run } from "../src/cli.ts";
 import { createAresMcp, ARES_TOOLS } from "../src/mcp-tools.ts";
@@ -11,15 +11,16 @@ import { fakeHttp, tempDir } from "./helpers.ts";
 const actor: Actor = { kind: "person" }, ctx = { actor, http: fakeHttp([]).http };
 const step = (id: string, needs: string[] = [], query = "synthetic") => ({ id, kind: "step", command: "lit.search", args: { query }, needs });
 const definition = () => ({ v: 1, nodes: [step("base"), { id: "approve", kind: "gate", needs: ["base"], binds: ["base"] }, step("final", ["approve"])], edges: [] });
-async function study(raw: unknown = definition(), autonomy = "gates") {
-  const dir = join(tempDir(), "study"); ops.init(dir, { question: "synthetic", autonomy }, ctx); await ops.planSet(dir, raw, ctx); return dir;
+async function study(raw: unknown = definition(), autonomy = "gates", mode = "survey") {
+  const dir = join(tempDir(), "study"); ops.init(dir, { question: "synthetic", autonomy, mode }, ctx); await ops.planSet(dir, raw, ctx); return dir;
 }
 const control = (dir: string, action: "pause" | "resume" | "retry" | "cancel" | "skip", commandId: string, node?: string, expectedRevision = 1) => ops.planControl(dir, { action, commandId, expectedRevision, ...(node ? { node } : {}) }, ctx);
 const node = (dir: string, id: string) => ops.planShow(dir).nodes.find(n => n.id === id)!;
 function observe(dir: string, id: string, status = "done", output: unknown = { hash: "synthetic" }) {
   const revision = ops.planShow(dir).revision;
-  appendEvent(dir, actor, "node.intent", { revision, node: id });
-  appendEvent(dir, actor, "node.observed", { revision, node: id, status, output });
+  const dispatchId = nextDispatchId(ops.planShow(dir), id);
+  appendEvent(dir, actor, "node.intent", { revision, node: id, dispatchId });
+  appendEvent(dir, actor, "node.observed", { revision, node: id, dispatchId, status, output });
 }
 
 test("ledger fold restores states, readiness and pause without touching study bytes", async () => {
@@ -59,7 +60,7 @@ test("definition edits invalidate consumed descendants, preserve unrelated work 
   await control(dir, "retry", "retry-base", "base", 2); expect(node(dir, "base").status).toBe("ready");
   observe(dir, "base"); expect(node(dir, "child").status).toBe("stale");
   await control(dir, "retry", "retry-child", "child", 2); expect(node(dir, "child").status).toBe("ready");
-  appendEvent(dir, actor, "node.observed", { revision: 1, node: "base", status: "failed" });
+  appendEvent(dir, actor, "node.observed", { revision: 1, node: "base", dispatchId: "old", status: "failed" });
   expect(node(dir, "base").status).toBe("done");
 });
 
@@ -94,7 +95,7 @@ test("gate binding changes on upstream output edits and pending auto approvals c
 test("failed, cancelled and uncertain nodes remain visible; uncertain needs explicit control", async () => {
   const dir = await study({ v: 1, nodes: [step("failed"), step("cancelled"), step("uncertain"), step("active")], edges: [] });
   observe(dir, "failed", "failed"); observe(dir, "cancelled", "cancelled"); observe(dir, "uncertain", "uncertain");
-  appendEvent(dir, actor, "node.intent", { revision: 1, node: "active" });
+  appendEvent(dir, actor, "node.intent", { revision: 1, node: "active", dispatchId: "active-1" });
   expect(ops.planShow(dir).uncertain).toEqual(["uncertain"]);
   expect(ops.planShow(dir).nodes.map(n => n.status)).toEqual(["failed", "cancelled", "uncertain", "dispatched"]);
   await control(dir, "pause", "pause"); expect(node(dir, "active").status).toBe("dispatched");
@@ -131,8 +132,8 @@ test("gate rejection invalidates completed consumers and done without output ref
   await ops.gateDecide(dir, "plan:approve", "reject", "recheck", ctx);
   expect(node(dir, "final").status).toBe("stale");
   const other = await study();
-  appendEvent(other, actor, "node.intent", { revision: 1, node: "base" });
-  appendEvent(other, actor, "node.observed", { revision: 1, node: "base", status: "done" });
+  appendEvent(other, actor, "node.intent", { revision: 1, node: "base", dispatchId: "base-1" });
+  appendEvent(other, actor, "node.observed", { revision: 1, node: "base", dispatchId: "base-1", status: "done" });
   expect(planGateBinding(ops.planShow(other), "plan:approve")).toBeUndefined();
   await expect(ops.gateDecide(other, "plan:approve", "approve", undefined, ctx)).rejects.toThrow("nothing to decide");
 });
@@ -157,8 +158,8 @@ test("uncertain missing attempt records can be explicitly retried or cancelled",
   for (const action of ["retry", "cancel"] as const) {
     const dir = join(tempDir(), "study"); ops.init(dir, { question: "synthetic", mode: "experiment" }, ctx);
     await ops.planSet(dir, { v: 1, nodes: [step("base")], edges: [] }, ctx);
-    appendEvent(dir, actor, "node.intent", { revision: 1, node: "base", attemptId: "a".repeat(16) });
-    appendEvent(dir, actor, "node.observed", { revision: 1, node: "base", status: "uncertain", reason: "missing record" });
+    appendEvent(dir, actor, "node.intent", { revision: 1, node: "base", dispatchId: "base-1", attemptId: "a".repeat(16) });
+    appendEvent(dir, actor, "node.observed", { revision: 1, node: "base", dispatchId: "base-1", status: "uncertain", reason: "missing record" });
     const result = await control(dir, action, action, "base");
     expect(result.status).toBe(action === "retry" ? "ready" : "cancelled");
     expect(readLedger(dir).filter(e => e.type === "attempt.started")).toHaveLength(0);
@@ -177,7 +178,7 @@ test("cancelling an undispatched step never touches attempt storage or any runne
 
 test("cancelling a dispatched hub node is local only and preserves the referenced task", async () => {
   const dir = await study({ v: 1, nodes: [{ id: "hub", kind: "hub", campaign: "c-7", unit: "u2" }], edges: [] });
-  appendEvent(dir, actor, "node.intent", { revision: 1, node: "hub", taskId: 42 });
+  appendEvent(dir, actor, "node.intent", { revision: 1, node: "hub", dispatchId: "hub-1", taskId: 42 });
   let calls = 0;
   const runner = async () => { calls++; throw new Error("hub subprocess must not be called"); };
   const result = await ops.planControl(dir, { action: "cancel", node: "hub", commandId: "cancel-hub", expectedRevision: 1 }, { ...ctx, runner });
@@ -197,10 +198,70 @@ test("stale and uncertain retry admits a new current-revision intent while prese
     await control(dir, "retry", "explicit-retry", "base", revision);
     expect(node(dir, "base").status).toBe("ready");
     expect(node(dir, "base").output).toBeUndefined();
-    appendEvent(dir, actor, "node.intent", { revision, node: "base" });
+    appendEvent(dir, actor, "node.intent", { revision, node: "base", dispatchId: nextDispatchId(ops.planShow(dir), "base") });
     expect(node(dir, "base").status).toBe("dispatched");
     expect(node(dir, "base").lastObserved).toMatchObject({ revision: 1, status: outcome, output: { hash: "old-reference" } });
     expect(readLedger(dir).filter(e => e.type === "node.observed")).toEqual([observed]);
     expect(readLedger(dir).filter(e => e.type === "node.intent").at(-1)!.data.revision).toBe(revision);
   }
+});
+
+
+test("late observations cannot complete a replacement dispatch or release its gate", async () => {
+  const dir = await study();
+  const first = nextDispatchId(ops.planShow(dir), "base");
+  appendEvent(dir, actor, "node.intent", { revision: 1, node: "base", dispatchId: first });
+  appendEvent(dir, actor, "node.observed", { revision: 1, node: "base", dispatchId: first, status: "uncertain" });
+  await control(dir, "retry", "retry-base", "base");
+  const second = nextDispatchId(ops.planShow(dir), "base"); expect(second).not.toBe(first);
+  appendEvent(dir, actor, "node.intent", { revision: 1, node: "base", dispatchId: second });
+  appendEvent(dir, actor, "node.observed", { revision: 1, node: "base", dispatchId: first, status: "done", output: { hash: "wrong" } });
+  expect(node(dir, "base").status).toBe("dispatched"); expect(node(dir, "base").output).toBeUndefined();
+  expect(planGateBinding(ops.planShow(dir), "plan:approve")).toBeUndefined();
+  appendEvent(dir, actor, "node.observed", { revision: 1, node: "base", dispatchId: second, status: "done", output: { hash: "right" } });
+  expect(node(dir, "base").output).toEqual({ hash: "right" });
+  expect(ops.gateList(dir).find(g => g.gate === "plan:approve")?.state).toBe("pending");
+});
+
+test("unchanged dispatch survives a new definition revision and consumes its matching old-revision observation", async () => {
+  const dir = await study();
+  appendEvent(dir, actor, "node.intent", { revision: 1, node: "base", dispatchId: "in-flight" });
+  await ops.planSet(dir, definition(), ctx);
+  expect(ops.planShow(dir).revision).toBe(2); expect(node(dir, "base").status).toBe("dispatched");
+  appendEvent(dir, actor, "node.observed", { revision: 1, node: "base", dispatchId: "in-flight", status: "done", output: { hash: "retained" } });
+  expect(node(dir, "base").status).toBe("done"); expect(node(dir, "base").lastObserved?.revision).toBe(1);
+  expect(node(dir, "approve").status).toBe("pending");
+});
+
+test("retry keeps its prior attempt parent and hub task reference visible", async () => {
+  for (const kind of ["step", "hub"] as const) {
+    const raw = { v: 1, nodes: [kind === "step" ? step("work") : { id: "work", kind, campaign: "c", unit: "u" }], edges: [] };
+    const dir = await study(raw, "gates", "experiment");
+    appendEvent(dir, actor, "node.intent", { revision: 1, node: "work", dispatchId: "first", ...(kind === "step" ? { attemptId: "a".repeat(16) } : { taskId: 42 }) });
+    appendEvent(dir, actor, "node.observed", { revision: 1, node: "work", dispatchId: "first", status: "failed" });
+    await control(dir, "retry", "retry-work", "work");
+    expect(node(dir, "work").status).toBe("ready");
+    if (kind === "step") expect(node(dir, "work").retryOf).toBe("a".repeat(16));
+    else expect(node(dir, "work").taskId).toBe(42);
+    expect(node(dir, "work").dispatchId).toBeUndefined();
+  }
+});
+
+test("retry, stale events and definition changes only stale descendants that consumed input", async () => {
+  for (const edit of ["retry", "stale", "set"] as const) {
+    const raw = { v: 1, nodes: [step("a"), step("b", ["a"])], edges: [] };
+    const dir = await study(raw); observe(dir, "a", edit === "retry" ? "failed" : "done");
+    if (edit === "retry") await control(dir, "retry", "retry-a", "a");
+    if (edit === "stale") appendEvent(dir, actor, "node.stale", { revision: 1, node: "a" });
+    if (edit === "set") await ops.planSet(dir, { ...raw, nodes: [step("a", [], "changed"), step("b", ["a"])] }, ctx);
+    expect(node(dir, "b").status).toBe("pending");
+    if (edit !== "retry") await control(dir, "retry", "retry-a", "a", ops.planShow(dir).revision);
+    observe(dir, "a"); expect(node(dir, "b").status).toBe("ready");
+  }
+});
+
+test("missing plan gates name the missing node and leave the ledger unchanged", async () => {
+  const dir = await study(), before = readFileSync(join(dir, "ledger.jsonl"));
+  await expect(ops.gateDecide(dir, "plan:missing", "approve", undefined, ctx)).rejects.toThrow("no gate node missing");
+  expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
 });

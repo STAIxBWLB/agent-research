@@ -393,7 +393,7 @@ test("plan cancellation uses attempt cancel, commits its receipt with the termin
   const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
   const ctx = { ...fake.ctx, http: fakeHttp([]).http };
   await planSet(dir, { v: 1, nodes: [{ id: "work", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }], edges: [] }, ctx);
-  appendEvent(dir, actor, "node.intent", { revision: 1, node: "work", attemptId: first.id });
+  appendEvent(dir, actor, "node.intent", { revision: 1, node: "work", dispatchId: "work-1", attemptId: first.id });
   const input = { action: "cancel" as const, node: "work", commandId: "cancel-work", expectedRevision: 1 };
   const result = await planControl(dir, input, ctx);
   expect(result.status).toBe("cancelled"); expect(showAttempt(dir, first.id).status).toBe("cancelled");
@@ -411,11 +411,27 @@ test("failed plan cancellation records no control receipt; a later cancel can co
   const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
   const ctx = { ...fake.ctx, http: fakeHttp([]).http };
   await planSet(dir, { v: 1, nodes: [{ id: "work", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }], edges: [] }, ctx);
-  appendEvent(dir, actor, "node.intent", { revision: 1, node: "work", attemptId: first.id });
+  appendEvent(dir, actor, "node.intent", { revision: 1, node: "work", dispatchId: "work-1", attemptId: first.id });
   const input = { action: "cancel" as const, node: "work", commandId: "cancel-work", expectedRevision: 1 };
   const badCtx = { ...ctx, runner: async () => { throw new Error("synthetic unreachable executor"); } };
   await expect(planControl(dir, input, badCtx)).rejects.toThrow();
   expect(readLedger(dir).filter(e => e.type === "plan.control")).toHaveLength(0);
   expect(planShow(dir).nodes[0]!.status).toBe("dispatched");
   expect((await planControl(dir, input, ctx)).status).toBe("cancelled");
+});
+
+
+test("plan retry passes the previous attempt id and creates a child instead of reusing the terminal attempt", async () => {
+  const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
+  await cancelAttempt(dir, first.id, undefined, fake.ctx);
+  const ctx = { ...fake.ctx, http: fakeHttp([]).http };
+  await planSet(dir, { v: 1, nodes: [{ id: "work", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }], edges: [] }, ctx);
+  appendEvent(dir, actor, "node.intent", { revision: 1, node: "work", dispatchId: "work-1", attemptId: first.id });
+  appendEvent(dir, actor, "node.observed", { revision: 1, node: "work", dispatchId: "work-1", status: "cancelled" });
+  await planControl(dir, { action: "retry", node: "work", commandId: "retry-work", expectedRevision: 1 }, ctx);
+  const node = planShow(dir).nodes[0]!;
+  expect(node.retryOf).toBe(first.id);
+  const child = await runAttempt(dir, { ...request, retry: node.retryOf! }, fake.ctx);
+  expect(child.id).not.toBe(first.id); expect(child.retryOf).toBe(first.id);
+  expect(child.status).toBe("running"); expect(listAttempts(dir).totals).toMatchObject({ running: 1, cancelled: 1 });
 });

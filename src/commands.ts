@@ -101,7 +101,10 @@ export function gateList(dirArg: string) {
 export async function gateDecide(dirArg: string, gate: string, decision: "approve" | "reject", reason: string | undefined, ctx: Ctx) {
   const { dir, study } = openStudy(dirArg), name = gateName(gate), why = reason === undefined ? undefined : boundedText(reason, "--reason", 500);
   if (name === "design") requireExperiment(study);
-  return withLock(dir, () => decideGate(dir, name, decision, ctx.actor, binder(dir), why));
+  return withLock(dir, () => {
+    if (name.startsWith("plan:") && !readPlanState(dir, readLedger(dir)).definition.nodes.some(n => n.id === name.slice(5) && n.kind === "gate")) throw new Error(`gate ${name}: no gate node ${name.slice(5)} in the plan; run ares gate list and select an existing gate`);
+    return decideGate(dir, name, decision, ctx.actor, binder(dir), why);
+  });
 }
 
 export async function search(dirArg: string, query: string, options: { source?: string; limit?: number; yearFrom?: number }, ctx: Ctx) {
