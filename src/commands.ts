@@ -1,3 +1,4 @@
+import { buildPaper } from "./paper/build.ts";
 import { checkPaper } from "./paper/check.ts";
 import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
 import { setFinalSeeds, finalGateBinding, requireFinalInputs, closeFinal, showPosthoc } from "./exp/final.ts";
@@ -407,3 +408,7 @@ export async function finalClose(dirArg: string, ctx: Pick<Ctx, "actor">) {
 export const posthocShow = (dir: string) => showPosthoc(dir);
 
 export const paperCheck = (dir: string) => checkPaper(dir);
+
+export async function paperBuild(dirArg: string, ctx: Pick<Ctx, "actor">) {
+  const { dir } = openStudy(dirArg); return withLock(dir, () => buildPaper(dir, ctx.actor));
+}
