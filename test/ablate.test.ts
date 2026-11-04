@@ -114,3 +114,17 @@ test("CLI and MCP share declarations/show/close with no executor calls, and surv
   await expect(ops.ablateAdd(survey, declaration(), ctx)).rejects.toThrow("experiment"); expect(() => ops.ablateShow(survey)).toThrow("experiment"); await expect(ops.ablateClose(survey, ctx)).rejects.toThrow("experiment");
   expect(readFileSync(join(survey, "ledger.jsonl"))).toEqual(before);
 });
+
+
+test("stored legacy selections using reserved phase runs fail closed for every ablate operation", async () => {
+  for (const name of ["ablate", "final", "posthoc"]) {
+    const dir = await study(), selection = join(dir, "design", "selection.json"), legacy = JSON.parse(readFileSync(selection, "utf8"));
+    legacy.run = name; const text = JSON.stringify(legacy); writeFileSync(selection, text);
+    const ledger = readFileSync(join(dir, "ledger.jsonl")), result = readFileSync(investigateResultPath(dir, "investigate"));
+    await expect(ops.ablateAdd(dir, declaration(), ctx)).rejects.toThrow(`${name} is a reserved phase run`);
+    expect(() => ops.ablateShow(dir)).toThrow("reserved phase run");
+    await expect(ops.ablateClose(dir, ctx)).rejects.toThrow("reserved phase run");
+    expect(readFileSync(selection, "utf8")).toBe(text); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(ledger);
+    expect(readFileSync(investigateResultPath(dir, "investigate"))).toEqual(result); expect(existsSync(ablateResultPath(dir))).toBe(false);
+  }
+});

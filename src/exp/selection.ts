@@ -13,6 +13,7 @@ export function validateSelection(raw: unknown, protocol: Protocol): Selection {
     if (raw.v !== 1) throw new Error(`selection.v: unsupported version; ${compatible}`);
     onlyKeys(raw, ["v", "run", "metric", "baseline", "minSeeds", "minDelta"], "selection");
     if (typeof raw.run !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(raw.run)) throw new Error("selection.run: use 1..64 letters, digits, underscores or hyphens, starting with a letter or digit");
+    if (["ablate", "final", "posthoc"].includes(raw.run)) throw new Error(`selection.run: ${raw.run} is a reserved phase run; choose another run such as investigate`);
     const metric = boundedText(raw.metric, "selection.metric", 128);
     if (!protocol.metrics.some(m => m.name === metric)) throw new Error("selection.metric: undeclared; choose a metric from design/protocol.json");
     if (!plain(raw.baseline)) throw new Error("selection.baseline: object with commit required");
