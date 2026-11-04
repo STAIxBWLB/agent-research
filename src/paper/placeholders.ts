@@ -33,8 +33,9 @@ export function parsePlaceholders(text: string): { placeholders: Placeholder[]; 
       else placeholders.push({ ...at, kind: "literal", text: body });
       continue;
     }
-    const parsed = /^([^\s{}|]+)(?:\|\.([0-6])f)?$/.exec(body);
-    if (!parsed) findings.push({ ...at, code: "bad-format", message: "number placeholder: invalid ref or format; use {{n:REF}} or {{n:REF|.Nf}} with N from 0 to 6" });
+    // ponytail: metric names containing | or } cannot be represented by this grammar; rename them in a new protocol.
+    const parsed = /^([^{}|]+)(?:\|\.([0-6])f)?$/.exec(body);
+    if (!parsed || (/\s/.test(parsed[1]!) && !/^(attempt|posthoc):[a-f0-9]{16}\..+$/s.test(parsed[1]!))) findings.push({ ...at, code: "bad-format", message: "number placeholder: invalid ref or format; use {{n:REF}} or {{n:REF|.Nf}} with N from 0 to 6" });
     else placeholders.push({ ...at, kind: "number", ref: parsed[1]!, ...(parsed[2] === undefined ? {} : { format: Number(parsed[2]) }) });
   }
   return { placeholders, findings };

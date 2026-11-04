@@ -93,6 +93,7 @@ export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_lit_card", description: "Record an extraction card for an included candidate: summary, claims, methods, findings, limitations, relevance.", inputSchema: obj({ study, id, card: CARD }, ["study", "id", "card"]), annotations: write },
   { name: "ares_lit_verify", description: "Check DOI or arXiv identifiers at Crossref, DataCite or arXiv and compare title and year. Never judges whether a paper supports a claim.", inputSchema: obj({ study, ids }, ["study"]), annotations: net },
   { name: "ares_lit_bib", description: "Write refs/references.bib from included and verified candidates. Needs the screen gate. Citekeys never change once assigned.", inputSchema: obj({ study }, ["study"]), annotations: write },
+  { name: "ares_paper_check", description: "Read-only manuscript readiness check: positioned bare-number, placeholder, citation and missing-negative-result findings plus every literal escape. Experiment numbers require closed evidence; survey checks citations and refuses experiment refs. Reads bounded paper/manuscript.md, starts no build/controller/network calls.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_cite_check", description: "Check [@key] citations in a draft against verified references; lists unknown and unverified keys.", inputSchema: obj({ study, draft: { type: "string", minLength: 1, maxLength: 4096 } }, ["study", "draft"]), annotations: read },
   { name: "ares_playbook", description: "Standalone literature, experiment and plan/conductor workflows, CLI-only controller startup, gate rules and evidence boundaries.", inputSchema: obj({}, []), annotations: read },
 ];
@@ -145,6 +146,7 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
     ares_lit_card: a => ops.card(dir(a), a.id as string, a.card, ctx),
     ares_lit_verify: a => ops.verify(dir(a), (a.ids as string[] | undefined) ?? [], ctx),
     ares_lit_bib: a => ops.bib(dir(a), ctx),
+    ares_paper_check: a => ops.paperCheck(dir(a)),
     ares_cite_check: a => ops.cite(dir(a), absolute(a.draft, "draft")),
     ares_playbook: () => ({ playbook: PLAYBOOK }),
   };
