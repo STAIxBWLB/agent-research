@@ -19,7 +19,7 @@ describe("AC8 CLI", () => {
     expect(readLedger(dir).every(e => e.actor.kind === "agent" && e.actor.id === "claude")).toBe(true);
     const status = JSON.parse((await run(["status", dir, "--json"], agentEnv, io())).text);
     expect(status.literature.candidates).toBe(4);
-    expect(status.gates.map((g: { state: string }) => g.state)).toEqual(["approved", "none"]);
+    expect(status.gates.map((g: { gate: string; state: string }) => [g.gate, g.state])).toEqual([["scope", "approved"], ["screen", "none"], ["review", "none"]]);
   });
   test("unknown or repeated options and bad values are refused before any write", async () => {
     const dir = join(tempDir(), "s");
