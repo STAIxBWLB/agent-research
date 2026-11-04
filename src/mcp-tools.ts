@@ -22,6 +22,8 @@ const REVIEW = obj({
   checklist: obj({ negativeResults: { type: "boolean" }, denominators: { type: "boolean" }, limitations: { type: "boolean" }, reproducibility: { type: "boolean" } }, ["negativeResults", "denominators", "limitations", "reproducibility"]),
   findings: { type: "array", maxItems: 200, items: obj({ id: text(128), kind: { type: "string", enum: ["contradiction", "unsupported-claim", "number", "citation", "method", "clarity", "other"] }, location: text(4000), text: text(4000), blocking: { type: "boolean" } }, ["id", "kind", "location", "text", "blocking"]) },
 }, ["v", "reviewer", "buildSha256", "checklist", "findings"]);
+const SKILL = obj({ name: text(64), summary: text(16384), steps: { ...texts(16384, 16384), minItems: 1 },
+  evidence: { ...texts(64, 16384), minItems: 1, description: "32-hex amem ids or ares:<study-id>/... refs" } }, ["name", "summary", "steps", "evidence"]);
 const SCOPE = obj({ question: text(2000), subquestions: texts(30, 1000), include: texts(50, 500), exclude: texts(50, 500), yearFrom: year, yearTo: year, maxCandidates: { type: "integer", minimum: 1, maximum: 5000 } }, ["question"]);
 const CARD = obj({ summary: text(4000), claims: texts(50, 1000), methods: text(4000), findings: text(4000), limitations: text(4000), relevance: text(4000) }, ["summary"]);
 const integer = (minimum: number, maximum: number) => ({ type: "integer", minimum, maximum });
@@ -66,6 +68,11 @@ const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), paren
 
 export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_manifest", description: "Read this ares version, implemented commands and shared schema versions without opening a study or reaching an executor.", inputSchema: obj({}, []), annotations: read },
+  { name: "ares_archive", description: "Preview pending derived lessons without writes. With the current full-list fingerprint, export up to 200 new amem notes and commit returned ids/hashes; remaining reports later batches. A partial failure records successes; repeat the same confirmation to continue. Applies to survey and experiment studies.", inputSchema: obj({ study, confirm: { type: "string", minLength: 64, maxLength: 64 } }, ["study"]), annotations: net },
+  { name: "ares_lessons", description: "Read project-scoped amem lessons with half-life ranking. Query intent when supplied, otherwise the study question; intent also returns a brief. Output relevance, decayed score, ordinal rank and age in days. No study write or lock. Survey and experiment.", inputSchema: obj({ study, for: text(1000), halfLife: { type: "number", minimum: 1, maximum: 3650 }, limit: integer(1, 50) }, ["study"]), annotations: { ...read, openWorldHint: true } },
+  { name: "ares_skill_propose", description: "Queue a reviewable skill proposal with at least one step and 1..64 evidence refs. At most 100 proposals, bounded 16 KiB Markdown plus receipt. Does not create a PR. Survey and experiment.", inputSchema: obj({ study, proposal: SKILL }, ["study", "proposal"]), annotations: write },
+  { name: "ares_skill_decide", description: "Record a final accept/reject/withdraw with reason and actor. Accept requires an HTTP(S) PR URL without credentials; never checks or merges the PR. Withdraw only while proposed. Survey and experiment.", inputSchema: obj({ study, name: text(64), decision: { type: "string", enum: ["accept", "reject", "withdraw"] }, reason: text(16384), pr: text(16384) }, ["study", "name", "decision", "reason"]), annotations: write },
+  { name: "ares_skill_list", description: "Read all skill proposal states after verifying bounded Markdown against receipts. No lock, subprocess or write. Survey and experiment.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_plan_set", description: "Validate a bounded revisioned DAG of existing steps, local gates and read-only hub references. Set it paused; changed consumed inputs become stale and need explicit retry. Never starts a controller.", inputSchema: obj({ study, plan: PLAN }, ["study", "plan"]), annotations: write },
   { name: "ares_plan_control", description: "Pause/resume admission or retry/cancel/skip a node. Requires a durable command id and expected definition revision: identical replay returns its original receipt; changed payloads/stale new requests refuse. Does not start a controller; run ares run separately. Cancelling an attempt may contact its executor; hub cancellation stays local.", inputSchema: obj({ study, action: { type: "string", enum: ["pause", "resume", "retry", "cancel", "skip"] }, node: text(128), commandId: text(128), expectedRevision: integer(1, Number.MAX_SAFE_INTEGER) }, ["study", "action", "commandId", "expectedRevision"]), annotations: net },
   { name: "ares_plan_show", description: "Read the definition revision, ledger-derived node states and last observations, gate decisions, uncertain nodes, controller owner and resolved hubProject without taking a lock or contacting an executor/hub.", inputSchema: obj({ study }, ["study"]), annotations: read },
@@ -115,10 +122,15 @@ function absolute(value: unknown, what: string): string {
 /** MCP calls always come from an agent; the actor id is the detected agent or `mcp`. */
 export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(env), runtime: ops.ExperimentRuntime = {}): { tools: readonly McpTool[]; handlers: Record<string, McpHandler> } {
   const detected = detectActor(env), actor: Actor = { kind: "agent", id: detected.kind === "agent" ? detected.id! : "mcp" };
-  const ctx = { ...runtime, actor, http };
+  const ctx = { ...runtime, actor, http }, memoryEnv = { ...env, AGENTHUB_PEER_ID: actor.id };
   const dir = (a: Record<string, unknown>) => absolute(a.study, "study");
   const handlers: Record<string, McpHandler> = {
     ares_manifest: () => ops.manifest(),
+    ares_archive: a => ops.archive(dir(a), { ...(a.confirm === undefined ? {} : { confirm: a.confirm as string }) }, ctx, memoryEnv),
+    ares_lessons: a => ops.lessons(dir(a), { ...(a.for === undefined ? {} : { for: a.for as string }), ...(a.halfLife === undefined ? {} : { halfLife: a.halfLife as number }), ...(a.limit === undefined ? {} : { limit: a.limit as number }) }, ctx, memoryEnv),
+    ares_skill_propose: a => ops.skillPropose(dir(a), a.proposal, ctx),
+    ares_skill_decide: a => ops.skillDecide(dir(a), a.name as string, a.decision as string, a.reason as string, a.pr as string | undefined, ctx),
+    ares_skill_list: a => ops.skillList(dir(a)),
     ares_plan_set: a => ops.planSet(dir(a), a.plan, ctx),
     ares_plan_control: a => ops.planControl(dir(a), { action: a.action as Parameters<typeof ops.planControl>[1]["action"], commandId: a.commandId as string, expectedRevision: a.expectedRevision as number, ...(a.node !== undefined ? { node: a.node as string } : {}) }, ctx),
     ares_plan_show: a => ops.planShow(dir(a)),
