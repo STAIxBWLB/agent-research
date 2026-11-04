@@ -4,6 +4,8 @@ const json = { "--json": "flag" } as const;
 export const COMMANDS: readonly CommandSpec[] = [
   { name: "manifest", usage: "manifest [--json]", mutates: false, options: json },
   { name: "init", usage: "init <dir> --question TEXT [--mode survey|experiment] [--autonomy auto|gates] [--json]", mutates: true, options: { "--question": "value", "--mode": "value", "--autonomy": "value", ...json } },
+  { name: "plan set", usage: "plan set <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
+  { name: "plan show", usage: "plan show <dir> [--json]", mutates: false, options: json },
   { name: "status", usage: "status <dir> [--json]", mutates: false, options: json },
   { name: "scope", usage: "scope <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "protocol", usage: "protocol <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },

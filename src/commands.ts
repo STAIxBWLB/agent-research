@@ -1,3 +1,4 @@
+import { readPlan, setPlan } from "./plan/definition.ts";
 export { manifest } from "./manifest.ts";
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -211,4 +212,15 @@ export async function bib(dirArg: string, ctx: Ctx) {
 export function cite(dirArg: string, draft: string) {
   const { dir } = openStudy(dirArg), path = resolve(draft);
   return { draft: path, ...checkCitations(readTextBounded(path, DRAFT_BYTES), loadCandidates(dir)) };
+}
+
+export async function planSet(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
+  const { dir } = openStudy(dirArg);
+  return withLock(dir, () => setPlan(dir, raw, ctx.actor));
+}
+export function planShow(dirArg: string) {
+  const { dir } = openStudy(dirArg);
+  const definition = readPlan(dir);
+  if (!definition) throw new Error("plan: no definition; use plan set");
+  return { definition, state: "paused" as const };
 }

@@ -66,6 +66,13 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       result = ops.init(positional[0]!, { question, ...(str("--mode") ? { mode: str("--mode")! } : {}), ...(str("--autonomy") ? { autonomy: str("--autonomy")! } : {}) }, ctx);
       break;
     }
+    case "plan set": {
+      count(spec, positional, 1);
+      const file = str("--file");
+      if (file === undefined) throw new Error("plan set: --file is required");
+      result = await ops.planSet(positional[0]!, await readInput(file, io), ctx); break;
+    }
+    case "plan show": count(spec, positional, 1); result = ops.planShow(positional[0]!); break;
     case "status": count(spec, positional, 1); result = ops.status(positional[0]!); break;
     case "scope": {
       count(spec, positional, 1);

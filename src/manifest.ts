@@ -5,6 +5,7 @@ import { COMMANDS } from "./commands-table.ts";
 export const FORMAT_VERSIONS = {
   manifest: 1,
   study: 1,
+  studyPlan: 1,
   ledgerEvent: 1,
   experimentProtocol: 1,
   executor: 1,
