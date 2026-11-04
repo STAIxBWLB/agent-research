@@ -1,4 +1,4 @@
-import { readFinalSeeds, authorizeFinalAttempt, finalGateBinding } from "./final.ts";
+import { readFinalSeeds, authorizeFinalAttempt, finalGateBinding, requirePosthocClosed } from "./final.ts";
 import { closeSync, existsSync, lstatSync, openSync, opendirSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { hostname } from "node:os";
 import { join, posix } from "node:path";
@@ -327,6 +327,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   const run = runName(options.run ?? "main"), label = boundedText(options.label ?? "baseline", "label", 128), seed = options.seed ?? protocol.seeds[0]!;
   if (!Number.isSafeInteger(seed) || !protocol.seeds.includes(seed)) throw new Error("seed: undeclared; choose a seed from protocol.seeds");
   if (frozen.finalSeeds?.seeds.includes(seed) && run !== "final") throw new Error("attempt seed: reserved for run final; choose a non-reserved exploratory seed");
+  if (run === "posthoc") await withLock(dir, () => requirePosthocClosed(dir));
   const finalAuthorization = run === "final" ? await withLock(dir, () => authorizeFinalAttempt(dir, options.commit, seed)) : undefined;
   if (options.retry !== undefined) id(options.retry);
   const initialBinding = frozen.binding;
@@ -335,6 +336,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   if (options.expectedId !== undefined && wanted !== options.expectedId) throw new Error("attempt identity: changed since plan intent; reconcile the plan node before retrying");
   let created = false;
   let attempt = await withLock(dir, () => {
+    if (run === "posthoc") requirePosthocClosed(dir);
     if (finalAuthorization && authorizeFinalAttempt(dir, options.commit, seed).binding !== finalAuthorization.binding) throw new Error("final inputs changed during snapshot resolution; approve the current final gate before retrying");
     const attempts = load(dir), existing = attempts.find(a => a.id === wanted); if (existing) return existing;
     if (designBinding(dir) !== initialBinding) throw new Error("design: changed while resolving the snapshot; approve the current design and retry attempt run");
