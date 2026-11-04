@@ -2,7 +2,7 @@
 
 Research engine for the agent family ([agent-hub](https://github.com/STAIxBWLB/agent-hub), [agent-mem](https://github.com/STAIxBWLB/agent-mem), [vault-mem](https://github.com/STAIxBWLB/vault-mem), [agent-console](https://github.com/STAIxBWLB/agent-console)). The plan and phases are in [#1](https://github.com/STAIxBWLB/agent-research/issues/1).
 
-This checkout implements A1 literature studies, A2 container experiments and the A3 plan DAG: an append-only ledger, approval gates, verified reference identifiers, frozen candidate snapshots, separate evaluator containers, attempt records and a resumable controller with read-only hub task references. Investigation selection, idea decisions, winner/no-winner results, declared ablations, reserved-seed final evaluation and exploratory posthoc results are available. Paper check/build and build-bound review gates render evidence-backed Markdown. Automatic idea generation/writing/reviewing, memory integration and the console panel remain later work.
+This checkout implements A1 literature studies, A2 container experiments and the A3 plan DAG: an append-only ledger, approval gates, verified reference identifiers, frozen candidate snapshots, separate evaluator containers, attempt records and a resumable controller with read-only hub task references. Investigation selection, idea decisions, winner/no-winner results, declared ablations, reserved-seed final evaluation and exploratory posthoc results are available. Paper check/build and build-bound review gates render evidence-backed Markdown. A5 adds amem lesson reads/archive and a reviewed skill proposal queue. Automatic idea generation/writing/reviewing and the console panel remain later work.
 
 ## Install
 
@@ -137,7 +137,7 @@ ares idea decide experiment variant-1 refine --reason "Test the next frozen cand
 ares idea decide experiment variant-1 pivot --reason "Drop this direction" --attempts <terminal-attempt-id>
 ```
 
-Refine adds the uniquely owned commit. Pivot refuses `--commit`, closes further decisions and keeps historical attempts and totals. Evidence is at most 200 existing, non-running, same-study attempt ids from the idea's commits; reasons are at most 2,000 bytes. An untested idea may omit `commit` when added, then omit `--attempts` for a first `refine --commit` or a pivot before testing. Once it has commits, nonempty evidence is required. Investigation rows and winner references carry the owning idea id; journal changes join the result's input hash. Survey studies refuse all selection, idea and investigate commands.
+Pivot optionally records `--cause` and `--retry-when` (at most 2,000 UTF-8 bytes each); refine refuses these fields. Missing pivot fields export as `not recorded`. Refine adds the uniquely owned commit. Pivot refuses `--commit`, closes further decisions and keeps historical attempts and totals. Evidence is at most 200 existing, non-running, same-study attempt ids from the idea's commits; reasons are at most 2,000 bytes. An untested idea may omit `commit` when added, then omit `--attempts` for a first `refine --commit` or a pivot before testing. Once it has commits, nonempty evidence is required. Investigation rows and winner references carry the owning idea id; journal changes join the result's input hash. Survey studies refuse all selection, idea and investigate commands.
 
 A conductor can put a no-argument `investigate.close` step after its agent-work hub unit, then bind a local plan gate to that result:
 
@@ -232,6 +232,27 @@ A finding is `{id,kind,location,text,blocking}`; kinds are `contradiction`, `uns
 The global `review` gate needs a clean current check/build, at least two distinct model families for that evidence hash, and no open blocking finding. Checklist answers are shown, including false answers, rather than adding a separate approval condition. Readiness names every unmet condition. Approval is checked in the shared command under the study lock; reject still needs a reason but no readiness. No current command auto-requires the review gate. The gate binds both output hashes and sorted added/resolved event hashes for that build. A changed build, added review or resolution reopens it; old reviews stay in the ledger but do not count toward a new build.
 
 A no-argument `paper.build` conductor step emits `{sha256}` of the committed evidence file; a downstream `plan:<id>` gate binds it. That local gate does not replace the global manuscript `review` gate. MCP paper/review operations never start the controller loop. Claim-to-passage evidence and its contradictions await [agent-hub#931](https://github.com/STAIxBWLB/agent-hub/issues/931); readiness currently reports `claims: unavailable (STAIxBWLB/agent-hub#931)` without blocking on it. Claim verdicts stay outside ares. LaTeX/PDF container builds and venue templates are out of scope. Acceptance uses offline synthetic fixtures, not live hub/executor DAG proof.
+
+## Memory and skill proposal workflow
+
+Use amem 0.20.3 or a compatible CLI. Start each phase with an intent-specific lesson read, then archive only at the end of the study:
+
+```sh
+ares lessons study --for "compare candidate hypotheses" --half-life 180 --limit 50 --json
+ares skill propose study --file proposal.json
+ares skill list study --json
+ares skill decide study reusable-procedure accept --reason "Reviewed against recorded evidence" --pr https://github.com/example/project/pull/1
+ares archive study --json
+ares archive study --confirm <fingerprint> --json
+```
+
+`lessons` searches with `--for` text, otherwise with the study question, in the study's amem project. An intent also adds a typed `amem brief`. It reports age in fractional days (future timestamps clamp to zero), T1 relevance with amem recency removed, half-life-decayed score and 1-based rank. The formula is `score = relevance * 0.5^(age / halfLife)`; ties put fail notes first, then lexical id. Half-life defaults to 180 days, bounded to 1..3650; result limit defaults to 50, bounded to 1..50. The command is read-only and takes no study lock.
+
+Archive derives fail notes from pivot decisions, findings from current closed investigation/final results and resolved review contradictions, and decisions from selection/final seeds. Fail fields use recorded cause/retryWhen or `not recorded`; outcomes retain negative reasons. Open contradictions stay out. Each note starts with study id/question; evidence uses study-scoped attempt/run refs, split into consecutive notes of at most 16 refs so none are dropped. Preview writes nothing. Its fingerprint binds the full canonical note list and stays valid across receipts. Confirmation writes at most the first 200 pending notes in stable order, reports `remaining`, and records returned ids/content hashes in one `archive.exported` event. Repeat the same confirmation for later batches; already-exported hashes are skipped. Partial failures commit successful receipts and explain how to continue. Changed source notes invalidate confirmation. Receipt capacity is checked before any outward write, and confirmed calls hold the study lock. Errors never include amem stdout/stderr. Note text travels on stdin, and `--`-leading option values get one leading space for the amem parser. Agent markers and home/config context are allowlisted; API credentials stay stripped.
+
+A proposal input is `{name, summary, steps, evidence}`: a run-name `name`, nonblank summary, at least one step, and 1..64 evidence refs (32-hex amem ids or `ares:<study-id>/...`). Unknown fields are refused. Deterministic Markdown at `proposals/skills/<name>.md` is bounded to 16 KiB and bound to its `skill.proposed` hash receipt. At most 100 proposals, including terminal states, are retained. List verifies bounded file bytes against receipts and shows proposed/accepted/rejected/withdrawn. Accept requires an HTTP(S) PR URL without credentials; ares records the actor's reference without opening, checking or merging the PR. Every terminal state is final; withdraw is allowed only while proposed. Durable vault promotion remains amem's `vault-candidates` pipeline; ares never writes the vault.
+
+Survey and experiment studies both support lessons, archive and all skill commands. Survey archives can export resolved review contradictions, and are empty when no eligible lessons exist. Selection, ideas and experiment-result operations remain experiment-only. All A5 acceptance tests use synthetic records and fake runners; no live amem or vault interoperability is claimed.
 
 ## Plan and conductor workflow
 
@@ -329,6 +350,7 @@ Sealing and metrics are **ares-observed**: ares builds the argv and checks the o
 | `paper/manuscript.md` | source Markdown with numeric refs and literal escapes |
 | `paper/build/manuscript.md` | rendered manuscript |
 | `paper/build/evidence.json` | versioned placeholder values, source paths/hashes and input manuscript hash |
+| `proposals/skills/<name>.md` | bounded versioned skill proposal, hash-bound to its ledger receipt |
 | `executor.json` | executor kind, optional SSH alias and required workdir |
 | `runs/<run>/attempts/<id>.json` | attempt identity, stage receipts, status, metrics and artifact/log metadata |
 
@@ -339,6 +361,11 @@ Experiment logs and outputs live on the executor at `<workdir>/<study-id>/<attem
 The implemented CLI surface below comes from `src/commands-table.ts`; `ares --help` prints current usage. Every operation exposing `--json` supports structured output.
 
 ```text
+ares archive <dir> [--confirm FINGERPRINT] [--json]
+ares lessons <dir> [--for TEXT] [--half-life DAYS] [--limit N] [--json]
+ares skill propose <dir> --file PATH|- [--json]
+ares skill decide <dir> <name> <accept|reject|withdraw> --reason TEXT [--pr URL] [--json]
+ares skill list <dir> [--json]
 ares manifest [--json]
 ares init <dir> --question TEXT [--mode survey|experiment] [--autonomy auto|gates] [--json]
 ares run <dir> [--parallel 1..8] [--json]
@@ -348,7 +375,7 @@ ares plan show <dir> [--json]
 ares status <dir> [--json]
 ares scope <dir> --file PATH|- [--json]
 ares idea add <dir> --file PATH|- [--json]
-ares idea decide <dir> <id> <refine|pivot> --reason TEXT [--attempts ID[,ID...]] [--commit SHA] [--json]
+ares idea decide <dir> <id> <refine|pivot> --reason TEXT [--attempts ID[,ID...]] [--commit SHA] [--cause TEXT] [--retry-when TEXT] [--json]
 ares investigate show <dir> [--json]
 ares investigate close <dir> [--json]
 ares ablate add <dir> --file PATH|- [--json]
@@ -386,11 +413,13 @@ ares playbook
 ares mcp
 ```
 
+Memory tools are `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide` and `ares_skill_list`; `ares_idea_decide` accepts pivot cause/retryWhen. Archive may write external amem notes; lessons reads external amem. Both carry `openWorldHint`; skill operations stay local. MCP calls preserve agent attribution even without a native shell marker.
+
 MCP uses shared command handlers; `init`, the controller loop `run`, and the server entrypoint `mcp` are CLI-only. Investigation tools are `ares_selection_set`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show` and `ares_investigate_close`. Plan tools are `ares_plan_set`, `ares_plan_show` and `ares_plan_control`; `ares_gate` accepts `plan:<node-id>`. Setting, showing or controlling a plan never starts the controller loop. Start `ares run` in a separate terminal before resuming through MCP. Experiment tools are `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile` and `ares_attempt_logs`; `ares_gate` accepts `design`, `final` and `review`. Paper/review tools are `ares_paper_check`, `ares_paper_build`, `ares_review_add`, `ares_review_resolve` and `ares_review_show`. Phase tools include `ares_final_seeds`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_final_close` and `ares_posthoc_show`. Attempt run is always detached over MCP, and executor-reaching tools carry `openWorldHint`.
 
 ## Version and format discovery
 
-`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `study`, `ledgerEvent`, `experimentProtocol`, `executor`, `experimentAttempt`, `studyPlan`, `experimentSelection`, `investigateResult`, `experimentFinalSeeds`, `ablateResult`, `finalResult` and `paperEvidence`, all version 1, carried by each record's `v` field.
+`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `study`, `ledgerEvent`, `experimentProtocol`, `executor`, `experimentAttempt`, `studyPlan`, `experimentSelection`, `investigateResult`, `experimentFinalSeeds`, `ablateResult`, `finalResult` and `paperEvidence`, all version 1, carried by each record's `v` field. `skillProposal: 1` is also listed; proposal Markdown carries `skillProposal: 1` frontmatter and skill events carry that version in their data. The `ledgerEvents` list advertises `archive.exported`, `skill.proposed` and `skill.decided` in the version-1 ledger envelope. Unsupported ledger/proposal versions are refused without rewriting their bytes.
 
 Within a supported schema, readers preserve additive fields on study/attempt records and keep ledger events with unknown kinds. Appending to the ledger leaves prior lines intact; updating an attempt keeps unrecognized fields and stage entries. Unknown stage entries remain readable, including logs and totals, but budget-gated starts refuse with an upgrade instruction because this version cannot account for their resource use. A future schema version or unknown execution status/stage is refused with an upgrade instruction, leaving the original data unchanged. Unknown plan versions or node kinds are refused without changing plan.json. Command input remains strict so unknown options or protocol fields cannot silently change an experiment.
 
@@ -408,7 +437,7 @@ Keys are sent with requests only; they are never written to the study.
 
 ## Not implemented yet
 
-Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, signed executor receipts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, vault-mem reference notes (after vault-mem#73), agent-mem conventions, the console plugin, `ares setup`, scheduled searches, the `copilot` and `step` autonomy modes.
+Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, signed executor receipts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, vault-mem reference notes (after vault-mem#73), the console plugin, `ares setup`, scheduled searches, the `copilot` and `step` autonomy modes.
 
 ## Development
 
