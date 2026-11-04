@@ -20,15 +20,16 @@ function previous(file: string, bound: number): string | undefined {
   try { return readTextBounded(file, bound); }
   catch { throw new Error(`paper build: previous output is unreadable, non-regular, invalid UTF-8 or oversized; restore the last valid ${file.endsWith("evidence.json") ? "paper/build/evidence.json" : "paper/build/manuscript.md"} before rebuilding`); }
 }
-/** Caller holds the study lock. Refusals precede the single output-and-receipt commit. */
-export function buildPaper(dirArg: string, actor: Actor) {
-  const { dir } = openStudy(dirArg), paths = paperBuildPaths(dir);
-  const oldEvidence = previous(paths.evidence, PAPER_EVIDENCE_BYTES);
+function evidenceBytes(dir: string): string | undefined {
+  const oldEvidence = previous(paperBuildPaths(dir).evidence, PAPER_EVIDENCE_BYTES);
   if (oldEvidence !== undefined) {
     let raw: unknown;
     try { raw = JSON.parse(oldEvidence); } catch { throw new Error("paper evidence: invalid JSON; restore the last valid paper/build/evidence.json before rebuilding"); }
     if (!plain(raw) || raw.v !== 1) throw new Error("paper evidence: unsupported version; use an ares version that supports it, keeping paper/build/evidence.json unchanged");
   }
+  return oldEvidence;
+}
+function calculatePaper(dir: string) {
   const report = checkPaper(dir);
   if (!report.ok) {
     const reasons = report.findings.slice(0, 10).map(f => `${f.code} at ${f.line}:${f.column}`).join(", ");
@@ -45,10 +46,25 @@ export function buildPaper(dirArg: string, actor: Actor) {
   const text = JSON.stringify(evidence, null, 2) + "\n";
   assertWritable(report.rendered, MANUSCRIPT_BYTES, "rendered manuscript; shorten paper/manuscript.md before rebuilding");
   assertWritable(text, PAPER_EVIDENCE_BYTES, "paper evidence; reduce paper/manuscript.md or its placeholders before rebuilding");
-  const manuscriptSha256 = sha256(report.rendered), evidenceSha256 = sha256(text), oldManuscript = previous(paths.manuscript, MANUSCRIPT_BYTES);
+  return { report, evidence, text, manuscriptSha256: sha256(report.rendered), evidenceSha256: sha256(text) };
+}
+/** Caller holds the study lock. Refusals precede the single output-and-receipt commit. */
+export function buildPaper(dirArg: string, actor: Actor) {
+  const { dir } = openStudy(dirArg), paths = paperBuildPaths(dir), oldEvidence = evidenceBytes(dir);
+  const { report, text, manuscriptSha256, evidenceSha256 } = calculatePaper(dir), oldManuscript = previous(paths.manuscript, MANUSCRIPT_BYTES);
   const receipt = readLedger(dir).findLast(event => event.type === "paper.built");
   const changed = oldManuscript !== report.rendered || oldEvidence !== text || receipt?.data.manuscriptSha256 !== manuscriptSha256 || receipt.data.evidenceSha256 !== evidenceSha256;
   if (sha256(readTextBounded(manuscriptPath(dir), MANUSCRIPT_BYTES)) !== report.manuscriptSha256) throw new Error("paper build: source manuscript changed during checking; rerun ares paper check and paper build on the current manuscript");
   if (changed) commit(dir, [[paths.manuscript, report.rendered, MANUSCRIPT_BYTES], [paths.evidence, text, PAPER_EVIDENCE_BYTES]], [{ actor, type: "paper.built", data: { manuscriptSha256, evidenceSha256, sourceManuscriptSha256: report.manuscriptSha256 } }]);
   return { manuscriptSha256, evidenceSha256, changed };
+}
+
+
+/** The exact fresh build and both output receipts must agree; never repairs or writes files. */
+export function readCurrentBuild(dirArg: string) {
+  const { dir } = openStudy(dirArg), paths = paperBuildPaths(dir), evidence = evidenceBytes(dir), manuscript = previous(paths.manuscript, MANUSCRIPT_BYTES);
+  if (evidence === undefined || manuscript === undefined) throw new Error("paper build: missing output; run ares paper build before reviewing");
+  const fresh = calculatePaper(dir), receipt = readLedger(dir).findLast(event => event.type === "paper.built");
+  if (evidence !== fresh.text || manuscript !== fresh.report.rendered || receipt?.data.manuscriptSha256 !== fresh.manuscriptSha256 || receipt.data.evidenceSha256 !== fresh.evidenceSha256 || receipt.data.sourceManuscriptSha256 !== fresh.report.manuscriptSha256) throw new Error("paper build: stale outputs or missing/mismatched receipt; run ares paper check and ares paper build before reviewing");
+  return { manuscriptSha256: fresh.manuscriptSha256, evidenceSha256: fresh.evidenceSha256, check: fresh.report };
 }

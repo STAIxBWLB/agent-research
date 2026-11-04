@@ -191,6 +191,17 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     }
     case "lit verify": if (!positional.length) throw new Error(`usage: ares ${spec.usage}`); result = await ops.verify(positional[0]!, positional.slice(1), ctx); break;
     case "lit bib": count(spec, positional, 1); result = await ops.bib(positional[0]!, ctx); break;
+    case "review add": {
+      count(spec, positional, 1); const file = str("--file");
+      if (file === undefined) throw new Error("review add: --file is required; pass --file PATH|- with a current-build report");
+      result = await ops.reviewAdd(positional[0]!, await readInput(file, io), ctx); break;
+    }
+    case "review resolve": {
+      count(spec, positional, 2); const reason = str("--reason");
+      if (reason === undefined) throw new Error("review resolve: --reason is required; explain how the finding was resolved");
+      result = await ops.reviewResolve(positional[0]!, positional[1]!, reason, ctx); break;
+    }
+    case "review show": count(spec, positional, 1); result = ops.reviewShow(positional[0]!); break;
     case "paper build": count(spec, positional, 1); result = await ops.paperBuild(positional[0]!, ctx); break;
     case "paper check": {
       count(spec, positional, 1); const report = ops.paperCheck(positional[0]!);
