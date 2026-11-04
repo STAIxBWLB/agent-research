@@ -37,8 +37,24 @@ const PROTOCOL = obj({
   budget: obj({ maxAttempts: integer(1, 1_000_000), maxWallHours: { type: "number", minimum: 0.000001, maximum: 1_000_000 }, maxGpuHours: { type: "number", minimum: 0, maximum: 64_000_000 } }, ["maxAttempts", "maxWallHours", "maxGpuHours"]),
 }, ["v", "method", "candidate", "evaluator", "metrics", "seeds", "limits", "network", "budget"]);
 
+const planId = text(128);
+const PLAN = obj({
+  v: { type: "integer", enum: [1] }, revision: integer(1, Number.MAX_SAFE_INTEGER),
+  nodes: { type: "array", maxItems: 128, items: obj({
+    id: planId, kind: { type: "string", enum: ["step", "hub", "gate"] },
+    needs: { type: "array", maxItems: 128, items: planId },
+    command: { type: "string", enum: ["lit.search", "lit.verify", "lit.bib", "cite.check", "attempt.run"] },
+    args: { type: "object", maxProperties: 32, properties: {}, additionalProperties: { type: ["string", "number", "boolean"], maxLength: 4096 } },
+    task: obj({ title: text(500), unit: text(128) }, ["title", "unit"]),
+    binds: { type: "array", maxItems: 128, items: planId },
+  }, ["id", "kind"]) },
+  edges: { type: "array", maxItems: 512, items: { type: "array", minItems: 2, maxItems: 2, items: planId } },
+}, ["v", "nodes", "edges"]);
+
 export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_manifest", description: "Read this ares version, implemented commands and shared schema versions without opening a study or reaching an executor.", inputSchema: obj({}, []), annotations: read },
+  { name: "ares_plan_set", description: "Validate and set a bounded plan definition, creating a paused revision.", inputSchema: obj({ study, plan: PLAN }, ["study", "plan"]), annotations: write },
+  { name: "ares_plan_show", description: "Read the plan definition without taking a lock.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_status", description: "Study summary: gates, candidate counts, verification counts, bibliography.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_scope_set", description: "Set scope.json (question, subquestions, include, exclude, yearFrom, yearTo, maxCandidates). A change returns the scope gate to pending.", inputSchema: obj({ study, scope: SCOPE }, ["study", "scope"]), annotations: write },
   { name: "ares_gate", description: "List gates, or approve or reject scope, screen or experiment design. The ledger records the actor; who may approve is workspace policy.", inputSchema: obj({ study, action: { type: "string", enum: ["list", "approve", "reject"] }, gate: { type: "string", enum: ["scope", "screen", "design"] }, reason }, ["study", "action"]), annotations: write },
@@ -73,6 +89,8 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
   const dir = (a: Record<string, unknown>) => absolute(a.study, "study");
   const handlers: Record<string, McpHandler> = {
     ares_manifest: () => ops.manifest(),
+    ares_plan_set: a => ops.planSet(dir(a), a.plan, ctx),
+    ares_plan_show: a => ops.planShow(dir(a)),
     ares_status: a => ops.status(dir(a)),
     ares_scope_set: a => ops.scope(dir(a), a.scope, ctx),
     ares_protocol_set: a => ops.protocol(dir(a), a.protocol, ctx),
