@@ -1,3 +1,4 @@
+import { finalSeedsHash } from "./final.ts";
 import { selectionHash } from "./selection.ts";
 import { existsSync, lstatSync, opendirSync } from "node:fs";
 import { join } from "node:path";
@@ -129,8 +130,8 @@ export function readDesign(dir: string): { protocol: Protocol; treeHash: string;
   const text = readTextBounded(file, PROTOCOL_BYTES);
   let raw: unknown; try { raw = JSON.parse(text); } catch { throw new Error("protocol: invalid JSON; restore design/protocol.json with a valid ares protocol input"); }
   const protocol = validateProtocol(raw), treeHash = taskTreeHash(dir);
-  const selected = selectionHash(dir, protocol);
-  return { protocol, treeHash, binding: sha256(JSON.stringify([sha256(text), treeHash, ...(selected !== undefined ? [selected] : [])])) };
+  const selected = selectionHash(dir, protocol), reserved = finalSeedsHash(dir, protocol);
+  return { protocol, treeHash, binding: sha256(JSON.stringify([sha256(text), treeHash, ...(selected !== undefined ? [selected] : []), ...(reserved !== undefined ? [reserved] : [])])) };
 }
 /** Caller holds the study lock, as with setScope. Validate everything before any write. */
 export function setProtocol(dir: string, raw: unknown, actor: Actor): Protocol {
@@ -138,6 +139,7 @@ export function setProtocol(dir: string, raw: unknown, actor: Actor): Protocol {
   const protocol = validateProtocol(raw), treeHash = taskTreeHash(dir), text = JSON.stringify(protocol, null, 2) + "\n";
   // Never commit a protocol that makes its existing selection unreadable.
   selectionHash(dir, protocol);
+  finalSeedsHash(dir, protocol);
   commit(dir, [[join(dir, "design", "protocol.json"), text, PROTOCOL_BYTES]], [{ actor, type: "protocol.set", data: { sha256: sha256(text), protocolHash: protocolHash(protocol), treeHash } }]);
   return protocol;
 }

@@ -14,6 +14,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "idea decide", usage: "idea decide <dir> <id> <refine|pivot> --reason TEXT [--attempts ID[,ID...]] [--commit SHA] [--json]", mutates: true, options: { "--reason": "value", "--attempts": "value", "--commit": "value", ...json } },
   { name: "investigate show", usage: "investigate show <dir> [--json]", mutates: false, options: json },
   { name: "investigate close", usage: "investigate close <dir> [--json]", mutates: true, options: json },
+  { name: "final seeds", usage: "final seeds <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "selection", usage: "selection <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "protocol", usage: "protocol <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "executor set", usage: "executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--json]", mutates: true, options: { "--kind": "value", "--host": "value", "--workdir": "value", ...json } },
