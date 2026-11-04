@@ -5,7 +5,7 @@ import { readSelection, selectionHash, type Selection } from "../exp/selection.t
 import { readClosedInvestigation, type InvestigateResult } from "../exp/investigate.ts";
 import { readClosedFinal, readFinalSeeds, finalSeedsHash, type FinalResult, type FinalSeeds } from "../exp/final.ts";
 import { foldReviews } from "../paper/review.ts";
-import type { AmemNote } from "./amem.ts";
+import type { AmemNote, AmemHit } from "./amem.ts";
 
 export interface LessonSources {
   study: Pick<Study, "id" | "question">; events: LedgerEvent[];
@@ -66,4 +66,23 @@ export function deriveLessons(sources: LessonSources): AmemNote[] {
     }
   }
   return notes;
+}
+
+export interface LessonRankOptions { halfLife?: number; limit?: number }
+export interface RankedLesson { id: string; kind: AmemHit["kind"]; title: string | null; age: number; relevance: number; score: number; rank: number }
+export const LESSON_HALF_LIFE = 180, LESSON_LIMIT = 50;
+const DAY_MS = 86_400_000;
+/** Pure ranking: age is days, relevance excludes amem recency, score is decayed and rank is 1-based. */
+export function rankLessons(hits: readonly AmemHit[], now: number, options: LessonRankOptions = {}): RankedLesson[] {
+  const halfLife = options.halfLife ?? LESSON_HALF_LIFE, limit = options.limit ?? LESSON_LIMIT;
+  if (!Number.isFinite(now)) throw new Error("lessons clock: finite timestamp required; supply a valid current time and retry");
+  if (!Number.isFinite(halfLife) || halfLife < 1 || halfLife > 3650) throw new Error("lessons half-life: outside 1..3650 days; pass --half-life DAYS within that range");
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > LESSON_LIMIT) throw new Error("lessons limit: outside 1..50; pass --limit with an integer in that range");
+  const ranked = hits.map(hit => {
+    const at = Date.parse(hit.at);
+    if (!Number.isFinite(at) || !Number.isFinite(hit.relevance) || hit.relevance <= 0) throw new Error("lessons score unavailable: invalid timestamp or relevance; inspect amem search --json --explain in the study directory before retrying");
+    const age = Math.max(0, (now - at) / DAY_MS), score = hit.relevance * 0.5 ** (age / halfLife);
+    return { id: hit.id, kind: hit.kind, title: hit.title, age, relevance: hit.relevance, score };
+  });
+  return ranked.sort((a, b) => b.score - a.score || Number(b.kind === "fail") - Number(a.kind === "fail") || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).slice(0, limit).map((row, index) => ({ ...row, rank: index + 1 }));
 }

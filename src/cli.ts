@@ -56,6 +56,10 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
   let result: unknown, code = 0;
   switch (spec.name) {
+    case "lessons": {
+      count(spec, positional, 1); const intent = str("--for"), halfLife = str("--half-life"), limit = integer(flags["--limit"], "--limit");
+      result = await ops.lessons(positional[0]!, { ...(intent === undefined ? {} : { for: intent }), ...(halfLife === undefined ? {} : { halfLife: Number(halfLife) }), ...(limit === undefined ? {} : { limit }) }, ctx, env); break;
+    }
     case "archive": {
       count(spec, positional, 1); const confirm = str("--confirm");
       result = await ops.archive(positional[0]!, { ...(confirm !== undefined ? { confirm } : {}) }, ctx, env); break;

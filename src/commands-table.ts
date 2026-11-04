@@ -2,6 +2,7 @@
 export interface CommandSpec { name: string; usage: string; mutates: boolean | "network"; options: Record<string, "flag" | "value"> }
 const json = { "--json": "flag" } as const;
 export const COMMANDS: readonly CommandSpec[] = [
+  { name: "lessons", usage: "lessons <dir> [--for TEXT] [--half-life DAYS] [--limit N] [--json]", mutates: false, options: { "--for": "value", "--half-life": "value", "--limit": "value", ...json } },
   { name: "archive", usage: "archive <dir> [--confirm FINGERPRINT] [--json]", mutates: "network", options: { "--confirm": "value", ...json } },
   { name: "manifest", usage: "manifest [--json]", mutates: false, options: json },
   { name: "init", usage: "init <dir> --question TEXT [--mode survey|experiment] [--autonomy auto|gates] [--json]", mutates: true, options: { "--question": "value", "--mode": "value", "--autonomy": "value", ...json } },
