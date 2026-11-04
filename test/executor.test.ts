@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { init } from "../src/commands.ts";
-import { buildContainerArgs, checkExecutor, containerName, processEnvironment, readExecutor, runOnExecutor, setExecutor, shellQuote, spawnRunner, startWatchdog, validateExecutor, type ContainerOptions, type Executor, type ProcessResult } from "../src/exp/executor.ts";
+import { buildContainerArgs, checkExecutor, containerName, PROCESS_CONTEXT_ENV_KEYS, processEnvironment, readExecutor, runOnExecutor, setExecutor, shellQuote, spawnRunner, startWatchdog, validateExecutor, type ContainerOptions, type Executor, type ProcessResult } from "../src/exp/executor.ts";
 import { setProtocol, type Protocol } from "../src/exp/protocol.ts";
 import { readLedger, withLock } from "../src/study.ts";
 import { fakeDocker, tempDir } from "./helpers.ts";
@@ -135,6 +135,15 @@ test("watchdog starts detached on the executor host with validated name and wall
   expect(request.args.join(" ")).toContain("nohup"); expect(request.args.join(" ")).toContain("/dev/null");
   await expect(startWatchdog(local, "0123456789abcdef", "evaluator", 60, fake.runner)).rejects.toThrow("executor local: watchdog start failed");
   await expect(startWatchdog(local, "0123456789abcdef", "candidate", 0, fake.runner)).rejects.toThrow("validated protocol limit");
+});
+
+test("optional process context keeps identity/config only and preserves default isolation", () => {
+  const extra = Object.fromEntries(PROCESS_CONTEXT_ENV_KEYS.map(key => [key, `synthetic-${key}`]));
+  extra.CLAUDECODE = "";
+  const parent = { PATH: "/bin", HOME: "/synthetic", ...extra, ANTHROPIC_API_KEY: "secret" };
+  expect(processEnvironment(parent)).toEqual({ PATH: "/bin", HOME: "/synthetic" });
+  expect(processEnvironment(parent, { ...extra, HOME: "/synthetic/override", ANTHROPIC_API_KEY: "secret", OPENAI_API_KEY: "secret", NODE_OPTIONS: "unsafe" }))
+    .toEqual({ PATH: "/bin", HOME: "/synthetic/override", ...extra });
 });
 
 test("process environment uses an allowlist and spawn runner bounds output and deadlines", async () => {
