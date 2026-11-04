@@ -46,7 +46,7 @@ export function validateReview(raw: unknown, strict = true): ReviewReport {
     bad(`${message}; correct the input before ares review add --file PATH`);
   }
 }
-function foldReviews(events: LedgerEvent[]): ReviewRecord[] {
+export function foldReviews(events: LedgerEvent[]): ReviewRecord[] {
   const rows: ReviewRecord[] = [], counts = new Map<string, number>();
   for (const event of events) {
     if (event.type === "review.added") {
