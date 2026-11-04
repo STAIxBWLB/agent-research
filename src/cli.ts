@@ -103,6 +103,11 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     }
     case "investigate show": count(spec, positional, 1); result = ops.investigateShow(positional[0]!); break;
     case "investigate close": count(spec, positional, 1); result = await ops.investigateClose(positional[0]!, ctx); break;
+    case "final seeds": {
+      count(spec, positional, 1); const file = str("--file");
+      if (file === undefined) throw new Error("final seeds: input missing; pass --file PATH or --file - for JSON");
+      result = await ops.finalSeeds(positional[0]!, await readInput(file, io), ctx); break;
+    }
     case "selection": {
       count(spec, positional, 1);
       const file = str("--file");

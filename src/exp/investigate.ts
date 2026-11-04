@@ -1,3 +1,4 @@
+import { readFinalSeeds, finalSeedsHash } from "./final.ts";
 import { foldIdeas } from "./ideas.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -8,7 +9,7 @@ import { readSelection, selectionHash } from "./selection.ts";
 
 export const INVESTIGATE_BYTES = 1_048_576;
 export type NoWinner = "no-baseline" | "baseline-seeds" | "no-candidate" | "below-margin" | "tie";
-type Exclusion = "other-protocol" | "before-selection" | "missing-start-event" | "undeclared-seed" | "later-success";
+type Exclusion = "other-protocol" | "before-selection" | "missing-start-event" | "undeclared-seed" | "later-success" | "reserved-seed";
 interface Sample { seed: number; attempt: string; value: number }
 export interface CommitResult {
   commit: string; idea?: string; attempts: Record<AttemptStatus, string[]>; perSeed: Sample[];
@@ -62,10 +63,11 @@ function inputs(dirArg: string) {
   for (const attempt of attempts) {
     if (attempt.studyId !== study.id || typeof attempt.commit !== "string" || !/^[a-f0-9]{40}$/.test(attempt.commit) || !Number.isSafeInteger(attempt.seed)) bad(`attempt ${attempt.id}: invalid study, commit or seed identity`);
   }
-  return { dir, protocol, rule, ruleSha, events, cutoff, hash, metric, attempts };
+  const reserved = readFinalSeeds(dir, protocol)?.seeds ?? [], reservedSha = finalSeedsHash(dir, protocol);
+  return { dir, protocol, rule, ruleSha, events, cutoff, hash, metric, attempts, reserved, reservedSha };
 }
 function calculate(input: ReturnType<typeof inputs>): InvestigateResult {
-  const { rule, ruleSha, events, cutoff, hash, metric, attempts, protocol } = input;
+  const { rule, ruleSha, events, cutoff, hash, metric, attempts, protocol, reserved, reservedSha } = input;
   const ideas = foldIdeas(events), owners = new Map<string, string>();
   // The journal enforces exactly one idea owner for any associated commit.
   for (const idea of ideas) for (const commit of idea.commits) owners.set(commit, idea.id);
@@ -90,6 +92,7 @@ function calculate(input: ReturnType<typeof inputs>): InvestigateResult {
       if (start.index <= cutoff) reasons.push("before-selection");
     }
     if (!protocol.seeds.includes(attempt.seed)) reasons.push("undeclared-seed");
+    if (reserved.includes(attempt.seed)) reasons.push("reserved-seed");
     if (!reasons.length && attempt.status === "succeeded") {
       if (row.perSeed.some(s => s.seed === attempt.seed)) reasons.push("later-success");
       else row.perSeed.push({ seed: attempt.seed, attempt: attempt.id, value: metricValue(attempt, metric) });
@@ -127,7 +130,7 @@ function calculate(input: ReturnType<typeof inputs>): InvestigateResult {
   else { const row = eligible[0]!; winner = { commit: row.commit, ...(row.idea !== undefined ? { idea: row.idea } : {}), attempts: row.pairs.map(p => p.attempt), mean: row.mean!, delta: row.delta! }; }
   const result: InvestigateResult = {
     v: 1, run: rule.run, ruleSha256: ruleSha, protocolHash: hash,
-    inputsSha256: sha256(canonical({ ruleSha, protocolHash: hash, cutoff, ideas: sha256(canonical(ideas)), attempts: ordered.map(a => ({ record: sha256(canonical(a)), start: starts.get(a.id)?.index ?? null })) })),
+    inputsSha256: sha256(canonical({ ruleSha, protocolHash: hash, ...(reservedSha !== undefined ? { finalSeedsSha256: reservedSha } : {}), cutoff, ideas: sha256(canonical(ideas)), attempts: ordered.map(a => ({ record: sha256(canonical(a)), start: starts.get(a.id)?.index ?? null })) })),
     metric, baseline, candidates, totals: { attempts: attempts.length, byStatus, countedSuccesses: [...rows.values()].reduce((n, r) => n + r.perSeed.length, 0), excluded: excluded.length }, excluded,
     winner, ...(reason ? { reason } : {}),
   };

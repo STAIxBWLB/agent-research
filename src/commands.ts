@@ -1,3 +1,4 @@
+import { setFinalSeeds } from "./exp/final.ts";
 import { addIdea, decideIdea } from "./exp/ideas.ts";
 import { showInvestigation, closeInvestigation } from "./exp/investigate.ts";
 import { setSelection } from "./exp/selection.ts";
@@ -358,4 +359,15 @@ export async function ideaAdd(dirArg: string, raw: unknown, ctx: Pick<Ctx, "acto
 export async function ideaDecide(dirArg: string, id: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
   const { dir, study } = openStudy(dirArg); requireExperiment(study);
   return withLock(dir, () => decideIdea(dir, id, raw, ctx.actor));
+}
+
+
+export async function finalSeeds(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
+  const { dir, study } = openStudy(dirArg); requireExperiment(study);
+  return withLock(dir, () => {
+    const design = readDesign(dir);
+    if (!design) throw new Error("final seeds: protocol missing; run ares protocol <dir> --file PATH first");
+    const result = setFinalSeeds(dir, raw, design.protocol, ctx.actor);
+    return { ...result, gate: gateState("design", readLedger(dir), binder(dir)) };
+  });
 }
