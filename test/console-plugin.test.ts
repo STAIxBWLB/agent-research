@@ -249,3 +249,23 @@ test("screen waiting time does not move when excluding an unrelated new candidat
   await ops.screen(f.survey, ["doi:10.0000/screened"], "exclude", "Synthetic exclusion", ctx); lastEventTime(f.survey, "2030-05-02T00:00:00.000Z");
   const second = await waiting(); expect(second.id).toBe(first.id); expect(second.at).toBe(first.at);
 });
+
+
+test("manuscript source and build edits refresh same-cursor views and invalidate stale review links", async () => {
+  for (const relative of [["paper", "manuscript.md"], ["paper", "build", "manuscript.md"], ["paper", "build", "evidence.json"]]) {
+    const f = await fixtures(fs.realpathSync(tempDir())), provider = await typed.open(context(f.family)), input = { panel: "study", study: f.survey }, journal = fs.readFileSync(join(f.survey, "ledger.jsonl"));
+    const first = await provider.snapshot({ ...input, after: 0 }), initial = first.study as Record<string, any>;
+    expect(initial.manuscript).not.toBeNull(); expect(initial.review.buildSha256).not.toBeNull();
+    expect(initial.gates.find((gate: any) => gate.gate === "review").state).toBe("pending");
+    expect(await provider.snapshot({ ...input, after: first.cursor as number })).toEqual({ cursor: first.cursor, changed: false });
+    const file = join(f.survey, ...relative), original = fs.readFileSync(file, "utf8");
+    fs.writeFileSync(file, relative.at(-1) === "evidence.json" ? JSON.stringify({ ...JSON.parse(original), manuscriptSha256: "f".repeat(64) }) : original + "Manual synthetic edit.\n");
+    const changed = await provider.snapshot({ ...input, after: first.cursor as number }), stale = changed.study as Record<string, any>;
+    expect(changed.changed).toBe(true); expect(changed.cursor).toBe(first.cursor); expect(stale.manuscript).toBeNull(); expect(stale.review.buildSha256).toBeNull();
+    expect(stale.review.unmet.some((row: any) => row.code === "build")).toBe(true); expect(stale.gates.find((gate: any) => gate.gate === "review").state).toBe("none");
+    expect(fs.readFileSync(join(f.survey, "ledger.jsonl"))).toEqual(journal);
+    expect(await provider.snapshot({ ...input, after: changed.cursor as number })).toEqual({ cursor: changed.cursor, changed: false });
+    fs.writeFileSync(file, original);
+    const restored = await provider.snapshot({ ...input, after: changed.cursor as number }); expect(restored.changed).toBe(true); expect(restored.cursor).toBe(first.cursor); expect((restored.study as Record<string, any>).manuscript).not.toBeNull();
+  }
+});

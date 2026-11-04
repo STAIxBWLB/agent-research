@@ -136,7 +136,8 @@ export const plugin = {
       async snapshot(input) {
         const registry = readRegistry(ctx.home);
         const probe = (file: string) => { try { const info = statSync(file); return [info.isFile(), info.size, info.mtimeMs, info.ctimeMs, info.mode, info.ino]; } catch { return null; } };
-        const probes = registry.studies.map(dir => ({ ledger: probe(join(dir, "ledger.jsonl")), study: probe(join(dir, "study.json")) }));
+        const probes = registry.studies.map(dir => ({ ledger: probe(join(dir, "ledger.jsonl")), study: probe(join(dir, "study.json")),
+          manuscript: probe(join(dir, "paper", "manuscript.md")), builtManuscript: probe(join(dir, "paper", "build", "manuscript.md")), evidence: probe(join(dir, "paper", "build", "evidence.json")) }));
         const cursor = probes.reduce((sum, row) => sum + (row.ledger?.[0] ? row.ledger[1] as number : 0), 0);
         const view = `${input.panel}:${str(input.study) ?? str(input.id) ?? ""}`, signature = sha256(JSON.stringify([registry.studies, probes]));
         if (input.after > 0 && input.after === cursor && seen.get(view) === signature) return { cursor, changed: false };
