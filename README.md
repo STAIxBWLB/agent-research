@@ -2,7 +2,7 @@
 
 Research engine for the agent family ([agent-hub](https://github.com/STAIxBWLB/agent-hub), [agent-mem](https://github.com/STAIxBWLB/agent-mem), [vault-mem](https://github.com/STAIxBWLB/vault-mem), [agent-console](https://github.com/STAIxBWLB/agent-console)). The plan and phases are in [#1](https://github.com/STAIxBWLB/agent-research/issues/1).
 
-This checkout implements A1 literature studies, A2 container experiments and the A3 plan DAG: an append-only ledger, approval gates, verified reference identifiers, frozen candidate snapshots, separate evaluator containers, attempt records and a resumable controller with read-only hub task references. Investigation loops, manuscripts, memory integration and the console panel remain later phases.
+This checkout implements A1 literature studies, A2 container experiments and the A3 plan DAG: an append-only ledger, approval gates, verified reference identifiers, frozen candidate snapshots, separate evaluator containers, attempt records and a resumable controller with read-only hub task references. Investigation selection, idea decisions and winner/no-winner results are available; automatic idea generation, ablation/final/posthoc logic, manuscripts, memory integration and the console panel remain later work.
 
 ## Install
 
@@ -90,9 +90,72 @@ The same protocol hash, commit/tree, seed and run return the same attempt. Use `
 
 Raw outputs and logs stay in the private executor attempt directory. The study holds output paths, sha256 and byte counts (regular files only, at most 500 files and 256 MiB total), plus each log stream's path, hash, bytes and truncation flag. Each stdout/stderr copy is capped at 16 MiB; excess log volume does not fail an attempt. `attempt logs` checks the recorded copies and prints tails without changing the study; `--tail` accepts 0..65536 bytes (default 16384), and omitted stage/stream filters return all recorded streams. No log content is persisted in the study.
 
+## Investigation workflow
+
+Set the selection rule before running baseline and candidate attempts. It fixes the run, primary protocol metric, frozen baseline commit, minimum paired seeds and improvement margin. Save this as `selection.json`, replacing the synthetic baseline SHA with your full frozen commit:
+
+```json
+{"v": 1, "run": "investigate", "metric": "score", "baseline": {"commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}, "minSeeds": 1, "minDelta": 0.01}
+```
+
+Use the experiment setup above, then:
+
+```sh
+ares selection experiment --file selection.json
+ares gate approve experiment design
+# Run the frozen baseline and each candidate with --run investigate and declared seeds.
+ares attempt run experiment --repo /absolute/candidate-repo --commit <baseline-40-hex-SHA> --seed 1 --run investigate --label baseline --detach
+ares attempt reconcile experiment
+# After it stops, run candidate commits the same way, then reconcile each one.
+ares investigate show experiment --json
+ares investigate close experiment --json
+```
+
+`metric` must be declared in the protocol; its unit and max/min direction come from there. `minSeeds` is 1..the number of declared seeds, and `minDelta` is finite and >=0 in that unit. A new or changed rule adds its raw file hash to the design seal and reopens approval. Identical validated bytes are a no-op, so they cannot erase earlier results by moving the cutoff. Protocol edits that invalidate an existing rule refuse before writing. Studies without selection retain the original design binding and approval.
+
+`investigate show` is read-only. Counting uses the selected run, current protocol hash and `attempt.started` ledger order after the latest recorded `selection.set`. Only the earliest successful attempt per commit/seed counts. Later successes, other-protocol, before-selection, undeclared-seed and missing-start attempts are listed with reasons; failed, cancelled, unknown and excluded records remain in run totals. Labels do not choose the baseline, its commit in the rule does.
+
+Each candidate compares its mean primary metric against the baseline on their shared successful seeds. It needs at least `minSeeds` pairs, a direction-adjusted delta strictly above zero and at least `minDelta`. Eligible candidates rank by paired delta, not raw mean, because paired seed sets can differ. An exact best-delta tie yields no winner. Other no-winner reasons are `no-baseline`, `baseline-seeds`, `no-candidate` and `below-margin`. Means are descriptive, with no significance test.
+
+Close refuses while any attempt in the selected run is running, including excluded attempts. It writes `runs/<run>/investigate.json` and `investigate.closed` together. The timestamp-free result includes rule/input hashes, baseline/candidate rows, paired values and means, exclusions, totals and a winner or `null` with its reason. Closing unchanged inputs writes nothing. Show/close starts no attempt, Docker process or hub; the tests use synthetic offline records.
+
+### Idea journal
+
+Ideas and their decisions live in ledger events, not a second file. An idea input for `ares idea add experiment --file idea.json` is:
+
+```json
+{"id": "variant-1", "title": "Synthetic candidate", "hypothesis": "The frozen candidate improves the declared metric", "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
+```
+
+Replace that synthetic commit with your candidate's frozen SHA. `id` and optional `parent` use the run-name rule (1..64 characters, alphanumeric first, then letters/digits/underscore/hyphen). Ids are unique, parent must exist, and each commit has exactly one idea owner. Limits are 1,000 ideas, 500-character titles and 4,000-character hypotheses. After inspecting terminal attempts from that idea's existing commits, record a decision:
+
+```sh
+ares idea decide experiment variant-1 refine --reason "Test the next frozen candidate" --attempts <terminal-attempt-id> --commit <next-40-hex-SHA>
+# To close a tested direction:
+ares idea decide experiment variant-1 pivot --reason "Drop this direction" --attempts <terminal-attempt-id>
+```
+
+Refine adds the uniquely owned commit. Pivot closes further decisions and keeps historical attempts and totals. Evidence is at most 200 existing, non-running, same-study attempt ids from the idea's commits; reasons are at most 2,000 bytes. An untested idea may omit `commit` when added, then omit `--attempts` for a first `refine --commit` or a pivot before testing. Once it has commits, nonempty evidence is required. Investigation rows and winner references carry the owning idea id; journal changes join the result's input hash. Survey studies refuse all selection, idea and investigate commands.
+
+A conductor can put a no-argument `investigate.close` step after its agent-work hub unit, then bind a local plan gate to that result:
+
+```json
+{
+  "v": 1,
+  "nodes": [
+    {"id": "agent-work", "kind": "hub", "campaign": "rc-0123456789ab", "unit": "candidates"},
+    {"id": "close", "kind": "step", "command": "investigate.close", "args": {}, "needs": ["agent-work"]},
+    {"id": "review-result", "kind": "gate", "needs": ["close"], "binds": ["close"]}
+  ],
+  "edges": []
+}
+```
+
+Use your real campaign/unit ids, with unit completion covering all attempts reaching terminal states. The close step emits exactly `{sha256, winner}` for the saved result; `winner: null` is a valid completed outcome, and its file explains why. The plan gate binds that reference before any later research phase. Start/resume/approve the plan as below. Ares only observes hub work; it does not generate ideas, launch coding agents or perform hub writes. Live hub/executor DAG coverage has not been run for this investigation workflow.
+
 ## Plan and conductor workflow
 
-A plan connects existing commands, approval gates and read-only hub task references. It does not implement the investigate, ablation, final or posthoc research logic. Create a study first. This offline example checks two drafts, with an approval between them: put citation-free text in `plan-study/draft.md` and `plan-study/final.md`, and save this definition as `draft-plan.json`:
+A plan connects existing commands, approval gates and read-only hub task references. It can close an investigation result; ablation, final and posthoc research logic remain separate work. Create a study first. This offline example checks two drafts, with an approval between them: put citation-free text in `plan-study/draft.md` and `plan-study/final.md`, and save this definition as `draft-plan.json`:
 
 ```json
 {
@@ -127,7 +190,7 @@ ares plan show plan-study --json
 
 `run` exits 0 when the plan is done. Each controller start restores an unfinished plan paused; resume it explicitly from another terminal or MCP client. SIGINT/SIGTERM stops admission, drains active command calls, records paused when still running, and releases the controller lock. Detached attempts stay alive for `attempt reconcile`. A live or foreign controller owner is refused; a dead same-host owner is recoverable by pid and process start identity, never by lock age. Waiting observations use 1 s to 30 s backoff, reset on progress, and unchanged polls write nothing.
 
-Plan definitions accept at most 128 nodes, 512 explicit edges and 128-byte ids, with no cycles or missing dependency endpoints. `needs` and `edges` both supply dependencies; a gate's `binds` may name only upstream nodes. A step command is one of `lit.search`, `lit.verify`, `lit.bib`, `cite.check`, `attempt.run`. Named `args` carry CLI options without `--`, including `year-from`; positional inputs are `query` for search, optional `ids` for verify, and `draft` for cite check. `attempt.run` needs `repo` and `commit`, always detaches, and accepts the existing seed/run/label/retry options. Steps refuse controller-owned `json` and `detach` arguments. Relative `repo` and `draft` resolve against the study directory. Scope, screen and design prerequisites still apply to the underlying commands.
+Plan definitions accept at most 128 nodes, 512 explicit edges and 128-byte ids, with no cycles or missing dependency endpoints. `needs` and `edges` both supply dependencies; a gate's `binds` may name only upstream nodes. A step command is one of `lit.search`, `lit.verify`, `lit.bib`, `cite.check`, `attempt.run`, `investigate.close`. The close step takes no args. Named `args` carry CLI options without `--`, including `year-from`; positional inputs are `query` for search, optional `ids` for verify, and `draft` for cite check. `attempt.run` needs `repo` and `commit`, always detaches, and accepts the existing seed/run/label/retry options. Steps refuse controller-owned `json` and `detach` arguments. Relative `repo` and `draft` resolve against the study directory. Scope, screen and design prerequisites still apply to the underlying commands.
 
 `--parallel` admits 1..8 step nodes (default 1); the existing one-active-attempt-per-study rule still applies. Plan state is replayed from ledger events. `plan show` is lock-free and lists each node's current status, last observation, attempt/retry/task references, gate decisions, uncertain nodes and controller owner. It also shows `hubProject` when a hub read resolves a board.
 
@@ -149,7 +212,7 @@ A ready hub node records its unit's child task id and waits for that task's appr
 
 ## What sealed means
 
-The `design` gate binds the exact protocol bytes and the sorted `task/` file tree hashes. Editing either reopens the gate. A budget-only change also reopens it, while the comparable attempt protocol hash excludes budget. The executor configuration is outside the seal; the attempt records the executor it used.
+The `design` gate binds the exact protocol bytes and the sorted `task/` file tree hashes, plus the raw selection file hash when present. Editing any sealed input reopens the gate. A budget-only change also reopens it, while the comparable attempt protocol hash excludes budget. The executor configuration is outside the seal; the attempt records the executor it used.
 
 Sealing and metrics are **ares-observed**: ares builds the argv and checks the observed container configuration. They are never **host-observed** or **runner-attested**. Signed receipts await [agent-hub#1018](https://github.com/STAIxBWLB/agent-hub/issues/1018). This seal neither attests to an untrusted host nor establishes support for a research claim.
 
@@ -178,6 +241,8 @@ Sealing and metrics are **ares-observed**: ares builds the argv and checks the o
 | `refs/references.bib` | generated bibliography |
 | `task/task.md`, `task/evaluator/`, optional `task/rubric.md` | experiment task and evaluator files, written directly |
 | `design/protocol.json` | validated experiment protocol |
+| `design/selection.json` | sealed investigation rule, when set |
+| `runs/<run>/investigate.json` | deterministic winner/no-winner result, candidate rows and totals |
 | `executor.json` | executor kind, optional SSH alias and required workdir |
 | `runs/<run>/attempts/<id>.json` | attempt identity, stage receipts, status, metrics and artifact/log metadata |
 
@@ -196,6 +261,11 @@ ares plan control <dir> <pause|resume|retry|cancel|skip> [node] --command-id ID 
 ares plan show <dir> [--json]
 ares status <dir> [--json]
 ares scope <dir> --file PATH|- [--json]
+ares idea add <dir> --file PATH|- [--json]
+ares idea decide <dir> <id> <refine|pivot> --reason TEXT [--attempts ID[,ID...]] [--commit SHA] [--json]
+ares investigate show <dir> [--json]
+ares investigate close <dir> [--json]
+ares selection <dir> --file PATH|- [--json]
 ares protocol <dir> --file PATH|- [--json]
 ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--json]
 ares executor check <dir> [--json]
@@ -219,11 +289,11 @@ ares playbook
 ares mcp
 ```
 
-MCP uses shared command handlers; `init`, the controller loop `run`, and the server entrypoint `mcp` are CLI-only. Plan tools are `ares_plan_set`, `ares_plan_show` and `ares_plan_control`; `ares_gate` accepts `plan:<node-id>`. Setting, showing or controlling a plan never starts the controller loop. Start `ares run` in a separate terminal before resuming through MCP. Experiment tools are `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile` and `ares_attempt_logs`; `ares_gate` accepts `design`. Attempt run is always detached over MCP, and executor-reaching tools carry `openWorldHint`.
+MCP uses shared command handlers; `init`, the controller loop `run`, and the server entrypoint `mcp` are CLI-only. Investigation tools are `ares_selection_set`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show` and `ares_investigate_close`. Plan tools are `ares_plan_set`, `ares_plan_show` and `ares_plan_control`; `ares_gate` accepts `plan:<node-id>`. Setting, showing or controlling a plan never starts the controller loop. Start `ares run` in a separate terminal before resuming through MCP. Experiment tools are `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile` and `ares_attempt_logs`; `ares_gate` accepts `design`. Attempt run is always detached over MCP, and executor-reaching tools carry `openWorldHint`.
 
 ## Version and format discovery
 
-`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `study`, `ledgerEvent`, `experimentProtocol`, `executor`, `experimentAttempt` and `studyPlan`, all version 1, carried by each record's `v` field.
+`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `study`, `ledgerEvent`, `experimentProtocol`, `executor`, `experimentAttempt`, `studyPlan`, `experimentSelection` and `investigateResult`, all version 1, carried by each record's `v` field.
 
 Within a supported schema, readers preserve additive fields on study/attempt records and keep ledger events with unknown kinds. Appending to the ledger leaves prior lines intact; updating an attempt keeps unrecognized fields and stage entries. Unknown stage entries remain readable, including logs and totals, but budget-gated starts refuse with an upgrade instruction because this version cannot account for their resource use. A future schema version or unknown execution status/stage is refused with an upgrade instruction, leaving the original data unchanged. Unknown plan versions or node kinds are refused without changing plan.json. Command input remains strict so unknown options or protocol fields cannot silently change an experiment.
 
@@ -241,7 +311,7 @@ Keys are sent with requests only; they are never written to the study.
 
 ## Not implemented yet
 
-Investigation loops, parallel attempts, ablations, final/posthoc research logic, signed executor receipts, manuscript build, vault-mem reference notes (after vault-mem#73), agent-mem conventions, the console plugin, `ares setup`, scheduled searches, the `copilot` and `step` autonomy modes.
+Automatic idea generation, parallel attempts, ablations, final/posthoc research logic, signed executor receipts, manuscript build, vault-mem reference notes (after vault-mem#73), agent-mem conventions, the console plugin, `ares setup`, scheduled searches, the `copilot` and `step` autonomy modes.
 
 ## Development
 

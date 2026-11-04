@@ -145,3 +145,13 @@ test("CLI and MCP accept hub references and named positional args; reject old hu
     expect(readFileSync(file)).toEqual(before); expect(readFileSync(ledger)).toEqual(events);
   }
 });
+
+test("investigate.close is an implemented no-argument step on CLI and MCP plan paths", async () => {
+  const raw = { v: 1, nodes: [{ id: "close", kind: "step", command: "investigate.close", args: {} }], edges: [] };
+  expect(validatePlan(raw).nodes[0]).toMatchObject({ command: "investigate.close", args: {} });
+  for (const args of [{ run: "other" }, { file: "rule.json" }, { json: true }]) expect(() => validatePlan({ ...raw, nodes: [{ ...raw.nodes[0], args }] })).toThrow();
+  const dir = study(), server = createAresMcp({}, ctx.http), tool = ARES_TOOLS.find(t => t.name === "ares_plan_set")!;
+  expect(validArguments({ study: dir, plan: raw }, tool.inputSchema)).toBe(true);
+  await server.handlers.ares_plan_set!({ study: dir, plan: raw });
+  expect(ops.planShow(dir).definition.nodes[0]).toMatchObject({ command: "investigate.close" });
+});
