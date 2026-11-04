@@ -5,7 +5,7 @@ import type { PlanNode } from "./definition.ts";
 
 export type StepNode = Extract<PlanNode, { kind: "step" }>;
 export type HubNode = Extract<PlanNode, { kind: "hub" }>;
-export interface Observation { status: "dispatched" | "done" | "failed" | "cancelled" | "uncertain"; output?: unknown; reason?: string; progress?: string; taskId?: number }
+export interface Observation { status: "dispatched" | "done" | "failed" | "cancelled" | "uncertain"; output?: unknown; reason?: string; progress?: string; taskId?: number; hubProject?: string }
 export interface ControllerRuntime {
   actor: Actor;
   hub?: HubClient;
@@ -54,12 +54,12 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
     const observe = async (node: NodeState, observation: Observation) => {
       const target = state().nodes.find(n => n.id === node.id);
       if (!target || target.dispatchId !== node.dispatchId || !["dispatched", "uncertain"].includes(target.status)) return;
-      if (observation.status === "dispatched" && target.lastObserved?.dispatchId === node.dispatchId && target.reason === observation.reason && (observation.taskId === undefined || target.taskId === observation.taskId)) return;
+      if (observation.status === "dispatched" && target.lastObserved?.dispatchId === node.dispatchId && target.reason === observation.reason && (observation.taskId === undefined || target.taskId === observation.taskId) && (observation.hubProject === undefined || target.hubProject === observation.hubProject)) return;
       return locked(() => {
       const current = state(), target = current.nodes.find(n => n.id === node.id);
       if (!target || target.dispatchId !== node.dispatchId || !["dispatched", "uncertain"].includes(target.status)) return;
-      if (observation.status === "dispatched" && target.status === "dispatched" && target.lastObserved && target.lastObserved.dispatchId === node.dispatchId && target.lastObserved.status === "dispatched" && target.reason === observation.reason && (observation.taskId === undefined || target.taskId === observation.taskId)) return;
-      commit(dir, [], [{ actor: runtime.actor, type: "node.observed", data: { revision: current.revision, node: node.id, dispatchId: node.dispatchId, status: observation.status, ...(observation.output !== undefined ? { output: observation.output } : {}), ...(observation.reason !== undefined ? { reason: observation.reason } : {}), ...(observation.taskId !== undefined ? { taskId: observation.taskId } : {}) } }]);
+      if (observation.status === "dispatched" && target.status === "dispatched" && target.lastObserved && target.lastObserved.dispatchId === node.dispatchId && target.lastObserved.status === "dispatched" && target.reason === observation.reason && (observation.taskId === undefined || target.taskId === observation.taskId) && (observation.hubProject === undefined || target.hubProject === observation.hubProject)) return;
+      commit(dir, [], [{ actor: runtime.actor, type: "node.observed", data: { revision: current.revision, node: node.id, dispatchId: node.dispatchId, status: observation.status, ...(observation.output !== undefined ? { output: observation.output } : {}), ...(observation.reason !== undefined ? { reason: observation.reason } : {}), ...(observation.taskId !== undefined ? { taskId: observation.taskId } : {}), ...(observation.hubProject !== undefined ? { hubProject: observation.hubProject } : {}) } }]);
       });
     };
     const reconcile = async (node: NodeState): Promise<void> => {
@@ -67,7 +67,7 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
       if (!definition || (definition.kind === "hub" && !runtime.hub)) return;
       let observation: Observation;
       if (definition.kind === "hub") {
-        try { observation = await runtime.hub!.observe(definition.campaign, definition.unit, node.taskId); }
+        try { observation = await runtime.hub!.observe(definition.campaign, definition.unit, node.taskId ?? boundHubTask(readLedger(dir), state().revision, node.id)); }
         catch { observation = { status: "dispatched", reason: "hub read unavailable; check ahub study show and restore hub access" }; }
       } else if (definition.kind !== "step" || definition.command !== "attempt.run") observation = { status: "uncertain", reason: "step result unavailable after interruption; explicitly retry or skip this node" };
       else {
@@ -129,7 +129,7 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
               let result: HubObservation;
               try { result = await runtime.hub.observe(definition.campaign, definition.unit, binding); }
               catch { result = { status: "dispatched", reason: "hub read unavailable; check ahub study show and restore hub access" }; }
-              const intent = await admit(dir, owner, runtime.actor, current, node, definition, result.taskId !== undefined ? { taskId: result.taskId } : {}, parallel);
+              const intent = await admit(dir, owner, runtime.actor, current, node, definition, { ...(result.taskId !== undefined ? { taskId: result.taskId } : {}), ...(result.hubProject !== undefined ? { hubProject: result.hubProject } : {}) }, parallel);
               if (intent) { await observe(intent, result); schedule(intent, result); }
               current = state(); continue;
             }
@@ -175,7 +175,7 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
     return state();
   });
 }
-async function admit(dir: string, owner: PlanOwner, actor: Actor, snapshot: PlanState, node: NodeState, definition: StepNode | HubNode, prepared: { attemptId?: string; taskId?: number }, parallel: number): Promise<NodeState | undefined> {
+async function admit(dir: string, owner: PlanOwner, actor: Actor, snapshot: PlanState, node: NodeState, definition: StepNode | HubNode, prepared: { attemptId?: string; taskId?: number; hubProject?: string }, parallel: number): Promise<NodeState | undefined> {
   const result = await tryTransaction(dir, () => {
     assertPlanOwner(dir, owner);
     const current = readPlanState(dir, readLedger(dir)), target = current.nodes.find(n => n.id === node.id);
