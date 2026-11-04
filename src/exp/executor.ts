@@ -8,15 +8,22 @@ export interface Executor { v: 1; kind: "local" | "ssh"; host?: string; workdir:
 export interface ProcessRequest {
   command: string; args: string[]; stdin?: Uint8Array | AsyncIterable<Uint8Array>;
   stdoutSink?: (chunk: Uint8Array) => void | Promise<void>; signal?: AbortSignal;
-  timeoutMs?: number; maxOutputBytes?: number;
+  timeoutMs?: number; maxOutputBytes?: number; cwd?: string; env?: NodeJS.ProcessEnv;
 }
 export interface ProcessResult { exitCode: number; stdout: string; stderr: string; timedOut?: boolean; truncated?: boolean }
 export type ProcessRunner = (request: ProcessRequest) => Promise<ProcessResult>;
 export const EXECUTOR_BYTES = 8192, PROCESS_OUTPUT_BYTES = 65_536;
 
-/** No parent API credentials enter child processes. HOME and SSH_AUTH_SOCK support normal Docker/SSH configuration. */
-export function processEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(["PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "SSH_AUTH_SOCK", "DOCKER_HOST", "DOCKER_CONTEXT"].flatMap(key => env[key] === undefined ? [] : [[key, env[key]!]]));
+/** Opt-in context for native CLI attribution and config discovery; no API credentials. */
+export const PROCESS_CONTEXT_ENV_KEYS = ["AGENTHUB_PEER_ID", "CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "PI_SESSION_ID",
+  "AMEM_HOME", "AGENTHUB_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "KIMI_CODE_HOME", "PI_CODING_AGENT_DIR", "QWEN_HOME", "JCODE_HOME"] as const;
+const BASE_ENV_KEYS = ["PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "SSH_AUTH_SOCK", "DOCKER_HOST", "DOCKER_CONTEXT"];
+/** Context is opt-in; executor children keep their existing minimal environment by default. */
+export function processEnvironment(env: NodeJS.ProcessEnv, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  return Object.fromEntries([...BASE_ENV_KEYS, ...PROCESS_CONTEXT_ENV_KEYS].flatMap(key => {
+    const value = extra[key] ?? (BASE_ENV_KEYS.includes(key) ? env[key] : undefined);
+    return value === undefined ? [] : [[key, value]];
+  }));
 }
 
 /** Bounded tails and a deadline; callers must never persist raw process diagnostics. */
@@ -26,7 +33,7 @@ export const spawnRunner: ProcessRunner = async request => {
     throw new Error("process bounds: invalid; use 1..1048576 output bytes and 1..604800000 timeout milliseconds");
   }
   if (request.signal?.aborted) throw new Error("process cancelled; retry the operation when cancellation is cleared");
-  const child = spawn(request.command, request.args, { env: processEnvironment(process.env), detached: true, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(request.command, request.args, { env: processEnvironment(process.env, request.env), cwd: request.cwd, detached: true, stdio: ["pipe", "pipe", "pipe"] });
   let stdout: Buffer = Buffer.alloc(0), stderr: Buffer = Buffer.alloc(0), truncated = false, timedOut = false;
   const append = (old: Buffer, chunk: Buffer): Buffer => {
     if (old.length + chunk.length > max) truncated = true;

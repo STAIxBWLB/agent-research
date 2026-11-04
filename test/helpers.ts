@@ -5,8 +5,8 @@ import { afterEach } from "bun:test";
 import { createHttp, type FetchLike } from "../src/http.ts";
 import type { ProcessRequest, ProcessResult, ProcessRunner } from "../src/exp/executor.ts";
 
-/** Scripted process boundary. Unexpected calls fail loudly; no Docker or SSH process is started. */
-export function fakeDocker(script: (ProcessResult | Error | ((request: ProcessRequest) => ProcessResult))[]) {
+/** Scripted process boundary. Unexpected calls fail loudly; no child process is started. */
+export function fakeRunner(script: (ProcessResult | Error | ((request: ProcessRequest) => ProcessResult))[]) {
   const requests: ProcessRequest[] = [];
   const runner: ProcessRunner = async request => {
     requests.push({ ...request, args: [...request.args] });
@@ -17,6 +17,9 @@ export function fakeDocker(script: (ProcessResult | Error | ((request: ProcessRe
   };
   return { runner, requests, remaining: () => script.length };
 }
+
+/** Backward-compatible name for executor fixtures. */
+export const fakeDocker = fakeRunner;
 
 export const fixture = (name: string) => readFileSync(join(import.meta.dir, "fixtures", name), "utf8");
 
