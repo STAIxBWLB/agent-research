@@ -183,7 +183,8 @@ function plan(host: Host, receiptPath: string, mode: SetupMode, desired: McpEntr
     result.receiptAfter = null; action.change = prior.priorPresent ? "restore" : "remove"; action.receiptChange = "remove"; return result;
   }
   if (isDeepStrictEqual(current, desired)) { action.change = "unchanged"; return result; }
-  if (prior && !isDeepStrictEqual(current, prior.installed) && !isDeepStrictEqual(current, prior.priorPresent ? prior.prior : undefined)) fail("ares entry changed since apply; reconcile it before replacing the installed root");
+  const original = prior?.priorToml === undefined ? prior?.priorPresent ? prior.prior : undefined : entry(host, prior.priorToml);
+  if (prior && !isDeepStrictEqual(current, prior.installed) && !isDeepStrictEqual(current, original)) fail("ares entry changed since apply; reconcile it before replacing the installed root");
   result.after = put(host, before, desired);
   const saved: Receipt = prior ?? { v: 1, target: host.target, file: host.file, existed: before !== null, keyExisted: Object.hasOwn(document(host, before), host.key), priorPresent: current !== undefined,
     ...(current === undefined ? {} : { prior: current }), ...(host.format === "toml" && current !== undefined ? { priorToml: priorToml(before) } : {}), installed: desired };

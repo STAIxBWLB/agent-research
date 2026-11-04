@@ -246,3 +246,14 @@ test("undo restores TOML datetime and nonfinite values from the raw table, not J
   const undone = runSetup("codex", "undo", f.options); expect(undone.actions.filter(action => action.change === "refused")).toEqual([]); expect(undone.applied).toBe(true);
   expect(Bun.TOML.parse(fs.readFileSync(file, "utf8"))).toEqual(Bun.TOML.parse(original)); expect(fs.existsSync(undone.actions[0]!.lock)).toBe(false);
 });
+
+test("receipt-first recovery re-applies an unchanged prior TOML datetime/nonfinite entry", () => {
+  const f = fixture(), file = join(f.home, ".codex", "config.toml"); fs.mkdirSync(dirname(file));
+  const content = '[mcp_servers.ares]\ncommand = "old"\nstarted = 1979-05-27T07:32:00Z\nvalue = nan\n'; fs.writeFileSync(file, content);
+  const first = runSetup("codex", "apply", f.options), action = first.actions[0]!, saved = fs.readFileSync(action.receipt);
+  expect(first.applied).toBe(true); expect(runSetup("codex", "undo", f.options).applied).toBe(true);
+  // Model receipt publication before config replacement, after the exited owner's lock has been cleared.
+  fs.writeFileSync(action.receipt, saved, { mode: 0o600 });
+  const resumed = runSetup("codex", "apply", f.options); expect(resumed.actions.filter(row => row.change === "refused")).toEqual([]); expect(resumed.applied).toBe(true);
+  expect(runSetup("codex", "undo", f.options).applied).toBe(true); expect(Bun.TOML.parse(fs.readFileSync(file, "utf8"))).toEqual(Bun.TOML.parse(content));
+});
