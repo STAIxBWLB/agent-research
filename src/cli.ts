@@ -72,6 +72,12 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       if (file === undefined) throw new Error("plan set: --file is required");
       result = await ops.planSet(positional[0]!, await readInput(file, io), ctx); break;
     }
+    case "plan control": {
+      count(spec, positional, 2, 3);
+      const commandId = str("--command-id"), expectedRevision = integer(flags["--expected-revision"], "--expected-revision");
+      if (!commandId || expectedRevision === undefined) throw new Error("plan control: command id and revision required; pass --command-id ID --expected-revision N from ares plan show");
+      result = await ops.planControl(positional[0]!, { action: positional[1]! as Parameters<typeof ops.planControl>[1]["action"], ...(positional[2] !== undefined ? { node: positional[2] } : {}), commandId, expectedRevision }, ctx); break;
+    }
     case "plan show": count(spec, positional, 1); result = ops.planShow(positional[0]!); break;
     case "status": count(spec, positional, 1); result = ops.status(positional[0]!); break;
     case "scope": {

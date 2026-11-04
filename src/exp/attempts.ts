@@ -167,7 +167,7 @@ async function withControl<T>(dir: string, fn: () => Promise<T>): Promise<T> {
   try { return await controlScope.run({ dir, token }, fn); }
   finally { try { if (readTextBounded(path, 128) === token) unlinkSync(path); } catch { /* stale owner must not remove a newer claim */ } }
 }
-async function update(dir: string, attemptId: string, ctx: AttemptContext, fn: (current: Attempt) => string | undefined, approvals: PendingEvent[] = []): Promise<Attempt> {
+async function update(dir: string, attemptId: string, ctx: AttemptContext, fn: (current: Attempt) => string | undefined, approvals: PendingEvent[] = [], completion?: (attempt: Attempt) => PendingEvent[]): Promise<Attempt> {
   return withLock(dir, () => {
     const scope = controlScope.getStore();
     if (scope?.dir === dir) {
@@ -175,7 +175,7 @@ async function update(dir: string, attemptId: string, ctx: AttemptContext, fn: (
       try { currentToken = readTextBounded(join(dir, ".ares.control.lock"), 128); } catch { /* expired or replaced */ }
       if (currentToken !== scope.token) throw new Error("attempt control: ownership expired or changed; run ares attempt reconcile before retrying this operation");
     }
-    const current = showAttempt(dir, attemptId), event = fn(current); if (event) save(dir, current, ctx, event, approvals); return current;
+    const current = showAttempt(dir, attemptId), event = fn(current); if (event) save(dir, current, ctx, event, [...approvals, ...(completion?.(current) ?? [])]); return current;
   });
 }
 function finish(attempt: Attempt, status: AttemptStatus, reason: string | undefined, ctx: AttemptContext): void {
@@ -434,11 +434,16 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
   return changed;
   });
 }
-export async function cancelAttempt(dirArg: string, wanted: string, reason: string | undefined, ctx: AttemptContext): Promise<Attempt> {
+export async function cancelAttempt(dirArg: string, wanted: string, reason: string | undefined, ctx: AttemptContext, completion?: (attempt: Attempt) => PendingEvent[]): Promise<Attempt> {
   const dir = studyDir(dirArg), why = reason === undefined ? undefined : boundedText(reason, "reason", 500);
   return withControl(dir, async () => {
   let attempt = showAttempt(dir, id(wanted));
-  if (attempt.status !== "running") return attempt;
+  if (attempt.status !== "running") return withLock(dir, () => {
+    const current = showAttempt(dir, wanted);
+    const pending = completion?.(current) ?? [];
+    if (pending.length) commit(dir, [], pending);
+    return current;
+  });
   if (alive(attempt, ctx)) throw new Error("attempt: another startup operation is active; retry cancel when it finishes (abandoned claims expire after 30 minutes)");
   try {
     let state = await inspect(attempt, ctx);
@@ -446,7 +451,7 @@ export async function cancelAttempt(dirArg: string, wanted: string, reason: stri
     if (state?.running) { await command(attempt, "cancel kill", "docker", ["kill", state.id], ctx); state = await inspect(attempt, ctx); }
     if (state) attempt = await captureStage(dir, attempt, ctx, true);
     const ended = state;
-    return update(dir, attempt.id, ctx, current => { if (ended && !ended.running) { current.stages[current.stage]!.exitCode = ended.exitCode; if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; } finish(current, "cancelled", why ?? "cancelled", ctx); return "attempt.cancelled"; });
+    return update(dir, attempt.id, ctx, current => { if (ended && !ended.running) { current.stages[current.stage]!.exitCode = ended.exitCode; if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; } finish(current, "cancelled", why ?? "cancelled", ctx); return "attempt.cancelled"; }, [], completion);
   } catch {
     await update(dir, attempt.id, ctx, current => { delete current.launching; return "attempt.executor-error"; });
     throw hostError(attempt, "cancel");

@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 
 export type Mode = "survey" | "experiment";
 export type Autonomy = "auto" | "gates";
-export type GateName = "scope" | "screen" | "design";
+export type GateName = "scope" | "screen" | "design" | `plan:${string}`;
 export const GATES: readonly GateName[] = ["scope", "screen", "design"];
 export interface Study { v: 1; id: string; question: string; mode: Mode; autonomy: Autonomy; createdAt: string }
 export interface Actor { kind: "person" | "agent" | "auto"; id?: string }
@@ -206,9 +206,9 @@ export function gateState(gate: GateName, events: LedgerEvent[], binder: Binder)
 }
 
 export function decideGate(dir: string, gate: GateName, decision: "approve" | "reject", actor: Actor, binder: Binder, reason?: string): GateState {
-  if (!GATES.includes(gate)) throw new Error(`unknown gate: ${gate}`);
+  if (!GATES.includes(gate) && !gate.startsWith("plan:")) throw new Error(`unknown gate: ${gate}; run ares gate list to select a gate`);
   const before = gateState(gate, readLedger(dir), binder);
-  if (before.state === "none") throw new Error(`gate ${gate}: nothing to decide yet`);
+  if (before.state === "none") throw new Error(`gate ${gate}: nothing to decide yet${gate.startsWith("plan:") ? "; finish every upstream node with output references, then run ares gate list" : ""}`);
   if (decision === "reject" && !reason) throw new Error(`gate ${gate}: a rejection needs --reason`);
   appendEvent(dir, actor, decision === "approve" ? "gate.approve" : "gate.reject", { gate, binding: before.current!, ...(reason ? { reason } : {}) });
   return gateState(gate, readLedger(dir), binder);
@@ -224,6 +224,7 @@ export function requireGate(dir: string, study: Study, gate: GateName, binder: B
   const state = gateState(gate, readLedger(dir), binder);
   if (state.state === "approved") return [];
   if (state.state === "pending" && study.autonomy === "auto") return [{ actor: { kind: "auto" }, type: "gate.approve", data: { gate, binding: state.current! } }];
+  if (state.state === "none" && gate.startsWith("plan:")) throw new Error(`gate ${gate}: upstream outputs are not complete; finish every upstream node and run ares gate list again`);
   if (state.state === "none") throw new Error(gate === "scope" ? "gate scope: no scope yet (run ares scope)" : gate === "design" ? "gate design: no protocol yet (run ares protocol)" : "gate screen: no included candidates yet");
   if (state.state === "rejected") throw new Error(`gate ${gate} is rejected${state.decided?.reason ? `: ${state.decided.reason}` : ""}; change the content and ask again`);
   throw new Error(`gate ${gate} is pending: run ares gate approve <dir> ${gate}`);
