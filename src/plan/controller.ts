@@ -82,7 +82,7 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
         let wait = 1000;
         for (;;) {
           const current = state().nodes.find(n => n.id === node.id);
-          if (runtime.signal?.aborted || current?.dispatchId !== node.dispatchId || current.status !== "dispatched") return;
+          if (runtime.signal?.aborted || !current || current.dispatchId !== node.dispatchId || current.status !== "dispatched") return;
           assertPlanOwner(dir, owner);
           try { observation = await runtime.execute(definition, node); break; }
           catch (error) {
