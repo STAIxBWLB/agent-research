@@ -65,7 +65,7 @@ const rows = (value: unknown) => value as Record<string, any>[];
 
 test("manifest, panels and stable inbox groups use real handlers without subprocess/network or writes", async () => {
   const f = await fixtures(fs.realpathSync(tempDir())), before = [f.family + "/research/studies.json", join(f.survey, "ledger.jsonl"), join(f.experiment, "ledger.jsonl")].map(path => [path, fs.readFileSync(path)] as const);
-  const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async () => { throw new Error("network forbidden in console reads"); });
+  const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async () => { throw new Error("network forbidden in console reads"); }) as typeof fetch);
   const spawnSpy = spyOn(child, "spawn").mockImplementation((() => { throw new Error("subprocess forbidden in console reads"); }) as typeof child.spawn);
   try {
     const provider = await typed.open(context(f.family)), snapshot = await provider.snapshot({ panel: "studies", after: 0 });
