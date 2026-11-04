@@ -138,3 +138,10 @@ test("a confirmed export holds the study lock until its receipts are committed",
   await pending;
   expect(fake.requests).toHaveLength(1); expect(previewArchive(dir).notes).toEqual([]);
 });
+
+test("receipt bounds are checked before the first outward write", async () => {
+  const dir = await setup(1), before = ledger(dir), fake = fakeRunner([result(first)]), preview = previewArchive(dir);
+  await expect(ops.archive(dir, { confirm: preview.fingerprint }, { actor: { kind: "agent", id: "x".repeat(65_536) }, runner: fake.runner }))
+    .rejects.toThrow("archive receipt: capacity check failed");
+  expect(fake.requests).toEqual([]); expect(ledger(dir)).toBe(before);
+});

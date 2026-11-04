@@ -1,4 +1,4 @@
-import { commit, openStudy, plain, sha256, type Actor, type LedgerEvent } from "../study.ts";
+import { commit, prepareCommit, openStudy, plain, sha256, type Actor, type LedgerEvent } from "../study.ts";
 import { canonical } from "../plan/state.ts";
 import { createAmemClient, type AmemNote } from "./amem.ts";
 import { deriveLessons, readLessonSources } from "./lessons.ts";
@@ -36,6 +36,12 @@ export function previewArchive(dir: string): ArchivePreview {
 export async function exportArchive(dirArg: string, fingerprint: string, actor: Actor, runner?: ProcessRunner, env: NodeJS.ProcessEnv = process.env): Promise<ArchiveResult> {
   const { dir } = openStudy(dirArg), preview = previewArchive(dir);
   if (!hex(fingerprint, 64) || fingerprint !== preview.fingerprint) throw new Error("archive: stale fingerprint; run ares archive <dir> again and confirm its current fingerprint");
+  if (preview.notes.length) {
+    try { prepareCommit(dir, [], [{ actor, type: "archive.exported", data: {
+      fingerprint, notes: preview.notes.map(note => ({ sha256: note.sha256, id: "f".repeat(32) })),
+    } }]); }
+    catch { throw new Error("archive receipt: capacity check failed; restore a valid bounded ledger or start a new study before exporting"); }
+  }
   const client = createAmemClient(dir, runner, env), written: ArchiveReceipt[] = [];
   let failure: unknown;
   for (const item of preview.notes) {
