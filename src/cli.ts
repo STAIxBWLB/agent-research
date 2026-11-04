@@ -56,6 +56,17 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
   let result: unknown, code = 0;
   switch (spec.name) {
+    case "skill propose": {
+      count(spec, positional, 1); const file = str("--file");
+      if (file === undefined) throw new Error("skill propose: input missing; pass --file PATH or --file - for proposal JSON");
+      result = await ops.skillPropose(positional[0]!, await readInput(file, io), ctx); break;
+    }
+    case "skill decide": {
+      count(spec, positional, 3); const reason = str("--reason");
+      if (reason === undefined) throw new Error("skill decide: reason missing; pass --reason TEXT and --pr URL for accept");
+      result = await ops.skillDecide(positional[0]!, positional[1]!, positional[2]!, reason, str("--pr"), ctx); break;
+    }
+    case "skill list": count(spec, positional, 1); result = ops.skillList(positional[0]!); break;
     case "lessons": {
       count(spec, positional, 1); const intent = str("--for"), halfLife = str("--half-life"), limit = integer(flags["--limit"], "--limit");
       result = await ops.lessons(positional[0]!, { ...(intent === undefined ? {} : { for: intent }), ...(halfLife === undefined ? {} : { halfLife: Number(halfLife) }), ...(limit === undefined ? {} : { limit }) }, ctx, env); break;
