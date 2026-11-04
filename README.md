@@ -2,7 +2,7 @@
 
 Research engine for the agent family ([agent-hub](https://github.com/STAIxBWLB/agent-hub), [agent-mem](https://github.com/STAIxBWLB/agent-mem), [vault-mem](https://github.com/STAIxBWLB/vault-mem), [agent-console](https://github.com/STAIxBWLB/agent-console)). The plan and phases are in [#1](https://github.com/STAIxBWLB/agent-research/issues/1).
 
-This checkout implements A1 literature studies, A2 container experiments and the A3 plan DAG: an append-only ledger, approval gates, verified reference identifiers, frozen candidate snapshots, separate evaluator containers, attempt records and a resumable controller with read-only hub task references. Investigation selection, idea decisions, winner/no-winner results, declared ablations, reserved-seed final evaluation and exploratory posthoc results are available. Automatic idea generation, manuscripts, memory integration and the console panel remain later work.
+This checkout implements A1 literature studies, A2 container experiments and the A3 plan DAG: an append-only ledger, approval gates, verified reference identifiers, frozen candidate snapshots, separate evaluator containers, attempt records and a resumable controller with read-only hub task references. Investigation selection, idea decisions, winner/no-winner results, declared ablations, reserved-seed final evaluation and exploratory posthoc results are available. Paper check/build and build-bound review gates render evidence-backed Markdown. Automatic idea generation/writing/reviewing, memory integration and the console panel remain later work.
 
 ## Install
 
@@ -181,6 +181,58 @@ A conductor can use no-argument `ablate.close` and `final.close` steps. Outputs 
 
 Final here means reserved seeds, the frozen Git snapshot and the sealed evaluator. Held-out evaluator data outside the study repository is deferred; data already in `task/` is not hidden from agents. Acceptance uses offline synthetic fixtures; no live hub campaign or live executor DAG coverage is claimed.
 
+## Paper and review workflow
+
+A4 renders Markdown from recorded evidence; it does not write a manuscript or run reviewers for you. Write `paper/manuscript.md` (at most 2 MiB) and put measured values in `{{n:REF}}` placeholders, optionally `{{n:REF|.Nf}}` with N from 0 to 6. At most 5,000 numeric and literal placeholders are allowed together. Use `{{lit:TEXT}}` for a reviewer-visible literal such as a year or cohort label. Every literal is listed by the check; it is an explicit exception, not a measured-value match.
+
+| Ref | Closed source |
+| --- | --- |
+| `final.status`, `final.reason`, `final.delta`, `final.mean`, `final.baselineMean`, `final.attempts.<status>` | current final result and all-final-attempt status counts |
+| `investigate.winner`, `investigate.reason`, `investigate.winner.delta`, `investigate.winner.mean`, `investigate.baseline.mean`, `investigate.totals.<status>` | current closed investigate result |
+| `ablate:<id>.delta`, `ablate:<id>.mean`, `ablate:<id>.referenceMean`, `ablate.totals.<status>` | current closed ablate result |
+| `attempt:<id>.<metric>`, `posthoc:<id>.<metric>` | succeeded current-protocol attempt with a finite ares-observed metric; posthoc always appends ` (exploratory)` |
+
+Status counts use `running`, `succeeded`, `failed`, `cancelled` or `unknown`. Text refs take no numeric format; an investigate winner renders as its 12-hex commit prefix. Missing, null, unclosed, stale or unsupported sources give `unresolved-ref`. Final refs also need the final gate currently approved. Metric names are exact declared names, including spaces and punctuation such as `accuracy (%)`; names containing `|` or `}` are unreferenceable in this grammar and need a new protocol/name. The ordinary `attempt:` prefix refuses posthoc records, and `posthoc:` refuses other runs.
+
+```sh
+ares paper check experiment --json
+ares paper build experiment --json
+```
+
+In experiment prose, other digits give `bare-number`; matching a free number against an existing metric is never allowed. Digits are allowed in link targets, placeholder/literal payloads and line-start ordered-list markers. Citation keys may contain digits, but bracket prose is checked: only locator terms (`p.`, `pp.`, `sec.`, `§`, `ch.`, `chap.`, `fig.`, `tbl.`, `table`, `eq.`, `l.`, `ll.`, `para.`) followed by integers, ranges or lists are exempt. `[@key, improved accuracy by 12.5%]` still fails. Inline/fenced/indented code numbers are nonblocking but listed as `codeNumbers` (first 500 values with line/column) and `codeNumberCount` (total). Paragraph and list continuations are prose. Unknown or unverified citation keys fail, including citations inside literal escapes; verification means identifier existence plus title/year match, never support for a claim.
+
+Negative results must be visible: when final.json exists, include `{{n:final.status}}`; when the closed investigation has no winner, include `{{n:investigate.reason}}`. Code examples, link targets, HTML comments and reference-definition metadata cannot satisfy this rule. Include a reason or numeric ref only when that source field exists; null values stay unresolved. The check is read-only and reports positions for every finding; a failing CLI check exits 1. Survey studies check citations without the experiment bare-number rule and refuse experiment placeholders with `unresolved-ref`; they can build citation-only manuscripts.
+
+Build refuses every finding before writes. It commits `paper/build/manuscript.md` (rendered values), `paper/build/evidence.json` (`paperEvidence: 1`) and `paper.built` together. The evidence map keeps the input manuscript hash and each active placeholder's syntax, value, rendering, position, source file and raw source hash; literal sources point to the input manuscript. Outputs are bounded to 2 MiB rendered Markdown and 8 MiB evidence. Identical outputs with a matching receipt are a no-op. Changed provenance rebuilds evidence even if rendered text is identical; unknown evidence versions preserve original bytes. The returned `manuscriptSha256` is the rendered output hash; `evidenceSha256` is the review's build identity.
+
+Have reviewers inspect the current output, evidence, literals and code-number list. Save each report and add it against the current evidence hash:
+
+```json
+{
+  "v": 1,
+  "reviewer": {"id": "reviewer-a", "modelFamily": "family-a"},
+  "buildSha256": "<current-evidenceSha256>",
+  "checklist": {"negativeResults": true, "denominators": true, "limitations": true, "reproducibility": true},
+  "findings": []
+}
+```
+
+```sh
+ares review add experiment --file review-a.json
+# Add a report from a second, distinct model family with the same current evidence hash.
+ares review add experiment --file review-b.json
+ares review show experiment --json
+# For an existing finding, using the review id returned by add:
+ares review resolve experiment <review-id>/<finding-id> --reason "How the issue was resolved"
+ares gate approve experiment review
+```
+
+A finding is `{id,kind,location,text,blocking}`; kinds are `contradiction`, `unsupported-claim`, `number`, `citation`, `method`, `clarity`, `other`. Contradictions are always blocking, even if submitted as false. A reasoned resolution records its actor; clean votes never resolve another review's finding. Reports use self-reported family labels, normalized for whitespace at the ends and case; ares neither launches nor attests to the reviewers. Limits: 100 reports per build, 200 findings per report, 4,000-byte texts/reasons, 128-byte reviewer/family/finding identifiers. The existing ledger event ceiling also limits a combined report to 60 KiB; shorten a report rather than raising the ledger bound.
+
+The global `review` gate needs a clean current check/build, at least two distinct model families for that evidence hash, and no open blocking finding. Checklist answers are shown, including false answers, rather than adding a separate approval condition. Readiness names every unmet condition. Approval is checked in the shared command under the study lock; reject still needs a reason but no readiness. No current command auto-requires the review gate. The gate binds both output hashes and sorted added/resolved event hashes for that build. A changed build, added review or resolution reopens it; old reviews stay in the ledger but do not count toward a new build.
+
+A no-argument `paper.build` conductor step emits `{sha256}` of the committed evidence file; a downstream `plan:<id>` gate binds it. That local gate does not replace the global manuscript `review` gate. MCP paper/review operations never start the controller loop. Claim-to-passage evidence and its contradictions await [agent-hub#931](https://github.com/STAIxBWLB/agent-hub/issues/931); readiness currently reports `claims: unavailable (STAIxBWLB/agent-hub#931)` without blocking on it. Claim verdicts stay outside ares. LaTeX/PDF container builds and venue templates are out of scope. Acceptance uses offline synthetic fixtures, not live hub/executor DAG proof.
+
 ## Plan and conductor workflow
 
 A plan connects existing commands, approval gates and read-only hub task references. It can close investigate, ablate and final results and bind their output references to downstream gates. Create a study first. This offline example checks two drafts, with an approval between them: put citation-free text in `plan-study/draft.md` and `plan-study/final.md`, and save this definition as `draft-plan.json`:
@@ -218,7 +270,7 @@ ares plan show plan-study --json
 
 `run` exits 0 when the plan is done. Each controller start restores an unfinished plan paused; resume it explicitly from another terminal or MCP client. SIGINT/SIGTERM stops admission, drains active command calls, records paused when still running, and releases the controller lock. Detached attempts stay alive for `attempt reconcile`. A live or foreign controller owner is refused; a dead same-host owner is recoverable by pid and process start identity, never by lock age. Waiting observations use 1 s to 30 s backoff, reset on progress, and unchanged polls write nothing.
 
-Plan definitions accept at most 128 nodes, 512 explicit edges and 128-byte ids, with no cycles or missing dependency endpoints. `needs` and `edges` both supply dependencies; a gate's `binds` may name only upstream nodes. A step command is one of `lit.search`, `lit.verify`, `lit.bib`, `cite.check`, `attempt.run`, `investigate.close`, `ablate.close`, `final.close`. Close steps take no args. Named `args` carry CLI options without `--`, including `year-from`; positional inputs are `query` for search, optional `ids` for verify, and `draft` for cite check. `attempt.run` needs `repo` and `commit`, always detaches, and accepts the existing seed/run/label/retry options. Steps refuse controller-owned `json` and `detach` arguments. Relative `repo` and `draft` resolve against the study directory. Scope, screen and design prerequisites still apply to the underlying commands.
+Plan definitions accept at most 128 nodes, 512 explicit edges and 128-byte ids, with no cycles or missing dependency endpoints. `needs` and `edges` both supply dependencies; a gate's `binds` may name only upstream nodes. A step command is one of `lit.search`, `lit.verify`, `lit.bib`, `cite.check`, `attempt.run`, `investigate.close`, `ablate.close`, `final.close`, `paper.build`. Close/build steps take no args. Named `args` carry CLI options without `--`, including `year-from`; positional inputs are `query` for search, optional `ids` for verify, and `draft` for cite check. `attempt.run` needs `repo` and `commit`, always detaches, and accepts the existing seed/run/label/retry options. Steps refuse controller-owned `json` and `detach` arguments. Relative `repo` and `draft` resolve against the study directory. Scope, screen and design prerequisites still apply to the underlying commands.
 
 `--parallel` admits 1..8 step nodes (default 1); the existing one-active-attempt-per-study rule still applies. Plan state is replayed from ledger events. `plan show` is lock-free and lists each node's current status, last observation, attempt/retry/task references, gate decisions, uncertain nodes and controller owner. It also shows `hubProject` when a hub read resolves a board.
 
@@ -253,7 +305,7 @@ Sealing and metrics are **ares-observed**: ares builds the argv and checks the o
 
 ## Gates
 
-`scope` binds to the content of `scope.json`; `screen` binds to the set of included papers; `design` binds the experiment protocol and task tree, plus selection/final-seeds files when present; `final` binds closed upstream results and design; `plan:<node-id>` binds a plan gate to all upstream observed output references. Changing bound content returns its gate to pending. With `--autonomy auto` a pending gate is approved as `auto` when a command needs it; with `gates` (default) someone must run `ares gate approve`. The ledger records who approved: a person, an agent (detected from the agent environment) or `auto`. Which of them may approve is the workspace's policy, not the tool's. For experiments, automatic design and final approval is committed with a verified candidate start; a failed preparation records no approval.
+`scope` binds to the content of `scope.json`; `screen` binds to the set of included papers; `design` binds the experiment protocol and task tree, plus selection/final-seeds files when present; `final` binds closed upstream results and design; `review` binds the current rendered/evidence hashes and current-build review/resolution event hashes; `plan:<node-id>` binds a plan gate to all upstream observed output references. Changing bound content returns its gate to pending. With `--autonomy auto` a pending gate is approved as `auto` when a command needs it; with `gates` (default) someone must run `ares gate approve`. The ledger records who approved: a person, an agent (detected from the agent environment) or `auto`. Which of them may approve is the workspace's policy, not the tool's. For experiments, automatic design and final approval is committed with a verified candidate start; a failed preparation records no approval. The review gate is approved explicitly after its readiness conditions pass; no current command auto-requires it.
 
 ## Study files
 
@@ -274,6 +326,9 @@ Sealing and metrics are **ares-observed**: ares builds the argv and checks the o
 | `runs/ablate/ablate.json` | declaration rows paired with winner replication, without ranking |
 | `runs/final/final.json` | one-shot qualification, decisive attempts and all final attempts |
 | `runs/<run>/investigate.json` | deterministic winner/no-winner result, candidate rows and totals |
+| `paper/manuscript.md` | source Markdown with numeric refs and literal escapes |
+| `paper/build/manuscript.md` | rendered manuscript |
+| `paper/build/evidence.json` | versioned placeholder values, source paths/hashes and input manuscript hash |
 | `executor.json` | executor kind, optional SSH alias and required workdir |
 | `runs/<run>/attempts/<id>.json` | attempt identity, stage receipts, status, metrics and artifact/log metadata |
 
@@ -307,8 +362,8 @@ ares protocol <dir> --file PATH|- [--json]
 ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--json]
 ares executor check <dir> [--json]
 ares gate list <dir> [--json]
-ares gate approve <dir> <scope|screen|design|final|plan:node-id> [--reason TEXT] [--json]
-ares gate reject <dir> <scope|screen|design|final|plan:node-id> --reason TEXT [--json]
+ares gate approve <dir> <scope|screen|design|final|review|plan:node-id> [--reason TEXT] [--json]
+ares gate reject <dir> <scope|screen|design|final|review|plan:node-id> --reason TEXT [--json]
 ares attempt run <dir> --repo PATH --commit SHA [--seed N] [--run NAME] [--label TEXT] [--retry ID] [--detach] [--json]
 ares attempt list <dir> [--run NAME] [--status running|succeeded|failed|cancelled|unknown] [--limit N] [--offset N] [--json]
 ares attempt show <dir> <id> [--json]
@@ -321,16 +376,21 @@ ares lit screen <dir> <id>... --include|--exclude [--reason TEXT] [--json]
 ares lit card <dir> <id> --file PATH|- [--json]
 ares lit verify <dir> [<id>...] [--json]
 ares lit bib <dir> [--json]
+ares review add <dir> --file PATH|- [--json]
+ares review resolve <dir> <review-id>/<finding-id> --reason TEXT [--json]
+ares review show <dir> [--json]
+ares paper build <dir> [--json]
+ares paper check <dir> [--json]
 ares cite check <dir> <draft> [--json]
 ares playbook
 ares mcp
 ```
 
-MCP uses shared command handlers; `init`, the controller loop `run`, and the server entrypoint `mcp` are CLI-only. Investigation tools are `ares_selection_set`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show` and `ares_investigate_close`. Plan tools are `ares_plan_set`, `ares_plan_show` and `ares_plan_control`; `ares_gate` accepts `plan:<node-id>`. Setting, showing or controlling a plan never starts the controller loop. Start `ares run` in a separate terminal before resuming through MCP. Experiment tools are `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile` and `ares_attempt_logs`; `ares_gate` accepts `design` and `final`. Phase tools include `ares_final_seeds`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_final_close` and `ares_posthoc_show`. Attempt run is always detached over MCP, and executor-reaching tools carry `openWorldHint`.
+MCP uses shared command handlers; `init`, the controller loop `run`, and the server entrypoint `mcp` are CLI-only. Investigation tools are `ares_selection_set`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show` and `ares_investigate_close`. Plan tools are `ares_plan_set`, `ares_plan_show` and `ares_plan_control`; `ares_gate` accepts `plan:<node-id>`. Setting, showing or controlling a plan never starts the controller loop. Start `ares run` in a separate terminal before resuming through MCP. Experiment tools are `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile` and `ares_attempt_logs`; `ares_gate` accepts `design`, `final` and `review`. Paper/review tools are `ares_paper_check`, `ares_paper_build`, `ares_review_add`, `ares_review_resolve` and `ares_review_show`. Phase tools include `ares_final_seeds`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_final_close` and `ares_posthoc_show`. Attempt run is always detached over MCP, and executor-reaching tools carry `openWorldHint`.
 
 ## Version and format discovery
 
-`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `study`, `ledgerEvent`, `experimentProtocol`, `executor`, `experimentAttempt`, `studyPlan`, `experimentSelection`, `investigateResult`, `experimentFinalSeeds`, `ablateResult` and `finalResult`, all version 1, carried by each record's `v` field.
+`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `study`, `ledgerEvent`, `experimentProtocol`, `executor`, `experimentAttempt`, `studyPlan`, `experimentSelection`, `investigateResult`, `experimentFinalSeeds`, `ablateResult`, `finalResult` and `paperEvidence`, all version 1, carried by each record's `v` field.
 
 Within a supported schema, readers preserve additive fields on study/attempt records and keep ledger events with unknown kinds. Appending to the ledger leaves prior lines intact; updating an attempt keeps unrecognized fields and stage entries. Unknown stage entries remain readable, including logs and totals, but budget-gated starts refuse with an upgrade instruction because this version cannot account for their resource use. A future schema version or unknown execution status/stage is refused with an upgrade instruction, leaving the original data unchanged. Unknown plan versions or node kinds are refused without changing plan.json. Command input remains strict so unknown options or protocol fields cannot silently change an experiment.
 
@@ -348,7 +408,7 @@ Keys are sent with requests only; they are never written to the study.
 
 ## Not implemented yet
 
-Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, signed executor receipts, manuscript build, vault-mem reference notes (after vault-mem#73), agent-mem conventions, the console plugin, `ares setup`, scheduled searches, the `copilot` and `step` autonomy modes.
+Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, signed executor receipts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, vault-mem reference notes (after vault-mem#73), agent-mem conventions, the console plugin, `ares setup`, scheduled searches, the `copilot` and `step` autonomy modes.
 
 ## Development
 

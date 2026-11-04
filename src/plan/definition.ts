@@ -4,7 +4,7 @@ import { COMMANDS } from "../commands-table.ts";
 import { boundedText, commit, onlyKeys, plain, readJsonFile, sha256, type Actor } from "../study.ts";
 
 export const PLAN_BYTES = 65_536;
-export const STEP_COMMANDS = ["lit.search", "lit.verify", "lit.bib", "cite.check", "attempt.run", "investigate.close", "ablate.close", "final.close"] as const;
+export const STEP_COMMANDS = ["lit.search", "lit.verify", "lit.bib", "cite.check", "attempt.run", "investigate.close", "ablate.close", "final.close", "paper.build"] as const;
 export type StepCommand = typeof STEP_COMMANDS[number];
 export type StepArgs = Record<string, string | number | boolean | string[]>;
 type BaseNode = { id: string; needs: string[] };
