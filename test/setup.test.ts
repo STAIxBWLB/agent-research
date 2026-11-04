@@ -130,7 +130,7 @@ test("receipt is durable before config rename and a failed config write rolls it
     return original(from, to);
   }) as typeof fs.renameSync);
   try { refuse(runSetup("claude", "apply", f.options)); } finally { spy.mockRestore(); }
-  expect(fs.existsSync(action.file)).toBe(false); expect(fs.existsSync(action.receipt)).toBe(false);
+  expect(fs.existsSync(action.file)).toBe(false); expect(fs.existsSync(action.receipt)).toBe(false); expect(fs.existsSync(action.lock)).toBe(false);
 });
 
 test("CLI preview/apply/undo use only temp HOME and reject incompatible options or unsupported targets", async () => {
@@ -219,4 +219,30 @@ test("readable administrator-owned release files register without weakening conf
   try { expect(runSetup("claude", "apply", { ...f.options, root: location }).applied).toBe(true); }
   finally { stat.mockRestore(); fdStat.mockRestore(); }
   expect(json(join(f.home, ".claude.json")).mcpServers.ares.args[1]).toBe(join(location, "bin", "ares.js"));
+});
+
+test("overlapping applies are serialized per client and cannot roll back a successful receipt", () => {
+  const f = fixture(), one = root("1.0.0"), two = root("2.0.0"), action = runSetup("claude", "dry-run", { ...f.options, root: one }).actions[0]!;
+  const original = fs.renameSync; let nested: ReturnType<typeof runSetup> | undefined, crossFamily: ReturnType<typeof runSetup> | undefined, triggered = false;
+  const spy = spyOn(fs, "renameSync").mockImplementation(((from: fs.PathLike, to: fs.PathLike) => {
+    original(from, to);
+    if (String(to) === action.receipt && !triggered) {
+      triggered = true; nested = runSetup("claude", "apply", { ...f.options, root: two });
+      crossFamily = runSetup("claude", "apply", { ...f.options, env: { ...f.env, AGENTHUB_HOME: join(f.home, "other-family") }, root: two });
+    }
+  }) as typeof fs.renameSync);
+  try { expect(runSetup("claude", "apply", { ...f.options, root: one }).applied).toBe(true); } finally { spy.mockRestore(); }
+  expect(nested!.applied).toBe(false); expect(nested!.actions[0]!.reason).toContain("locked"); expect(crossFamily!.actions[0]!.reason).toContain("locked"); expect(fs.existsSync(join(f.home, "other-family"))).toBe(false); expect(fs.existsSync(action.lock)).toBe(false);
+  expect(json(action.receipt).installed).toEqual(json(action.file).mcpServers.ares);
+  expect(runSetup("claude", "apply", { ...f.options, root: two }).applied).toBe(true);
+  expect(json(action.receipt).installed).toEqual(json(action.file).mcpServers.ares);
+  expect(runSetup("claude", "undo", f.options).applied).toBe(true); expect(fs.existsSync(action.receipt)).toBe(false); expect(fs.existsSync(action.lock)).toBe(false);
+});
+
+test("undo restores TOML datetime and nonfinite values from the raw table, not JSON", () => {
+  const f = fixture(), file = join(f.home, ".codex", "config.toml"); fs.mkdirSync(dirname(file));
+  const original = '[mcp_servers.ares]\ncommand = "old"\nstarted = 1979-05-27T07:32:00Z\npositive = inf\nnegative = -inf\nnot_number = nan\n\n[model]\nname = "synthetic"\n';
+  fs.writeFileSync(file, original); expect(runSetup("codex", "apply", f.options).applied).toBe(true);
+  const undone = runSetup("codex", "undo", f.options); expect(undone.actions.filter(action => action.change === "refused")).toEqual([]); expect(undone.applied).toBe(true);
+  expect(Bun.TOML.parse(fs.readFileSync(file, "utf8"))).toEqual(Bun.TOML.parse(original)); expect(fs.existsSync(undone.actions[0]!.lock)).toBe(false);
 });

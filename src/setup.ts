@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, realpathSync, unlinkSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, realpathSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,7 @@ export type SetupTarget = typeof SETUP_TARGETS[number];
 export type SetupMode = "dry-run" | "apply" | "undo";
 export interface McpEntry { command: string; args: string[] }
 interface Host { target: SetupTarget; file: string; key: string; format: "json" | "toml" }
-export interface SetupAction { target: SetupTarget; file: string; entry: string; receipt: string; change: "add" | "replace" | "unchanged" | "restore" | "remove" | "none" | "refused"; receiptChange: "add" | "replace" | "remove" | "none"; reason?: string }
+export interface SetupAction { target: SetupTarget; file: string; entry: string; receipt: string; lock: string; change: "add" | "replace" | "unchanged" | "restore" | "remove" | "none" | "refused"; receiptChange: "add" | "replace" | "remove" | "none"; reason?: string }
 export interface SetupReport { mode: SetupMode; applied: boolean; root: string; entry: McpEntry; actions: SetupAction[]; notes: string[] }
 interface Receipt { v: 1; target: SetupTarget; file: string; existed: boolean; keyExisted: boolean; priorPresent: boolean; prior?: unknown; priorToml?: string; installed: McpEntry }
 interface Plan { host: Host; action: SetupAction; before: string | null; after: string | null; receiptBefore: string | null; receiptAfter: string | null }
@@ -146,7 +146,7 @@ function put(host: Host, source: string | null, value: unknown, rawToml?: string
     lines.push(prefix + (source ? newline : "") + block);
   }
   const output = lines.join("");
-  try { const parsed = document(host, output); if (!isDeepStrictEqual(parsed.mcp_servers === undefined ? undefined : record(parsed.mcp_servers).ares, value)) throw new Error(); }
+  try { const parsed = document(host, output); if (!isDeepStrictEqual(parsed.mcp_servers === undefined ? undefined : record(parsed.mcp_servers).ares, rawToml === undefined ? value : entry(host, rawToml))) throw new Error(); }
   catch { fail("TOML entry cannot be edited safely; convert inline/dotted ares settings to [mcp_servers.ares] tables first"); }
   return output;
 }
@@ -169,8 +169,10 @@ function receipt(source: string | null, host: Host): Receipt | undefined {
     || (raw.priorPresent && !Object.hasOwn(raw, "prior")) || (raw.priorToml !== undefined && typeof raw.priorToml !== "string")) fail("unsupported, malformed or foreign setup receipt");
   return raw as unknown as Receipt;
 }
-function plan(host: Host, receiptPath: string, mode: SetupMode, desired: McpEntry): Plan {
-  const action: SetupAction = { target: host.target, file: host.file, entry: `${host.key}.ares`, receipt: receiptPath, change: "none", receiptChange: "none" };
+function plan(host: Host, receiptPath: string, mode: SetupMode, desired: McpEntry, ownsLock = false): Plan {
+  const action: SetupAction = { target: host.target, file: host.file, entry: `${host.key}.ares`, receipt: receiptPath, lock: `${host.file}.ares-setup.lock`, change: "none", receiptChange: "none" };
+  guard(action.lock);
+  if (!ownsLock && existsSync(action.lock)) fail("target is locked by another setup", "retry after that setup finishes");
   const before = read(host.file, SETUP_CONFIG_BYTES), receiptBefore = read(receiptPath, SETUP_RECEIPT_BYTES), prior = receipt(receiptBefore, host), current = entry(host, before);
   const result: Plan = { host, action, before, after: before, receiptBefore, receiptAfter: receiptBefore };
   if (mode === "undo") {
@@ -190,6 +192,14 @@ function plan(host: Host, receiptPath: string, mode: SetupMode, desired: McpEntr
   assertWritable(result.after, SETUP_CONFIG_BYTES, "client config");
   action.change = current === undefined ? "add" : "replace"; action.receiptChange = receiptBefore === null ? "add" : "replace"; return result;
 }
+/** Per-config, not per-family, so two family homes cannot race on the same client file. */
+function acquireSetupLock(file: string): () => void {
+  guard(file); mkdirSync(dirname(file), { recursive: true, mode: 0o700 }); guard(file);
+  let fd: number;
+  try { fd = openSync(file, "wx", 0o600); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") fail("target is locked by another setup", "retry after that setup finishes"); throw error; }
+  return () => { try { closeSync(fd); } finally { unlinkSync(file); } };
+}
 /** Agent setup only. Console dispatch is deliberately separate for the plugin integration. */
 export function runSetup(target: string, mode: SetupMode, options: { env: NodeJS.ProcessEnv; cwd?: string; root?: string }): SetupReport {
   if (target === "console") fail("console setup is not available in this version", "use an agent target or upgrade to a release with console support");
@@ -202,12 +212,17 @@ export function runSetup(target: string, mode: SetupMode, options: { env: NodeJS
   for (const name of targets) {
     const host = table[name], receiptPath = join(family, "research", "setup", `${name}-${sha256(host.file).slice(0, 16)}.json`);
     try { const item = plan(host, receiptPath, mode, desired); plans.push(item); report.actions.push(item.action); }
-    catch (error) { report.actions.push({ target: name, file: host.file, entry: `${host.key}.ares`, receipt: receiptPath, change: "refused", receiptChange: "none", reason: failureReason(error) }); }
+    catch (error) { report.actions.push({ target: name, file: host.file, entry: `${host.key}.ares`, receipt: receiptPath, lock: `${host.file}.ares-setup.lock`, change: "refused", receiptChange: "none", reason: failureReason(error) }); }
   }
   if (mode === "dry-run" || report.actions.some(action => action.change === "refused")) return report;
-  for (const item of plans) {
+  for (let item of plans) {
     if (["none", "unchanged"].includes(item.action.change)) continue;
+    let release: (() => void) | undefined;
     try {
+      release = acquireSetupLock(item.action.lock);
+      const fresh = plan(item.host, item.action.receipt, mode, desired, true);
+      Object.assign(item.action, fresh.action); item = { ...fresh, action: item.action };
+      if (["none", "unchanged"].includes(item.action.change)) continue;
       if (read(item.host.file, SETUP_CONFIG_BYTES) !== item.before || read(item.action.receipt, SETUP_RECEIPT_BYTES) !== item.receiptBefore) fail("config or receipt changed during setup; rerun preview before applying");
       // Receipt is durable before apply changes client config. Undo keeps the receipt until restoration succeeds.
       if (mode === "apply") write(item.action.receipt, item.receiptAfter, SETUP_RECEIPT_BYTES);
@@ -215,10 +230,11 @@ export function runSetup(target: string, mode: SetupMode, options: { env: NodeJS
         if (read(item.host.file, SETUP_CONFIG_BYTES) !== item.before) fail("client config changed after receipt creation; rerun preview before applying");
         write(item.host.file, item.after, SETUP_CONFIG_BYTES);
       }
-      catch (error) { if (mode === "apply") write(item.action.receipt, item.receiptBefore, SETUP_RECEIPT_BYTES); throw error; }
+      catch (error) { if (mode === "apply" && read(item.action.receipt, SETUP_RECEIPT_BYTES) === item.receiptAfter) write(item.action.receipt, item.receiptBefore, SETUP_RECEIPT_BYTES); throw error; }
       if (mode === "undo") write(item.action.receipt, null, SETUP_RECEIPT_BYTES);
       report.applied = true;
     } catch (error) { item.action.change = "refused"; item.action.reason = failureReason(error); break; }
+    finally { release?.(); }
   }
   return report;
 }
