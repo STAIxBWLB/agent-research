@@ -91,6 +91,8 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       result = await ops.scope(positional[0]!, await readInput(file, io), ctx);
       break;
     }
+    case "investigate show": count(spec, positional, 1); result = ops.investigateShow(positional[0]!); break;
+    case "investigate close": count(spec, positional, 1); result = await ops.investigateClose(positional[0]!, ctx); break;
     case "selection": {
       count(spec, positional, 1);
       const file = str("--file");

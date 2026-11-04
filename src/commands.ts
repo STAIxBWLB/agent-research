@@ -1,3 +1,4 @@
+import { showInvestigation, closeInvestigation } from "./exp/investigate.ts";
 import { setSelection } from "./exp/selection.ts";
 import { createHubClient } from "./plan/hub.ts";
 import { runPlan, type ControllerRuntime, type Observation, type StepNode } from "./plan/controller.ts";
@@ -335,4 +336,11 @@ export async function selection(dirArg: string, raw: unknown, ctx: Pick<Ctx, "ac
     const result = setSelection(dir, raw, design.protocol, ctx.actor);
     return { ...result, gate: gateState("design", readLedger(dir), binder(dir)) };
   });
+}
+
+
+export const investigateShow = (dir: string) => showInvestigation(dir);
+export async function investigateClose(dirArg: string, ctx: Pick<Ctx, "actor">) {
+  const { dir, study } = openStudy(dirArg); requireExperiment(study);
+  return withLock(dir, () => closeInvestigation(dir, ctx.actor));
 }
