@@ -12,7 +12,7 @@ test("manifest CLI and MCP publish the package version, all commands and impleme
   const expected = ops.manifest();
   expect(expected.v).toBe(1); expect(expected.version).toBe(version);
   expect(expected.commands).toEqual(COMMANDS.map(({ name, usage }) => ({ name, usage })));
-  expect(expected.mcp).toEqual({ server: "ares", tools: ARES_TOOLS.map(tool => ({ name: tool.name, readOnly: tool.annotations.readOnlyHint === true })) });
+  expect(expected.mcp).toEqual({ server: "ares", tools: ARES_TOOLS.map(tool => ({ name: tool.name, readOnly: tool.annotations.readOnlyHint === true && tool.annotations.openWorldHint !== true })) });
   expect(expected.formats).toEqual({ manifest: 1, study: 1, paperEvidence: 1, skillProposal: 1, studyPlan: 1, ledgerEvent: 1, experimentProtocol: 1, experimentSelection: 1, experimentFinalSeeds: 1, ablateResult: 1, finalResult: 1, investigateResult: 1, executor: 1, experimentAttempt: 1 });
   const forbidden = async () => { throw new Error("manifest must not start a process"); };
   const cli = await run(["manifest", "--json"], {}, { http: fakeHttp([]).http, runner: forbidden });
@@ -35,7 +35,7 @@ test("manifest CLI and MCP publish the package version, all commands and impleme
   expected.commands.length = 0; Object.assign(expected.formats, { study: 999 });
   expected.mcp.tools[0]!.name = "changed"; expected.mcp.tools[0]!.readOnly = false; expected.mcp.tools.length = 0;
   expect(ops.manifest().commands.length).toBe(COMMANDS.length); expect(ops.manifest().formats.study).toBe(1);
-  expect(ops.manifest().mcp.tools).toEqual(ARES_TOOLS.map(tool => ({ name: tool.name, readOnly: tool.annotations.readOnlyHint === true })));
+  expect(ops.manifest().mcp.tools).toEqual(ARES_TOOLS.map(tool => ({ name: tool.name, readOnly: tool.annotations.readOnlyHint === true && tool.annotations.openWorldHint !== true })));
 });
 
 test("manifest rejects positional arguments and unsupported options", async () => {
@@ -44,13 +44,15 @@ test("manifest rejects positional arguments and unsupported options", async () =
 });
 
 
-test("manifest read-only grants match tool annotations while network/container mutations stay false", () => {
+test("manifest read-only grants exclude every open-world tool, including executor log reads", () => {
   const tools = ops.manifest().mcp.tools;
   expect(tools.map(tool => tool.name)).toEqual(ARES_TOOLS.map(tool => tool.name));
-  for (const tool of ARES_TOOLS) expect(tools.find(row => row.name === tool.name)!.readOnly).toBe(tool.annotations.readOnlyHint === true);
+  for (const tool of ARES_TOOLS) expect(tools.find(row => row.name === tool.name)!.readOnly).toBe(tool.annotations.readOnlyHint === true && tool.annotations.openWorldHint !== true);
+  for (const tool of ARES_TOOLS.filter(tool => tool.annotations.openWorldHint === true)) expect(tools.find(row => row.name === tool.name)!.readOnly).toBe(false);
   for (const name of ["ares_archive", "ares_lit_search", "ares_lit_verify", "ares_executor_check", "ares_attempt_run", "ares_attempt_cancel", "ares_attempt_reconcile", "ares_plan_control"]) {
     expect(tools.find(tool => tool.name === name)?.readOnly).toBe(false);
   }
   expect(tools.find(tool => tool.name === "ares_status")?.readOnly).toBe(true);
-  expect(tools.find(tool => tool.name === "ares_lessons")?.readOnly).toBe(true);
+  expect(tools.find(tool => tool.name === "ares_lessons")?.readOnly).toBe(false);
+  expect(tools.find(tool => tool.name === "ares_attempt_logs")?.readOnly).toBe(false);
 });

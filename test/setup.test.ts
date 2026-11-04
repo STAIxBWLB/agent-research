@@ -171,3 +171,19 @@ test("a multiline TOML closing line beginning with # belongs to the saved entry,
   fs.writeFileSync(file, fs.readFileSync(file, "utf8").replace('# closing"""\n', '').replace('# user comment\n', ''));
   expect(runSetup("codex", "undo", f.options).applied).toBe(true); expect(Bun.TOML.parse(fs.readFileSync(file, "utf8"))).toEqual(original);
 });
+
+test("argument refusals give the relevant next step and file refusals are not double-suffixed", () => {
+  const f = fixture();
+  for (const [target, mode, options, expected] of [
+    ["console", "dry-run", f.options, "use an agent target"],
+    ["unknown", "dry-run", f.options, "use claude|codex"],
+    ["claude", "dry-run", { ...f.options, root: "relative" }, "pass --root ABS"],
+    ["claude", "invalid", f.options, "choose dry-run, apply or undo"],
+  ] as const) {
+    try { runSetup(target, mode as "dry-run", options); throw new Error("expected refusal"); }
+    catch (error) { const message = (error as Error).message; expect(message).toContain(expected); expect(message).not.toContain("restore its setup receipt"); }
+  }
+  fs.writeFileSync(join(f.home, ".claude.json"), "not JSON");
+  const reason = runSetup("claude", "dry-run", f.options).actions[0]!.reason!;
+  expect(reason).toContain("invalid JSON"); expect(reason.match(/restore its setup receipt/g)).toHaveLength(1); expect(reason).not.toContain("correct the file or receipt and retry");
+});

@@ -16,9 +16,13 @@ interface Receipt { v: 1; target: SetupTarget; file: string; existed: boolean; k
 interface Plan { host: Host; action: SetupAction; before: string | null; after: string | null; receiptBefore: string | null; receiptAfter: string | null }
 export const SETUP_CONFIG_BYTES = 4 * 1024 * 1024, SETUP_RECEIPT_BYTES = 8 * 1024 * 1024;
 const OWN_ROOT = fileURLToPath(new URL("..", import.meta.url));
-function fail(message: string): never { throw new Error(`setup: ${message}; correct the config or restore its setup receipt, then rerun ares setup`); }
+class SetupError extends Error {}
+function fail(message: string, nextStep = "correct the config or restore its setup receipt, then rerun ares setup"): never { throw new SetupError(`setup: ${message}; ${nextStep}`); }
+function failureReason(error: unknown): string {
+  return error instanceof SetupError ? error.message : `setup: ${error instanceof Error ? error.message : "file operation failed"}; check file permissions and the setup receipt, then rerun ares setup`;
+}
 function absolute(value: string, label: string): string {
-  if (!isAbsolute(value) || value.includes("\0")) fail(`${label} must be an absolute path`);
+  if (!isAbsolute(value) || value.includes("\0")) fail(`${label} must be an absolute path`, label === "--root" ? "pass --root ABS for an existing agent-research release" : `set ${label} to an absolute path and rerun ares setup`);
   return resolve(value);
 }
 /** Refuse links anywhere along a config/receipt path, including not-yet-created descendants. */
@@ -149,12 +153,12 @@ function put(host: Host, source: string | null, value: unknown, rawToml?: string
 function install(root: string): string {
   const requested = absolute(root, "--root");
   let location: string;
-  try { location = realpathSync(requested); } catch { fail("install root is unreadable or missing; select an existing agent-research release root"); }
+  try { location = realpathSync(requested); } catch { fail("install root is unreadable or missing", "pass --root ABS for an existing agent-research release"); }
   const source = read(join(location, "package.json"), 65_536);
-  let pkg: unknown; try { pkg = source === null ? null : JSON.parse(source); } catch { fail("install root package.json must be valid JSON"); }
-  if (!plain(pkg) || pkg.name !== "@staix/agent-research" || typeof pkg.version !== "string") fail("--root must name an agent-research install containing package.json and bin/ares.js");
+  let pkg: unknown; try { pkg = source === null ? null : JSON.parse(source); } catch { fail("install root package.json is not valid JSON", "select or reinstall an intact agent-research release root"); }
+  if (!plain(pkg) || pkg.name !== "@staix/agent-research" || typeof pkg.version !== "string") fail("--root is not an agent-research installation", "select a release root containing package.json and bin/ares.js");
   const bootstrap = join(location, "bin", "ares.js"); guard(bootstrap);
-  try { if (!lstatSync(bootstrap).isFile()) throw new Error(); } catch { fail("install root has no regular bin/ares.js; select an intact release root"); }
+  try { if (!lstatSync(bootstrap).isFile()) throw new Error(); } catch { fail("install root has no regular bin/ares.js", "select or reinstall an intact agent-research release root"); }
   return location;
 }
 function receipt(source: string | null, host: Host): Receipt | undefined {
@@ -188,9 +192,9 @@ function plan(host: Host, receiptPath: string, mode: SetupMode, desired: McpEntr
 }
 /** Agent setup only. Console dispatch is deliberately separate for the plugin integration. */
 export function runSetup(target: string, mode: SetupMode, options: { env: NodeJS.ProcessEnv; cwd?: string; root?: string }): SetupReport {
-  if (target === "console") fail("console setup is not available in this version; use an agent target until console support is installed");
-  if (target !== "all" && !(SETUP_TARGETS as readonly string[]).includes(target)) fail(`unknown target; use ${SETUP_TARGETS.join("|")}|all`);
-  if (!["dry-run", "apply", "undo"].includes(mode)) fail("mode must be dry-run, apply or undo");
+  if (target === "console") fail("console setup is not available in this version", "use an agent target or upgrade to a release with console support");
+  if (target !== "all" && !(SETUP_TARGETS as readonly string[]).includes(target)) fail("unknown target", `use ${SETUP_TARGETS.join("|")}|all`);
+  if (!["dry-run", "apply", "undo"].includes(mode)) fail("unsupported setup mode", "choose dry-run, apply or undo and rerun ares setup");
   const env = options.env, root = install(options.root ?? OWN_ROOT), desired: McpEntry = { command: "bun", args: ["--smol", join(root, "bin", "ares.js"), "mcp"] };
   const table = hosts(env, options.cwd ?? process.cwd()), family = absolute(env.AGENTHUB_HOME?.trim() || join(absolute(env.HOME?.trim() || homedir(), "HOME"), ".agenthub"), "AGENTHUB_HOME");
   const targets = target === "all" ? SETUP_TARGETS.filter(name => name !== "agy") : [target as SetupTarget], plans: Plan[] = [];
@@ -198,7 +202,7 @@ export function runSetup(target: string, mode: SetupMode, options: { env: NodeJS
   for (const name of targets) {
     const host = table[name], receiptPath = join(family, "research", "setup", `${name}-${sha256(host.file).slice(0, 16)}.json`);
     try { const item = plan(host, receiptPath, mode, desired); plans.push(item); report.actions.push(item.action); }
-    catch (error) { report.actions.push({ target: name, file: host.file, entry: `${host.key}.ares`, receipt: receiptPath, change: "refused", receiptChange: "none", reason: `${error instanceof Error ? error.message : "setup failed"}; correct the file or receipt and retry` }); }
+    catch (error) { report.actions.push({ target: name, file: host.file, entry: `${host.key}.ares`, receipt: receiptPath, change: "refused", receiptChange: "none", reason: failureReason(error) }); }
   }
   if (mode === "dry-run" || report.actions.some(action => action.change === "refused")) return report;
   for (const item of plans) {
@@ -214,7 +218,7 @@ export function runSetup(target: string, mode: SetupMode, options: { env: NodeJS
       catch (error) { if (mode === "apply") write(item.action.receipt, item.receiptBefore, SETUP_RECEIPT_BYTES); throw error; }
       if (mode === "undo") write(item.action.receipt, null, SETUP_RECEIPT_BYTES);
       report.applied = true;
-    } catch (error) { item.action.change = "refused"; item.action.reason = `${error instanceof Error ? error.message : "write failed"}; restore config permissions and rerun setup`; break; }
+    } catch (error) { item.action.change = "refused"; item.action.reason = failureReason(error); break; }
   }
   return report;
 }
