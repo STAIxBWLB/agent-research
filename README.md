@@ -135,7 +135,7 @@ ares idea decide experiment variant-1 refine --reason "Test the next frozen cand
 ares idea decide experiment variant-1 pivot --reason "Drop this direction" --attempts <terminal-attempt-id>
 ```
 
-Refine adds the uniquely owned commit. Pivot closes further decisions and keeps historical attempts and totals. Evidence is at most 200 existing, non-running, same-study attempt ids from the idea's commits; reasons are at most 2,000 bytes. An untested idea may omit `commit` when added, then omit `--attempts` for a first `refine --commit` or a pivot before testing. Once it has commits, nonempty evidence is required. Investigation rows and winner references carry the owning idea id; journal changes join the result's input hash. Survey studies refuse all selection, idea and investigate commands.
+Refine adds the uniquely owned commit. Pivot refuses `--commit`, closes further decisions and keeps historical attempts and totals. Evidence is at most 200 existing, non-running, same-study attempt ids from the idea's commits; reasons are at most 2,000 bytes. An untested idea may omit `commit` when added, then omit `--attempts` for a first `refine --commit` or a pivot before testing. Once it has commits, nonempty evidence is required. Investigation rows and winner references carry the owning idea id; journal changes join the result's input hash. Survey studies refuse all selection, idea and investigate commands.
 
 A conductor can put a no-argument `investigate.close` step after its agent-work hub unit, then bind a local plan gate to that result:
 

@@ -25,6 +25,8 @@ function validateDecision(raw: unknown, strict: boolean): IdeaDecision {
   if (!plain(raw)) bad("decision object required");
   if (strict) onlyKeys(raw, ["decision", "reason", "attempts", "commit"], "idea decision");
   if (raw.decision !== "refine" && raw.decision !== "pivot") bad("decision: use refine or pivot");
+  // Reject new pivot commit options; keep older ledger entries readable on replay.
+  if (strict && raw.decision === "pivot" && raw.commit !== undefined) bad("pivot does not take --commit; omit --commit, or use refine to attach a commit");
   const reason = boundedText(raw.reason, "idea reason", 2000);
   if (Buffer.byteLength(reason) > 2000) bad("reason: at most 2000 bytes required");
   if (raw.attempts !== undefined && (!Array.isArray(raw.attempts) || raw.attempts.length > MAX_DECISION_ATTEMPTS || raw.attempts.some(a => typeof a !== "string" || !/^[a-f0-9]{16}$/.test(a)))) bad(`attempts: name at most ${MAX_DECISION_ATTEMPTS} 16-hex attempt ids from ares attempt list`);

@@ -135,3 +135,19 @@ test("an untested idea attaches its first commit or pivots without attempts; com
   await ops.ideaAdd(dir, { id: "no-commit", title: "Synthetic", hypothesis: "Untested" }, ctx);
   await expect(ops.ideaDecide(dir, "no-commit", { decision: "refine", reason: "why", attempts: [foreign], commit: OTHER }, ctx)).rejects.toThrow("omit --attempts");
 });
+
+
+test("pivot rejects commit on API, CLI and MCP without writes, while legacy pivot metadata remains readable", async () => {
+  const dir = await setup(); await ops.ideaAdd(dir, idea(), ctx); const evidence = attempt(dir, BASE, "failed");
+  const before = readFileSync(join(dir, "ledger.jsonl"));
+  const input = { decision: "pivot", reason: "Synthetic dropped direction", attempts: [evidence], commit: NEXT };
+  await expect(ops.ideaDecide(dir, "root", input, ctx)).rejects.toThrow("pivot does not take --commit");
+  await expect(run(["idea", "decide", dir, "root", "pivot", "--reason", input.reason, "--attempts", evidence, "--commit", NEXT], {}, { http: ctx.http })).rejects.toThrow("omit --commit");
+  const server = createAresMcp({}, ctx.http);
+  await expect(server.handlers.ares_idea_decide!({ study: dir, id: "root", ...input })).rejects.toThrow("pivot does not take --commit");
+  expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
+  appendEvent(dir, actor, "idea.decided", { id: "root", ...input });
+  const legacy = readFileSync(join(dir, "ledger.jsonl")), replay = foldIdeas(readLedger(dir));
+  expect(replay[0]!.state).toBe("pivoted"); expect(replay[0]!.commits).toEqual([BASE]);
+  expect(replay[0]!.decisions[0]!.commit).toBe(NEXT); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(legacy);
+});
