@@ -367,7 +367,11 @@ export async function finalSeeds(dirArg: string, raw: unknown, ctx: Pick<Ctx, "a
   return withLock(dir, () => {
     const design = readDesign(dir);
     if (!design) throw new Error("final seeds: protocol missing; run ares protocol <dir> --file PATH first");
-    const result = setFinalSeeds(dir, raw, design.protocol, ctx.actor);
+    const result = setFinalSeeds(dir, raw, design.protocol, ctx.actor, () => {
+      const attempts = listAttempts(dir).attempts;
+      if (attempts.some(attempt => !Number.isSafeInteger(attempt.seed))) throw new Error("final seeds: attempt seed metadata is malformed; restore valid attempt records before reserving seeds");
+      return new Set(attempts.map(attempt => attempt.seed));
+    });
     return { ...result, gate: gateState("design", readLedger(dir), binder(dir)) };
   });
 }

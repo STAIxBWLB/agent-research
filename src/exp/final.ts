@@ -38,9 +38,14 @@ export function finalSeedsHash(dir: string, protocol: Protocol): string | undefi
   const value = record(dir, protocol); return value === undefined ? undefined : sha256(value.text);
 }
 /** Caller holds the study lock; identical bytes never move the reservation event boundary. */
-export function setFinalSeeds(dir: string, raw: unknown, protocol: Protocol, actor: Actor) {
+export function setFinalSeeds(dir: string, raw: unknown, protocol: Protocol, actor: Actor, readUsedSeeds: () => ReadonlySet<number>) {
   requireExperiment(openStudy(dir).study);
   const final = validateFinalSeeds(raw, protocol), previous = record(dir, protocol), text = JSON.stringify(final, null, 2) + "\n", hash = sha256(text), changed = previous?.text !== text;
-  if (changed) commit(dir, [[finalSeedsPath(dir), text, FINAL_SEEDS_BYTES]], [{ actor, type: "final.seeds.set", data: { sha256: hash, seeds: final.seeds } }]);
+  if (changed) {
+    const used = readUsedSeeds();
+    const seen = final.seeds.find(seed => used.has(seed));
+    if (seen !== undefined) throw new Error(`final seeds: seed ${seen} was already used by an existing attempt; choose an unused declared seed`);
+    commit(dir, [[finalSeedsPath(dir), text, FINAL_SEEDS_BYTES]], [{ actor, type: "final.seeds.set", data: { sha256: hash, seeds: final.seeds } }]);
+  }
   return { final, sha256: hash, changed };
 }

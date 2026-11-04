@@ -87,15 +87,17 @@ test("reserved attempts refuse before Git, records, containers or auto approval;
 });
 
 let serial = 0;
-function evidence(dir: string, frozen: string, seed: number, value: number) {
-  const id = (++serial).toString(16).padStart(16, "0"), protocol = readProtocol(dir)!, run = "investigate", folder = join(dir, "runs", run, "attempts"); mkdirSync(folder, { recursive: true });
-  writeFileSync(join(folder, `${id}.json`), JSON.stringify({ v: 1, id, studyId: openStudy(dir).study.id, run, commit: frozen, seed, protocolHash: protocolHash(protocol), protocol, executor: {}, stages: {}, stage: "evaluator", status: "succeeded", startedAt: "2030-01-01T00:00:00Z", metrics: [{ name: "score", value, unit: "points", provenance: "ares-observed" }], outputs: [] }));
+function evidence(dir: string, frozen: string, seed: number, value: number, options: {run?: string; status?: "running" | "succeeded" | "failed" | "cancelled" | "unknown"} = {}) {
+  const id = (++serial).toString(16).padStart(16, "0"), protocol = readProtocol(dir)!, run = options.run ?? "investigate", folder = join(dir, "runs", run, "attempts"); mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, `${id}.json`), JSON.stringify({ v: 1, id, studyId: openStudy(dir).study.id, run, commit: frozen, seed, protocolHash: protocolHash(protocol), protocol, executor: {}, stages: {}, stage: "evaluator", status: options.status ?? "succeeded", startedAt: "2030-01-01T00:00:00Z", metrics: [{ name: "score", value, unit: "points", provenance: "ares-observed" }], outputs: [] }));
   appendEvent(dir, actor, "attempt.started", { id, run, commit: frozen, seed }); return id;
 }
 test("investigation lists reserved seeds as excluded, preserves totals and changes the reservation input fingerprint", async () => {
   const dir = await study(); await ops.selection(dir, { v: 1, run: "investigate", metric: "score", baseline: { commit: BASE }, minSeeds: 1, minDelta: 1 }, ctx);
-  evidence(dir, BASE, 1, 10); evidence(dir, CANDIDATE, 1, 12); const a = evidence(dir, BASE, 4, 1000), b = evidence(dir, CANDIDATE, 4, 10000);
-  const before = ops.investigateShow(dir); await ops.finalSeeds(dir, { v: 1, seeds: [4] }, ctx); const result = ops.investigateShow(dir);
+  evidence(dir, BASE, 1, 10); evidence(dir, CANDIDATE, 1, 12);
+  const before = ops.investigateShow(dir); await ops.finalSeeds(dir, { v: 1, seeds: [4] }, ctx);
+  // Imported/synthetic exploratory records must still be excluded if they use a reservation.
+  const a = evidence(dir, BASE, 4, 1000), b = evidence(dir, CANDIDATE, 4, 10000); const result = ops.investigateShow(dir);
   expect(result.winner?.delta).toBe(2); expect(result.totals.attempts).toBe(4); expect(result.totals.byStatus.succeeded).toBe(4);
   expect(result.totals.countedSuccesses).toBe(2); expect(result.excluded.filter(e => e.reasons.includes("reserved-seed")).map(e => e.id)).toEqual([a, b]);
   expect(result.inputsSha256).not.toBe(before.inputsSha256);
@@ -133,4 +135,27 @@ test("a reservation added during snapshot resolution fences the attempt before c
   } })).rejects.toThrow("design: changed");
   expect(calls).toBe(2); expect(readLedger(dir).filter(e => e.type === "attempt.started")).toHaveLength(0);
   expect(existsSync(join(dir, "runs"))).toBe(false);
+});
+
+
+test("new reservations refuse seeds seen in any run and status on API, CLI and MCP before writes", async () => {
+  for (const [runName, status] of [["main", "running"], ["investigate", "succeeded"], ["ablate", "failed"], ["final", "cancelled"], ["posthoc", "unknown"]] as const) {
+    const dir = await study(); evidence(dir, BASE, 4, 10, { run: runName, status });
+    const before = readFileSync(join(dir, "ledger.jsonl")), rule = { v: 1, seeds: [4] };
+    await expect(ops.finalSeeds(dir, rule, ctx)).rejects.toThrow("seed 4 was already used");
+    await expect(run(["final", "seeds", dir, "--file", "-"], {}, { http: ctx.http, readStdin: async () => JSON.stringify(rule) })).rejects.toThrow("choose an unused declared seed");
+    const server = createAresMcp({}, ctx.http);
+    await expect(server.handlers.ares_final_seeds!({ study: dir, final: rule })).rejects.toThrow("seed 4 was already used");
+    expect(existsSync(finalSeedsPath(dir))).toBe(false); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
+  }
+});
+
+test("identical reserved bytes remain a no-op after use, but a changed value containing a used seed refuses", async () => {
+  const dir = await study(); await ops.finalSeeds(dir, { v: 1, seeds: [4] }, ctx);
+  await ops.gateDecide(dir, "design", "approve", undefined, ctx); evidence(dir, BASE, 4, 10, { run: "final" });
+  const before = readFileSync(join(dir, "ledger.jsonl")), bytes = readFileSync(finalSeedsPath(dir));
+  expect((await ops.finalSeeds(dir, { v: 1, seeds: [4] }, ctx)).changed).toBe(false);
+  expect(ops.gateList(dir).find(g => g.gate === "design")!.state).toBe("approved");
+  await expect(ops.finalSeeds(dir, { v: 1, seeds: [3, 4] }, ctx)).rejects.toThrow("seed 4 was already used");
+  expect(readFileSync(finalSeedsPath(dir))).toEqual(bytes); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
 });
