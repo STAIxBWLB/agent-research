@@ -1,3 +1,4 @@
+import { addIdea, decideIdea } from "./exp/ideas.ts";
 import { showInvestigation, closeInvestigation } from "./exp/investigate.ts";
 import { setSelection } from "./exp/selection.ts";
 import { createHubClient } from "./plan/hub.ts";
@@ -343,4 +344,14 @@ export const investigateShow = (dir: string) => showInvestigation(dir);
 export async function investigateClose(dirArg: string, ctx: Pick<Ctx, "actor">) {
   const { dir, study } = openStudy(dirArg); requireExperiment(study);
   return withLock(dir, () => closeInvestigation(dir, ctx.actor));
+}
+
+
+export async function ideaAdd(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
+  const { dir, study } = openStudy(dirArg); requireExperiment(study);
+  return withLock(dir, () => addIdea(dir, raw, ctx.actor));
+}
+export async function ideaDecide(dirArg: string, id: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
+  const { dir, study } = openStudy(dirArg); requireExperiment(study);
+  return withLock(dir, () => decideIdea(dir, id, raw, ctx.actor));
 }

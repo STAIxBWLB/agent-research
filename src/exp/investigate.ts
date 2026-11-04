@@ -1,3 +1,4 @@
+import { foldIdeas } from "./ideas.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { assertWritable, commit, openStudy, plain, readLedger, readTextBounded, requireExperiment, sha256, type Actor, type LedgerEvent } from "../study.ts";
@@ -65,6 +66,9 @@ function inputs(dirArg: string) {
 }
 function calculate(input: ReturnType<typeof inputs>): InvestigateResult {
   const { rule, ruleSha, events, cutoff, hash, metric, attempts, protocol } = input;
+  const ideas = foldIdeas(events), owners = new Map<string, string>();
+  // The journal enforces exactly one idea owner for any associated commit.
+  for (const idea of ideas) for (const commit of idea.commits) owners.set(commit, idea.id);
   const starts = new Map<string, { index: number; event: LedgerEvent }>();
   events.forEach((event, index) => {
     if (event.type !== "attempt.started" || typeof event.data.id !== "string") return;
@@ -92,6 +96,7 @@ function calculate(input: ReturnType<typeof inputs>): InvestigateResult {
     }
     if (reasons.length) excluded.push({ id: attempt.id, commit: attempt.commit, seed: attempt.seed, status: attempt.status, reasons });
   }
+  for (const row of rows.values()) { const idea = owners.get(row.commit); if (idea !== undefined) row.idea = idea; }
   const baseline = rows.get(rule.baseline.commit)!;
   for (const row of rows.values()) row.perSeed.sort((a, b) => a.seed - b.seed);
   baseline.mean = mean(baseline.perSeed.map(s => s.value)); baseline.baselineMean = baseline.mean;
@@ -119,10 +124,10 @@ function calculate(input: ReturnType<typeof inputs>): InvestigateResult {
   else if (!candidates.some(row => row.pairedSeeds.length >= rule.minSeeds)) reason = "no-candidate";
   else if (!eligible.length) reason = "below-margin";
   else if (eligible.length > 1 && eligible[0]!.delta === eligible[1]!.delta) reason = "tie";
-  else { const row = eligible[0]!; winner = { commit: row.commit, attempts: row.pairs.map(p => p.attempt), mean: row.mean!, delta: row.delta! }; }
+  else { const row = eligible[0]!; winner = { commit: row.commit, ...(row.idea !== undefined ? { idea: row.idea } : {}), attempts: row.pairs.map(p => p.attempt), mean: row.mean!, delta: row.delta! }; }
   const result: InvestigateResult = {
     v: 1, run: rule.run, ruleSha256: ruleSha, protocolHash: hash,
-    inputsSha256: sha256(canonical({ ruleSha, protocolHash: hash, cutoff, attempts: ordered.map(a => ({ record: sha256(canonical(a)), start: starts.get(a.id)?.index ?? null })) })),
+    inputsSha256: sha256(canonical({ ruleSha, protocolHash: hash, cutoff, ideas: sha256(canonical(ideas)), attempts: ordered.map(a => ({ record: sha256(canonical(a)), start: starts.get(a.id)?.index ?? null })) })),
     metric, baseline, candidates, totals: { attempts: attempts.length, byStatus, countedSuccesses: [...rows.values()].reduce((n, r) => n + r.perSeed.length, 0), excluded: excluded.length }, excluded,
     winner, ...(reason ? { reason } : {}),
   };
