@@ -1,4 +1,3 @@
-import { requireReviewReady } from "./paper/review.ts";
 import { hostname } from "node:os";
 import { spawnSync } from "node:child_process";
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync, lstatSync } from "node:fs";
@@ -211,7 +210,6 @@ export function gateState(gate: GateName, events: LedgerEvent[], binder: Binder)
 
 export function decideGate(dir: string, gate: GateName, decision: "approve" | "reject", actor: Actor, binder: Binder, reason?: string): GateState {
   if (!GATES.includes(gate) && !gate.startsWith("plan:")) throw new Error(`unknown gate: ${gate}; run ares gate list to select a gate`);
-  if (gate === "review" && decision === "approve") requireReviewReady(dir);
   const before = gateState(gate, readLedger(dir), binder);
   if (before.state === "none") throw new Error(`gate ${gate}: nothing to decide yet${gate.startsWith("plan:") ? "; finish every upstream node with output references, then run ares gate list" : ""}`);
   if (decision === "reject" && !reason) throw new Error(`gate ${gate}: a rejection needs --reason`);
@@ -226,7 +224,6 @@ export function decideGate(dir: string, gate: GateName, decision: "approve" | "r
  */
 export function requireGate(dir: string, study: Study, gate: GateName, binder: Binder): PendingEvent[] {
   if (gate === "design" || gate === "final") requireExperiment(study);
-  if (gate === "review") requireReviewReady(dir);
   const state = gateState(gate, readLedger(dir), binder);
   if (state.state === "approved") return [];
   if (state.state === "pending" && study.autonomy === "auto") return [{ actor: { kind: "auto" }, type: "gate.approve", data: { gate, binding: state.current! } }];

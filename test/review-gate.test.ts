@@ -4,7 +4,7 @@ import { join } from "node:path";
 import * as ops from "../src/commands.ts";
 import { readCurrentBuild, paperBuildPaths } from "../src/paper/build.ts";
 import { validateReview, reviewBinding } from "../src/paper/review.ts";
-import { appendEvent, decideGate, openStudy, readLedger, requireGate } from "../src/study.ts";
+import { appendEvent, readLedger } from "../src/study.ts";
 import { run } from "../src/cli.ts";
 import { createAresMcp } from "../src/mcp-tools.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
@@ -60,12 +60,12 @@ test("two distinct normalized families are required; false checklist answers rem
   const ready = ops.reviewShow(dir); expect(ready.ready).toBe(true); expect(ready.checklists.some(row => !row.limitations)).toBe(true); expect(ready.unmet).toEqual([]);
 });
 
-test("current check and build freshness block approvals, additions and automatic gate helpers", async () => {
+test("current check and build freshness block command approvals and additions even in auto autonomy", async () => {
   const dir = await setup("auto"), raw = report(dir); const before = readFileSync(join(dir, "ledger.jsonl"));
-  expect(() => requireGate(dir, openStudy(dir).study, "review", ops.binder(dir))).toThrow("model-families");
-  expect(() => decideGate(dir, "review", "approve", actor, ops.binder(dir))).toThrow("model-families"); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
+  await expect(ops.gateDecide(dir, "review", "approve", undefined, ctx)).rejects.toThrow("model-families"); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
   await ops.reviewAdd(dir, raw, ctx); await ops.reviewAdd(dir, report(dir, "family-b"), ctx);
-  expect(requireGate(dir, openStudy(dir).study, "review", ops.binder(dir))).toMatchObject([{ actor: { kind: "auto" }, type: "gate.approve" }]);
+  await ops.gateDecide(dir, "review", "approve", undefined, ctx);
+  expect(ops.gateList(dir).find(g => g.gate === "review")?.state).toBe("approved");
   writeFileSync(join(dir, "paper", "manuscript.md"), "Unknown [@missing2026].");
   expect(ops.reviewShow(dir).unmet.map(row => row.code)).toContain("paper-check");
   await expect(ops.gateDecide(dir, "review", "approve", undefined, ctx)).rejects.toThrow("paper-check"); await expect(ops.reviewAdd(dir, raw, ctx)).rejects.toThrow("paper check");
@@ -107,4 +107,20 @@ test("additive ledger review metadata survives appends and unsupported versions 
   await ops.reviewAdd(dir, report(dir, "family-b"), ctx); expect(readLedger(dir).find(e => e.type === "review.added")!.data.future).toBe("also keep");
   appendEvent(dir, actor, "review.added", { id: "future", review: { ...raw, v: 99 } }); const before = readFileSync(join(dir, "ledger.jsonl"));
   await expect(ops.reviewAdd(dir, raw, ctx)).rejects.toThrow("supports this report"); expect(ops.reviewShow(dir).unmet.map(row => row.code)).toContain("review-journal"); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
+});
+
+
+test("rejecting a current review gate needs a reason but no readiness; approval still names unmet conditions", async () => {
+  const dir = await setup();
+  expect(ops.reviewShow(dir).ready).toBe(false);
+  const rejected = await ops.gateDecide(dir, "review", "reject", "Obtain independent reviews first", ctx);
+  expect(rejected.state).toBe("rejected");
+  await expect(ops.gateDecide(dir, "review", "approve", undefined, ctx)).rejects.toThrow("model-families");
+  await ops.reviewAdd(dir, report(dir, "family-a", [finding()]), ctx); await ops.reviewAdd(dir, report(dir, "family-b"), ctx);
+  const blocked = await ops.gateDecide(dir, "review", "reject", "Unresolved contradiction", ctx);
+  expect(blocked.state).toBe("rejected");
+  await expect(ops.gateDecide(dir, "review", "approve", undefined, ctx)).rejects.toThrow("blocking-findings");
+  const ledger = readFileSync(join(dir, "ledger.jsonl"));
+  await expect(ops.gateDecide(dir, "review", "reject", undefined, ctx)).rejects.toThrow("rejection needs --reason");
+  expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(ledger);
 });

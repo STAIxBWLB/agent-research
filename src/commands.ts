@@ -1,4 +1,4 @@
-import { addReview, resolveReview, reviewReadiness, reviewBinding } from "./paper/review.ts";
+import { addReview, resolveReview, reviewReadiness, reviewBinding, requireReviewReady } from "./paper/review.ts";
 import { buildPaper } from "./paper/build.ts";
 import { checkPaper } from "./paper/check.ts";
 import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
@@ -115,6 +115,7 @@ export async function gateDecide(dirArg: string, gate: string, decision: "approv
   if (name === "design" || name === "final") requireExperiment(study);
   return withLock(dir, () => {
     if (name === "final") requireFinalInputs(dir);
+    if (name === "review" && decision === "approve") requireReviewReady(dir);
     if (name.startsWith("plan:") && !readPlanState(dir, readLedger(dir)).definition.nodes.some(n => n.id === name.slice(5) && n.kind === "gate")) throw new Error(`gate ${name}: no gate node ${name.slice(5)} in the plan; run ares gate list and select an existing gate`);
     return decideGate(dir, name, decision, ctx.actor, binder(dir), why);
   });
