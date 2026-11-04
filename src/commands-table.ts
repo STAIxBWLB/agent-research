@@ -39,6 +39,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "lit card", usage: "lit card <dir> <id> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "lit verify", usage: "lit verify <dir> [<id>...] [--json]", mutates: "network", options: json },
   { name: "lit bib", usage: "lit bib <dir> [--json]", mutates: true, options: json },
+  { name: "paper build", usage: "paper build <dir> [--json]", mutates: true, options: json },
   { name: "paper check", usage: "paper check <dir> [--json]", mutates: false, options: json },
   { name: "cite check", usage: "cite check <dir> <draft> [--json]", mutates: false, options: json },
   { name: "playbook", usage: "playbook", mutates: false, options: {} },
