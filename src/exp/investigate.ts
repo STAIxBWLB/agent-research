@@ -67,8 +67,8 @@ function inputs(dirArg: string) {
 function calculate(input: ReturnType<typeof inputs>): InvestigateResult {
   const { rule, ruleSha, events, cutoff, hash, metric, attempts, protocol } = input;
   const ideas = foldIdeas(events), owners = new Map<string, string>();
-  // Keep the earliest journal attribution if multiple hypotheses cite a shared commit.
-  for (const idea of ideas) for (const commit of idea.commits) if (!owners.has(commit)) owners.set(commit, idea.id);
+  // The journal enforces exactly one idea owner for any associated commit.
+  for (const idea of ideas) for (const commit of idea.commits) owners.set(commit, idea.id);
   const starts = new Map<string, { index: number; event: LedgerEvent }>();
   events.forEach((event, index) => {
     if (event.type !== "attempt.started" || typeof event.data.id !== "string") return;

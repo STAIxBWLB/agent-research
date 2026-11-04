@@ -11,7 +11,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "status", usage: "status <dir> [--json]", mutates: false, options: json },
   { name: "scope", usage: "scope <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "idea add", usage: "idea add <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
-  { name: "idea decide", usage: "idea decide <dir> <id> <refine|pivot> --reason TEXT --attempts ID[,ID...] [--commit SHA] [--json]", mutates: true, options: { "--reason": "value", "--attempts": "value", "--commit": "value", ...json } },
+  { name: "idea decide", usage: "idea decide <dir> <id> <refine|pivot> --reason TEXT [--attempts ID[,ID...]] [--commit SHA] [--json]", mutates: true, options: { "--reason": "value", "--attempts": "value", "--commit": "value", ...json } },
   { name: "investigate show", usage: "investigate show <dir> [--json]", mutates: false, options: json },
   { name: "investigate close", usage: "investigate close <dir> [--json]", mutates: true, options: json },
   { name: "selection", usage: "selection <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },

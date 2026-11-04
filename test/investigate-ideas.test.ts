@@ -45,7 +45,7 @@ test("duplicate ids, missing parents, malformed ids/commits and unknown fields r
 
 test("1000 ideas is inclusive and the next add refuses without dropping journal data", async () => {
   const dir = await setup();
-  commit(dir, [], Array.from({ length: MAX_IDEAS }, (_, i) => ({ actor, type: "idea.added", data: { idea: idea(`idea-${i}`) } })));
+  commit(dir, [], Array.from({ length: MAX_IDEAS }, (_, i) => ({ actor, type: "idea.added", data: { idea: { id: `idea-${i}`, title: "Synthetic", hypothesis: "Untested" } } })));
   expect(foldIdeas(readLedger(dir))).toHaveLength(1000);
   const before = readFileSync(join(dir, "ledger.jsonl"));
   await expect(ops.ideaAdd(dir, idea("extra"), ctx)).rejects.toThrow("1000"); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
@@ -111,4 +111,27 @@ test("survey refuses every idea command and experiment ideas can be recorded bef
   expect(readFileSync(join(survey, "ledger.jsonl"))).toEqual(before);
   const experiment = tempDir(); ops.init(experiment, { question: "synthetic", mode: "experiment" }, ctx);
   expect((await ops.ideaAdd(experiment, { id: "concept", title: "Synthetic", hypothesis: "Not frozen yet" }, ctx)).commits).toEqual([]);
+});
+
+
+test("a commit has one idea owner, including refined commits, and every ownership refusal preserves the journal", async () => {
+  const dir = await setup(); await ops.ideaAdd(dir, idea("first", BASE), ctx); await ops.ideaAdd(dir, idea("second", NEXT), ctx);
+  const evidence = attempt(dir, BASE, "failed"), before = readFileSync(join(dir, "ledger.jsonl"));
+  await expect(ops.ideaAdd(dir, idea("duplicate", BASE), ctx)).rejects.toThrow("belongs to idea first");
+  await expect(ops.ideaDecide(dir, "first", { decision: "refine", reason: "why", attempts: [evidence], commit: NEXT }, ctx)).rejects.toThrow("belongs to idea second");
+  expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
+  await ops.ideaDecide(dir, "first", { decision: "refine", reason: "why", attempts: [evidence], commit: OTHER }, ctx);
+  await expect(ops.ideaAdd(dir, idea("after-refine", OTHER), ctx)).rejects.toThrow("belongs to idea first");
+});
+
+test("an untested idea attaches its first commit or pivots without attempts; committed ideas still require evidence", async () => {
+  const dir = await setup(); await ops.ideaAdd(dir, { id: "fresh", title: "Synthetic", hypothesis: "Untested" }, ctx);
+  const first = await ops.ideaDecide(dir, "fresh", { decision: "refine", reason: "First frozen candidate", commit: NEXT }, ctx);
+  expect(first.commits).toEqual([NEXT]); expect(first.decisions[0]!.attempts).toEqual([]);
+  await expect(ops.ideaDecide(dir, "fresh", { decision: "pivot", reason: "Missing evidence" }, ctx)).rejects.toThrow("pass --attempts");
+  await ops.ideaAdd(dir, { id: "dropped", title: "Synthetic", hypothesis: "Untested" }, ctx);
+  expect((await ops.ideaDecide(dir, "dropped", { decision: "pivot", reason: "Dropped before testing" }, ctx)).state).toBe("pivoted");
+  const foreign = attempt(dir, BASE, "failed");
+  await ops.ideaAdd(dir, { id: "no-commit", title: "Synthetic", hypothesis: "Untested" }, ctx);
+  await expect(ops.ideaDecide(dir, "no-commit", { decision: "refine", reason: "why", attempts: [foreign], commit: OTHER }, ctx)).rejects.toThrow("omit --attempts");
 });
