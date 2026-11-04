@@ -333,3 +333,28 @@ test("production phase close steps bind committed result sha/status to a gate fo
     expect(ops.gateList(dir).find(g => g.gate === "plan:review")!.state).toBe("pending");
   }
 });
+
+
+test("production paper.build step binds committed evidence bytes to a plan gate on survey and experiment studies", async () => {
+  for (const mode of ["survey", "experiment"]) {
+    const dir = tempDir(); ops.init(dir, { question: "synthetic", mode }, ctx);
+    mkdirSync(join(dir, "paper")); writeFileSync(join(dir, "paper", "manuscript.md"), "Synthetic cohort {{lit:2026}}.\n");
+    await ops.planSet(dir, { v: 1, nodes: [{ id: "build", kind: "step", command: "paper.build", args: {} }, { id: "inspect", kind: "gate", needs: ["build"], binds: ["build"] }], edges: [] }, ctx);
+    let resumed = false, approved = false;
+    const state = await ops.planRun(dir, {}, { ...ctx, runner: async () => { throw new Error("paper build must not invoke an executor or hub"); }, sleep: async () => {
+      if (!resumed) { resumed = true; await resume(dir); }
+      else if (!approved && ops.gateList(dir).find(g => g.gate === "plan:inspect")?.state === "pending") { approved = true; await ops.gateDecide(dir, "plan:inspect", "approve", undefined, ctx); }
+      await Bun.sleep(1);
+    } });
+    const bytes = readFileSync(join(dir, "paper", "build", "evidence.json"));
+    expect(state.nodes.find(n => n.id === "build")!.output).toEqual({ sha256: sha256(bytes) }); expect(state.state).toBe("done");
+    expect(readFileSync(join(dir, "paper", "build", "manuscript.md"), "utf8")).toBe("Synthetic cohort 2026.\n");
+    expect(ops.gateList(dir).find(g => g.gate === "plan:inspect")?.state).toBe("approved");
+    expect(readLedger(dir).filter(e => e.type === "paper.built")).toHaveLength(1);
+    expect(ops.gateList(dir).find(g => g.gate === "review")?.state).toBe("pending"); // A local plan gate never replaces manuscript review readiness.
+    await ops.planControl(dir, { action: "retry", node: "build", commandId: "refresh-build", expectedRevision: 1 }, ctx);
+    appendEvent(dir, actor, "node.intent", { revision: 1, node: "build", dispatchId: "1:build:2" });
+    appendEvent(dir, actor, "node.observed", { revision: 1, node: "build", dispatchId: "1:build:2", status: "done", output: { sha256: "changed" } });
+    expect(ops.gateList(dir).find(g => g.gate === "plan:inspect")?.state).toBe("pending");
+  }
+});

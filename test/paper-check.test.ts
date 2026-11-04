@@ -166,3 +166,16 @@ test("paragraph and list continuations stay prose while genuine indented blocks 
     const report = draft(dir, text); expect(report.ok).toBe(true); expect(report.codeNumberCount).toBeGreaterThan(0);
   }
 });
+
+
+test("survey check/build use citations only and experiment-ref findings preserve prior build outputs", async () => {
+  const dir = study("survey"); references(dir); draft(dir, "Literature from 2026 [@good2026].");
+  const server = createAresMcp({}, ctx.http), built = await server.handlers.ares_paper_build!({ study: dir });
+  expect(JSON.parse((await run(["paper", "build", dir, "--json"], {}, { http: ctx.http })).text)).toEqual({ ...(built as object), changed: false });
+  const file = join(dir, "paper", "build", "evidence.json"), bytes = readFileSync(file);
+  draft(dir, "{{n:final.status}}"); const before = readFileSync(join(dir, "ledger.jsonl"));
+  for (const report of [ops.paperCheck(dir), await server.handlers.ares_paper_check!({ study: dir })]) expect((report as ReturnType<typeof checkPaper>).findings[0]?.code).toBe("unresolved-ref");
+  await expect(run(["paper", "build", dir], {}, { http: ctx.http })).rejects.toThrow("unresolved-ref");
+  await expect(server.handlers.ares_paper_build!({ study: dir })).rejects.toThrow("unresolved-ref");
+  expect(readFileSync(file)).toEqual(bytes); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
+});

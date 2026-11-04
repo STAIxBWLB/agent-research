@@ -333,6 +333,10 @@ export async function planRun(dirArg: string, options: { parallel?: number }, ct
           const result = await finalClose(dir, ctx);
           return { status: "done", output: { sha256: sha256(JSON.stringify(result, null, 2) + "\n"), status: result.status } };
         }
+        case "paper.build": {
+          const result = await paperBuild(dir, ctx);
+          return { status: "done", output: { sha256: result.evidenceSha256 } };
+        }
         case "cite.check": { const value = cite(dir, resolve(dir, stepText(node, "draft"))); result = value; ok = value.ok; break; }
       }
       return { status: ok ? "done" : "failed", ...(ok ? { output: { sha256: sha256(JSON.stringify(result)) } } : { reason: "step reported failure; inspect its command result and inputs before retry" }) };
