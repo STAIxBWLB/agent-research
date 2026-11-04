@@ -1,3 +1,4 @@
+import { createHubClient } from "./plan/hub.ts";
 import { runPlan, type ControllerRuntime, type Observation, type StepNode } from "./plan/controller.ts";
 import { resolveSnapshot } from "./exp/snapshot.ts";
 import { spawnRunner } from "./exp/executor.ts";
@@ -290,6 +291,7 @@ export async function planRun(dirArg: string, options: { parallel?: number }, ct
     ...(attempt.status !== "running" && attempt.status !== "succeeded" ? { reason: `attempt ${attempt.status}; inspect ares attempt show before retrying this node` } : {}),
   });
   const runtime: ControllerRuntime = {
+    hub: createHubClient(dir, ctx.runner),
     actor: ctx.actor, ...(ctx.signal ? { signal: ctx.signal } : {}), ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
     prepare: async (node, state) => {
       if (node.command !== "attempt.run") return {};

@@ -2,7 +2,7 @@ import { gateState, plain, sha256, boundedText, onlyKeys, type Actor, type GateN
 import { readPlan, validatePlan, type PlanDefinition, type PlanNode } from "./definition.ts";
 
 export type NodeStatus = "pending" | "ready" | "dispatched" | "done" | "failed" | "cancelled" | "uncertain" | "stale" | "skipped";
-export interface NodeState { id: string; kind: PlanNode["kind"]; status: NodeStatus; dispatchId?: string; dispatchCount?: number; retryOf?: string; output?: unknown; attemptId?: string; taskId?: number; reason?: string; gate?: GateState; lastObserved?: { revision: number; dispatchId: string; status: NodeStatus; at: string; output?: unknown; reason?: string } }
+export interface NodeState { id: string; kind: PlanNode["kind"]; status: NodeStatus; dispatchId?: string; dispatchCount?: number; retryOf?: string; output?: unknown; attemptId?: string; taskId?: number; hubProject?: string; reason?: string; gate?: GateState; lastObserved?: { revision: number; dispatchId: string; status: NodeStatus; at: string; output?: unknown; reason?: string } }
 export interface ControlRequest { action: "pause" | "resume" | "retry" | "cancel" | "skip"; node?: string; commandId: string; expectedRevision: number }
 export interface ControlResult { commandId: string; revision: number; action: ControlRequest["action"]; node?: string; state: "paused" | "running" | "done"; status?: NodeStatus }
 export interface PlanState { definition: PlanDefinition; revision: number; state: "paused" | "running" | "done"; nodes: NodeState[]; uncertain: string[] }
@@ -153,12 +153,24 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
         dispatches.add(key); node.dispatchId = dispatchId; node.dispatchCount = (node.dispatchCount ?? 0) + 1;
         node.status = "dispatched";
         if (typeof d.attemptId === "string") node.attemptId = d.attemptId;
+        delete node.taskId;
         if (Number.isSafeInteger(d.taskId)) node.taskId = d.taskId as number;
+        if (typeof d.hubProject === "string") node.hubProject = boundedText(d.hubProject, `node ${node.id} hub project`, 4096);
       } else {
         const dispatchId = dispatchIdentity(d.dispatchId, node.id);
         if (dispatchId !== node.dispatchId || !Number.isSafeInteger(d.revision) || (d.revision as number) > state.revision) continue;
         if (!statuses.includes(d.status as NodeStatus) || !["done", "failed", "cancelled", "uncertain", "dispatched"].includes(d.status as string)) bad(`node.observed ${node.id} has unknown status ${String(d.status)}`);
         if (node.status !== "dispatched" && node.status !== "uncertain") continue;
+        if (d.taskId !== undefined) {
+          if (node.kind !== "hub" || !Number.isSafeInteger(d.taskId) || (d.taskId as number) < 1 || (node.taskId !== undefined && node.taskId !== d.taskId)) {
+            node.status = "failed"; delete node.output;
+            node.reason = "hub child task binding changed or invalid; inspect ahub study show and retry explicitly";
+            node.lastObserved = { revision: d.revision as number, dispatchId, status: "failed", at: event.at, reason: node.reason };
+            refresh(state, decisions); continue;
+          }
+          node.taskId = d.taskId as number;
+        }
+        if (typeof d.hubProject === "string") node.hubProject = boundedText(d.hubProject, `node ${node.id} hub project`, 4096);
         node.status = d.status as NodeStatus;
         if (node.status === "done" && d.output !== undefined) node.output = d.output;
         delete node.reason;
