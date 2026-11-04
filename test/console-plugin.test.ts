@@ -138,8 +138,9 @@ test("registry and availability changes refresh even when the ledger-byte cursor
 
 test("an unrelated ledger event does not change when an unchanged pending gate started waiting", async () => {
   const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "waiting"); addStudy(family, study);
+  fs.writeFileSync(join(study, "literature", "candidates.json"), JSON.stringify([{ id: "doi:10.0000/waiting", title: "Synthetic included candidate", authors: [], sources: ["openalex"], status: "included", addedAt: "2030-01-01T00:00:00Z" }]));
   const provider = await typed.open(context(family)), first = await provider.snapshot({ panel: "inbox", after: 0 });
-  const scope = rows(first.items).find(row => row.kind === "gate" && row.title.includes("scope"))!;
+  const scope = rows(first.items).find(row => row.kind === "gate" && row.title.includes("screen"))!;
   appendEvent(study, actor, "synthetic.unrelated", {});
   const next = await provider.snapshot({ panel: "inbox", after: first.cursor as number });
   expect(rows(next.items).find(row => row.id === scope.id)?.at).toBe(scope.at);
