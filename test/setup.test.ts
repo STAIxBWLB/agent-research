@@ -139,7 +139,7 @@ test("CLI preview/apply/undo use only temp HOME and reject incompatible options 
   expect((await run(["setup", "claude", "--root", location, "--apply", "--json"], f.env)).code).toBe(0);
   expect((await run(["setup", "claude", "--undo", "--json"], f.env)).code).toBe(0);
   await expect(run(["setup", "claude", "--apply", "--undo"], f.env)).rejects.toThrow("conflict");
-  await expect(run(["setup", "console"], f.env)).rejects.toThrow("console setup is not available");
+  expect((await run(["setup", "console", "--json"], f.env)).code).toBe(0);
   await expect(run(["setup", "unknown"], f.env)).rejects.toThrow("unknown target");
 });
 
@@ -177,7 +177,6 @@ test("a multiline TOML closing line beginning with # belongs to the saved entry,
 test("argument refusals give the relevant next step and file refusals are not double-suffixed", () => {
   const f = fixture();
   for (const [target, mode, options, expected] of [
-    ["console", "dry-run", f.options, "use an agent target"],
     ["unknown", "dry-run", f.options, "use claude|codex"],
     ["claude", "dry-run", { ...f.options, root: "relative" }, "pass --root ABS"],
     ["claude", "invalid", f.options, "choose dry-run, apply or undo"],

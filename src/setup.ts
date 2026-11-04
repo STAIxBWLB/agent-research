@@ -1,18 +1,21 @@
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, realpathSync, unlinkSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, realpathSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
-import { assertWritable, plain, readTextBounded, sha256, writeAtomic } from "./study.ts";
+import { assertWritable, plain, readBytesBounded, readTextBounded, sha256, writeAtomic } from "./study.ts";
 
 export const SETUP_TARGETS = ["claude", "codex", "kimi", "pi", "qwen", "jcode", "agy"] as const;
-export type SetupTarget = typeof SETUP_TARGETS[number];
+type AgentSetupTarget = typeof SETUP_TARGETS[number];
+export type SetupTarget = AgentSetupTarget | "console";
 export type SetupMode = "dry-run" | "apply" | "undo";
 export interface McpEntry { command: string; args: string[] }
-interface Host { target: SetupTarget; file: string; key: string; format: "json" | "toml" }
+export interface ConsoleManifest { api: 1; tool: "ares"; module: string; sha256: string }
+type SetupEntry = McpEntry | ConsoleManifest;
+interface Host { target: SetupTarget; file: string; key: string; format: "json" | "toml" | "manifest" }
 export interface SetupAction { target: SetupTarget; file: string; entry: string; receipt: string; lock: string; change: "add" | "replace" | "unchanged" | "restore" | "remove" | "none" | "refused"; receiptChange: "add" | "replace" | "remove" | "none"; reason?: string }
-export interface SetupReport { mode: SetupMode; applied: boolean; root: string; entry: McpEntry; actions: SetupAction[]; notes: string[] }
-interface Receipt { v: 1; target: SetupTarget; file: string; existed: boolean; keyExisted: boolean; priorPresent: boolean; prior?: unknown; priorToml?: string; installed: McpEntry }
+export interface SetupReport { mode: SetupMode; applied: boolean; root: string; entry: McpEntry; actions: SetupAction[]; notes: string[]; console?: ConsoleManifest }
+interface Receipt { v: 1; target: SetupTarget; file: string; existed: boolean; keyExisted: boolean; priorPresent: boolean; prior?: unknown; priorToml?: string; installed: SetupEntry }
 interface Plan { host: Host; action: SetupAction; before: string | null; after: string | null; receiptBefore: string | null; receiptAfter: string | null }
 export const SETUP_CONFIG_BYTES = 4 * 1024 * 1024, SETUP_RECEIPT_BYTES = 8 * 1024 * 1024;
 const OWN_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -49,26 +52,27 @@ function read(file: string, max: number, owned = true): string | null {
   try { return readTextBounded(file, max, { noFollow: true, ...(owned ? { uid: process.getuid!() } : {}) }); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
 }
-function write(file: string, value: string | null, max: number): void {
+function write(file: string, value: string | null, max: number, privateFile = false): void {
   guard(file);
   if (value === null) { unlinkSync(file); return; }
   assertWritable(value, max, "setup output");
   let mode = 0o600;
-  try { mode = lstatSync(file).mode & 0o777; } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  try { if (!privateFile) mode = lstatSync(file).mode & 0o777; } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  if (privateFile) privateDirectory(dirname(file), true);
   guard(file); writeAtomic(file, value, max, mode);
 }
 function record(value: unknown): Record<string, unknown> { if (!plain(value)) fail("config must contain an object"); return value; }
 function document(host: Host, source: string | null): Record<string, unknown> {
   if (source === null) return {};
-  try { return record(host.format === "json" ? JSON.parse(source) : Bun.TOML.parse(source)); }
+  try { return record(host.format === "toml" ? Bun.TOML.parse(source) : JSON.parse(source)); }
   catch { fail(`invalid ${host.format.toUpperCase()}; fix ${host.file} before applying setup`); }
 }
-function entry(host: Host, source: string | null): unknown { const doc = document(host, source); return doc[host.key] === undefined ? undefined : record(doc[host.key]).ares; }
-function hosts(env: NodeJS.ProcessEnv, cwd: string): Record<SetupTarget, Host> {
+function entry(host: Host, source: string | null): unknown { if (host.format === "manifest") return source === null ? undefined : document(host, source); const doc = document(host, source); return doc[host.key] === undefined ? undefined : record(doc[host.key]).ares; }
+function hosts(env: NodeJS.ProcessEnv, cwd: string): Record<AgentSetupTarget, Host> {
   const home = absolute(env.HOME?.trim() || homedir(), "HOME");
   const dir = (key: string, fallback: string) => absolute(env[key]?.trim() || join(home, fallback), key);
-  const json = (target: SetupTarget, file: string, key = "mcpServers"): Host => ({ target, file, format: "json", key });
+  const json = (target: AgentSetupTarget, file: string, key = "mcpServers"): Host => ({ target, file, format: "json", key });
   return {
     claude: json("claude", env.CLAUDE_CONFIG_DIR?.trim() ? join(dir("CLAUDE_CONFIG_DIR", ".claude"), ".claude.json") : join(home, ".claude.json")),
     codex: { target: "codex", file: join(dir("CODEX_HOME", ".codex"), "config.toml"), format: "toml", key: "mcp_servers" },
@@ -129,6 +133,7 @@ function priorToml(source: string | null): string | undefined {
   return owned.length ? owned.map(([start, stop]) => lines.slice(start, stop).join("")).join("") : undefined;
 }
 function put(host: Host, source: string | null, value: unknown, rawToml?: string, keepKey = false): string {
+  if (host.format === "manifest") return JSON.stringify(value ?? {}, null, 2) + "\n";
   if (host.format === "json") {
     const doc = document(host, source), servers = { ...record(doc[host.key] ?? {}) };
     if (value === undefined) delete servers.ares; else servers.ares = value;
@@ -164,16 +169,23 @@ function install(root: string): string {
   try { if (!lstatSync(bootstrap).isFile()) throw new Error(); } catch { fail("install root has no regular bin/ares.js", "select or reinstall an intact agent-research release root"); }
   return location;
 }
+function validInstalled(host: Host, value: unknown): boolean {
+  if (!plain(value)) return false;
+  return host.format === "manifest"
+    ? value.api === 1 && value.tool === "ares" && typeof value.module === "string" && isAbsolute(value.module) && typeof value.sha256 === "string" && /^[a-f0-9]{64}$/.test(value.sha256)
+    : typeof value.command === "string" && Array.isArray(value.args) && value.args.every(arg => typeof arg === "string");
+}
 function receipt(source: string | null, host: Host): Receipt | undefined {
   if (source === null) return undefined;
   let raw: unknown; try { raw = JSON.parse(source); } catch { fail("receipt must be valid JSON"); }
   if (!plain(raw) || raw.v !== 1 || raw.target !== host.target || raw.file !== host.file || typeof raw.existed !== "boolean" || typeof raw.keyExisted !== "boolean" || typeof raw.priorPresent !== "boolean"
-    || !plain(raw.installed) || typeof raw.installed.command !== "string" || !Array.isArray(raw.installed.args) || !raw.installed.args.every(arg => typeof arg === "string")
+    || !validInstalled(host, raw.installed)
     || (raw.priorPresent && !Object.hasOwn(raw, "prior")) || (raw.priorToml !== undefined && typeof raw.priorToml !== "string")) fail("unsupported, malformed or foreign setup receipt");
   return raw as unknown as Receipt;
 }
-function plan(host: Host, receiptPath: string, mode: SetupMode, desired: McpEntry, ownsLock = false): Plan {
-  const action: SetupAction = { target: host.target, file: host.file, entry: `${host.key}.ares`, receipt: receiptPath, lock: `${host.file}.ares-setup.lock`, change: "none", receiptChange: "none" };
+function plan(host: Host, receiptPath: string, mode: SetupMode, desired: SetupEntry, ownsLock = false): Plan {
+  const action: SetupAction = { target: host.target, file: host.file, entry: host.format === "manifest" ? "console plugin manifest" : `${host.key}.ares`, receipt: receiptPath, lock: `${host.file}.ares-setup.lock`, change: "none", receiptChange: "none" };
+  if (host.format === "manifest") privateDirectory(dirname(host.file));
   guard(action.lock);
   if (!ownsLock && existsSync(action.lock)) setupLockRefusal(action.lock);
   const before = read(host.file, SETUP_CONFIG_BYTES), receiptBefore = read(receiptPath, SETUP_RECEIPT_BYTES), prior = receipt(receiptBefore, host), current = entry(host, before);
@@ -185,7 +197,7 @@ function plan(host: Host, receiptPath: string, mode: SetupMode, desired: McpEntr
     if (!prior.existed && isDeepStrictEqual(document(host, result.after), {})) result.after = null;
     result.receiptAfter = null; action.change = prior.priorPresent ? "restore" : "remove"; action.receiptChange = "remove"; return result;
   }
-  if (isDeepStrictEqual(current, desired)) { action.change = "unchanged"; return result; }
+  if (isDeepStrictEqual(current, desired) && (host.format !== "manifest" || !privateModesNeeded(host.file))) { action.change = "unchanged"; return result; }
   const original = prior?.priorToml === undefined ? prior?.priorPresent ? prior.prior : undefined : entry(host, prior.priorToml);
   if (prior && !isDeepStrictEqual(current, prior.installed) && !isDeepStrictEqual(current, original)) fail("ares entry changed since apply; reconcile it before replacing the installed root");
   result.after = put(host, before, desired);
@@ -206,18 +218,21 @@ function acquireSetupLock(file: string): () => void {
 }
 /** Agent setup only. Console dispatch is deliberately separate for the plugin integration. */
 export function runSetup(target: string, mode: SetupMode, options: { env: NodeJS.ProcessEnv; cwd?: string; root?: string }): SetupReport {
-  if (target === "console") fail("console setup is not available in this version", "use an agent target or upgrade to a release with console support");
+  if (target === "console") return consoleManifest(mode, options.env, options.root ?? OWN_ROOT, options.root !== undefined);
   if (target !== "all" && !(SETUP_TARGETS as readonly string[]).includes(target)) fail("unknown target", `use ${SETUP_TARGETS.join("|")}|all`);
   if (!["dry-run", "apply", "undo"].includes(mode)) fail("unsupported setup mode", "choose dry-run, apply or undo and rerun ares setup");
   const env = options.env, root = install(options.root ?? OWN_ROOT), desired: McpEntry = { command: "bun", args: ["--smol", join(root, "bin", "ares.js"), "mcp"] };
   const table = hosts(env, options.cwd ?? process.cwd()), family = absolute(env.AGENTHUB_HOME?.trim() || join(absolute(env.HOME?.trim() || homedir(), "HOME"), ".agenthub"), "AGENTHUB_HOME");
-  const targets = target === "all" ? SETUP_TARGETS.filter(name => name !== "agy") : [target as SetupTarget], plans: Plan[] = [];
+  const targets = target === "all" ? SETUP_TARGETS.filter(name => name !== "agy") : [target as AgentSetupTarget], plans: Plan[] = [];
   const report: SetupReport = { mode, applied: false, root, entry: desired, actions: [], notes: target === "all" ? ["all covers user-level clients; run ares setup agy from its workspace separately"] : [] };
   for (const name of targets) {
     const host = table[name], receiptPath = join(family, "research", "setup", `${name}-${sha256(host.file).slice(0, 16)}.json`);
     try { const item = plan(host, receiptPath, mode, desired); plans.push(item); report.actions.push(item.action); }
-    catch (error) { report.actions.push({ target: name, file: host.file, entry: `${host.key}.ares`, receipt: receiptPath, lock: `${host.file}.ares-setup.lock`, change: "refused", receiptChange: "none", reason: failureReason(error) }); }
+    catch (error) { report.actions.push({ target: name, file: host.file, entry: host.format === "manifest" ? "console plugin manifest" : `${host.key}.ares`, receipt: receiptPath, lock: `${host.file}.ares-setup.lock`, change: "refused", receiptChange: "none", reason: failureReason(error) }); }
   }
+  return executePlans(plans, mode, desired, report);
+}
+function executePlans(plans: Plan[], mode: SetupMode, desired: SetupEntry, report: SetupReport): SetupReport {
   if (mode === "dry-run" || report.actions.some(action => action.change === "refused")) return report;
   for (let item of plans) {
     if (["none", "unchanged"].includes(item.action.change)) continue;
@@ -232,7 +247,7 @@ export function runSetup(target: string, mode: SetupMode, options: { env: NodeJS
       if (mode === "apply") write(item.action.receipt, item.receiptAfter, SETUP_RECEIPT_BYTES);
       try {
         if (read(item.host.file, SETUP_CONFIG_BYTES) !== item.before) fail("client config changed after receipt creation; rerun preview before applying");
-        write(item.host.file, item.after, SETUP_CONFIG_BYTES);
+        write(item.host.file, item.after, SETUP_CONFIG_BYTES, item.host.format === "manifest");
       }
       catch (error) { if (mode === "apply" && read(item.action.receipt, SETUP_RECEIPT_BYTES) === item.receiptAfter) write(item.action.receipt, item.receiptBefore, SETUP_RECEIPT_BYTES); throw error; }
       if (mode === "undo") write(item.action.receipt, null, SETUP_RECEIPT_BYTES);
@@ -241,4 +256,41 @@ export function runSetup(target: string, mode: SetupMode, options: { env: NodeJS
     finally { release?.(); }
   }
   return report;
+}
+
+/** The manifest directory must satisfy agent-console's private user-owned registration boundary. */
+function privateDirectory(dir: string, apply = false): void {
+  let info;
+  try { info = lstatSync(dir); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+  if (!info.isDirectory() || info.isSymbolicLink()) fail("console plugin directory must be a real directory");
+  if (info.uid !== process.getuid!()) fail("console plugin directory is owned by another user");
+  if (apply) chmodSync(dir, 0o700);
+}
+function privateModesNeeded(file: string): boolean {
+  try { if ((lstatSync(dirname(file)).mode & 0o777) !== 0o700) return true; } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  try { return (lstatSync(file).mode & 0o777) !== 0o600; } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; return false; }
+}
+/** Console registration is separate from agent-client `all`; no instruction blocks or other manifests are touched. */
+export function consoleManifest(mode: SetupMode, env: NodeJS.ProcessEnv, requestedRoot = OWN_ROOT, versioned = false): SetupReport {
+  if (!["dry-run", "apply", "undo"].includes(mode)) fail("unsupported setup mode", "choose dry-run, apply or undo and rerun ares setup");
+  const root = install(requestedRoot), module = join(root, "src", "ui", "plugin.ts");
+  const mcp: McpEntry = { command: "bun", args: ["--smol", join(root, "bin", "ares.js"), "mcp"] };
+  let desired: SetupEntry = mcp;
+  if (mode !== "undo") {
+    guard(module, false);
+    let bytes: Buffer;
+    try { bytes = readBytesBounded(module, SETUP_CONFIG_BYTES, { noFollow: true }); }
+    catch { fail("console plugin module is missing, unreadable or over 4 MiB", "select an intact release containing src/ui/plugin.ts and rerun ares setup console"); }
+    desired = { api: 1, tool: "ares", module, sha256: sha256(bytes) };
+  }
+  const pkg = record(JSON.parse(read(join(root, "package.json"), 65_536, false)!)), version = pkg.version;
+  if (versioned && (typeof version !== "string" || version.length > 128 || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))) fail("release version cannot name a console registration", "use an agent-research root with a semantic package version");
+  const family = absolute(env.AGENTHUB_HOME?.trim() || join(absolute(env.HOME?.trim() || homedir(), "HOME"), ".agenthub"), "AGENTHUB_HOME");
+  const file = join(family, "console", "plugins", versioned ? `ares@${version}.json` : "ares.json");
+  const host: Host = { target: "console", file, key: "", format: "manifest" }, receiptPath = join(family, "research", "setup", `console-${sha256(file).slice(0, 16)}.json`);
+  const report: SetupReport = { mode, applied: false, root, entry: mcp, ...(mode === "undo" ? {} : { console: desired as ConsoleManifest }), actions: [], notes: ["Registers only the ares console plugin; restart the console to load changed code."] };
+  let item: Plan;
+  try { item = plan(host, receiptPath, mode, desired); }
+  catch (error) { report.actions.push({ target: "console", file, entry: "console plugin manifest", receipt: receiptPath, lock: `${file}.ares-setup.lock`, change: "refused", receiptChange: "none", reason: failureReason(error) }); return report; }
+  report.actions.push(item.action); return executePlans([item], mode, desired, report);
 }

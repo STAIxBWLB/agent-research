@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { addStudy, removeStudy, readRegistry } from "./console/registry.ts";
 import { readWatchSnapshot, setWatch, runWatch, showWatch } from "./lit/watch.ts";
 import { runSetup, type SetupMode } from "./setup.ts";
 import { proposeSkill, decideSkill, listSkills } from "./memory/skills.ts";
@@ -487,3 +489,10 @@ export async function watchRun(dirArg: string, ctx: Ctx) {
   });
 }
 export const watchShow = (dir: string) => ({ ...showWatch(dir), newCandidates: list(dir, { status: "new", limit: 500 }) });
+
+function consoleHome(env: NodeJS.ProcessEnv): string {
+  return env.AGENTHUB_HOME?.trim() || join(env.HOME?.trim() || homedir(), ".agenthub");
+}
+export const consoleAdd = (dir: string, env: NodeJS.ProcessEnv) => addStudy(consoleHome(env), dir);
+export const consoleRemove = (dir: string, env: NodeJS.ProcessEnv) => removeStudy(consoleHome(env), dir);
+export const consoleList = (env: NodeJS.ProcessEnv) => readRegistry(consoleHome(env));
