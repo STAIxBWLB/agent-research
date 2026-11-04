@@ -1,5 +1,6 @@
 import { version } from "../package.json";
 import { COMMANDS } from "./commands-table.ts";
+import { ARES_TOOLS } from "./mcp-tools.ts";
 
 /** Implemented family-readable records only; private inputs and future integrations are not contracts. */
 export const FORMAT_VERSIONS = {
@@ -26,7 +27,8 @@ export interface Manifest {
   commands: { name: string; usage: string }[];
   formats: typeof FORMAT_VERSIONS;
   ledgerEvents: typeof MEMORY_LEDGER_EVENTS[number][];
+  mcp: { server: "ares"; tools: { name: string; readOnly: boolean }[] };
 }
 export function manifest(): Manifest {
-  return { v: 1, name: "ares", version, commands: COMMANDS.map(({ name, usage }) => ({ name, usage })), formats: { ...FORMAT_VERSIONS }, ledgerEvents: [...MEMORY_LEDGER_EVENTS] };
+  return { v: 1, name: "ares", version, commands: COMMANDS.map(({ name, usage }) => ({ name, usage })), formats: { ...FORMAT_VERSIONS }, ledgerEvents: [...MEMORY_LEDGER_EVENTS], mcp: { server: "ares", tools: ARES_TOOLS.map(tool => ({ name: tool.name, readOnly: tool.annotations.readOnlyHint === true })) } };
 }

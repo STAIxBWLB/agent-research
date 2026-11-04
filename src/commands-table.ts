@@ -7,6 +7,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "skill list", usage: "skill list <dir> [--json]", mutates: false, options: json },
   { name: "lessons", usage: "lessons <dir> [--for TEXT] [--half-life DAYS] [--limit N] [--json]", mutates: false, options: { "--for": "value", "--half-life": "value", "--limit": "value", ...json } },
   { name: "archive", usage: "archive <dir> [--confirm FINGERPRINT] [--json]", mutates: "network", options: { "--confirm": "value", ...json } },
+  { name: "setup", usage: "setup <claude|codex|kimi|pi|qwen|jcode|agy|all> [--apply|--undo] [--root ABS] [--json]", mutates: true, options: { "--apply": "flag", "--undo": "flag", "--root": "value", ...json } },
   { name: "manifest", usage: "manifest [--json]", mutates: false, options: json },
   { name: "init", usage: "init <dir> --question TEXT [--mode survey|experiment] [--autonomy auto|gates] [--json]", mutates: true, options: { "--question": "value", "--mode": "value", "--autonomy": "value", ...json } },
   { name: "run", usage: "run <dir> [--parallel 1..8] [--json]", mutates: "network", options: { "--parallel": "value", ...json } },

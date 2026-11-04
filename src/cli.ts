@@ -56,6 +56,13 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
   let result: unknown, code = 0;
   switch (spec.name) {
+    case "setup": {
+      count(spec, positional, 1);
+      if (flags["--apply"] && flags["--undo"]) throw new Error("setup: --apply and --undo conflict; choose one or omit both for preview");
+      const root = str("--root"); result = ops.setup(positional[0]!, flags["--apply"] ? "apply" : flags["--undo"] ? "undo" : "dry-run", env, { ...(root === undefined ? {} : { root }) });
+      if ((result as ReturnType<typeof ops.setup>).actions.some(action => action.change === "refused")) code = 1;
+      break;
+    }
     case "skill propose": {
       count(spec, positional, 1); const file = str("--file");
       if (file === undefined) throw new Error("skill propose: input missing; pass --file PATH or --file - for proposal JSON");
