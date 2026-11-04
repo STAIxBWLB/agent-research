@@ -16,7 +16,7 @@ let serial = 0;
 function attempt(dir: string, frozen: string, seed: number, value: number, options: {run?:string;status?:AttemptStatus;binding?:string;retryOf?:string;seal?:string} = {}) {
   const id = (++serial).toString(16).padStart(16, "0"), protocol = readProtocol(dir)!, run = options.run ?? "final", folder = join(dir, "runs", run, "attempts"); mkdirSync(folder, { recursive: true });
   const finalBinding = options.binding ?? (run === "final" ? finalGateBinding(dir) : undefined);
-  writeFileSync(join(folder, `${id}.json`), JSON.stringify({ v: 1, id, studyId: openStudy(dir).study.id, run, commit: frozen, seed, protocolHash: protocolHash(protocol), protocol, executor: {}, stages: {}, stage: "evaluator", status: options.status ?? "succeeded", startedAt: "2030-01-01T00:00:00Z", sealBinding: options.seal ?? designBinding(dir), ...(finalBinding ? { finalBinding } : {}), ...(options.retryOf ? { retryOf: options.retryOf } : {}), metrics: [{ name: "score", value, unit: "points", provenance: "ares-observed" }], outputs: [] }));
+  writeFileSync(join(folder, `${id}.json`), JSON.stringify({ v: 1, id, studyId: openStudy(dir).study.id, run, commit: frozen, seed, protocolHash: protocolHash(protocol), protocol, executor: {}, stages: {}, stage: "evaluator", status: options.status ?? "succeeded", startedAt: "2030-01-01T00:00:00Z", sealBinding: options.seal ?? designBinding(dir), ...(finalBinding ? { finalBinding, finalWinner: requireFinalInputs(dir).winner } : {}), ...(options.retryOf ? { retryOf: options.retryOf } : {}), metrics: [{ name: "score", value, unit: "points", provenance: "ares-observed" }], outputs: [] }));
   appendEvent(dir, actor, "attempt.started", { id, run, commit: frozen, seed }); return id;
 }
 async function setup(direction = "max", ablate = false) {
@@ -72,11 +72,11 @@ test("running and missing decisive attempts refuse with result and ledger unchan
   await expect(ops.finalClose(dir, ctx)).rejects.toThrow("attempt reconcile"); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before); expect(existsSync(finalResultPath(dir))).toBe(false);
 });
 
-test("first successes from stale final inputs cannot qualify and every final attempt stays visible", async () => {
+test("old binding tags alone never change fixed valid final attempts and every attempt stays visible", async () => {
   const dir = await setup(); await approve(dir);
   for (const seed of [3, 4]) { attempt(dir, BASE, seed, 10); attempt(dir, WIN, seed, 12, { binding: "old-inputs" }); }
   attempt(dir, ABL, 1, 1000);
-  const result = await ops.finalClose(dir, ctx); expect(result.status).toBe("not_qualified"); expect(result.reason).toBe("input-changed"); expect(result.attempts).toHaveLength(5);
+  const result = await ops.finalClose(dir, ctx); expect(result.status).toBe("qualified"); expect(result.attempts).toHaveLength(5);
 });
 
 test("final attempt preflight rejects gate, commit and seed errors before any process/record", async () => {
@@ -107,4 +107,36 @@ test("partial successful decisive pairs remain reported without overriding a fai
   attempt(dir, BASE, 4, 10); attempt(dir, WIN, 4, 12);
   const result = await ops.finalClose(dir, ctx);
   expect(result.status).toBe("not_qualified"); expect(result.reason).toBe("failed"); expect(result.pairs.map(p => p.seed)).toEqual([4]); expect(result.delta).toBe(2);
+});
+
+
+test("idea-note input changes require re-approval rather than disqualifying fixed final data", async () => {
+  const dir = await setup(); await approve(dir); decisive(dir); const original = await ops.finalClose(dir, ctx);
+  await ops.ideaAdd(dir, { id: "note", title: "Synthetic note", hypothesis: "Interpret existing evidence" }, ctx); await ops.investigateClose(dir, ctx);
+  expect(ops.gateList(dir).find(g => g.gate === "final")!.state).toBe("pending");
+  const before = readFileSync(join(dir, "ledger.jsonl"));
+  await expect(ops.finalClose(dir, ctx)).rejects.toThrow("not currently approved"); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
+  await ops.gateDecide(dir, "final", "approve", undefined, ctx);
+  const after = await ops.finalClose(dir, ctx); expect(after.status).toBe("qualified"); expect(after.decisive.map(a => a.id)).toEqual(original.decisive.map(a => a.id));
+});
+
+test("changed evaluation protocol yields protocol-changed after re-approval without replacing decisive attempts", async () => {
+  const dir = await setup(); await approve(dir); decisive(dir);
+  const p = readProtocol(dir)!; await ops.protocol(dir, { ...p, method: "Changed evaluation protocol" }, ctx);
+  for (const seed of [1, 2]) { attempt(dir, BASE, seed, 10, { run: "investigate" }); attempt(dir, WIN, seed, 12, { run: "investigate" }); }
+  await ops.investigateClose(dir, ctx); await approve(dir);
+  const result = await ops.finalClose(dir, ctx); expect(result.status).toBe("not_qualified"); expect(result.reason).toBe("protocol-changed");
+});
+
+test("winner changes cannot buy a new final even after only baseline attempts", async () => {
+  for (const baselineOnly of [false, true]) {
+    const dir = await setup(); await approve(dir);
+    if (baselineOnly) for (const seed of [3, 4]) attempt(dir, BASE, seed, 10); else decisive(dir);
+    for (const seed of [1, 2]) attempt(dir, ABL, seed, 20, { run: "investigate" });
+    await ops.investigateClose(dir, ctx); await approve(dir); await ops.executorSet(dir, { v: 1, kind: "local", workdir: "/private/synthetic" }, ctx);
+    const before = readFileSync(join(dir, "ledger.jsonl")); let calls = 0;
+    await expect(runAttempt(dir, { repo: "/synthetic", commit: ABL, seed: 3, run: "final", detach: true }, { actor, runner: async () => { calls++; throw new Error("must not execute"); } })).rejects.toThrow("winner changed after a final attempt");
+    expect(calls).toBe(0); expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
+    const result = await ops.finalClose(dir, ctx); expect(result.status).toBe("not_qualified"); expect(result.reason).toBe("winner-changed");
+  }
 });

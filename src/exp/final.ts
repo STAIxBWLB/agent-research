@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { commit, onlyKeys, openStudy, plain, readTextBounded, requireExperiment, sha256, assertWritable, gateState, readLedger, requireGate, type Actor } from "../study.ts";
+import { commit, onlyKeys, openStudy, plain, readTextBounded, requireExperiment, sha256, assertWritable, gateState, readLedger, requireGate, type Actor, type LedgerEvent } from "../study.ts";
 import { readDesign, readProtocol, type Protocol } from "./protocol.ts";
 import { listAttempts, type Attempt, type AttemptStatus } from "./attempts.ts";
 import { ablateResultPath, ABLATE_BYTES, foldAblations, readClosedAblate } from "./ablate.ts";
@@ -90,15 +90,29 @@ export function requireFinalInputs(dirArg: string) {
   const binding = finalGateBinding(dir); if (!binding) finalError("closed upstream results are incomplete");
   return { dir, study, design, final, rule, investigate, ablate, binding, winner: investigate.result.winner.commit, baseline: rule.baseline.commit };
 }
+function winnerChanged(attempts: Attempt[], events: LedgerEvent[], winner: string, baseline: string, seeds: number[]): boolean {
+  let latest: string | undefined;
+  const history = new Map<string, string | undefined>();
+  for (const event of events) {
+    if (event.type === "investigate.closed") latest = typeof event.data.winner === "string" ? event.data.winner : undefined;
+    if (event.type === "attempt.started" && typeof event.data.id === "string") history.set(event.data.id, latest);
+  }
+  return attempts.some(a => {
+    if (a.finalWinner !== undefined && (typeof a.finalWinner !== "string" || !/^[a-f0-9]{40}$/.test(a.finalWinner))) finalError(`attempt ${a.id} has malformed final winner metadata; restore its valid record`);
+    const original = a.finalWinner ?? history.get(a.id);
+    return (original !== undefined && original !== winner) || (seeds.includes(a.seed) && a.commit !== winner && a.commit !== baseline);
+  });
+}
 /** Called under the study lock before snapshot resolution and again before record creation. */
-export function authorizeFinalAttempt(dir: string, commit: string, seed: number): { binding: string; auto: boolean } {
+export function authorizeFinalAttempt(dir: string, commit: string, seed: number): { binding: string; auto: boolean; winner: string } {
   const input = requireFinalInputs(dir);
   if (!input.final.seeds.includes(seed)) finalError(`seed ${seed} is not reserved; choose a seed from design/final.json`);
   if (typeof commit !== "string" || !/^[a-fA-F0-9]{40}$/.test(commit)) finalError("commit must be a full 40-hex SHA; choose the winner or baseline frozen commit");
   const normalized = commit.toLowerCase();
   if (normalized !== input.winner && normalized !== input.baseline) finalError("commit is neither the investigate winner nor selection baseline; choose one of those frozen commits");
+  if (winnerChanged(listAttempts(input.dir, { run: "final" }).attempts, readLedger(input.dir), input.winner, input.baseline, input.final.seeds)) finalError("winner changed after a final attempt; approve the current final gate and run ares final close to record winner-changed, never start a second final");
   const approvals = requireGate(dir, input.study, "final", () => input.binding);
-  return { binding: input.binding, auto: approvals.length > 0 };
+  return { binding: input.binding, auto: approvals.length > 0, winner: input.winner };
 }
 interface FinalAttempt { id: string; commit: string; seed: number; status: AttemptStatus; decisive: boolean; reason?: string; retryOf?: string }
 export interface FinalResult {
@@ -117,32 +131,31 @@ export function closeFinal(dirArg: string, actor: Actor): FinalResult {
   const input = requireFinalInputs(dirArg), file = finalResultPath(input.dir), old = resultBytes(file, FINAL_RESULT_BYTES, "final");
   const attempts = listAttempts(input.dir, { run: "final" }).attempts;
   if (attempts.some(a => a.status === "running")) throw new Error("final close: a final attempt is running; run ares attempt reconcile before closing");
-  const events = readLedger(input.dir), starts = new Map<string, { index: number; data: Record<string, unknown> }>();
+  const events = readLedger(input.dir);
+  if (gateState("final", events, () => input.binding).state !== "approved") finalError("gate is not currently approved; run ares gate approve <dir> final after closing changed inputs");
+  const changedWinner = winnerChanged(attempts, events, input.winner, input.baseline, input.final.seeds);
+  const starts = new Map<string, { index: number; data: Record<string, unknown> }>();
   events.forEach((e, index) => { if (e.type === "attempt.started" && typeof e.data.id === "string") { if (starts.has(e.data.id)) finalError(`duplicate start receipt for ${e.data.id}; restore the valid ledger`); starts.set(e.data.id, { index, data: e.data }); } });
   const ordered = [...attempts].sort((a, b) => (starts.get(a.id)?.index ?? -1) - (starts.get(b.id)?.index ?? -1) || a.id.localeCompare(b.id));
   const chosen = new Map<string, Attempt>(), rows: FinalAttempt[] = [];
   for (const a of ordered) {
     if (a.studyId !== input.study.id || typeof a.commit !== "string" || !/^[a-f0-9]{40}$/.test(a.commit) || !Number.isSafeInteger(a.seed)) finalError(`attempt ${a.id} has invalid study/commit/seed metadata`);
-    const required = [input.winner, input.baseline].includes(a.commit) && input.final.seeds.includes(a.seed), start = starts.get(a.id);
+    const required = input.final.seeds.includes(a.seed), start = starts.get(a.id);
     if (required && (!start || start.data.run !== "final" || start.data.commit !== a.commit || start.data.seed !== a.seed)) finalError(`attempt ${a.id} has no matching start receipt; restore its ledger evidence`);
     const key = `${a.commit}:${a.seed}`, decisive = required && !chosen.has(key);
     if (decisive) chosen.set(key, a);
     rows.push({ id: a.id, commit: a.commit, seed: a.seed, status: a.status, decisive, ...(!required ? { reason: "outside-final-pairs" } : !decisive ? { reason: "later-attempt" } : {}), ...(a.retryOf ? { retryOf: a.retryOf } : {}) });
   }
-  for (const commit of [input.winner, input.baseline]) for (const seed of input.final.seeds) if (!chosen.has(`${commit}:${seed}`)) finalError(`missing decisive attempt for commit ${commit} seed ${seed}; finish every reserved winner/baseline pair`);
+  if (!changedWinner) for (const commit of [input.winner, input.baseline]) for (const seed of input.final.seeds) if (!chosen.has(`${commit}:${seed}`)) finalError(`missing decisive attempt for commit ${commit} seed ${seed}; finish every reserved winner/baseline pair`);
   const decisive = rows.filter(a => a.decisive), firstFailure = decisive.find(a => a.status !== "succeeded");
-  let reason: string | undefined = firstFailure?.status;
-  const selected = [...chosen.values()];
-  if (!reason && selected.some(a => a.sealBinding !== input.design.binding || a.finalBinding !== input.binding || a.protocolHash !== input.investigate.result.protocolHash)) reason = "input-changed";
+  let reason: string | undefined = changedWinner ? "winner-changed" : [...chosen.values()].some(a => a.protocolHash !== input.investigate.result.protocolHash) ? "protocol-changed" : firstFailure?.status;
   const samples = (commit: string): Sample[] => input.final.seeds.flatMap(seed => {
-    const a = chosen.get(`${commit}:${seed}`)!;
-    if (a.status !== "succeeded" || a.sealBinding !== input.design.binding || a.finalBinding !== input.binding || a.protocolHash !== input.investigate.result.protocolHash) return [];
+    const a = chosen.get(`${commit}:${seed}`);
+    if (!a || a.status !== "succeeded" || a.protocolHash !== input.investigate.result.protocolHash) return [];
     return [{ seed, attempt: a.id, value: metricValue(a, input.investigate.result.metric) }];
   });
   const paired = pairSamples(samples(input.winner), samples(input.baseline), input.investigate.result.metric.direction, input.winner);
   if (!reason) {
-    const gate = gateState("final", events, () => input.binding);
-    if (gate.state !== "approved") finalError("gate is not approved for the current inputs; run ares gate approve <dir> final");
     if (paired.delta === null || paired.delta <= 0 || paired.delta < input.rule.minDelta) reason = "below-margin";
   }
   const result: FinalResult = { v: 1, status: reason ? "not_qualified" : "qualified", ...(reason ? { reason } : {}), winner: input.winner, baseline: input.baseline, seeds: input.final.seeds, pairs: paired.pairs, mean: paired.mean, baselineMean: paired.referenceMean, delta: paired.delta, decisive, attempts: rows, investigateSha256: input.investigate.sha256, ...(input.ablate ? { ablateSha256: input.ablate.sha256 } : {}), sealBinding: input.design.binding,

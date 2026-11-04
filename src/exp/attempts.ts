@@ -20,7 +20,7 @@ export interface Attempt {
   sealing: { separateContainers: boolean; evaluatorReadOnly: boolean; candidateHasNoEvaluator: boolean; verifiedBy: "ares-observed" };
   launching?: { pid: number; host: string; token: string; claimedAt: string; expiresAt: string };
   pendingAutoApproval?: string;
-  finalBinding?: string; pendingFinalApproval?: string;
+  finalBinding?: string; finalWinner?: string; pendingFinalApproval?: string;
 }
 export interface AttemptOptions { repo: string; commit: string; seed?: number; run?: string; label?: string; retry?: string; detach?: boolean; expectedId?: string }
 /** collectEvaluation is T4's validating adapter; T3 does not parse or validate metric schemas. */
@@ -345,7 +345,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     const root = posix.join(executor.workdir, study.id, wanted);
     const record: Attempt = { v: 1, id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, protocol, paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };
     if (approval.length) record.pendingAutoApproval = binding!;
-    if (finalAuthorization) { record.finalBinding = finalAuthorization.binding; if (finalAuthorization.auto) record.pendingFinalApproval = finalAuthorization.binding; }
+    if (finalAuthorization) { record.finalBinding = finalAuthorization.binding; record.finalWinner = finalAuthorization.winner; if (finalAuthorization.auto) record.pendingFinalApproval = finalAuthorization.binding; }
     commit(dir, [[file(dir, record), JSON.stringify(record, null, 2) + "\n", ATTEMPT_BYTES]], [{ actor: ctx.actor, type: "attempt.started", data: { id: wanted, run, seed, commit: record.commit, treeId: record.treeId } }]);
     created = true; return record;
   });
