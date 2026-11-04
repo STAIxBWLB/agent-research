@@ -16,6 +16,8 @@ const META = { identity: "verified-person", node: "synthetic-node", via: "consol
 const candidateId = "doi:10.0000/action-a", otherId = "doi:10.0000/action-b", baselineId = "doi:10.0000/action-baseline", proposalName = "synthetic-procedure", pr = "https://github.com/example/synthetic/pull/1";
 type Input = { action: string; [key: string]: unknown };
 type Preview = { ok: false; needsConfirm: true; fingerprint: string; preview: string[] };
+type WireResponse = { ok?: boolean; needsConfirm?: boolean; confirmToken?: string; readOnly?: boolean };
+const responseJson = async (response: Response): Promise<WireResponse> => await response.json() as WireResponse;
 const ledger = (dir: string) => fs.readFileSync(join(dir, "ledger.jsonl"), "utf8");
 async function fixture(home: string) {
   const family = join(home, "family"), survey = join(home, "survey"), experiment = join(home, "experiment");
@@ -56,8 +58,10 @@ async function open(f: Awaited<ReturnType<typeof fixture>>, runner = fakeRunner(
 async function preview(provider: ConsoleProvider, input: Input): Promise<Preview> {
   const result = await provider.action(input, META);
   expect(result.ok).toBe(false); expect("needsConfirm" in result && result.needsConfirm).toBe(true);
-  if (!("needsConfirm" in result) || !result.needsConfirm) throw new Error("expected a confirmation preview");
-  expect(result.fingerprint).toMatch(/^[a-f0-9]{64}$/); expect(result.preview.length).toBeGreaterThan(0); return result;
+  if (result.ok !== false || !("needsConfirm" in result) || result.needsConfirm !== true) throw new Error("expected a confirmation preview");
+  const pending = result as Preview;
+  if (typeof pending.fingerprint !== "string" || !Array.isArray(pending.preview) || pending.preview.some(line => typeof line !== "string")) throw new Error("malformed confirmation preview");
+  expect(pending.fingerprint).toMatch(/^[a-f0-9]{64}$/); expect(pending.preview.length).toBeGreaterThan(0); return pending;
 }
 function files(home: string): Record<string, string> {
   const result: Record<string, string> = {};
@@ -91,7 +95,7 @@ test("confirming every action appends one person-attributed event and ignores pa
   const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async () => { throw new Error("console action network forbidden"); }) as unknown as typeof fetch);
   try {
     for (const [index, action] of actions(f).entries()) {
-      const input = { ...action, actor: { kind: "agent", id: "page-spoof" }, meta: { identity: "page-spoof" } }, pending = await preview(provider, input), dir = input.study as string, count = readLedger(dir).length;
+      const input: Input = { ...action, actor: { kind: "agent", id: "page-spoof" }, meta: { identity: "page-spoof" } }, pending = await preview(provider, input), dir = input.study as string, count = readLedger(dir).length;
       const result = await provider.action({ ...input, confirmed: true, fingerprint: pending.fingerprint }, META);
       expect(result.ok).toBe(true); expect(readLedger(dir)).toHaveLength(count + 1);
       expect(readLedger(dir).at(-1)).toMatchObject({ type: types[index], actor: { kind: "person", id: META.identity } });
@@ -166,7 +170,7 @@ test("the pinned console read-only server refuses an action before invoking the 
   try {
     expect(handle).toBeDefined();
     const response = await handle!(new Request("http://127.0.0.1:43179/p/ares/action", { method: "POST", headers: { host: "127.0.0.1:43179", origin: "http://127.0.0.1:43179", "content-type": "application/json" }, body: JSON.stringify(actions(f)[0]) }));
-    expect(response.status).toBe(403); expect((await response.json()).readOnly).toBe(true); expect(action).not.toHaveBeenCalled();
+    expect(response.status).toBe(403); expect((await responseJson(response)).readOnly).toBe(true); expect(action).not.toHaveBeenCalled();
     expect(files(f.home)).toEqual(before); expect(fake.requests).toEqual([]);
   } finally { await server.stop(); action.mockRestore(); serve.mockRestore(); }
 });
@@ -201,17 +205,17 @@ test("the pinned writable console routes all four actions through shell-issued c
     const previewBefore = files(f.home);
     for (const input of previewActions(f)) {
       expect(Object.hasOwn(input, "decision")).toBe(false);
-      const response = await request(input), result = await response.json();
+      const response = await request(input), result = await responseJson(response);
       expect(response.status).toBe(200); expect(result.needsConfirm).toBe(true); expect(result.confirmToken).toMatch(/^[a-f0-9]{64}$/);
     }
     expect(files(f.home)).toEqual(previewBefore); expect(fake.requests).toEqual([]);
     for (const [index, action] of actions(f).entries()) {
-      const input = { ...action, actor: { kind: "agent", id: "page-spoof" }, meta: { identity: "page-spoof" } }, before = files(f.home), dir = input.study as string, count = readLedger(dir).length, requested = fake.requests.length;
-      const pendingResponse = await request(input), pending = await pendingResponse.json();
+      const input: Input = { ...action, actor: { kind: "agent", id: "page-spoof" }, meta: { identity: "page-spoof" } }, before = files(f.home), dir = input.study as string, count = readLedger(dir).length, requested = fake.requests.length;
+      const pendingResponse = await request(input), pending = await responseJson(pendingResponse);
       expect(pendingResponse.status).toBe(200); expect(pending.needsConfirm).toBe(true); expect(pending.confirmToken).toMatch(/^[a-f0-9]{64}$/);
       expect(files(f.home)).toEqual(before); expect(fake.requests).toHaveLength(requested);
       const response = await request({ ...input, confirmToken: pending.confirmToken });
-      expect(response.status).toBe(200); expect((await response.json()).ok).toBe(true); expect(readLedger(dir)).toHaveLength(count + 1);
+      expect(response.status).toBe(200); expect((await responseJson(response)).ok).toBe(true); expect(readLedger(dir)).toHaveLength(count + 1);
       expect(readLedger(dir).at(-1)).toMatchObject({ type: ["gate.approve", "lit.screen", "skill.decided", "archive.exported"][index], actor: { kind: "person", id: META.identity } });
       const committed = files(f.home), replay = await request({ ...input, confirmToken: pending.confirmToken });
       expect(replay.status).toBe(409); expect(files(f.home)).toEqual(committed);
