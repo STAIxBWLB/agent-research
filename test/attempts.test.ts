@@ -378,7 +378,9 @@ test("oversized stage logs are capped and marked truncated without failing a suc
     return collectStageEvidence(attempt, stage, logCaptureFixtureRunner(runner));
   };
   const first = await runAttempt(dir, request, fake.ctx); running(fake, "candidate").running = false;
-  await reconcileAttempts(dir, fake.ctx); running(fake, "evaluator").running = false;
+  await reconcileAttempts(dir, fake.ctx);
+  expect(showAttempt(dir, first.id)).toMatchObject({ status: "running", stage: "evaluator" });
+  running(fake, "evaluator").running = false;
   await reconcileAttempts(dir, fake.ctx); const done = showAttempt(dir, first.id);
   expect(done.status).toBe("succeeded"); expect(done.metrics[0]?.value).toBe(7);
   for (const stage of ["candidate", "evaluator"] as const) {

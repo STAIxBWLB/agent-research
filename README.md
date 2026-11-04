@@ -54,6 +54,8 @@ ares attempt logs experiment <id> --stage candidate --stream stderr --tail 16384
 ares attempt cancel experiment <id> --reason "stop this run"
 ```
 
+Executor hosts need `tar --no-xattrs` support (GNU tar >=1.27 or bsdtar). Unsupported implementations such as BusyBox tar fail with the generic "stage log collection failed" executor error; ares does not fall back to archives containing metadata.
+
 Create the executor workdir on that host, owned by its user with mode `0700`. The path is required and absolute; a shared `/tmp` default is not used. `executor check` reports the Docker server version, image availability and non-root uid:gid, and may pull missing images. It stores the alias, never SSH credentials.
 
 The task contains `task.md`, evaluator entrypoint/data under `evaluator/`, and optional `rubric.md`. Use regular files only, at most 500 files and 64 MiB total; symlinks are refused. A protocol has this shape (the pinned BusyBox image below can run the synthetic shell fixtures):

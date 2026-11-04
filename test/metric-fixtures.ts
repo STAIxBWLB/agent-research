@@ -31,7 +31,9 @@ export function logCaptureFixtureRunner(fallback?: ProcessRunner): ProcessRunner
     if (request.command === "sh" && request.stdoutSink && request.args[1]?.includes("docker logs")) {
       const script = request.args[1].replace(/docker logs [a-f0-9]{64}/, `${shellQuote(process.execPath)} -e ${shellQuote(producer)}`);
       if (script.includes("docker logs")) throw new Error("synthetic runner refused an unhandled Docker command");
-      return spawnRunner({ ...request, args: ["-c", script] });
+      // Exercise binary Darwin metadata even on CI Macs without automatic provenance.
+      const decorated = process.platform === "darwin" ? script.replace(/\n(?=(?:COPYFILE_DISABLE=1 )?tar )/, '\nfor file in "$out" "$err" "$state"; do xattr -w -x user.ares.synthetic 00ff "$file"; done\n') + '\nfor file in "$out" "$err" "$state"; do xattr -p user.ares.synthetic "$file" > /dev/null; done' : script;
+      return spawnRunner({ ...request, args: ["-c", decorated] });
     }
     if (fallback) return fallback(request);
     throw new Error("unscripted synthetic fixture process");
