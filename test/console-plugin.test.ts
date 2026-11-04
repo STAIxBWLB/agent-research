@@ -57,7 +57,7 @@ async function fixtures(home: string) {
 }
 const persistent = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "ares-console-conformance-"))), conf = await fixtures(persistent);
 afterAll(() => fs.rmSync(persistent, { recursive: true, force: true }));
-// T2 has no enabled write actions; every known/unknown action is explicitly refused below. T3 supplies destructive cases.
+// Enabled action confirmation cases live in console-actions.test.ts; invalid actions below cannot write.
 registerConsoleConformance(typed, { home: conf.family, destructive: [], assets: [`manuscript:${openStudy(conf.survey).study.id}`] });
 
 const context = (home: string) => ({ home, log: (_line: string) => {}, features: ["inbox.form", "action.meta"] });
@@ -77,7 +77,7 @@ test("manifest, panels and stable inbox groups use real handlers without subproc
     const detail = await provider.snapshot({ panel: "study", study: f.survey, after: 0 }); expect((detail.study as any).manuscript.id).toBe(`manuscript:${openStudy(f.survey).study.id}`);
     const first = await provider.snapshot({ panel: "inbox", after: 0 }), second = await provider.snapshot({ panel: "inbox", after: 0 }), items = rows(first.items);
     expect(new Set(items.map(row => row.group))).toEqual(new Set(["decision", "candidate", "review", "alert"]));
-    const candidate = items.filter(row => row.group === "candidate"); expect(candidate).toHaveLength(1); expect(candidate[0]!.detail).toContain("Synthetic human rubric"); expect(candidate[0]!.title).toBe("Synthetic live candidate");
+    const candidate = items.filter(row => row.group === "candidate"); expect(candidate).toHaveLength(1); expect(candidate[0]!.detail).toContain("See study rubric"); expect(candidate[0]!.title).toBe("Synthetic live candidate");
     expect(items.some(row => row.kind === "skill" && row.verbs.some((verb: any) => verb.label === "Accept" && verb.form))).toBe(true);
     expect(items.some(row => row.kind === "review" && row.verbs.length === 0)).toBe(true);
     expect(items.filter(row => row.kind === "attempt")).toHaveLength(2); expect(items.some(row => row.kind === "watch")).toBe(true);
@@ -85,7 +85,7 @@ test("manifest, panels and stable inbox groups use real handlers without subproc
     const actualTimes = new Set([...readLedger(f.survey), ...readLedger(f.experiment)].map(event => event.at));
     for (const item of items.filter(row => row.kind !== "unavailable")) expect(actualTimes.has(item.at)).toBe(true);
     for (const item of items) for (const verb of item.verbs) expect(verb.destructive).toBe(true);
-    for (const action of ["gate", "screen", "skillDecide", "archiveConfirm", "unknown"]) expect((await provider.action({ action, confirmed: true }, { identity: "local", node: "local", via: "console" })).ok).toBe(false);
+    for (const action of ["gate.approve", "gate.reject", "screen.include", "screen.exclude", "skill.accept", "skill.reject", "skill.withdraw", "archive.confirm", "unknown"]) expect((await provider.action({ action, confirmed: true }, { identity: "local", node: "local", via: "console" })).ok).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled(); expect(spawnSpy).not.toHaveBeenCalled();
     for (const [path, bytes] of before) expect(fs.readFileSync(path)).toEqual(bytes);
   } finally { fetchSpy.mockRestore(); spawnSpy.mockRestore(); }
