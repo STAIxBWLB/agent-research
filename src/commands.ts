@@ -1,3 +1,5 @@
+import { rankLessons, type LessonRankOptions } from "./memory/lessons.ts";
+import { createAmemClient } from "./memory/amem.ts";
 import { previewArchive, exportArchive, type ArchivePreview, type ArchiveResult } from "./memory/archive.ts";
 import { addReview, resolveReview, reviewReadiness, reviewBinding, requireReviewReady } from "./paper/review.ts";
 import { buildPaper } from "./paper/build.ts";
@@ -433,4 +435,15 @@ export async function archive(dirArg: string, options: { confirm?: string }, ctx
   const { dir } = openStudy(dirArg);
   if (options.confirm === undefined) return previewArchive(dir);
   return withLock(dir, () => exportArchive(dir, options.confirm!, ctx.actor, ctx.runner, env));
+}
+
+/** The study cwd binds amem's project; search and optional intent brief never write study files. */
+export async function lessons(dirArg: string, options: LessonRankOptions & { for?: string }, ctx: Pick<Ctx, "runner" | "now"> = {}, env: NodeJS.ProcessEnv = process.env) {
+  const { dir, study } = openStudy(dirArg), now = ctx.now?.() ?? Date.now();
+  rankLessons([], now, options);
+  if (options.for !== undefined && (!options.for.trim() || options.for.includes("\0") || options.for.length > 1000)) throw new Error("lessons intent: blank, NUL or over 1000 characters; pass --for with nonblank intent text within that bound");
+  const client = createAmemClient(dir, ctx.runner, env), hits = await client.search(study.question);
+  const ranked = rankLessons(hits, now, options);
+  const brief = options.for === undefined ? undefined : await client.brief(options.for, 2048);
+  return { lessons: ranked, ...(brief === undefined ? {} : { brief }) };
 }
