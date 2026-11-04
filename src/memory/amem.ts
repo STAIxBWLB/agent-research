@@ -19,7 +19,12 @@ const kindOf = (value: unknown): value is AmemKind => ["fail", "finding", "decis
 const identifier = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{32}$/.test(value);
 function invalid(): never { throw new Error("amem bad JSON: invalid response shape; check amem --version and inspect --json output in the study directory"); }
 function input(text: string): void {
-  if (!text.trim() || text === "-" || text.startsWith("-") || text.includes("\0")) throw new Error("amem input: provide non-empty text without a leading hyphen or NUL; correct the input and retry");
+  if (!text.trim() || text.includes("\0")) throw new Error("amem input: provide non-empty text without NUL; correct the input and retry");
+}
+function optionValue(value: string): string {
+  input(value);
+  // ponytail: amem 0.20.3 cannot escape -- values; one leading space works until its parser supports literal option values.
+  return value.startsWith("--") ? ` ${value}` : value;
 }
 function hit(raw: unknown): AmemHit {
   if (!plain(raw) || !identifier(raw.id) || !kindOf(raw.kind) || (raw.title !== null && typeof raw.title !== "string")
@@ -35,9 +40,9 @@ function hit(raw: unknown): AmemHit {
 function scoreUnavailable(): never {
   throw new Error("amem score unavailable: finite positive finalScore and recencyFactor required; inspect amem search <words> --json --explain in the study directory");
 }
-async function readAmem(args: string[], cwd: string, runner: ProcessRunner, context: NodeJS.ProcessEnv): Promise<unknown> {
+async function readAmem(args: string[], cwd: string, runner: ProcessRunner, context: NodeJS.ProcessEnv, stdin?: Uint8Array): Promise<unknown> {
   let result;
-  try { result = await runner({ command: "amem", args, cwd, env: context, maxOutputBytes: AMEM_OUTPUT_BYTES, timeoutMs: 30_000 }); }
+  try { result = await runner({ command: "amem", args, cwd, env: context, ...(stdin === undefined ? {} : { stdin }), maxOutputBytes: AMEM_OUTPUT_BYTES, timeoutMs: 30_000 }); }
   catch { throw new Error("amem spawn failure; check amem is on PATH (amem --version)"); }
   if (result.truncated || Buffer.byteLength(result.stdout) > AMEM_OUTPUT_BYTES) throw new Error("amem over-bound output; reduce the search limit or brief bytes and retry");
   if (result.timedOut) throw new Error("amem timeout; check amem --version and retry in the study directory");
@@ -57,18 +62,18 @@ function searchRows(raw: unknown): unknown[] {
 /** The process boundary returns projections only; raw diagnostics never escape in errors. */
 export function createAmemClient(cwd: string, runner: ProcessRunner = spawnRunner, env: NodeJS.ProcessEnv = process.env): AmemClient {
   const context = Object.fromEntries([...PROCESS_CONTEXT_ENV_KEYS, "HOME"].flatMap(key => env[key] === undefined ? [] : [[key, env[key]!]]));
-  const read = (args: string[]) => readAmem(args, cwd, runner, context);
+  const read = (args: string[], stdin?: Uint8Array) => readAmem(args, cwd, runner, context, stdin);
   return {
     async add(note) {
       input(note.text);
       if (!kindOf(note.kind)) throw new Error("amem input: invalid kind; use fail, finding, decision or contract");
       if (note.evidence && note.evidence.length > 16) throw new Error("amem input: at most 16 evidence refs; reduce evidence refs and retry");
-      const args = ["note", "add", note.text, "--kind", note.kind];
+      const args = ["note", "add", "-", "--kind", note.kind];
       for (const [flag, value] of [["--approach", note.approach], ["--symptom", note.symptom], ["--cause", note.cause],
         ... (note.evidence ?? []).map(ref => ["--evidence", ref]), ["--retry-when", note.retryWhen], ["--title", note.title]]) {
-        if (value !== undefined) { input(value); args.push(flag!, value); }
+        if (value !== undefined) args.push(flag!, optionValue(value));
       }
-      const raw = await read([...args, "--json"]);
+      const raw = await read([...args, "--json"], Buffer.from(note.text, "utf8"));
       if (!plain(raw) || !identifier(raw.id)) invalid();
       return raw.id;
     },
@@ -76,14 +81,14 @@ export function createAmemClient(cwd: string, runner: ProcessRunner = spawnRunne
       input(words);
       if (kind !== undefined && !kindOf(kind)) throw new Error("amem input: invalid kind; use fail, finding, decision or contract");
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("amem input: search limit must be 1..100; choose an integer in this range");
-      const raw = await read(["search", words, "--json", "--explain", "--limit", String(limit)]);
+      const raw = await read(["search", optionValue(words), "--json", "--explain", "--limit", String(limit)]);
       const rows = searchRows(raw);
       return rows.filter(row => kind === undefined || plain(row) && row.kind === kind).map(hit);
     },
     async brief(text, bytes) {
       input(text);
       if (!Number.isSafeInteger(bytes) || bytes < 1 || bytes > AMEM_BRIEF_BYTES) throw new Error("amem input: brief bytes must be 1..8192; choose an integer in this range");
-      const raw = await read(["brief", "--for", text, "--json", "--bytes", String(bytes)]);
+      const raw = await read(["brief", "--for", optionValue(text), "--json", "--bytes", String(bytes)]);
       if (!plain(raw) || typeof raw.brief !== "string" || !Number.isSafeInteger(raw.bytes) || (raw.bytes as number) < 0
         || (raw.bytes as number) > bytes || Buffer.byteLength(raw.brief) > bytes || typeof raw.truncated !== "boolean" || typeof raw.state !== "string") invalid();
       return { brief: raw.brief, bytes: raw.bytes as number, truncated: raw.truncated, state: raw.state };

@@ -1,3 +1,4 @@
+import { previewArchive, exportArchive, type ArchivePreview, type ArchiveResult } from "./memory/archive.ts";
 import { addReview, resolveReview, reviewReadiness, reviewBinding, requireReviewReady } from "./paper/review.ts";
 import { buildPaper } from "./paper/build.ts";
 import { checkPaper } from "./paper/check.ts";
@@ -426,3 +427,10 @@ export async function reviewResolve(dirArg: string, target: string, reason: stri
   const { dir } = openStudy(dirArg); return withLock(dir, () => resolveReview(dir, target, reason, ctx.actor));
 }
 export const reviewShow = (dir: string) => reviewReadiness(dir);
+
+/** Preview is read-only; confirmed outward writes and receipts share the study lock. */
+export async function archive(dirArg: string, options: { confirm?: string }, ctx: Pick<Ctx, "actor" | "runner">, env: NodeJS.ProcessEnv = process.env): Promise<ArchivePreview | ArchiveResult> {
+  const { dir } = openStudy(dirArg);
+  if (options.confirm === undefined) return previewArchive(dir);
+  return withLock(dir, () => exportArchive(dir, options.confirm!, ctx.actor, ctx.runner, env));
+}

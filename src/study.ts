@@ -152,6 +152,16 @@ export async function withLock<T>(dir: string, fn: () => Promise<T> | T): Promis
 export interface PendingEvent { actor: Actor; type: string; data: Record<string, unknown> }
 export type FileWrite = [path: string, text: string, maxBytes: number];
 
+/** Validate command capacity without writing; callers can reserve receipt space before outward effects. */
+export function prepareCommit(dir: string, files: FileWrite[], pending: PendingEvent[]): { events: LedgerEvent[]; lines: string[] } {
+  const at = new Date().toISOString(), events: LedgerEvent[] = pending.map(e => ({ v: 1, at, ...e }));
+  const lines = events.map(e => JSON.stringify(e) + "\n");
+  lines.forEach((line, i) => { if (Buffer.byteLength(line) > EVENT_BYTES) throw new Error(`ledger event ${events[i]!.type} exceeds ${EVENT_BYTES} bytes`); });
+  const ledger = join(dir, "ledger.jsonl"), size = existsSync(ledger) ? statSync(ledger).size : 0;
+  if (size + Buffer.byteLength(lines.join("")) > LEDGER_BYTES) throw new Error(`ledger.jsonl would exceed ${LEDGER_BYTES} bytes; start a new study`);
+  for (const [path, text, max] of files) assertWritable(text, max, path);
+  return { events, lines };
+}
 /**
  * Apply one command's changes: every file and ledger bound is checked first (file sizes, event sizes, the ledger's
  * total against its read limit), then the files are written and all events appended in one write. A failed check
@@ -159,12 +169,7 @@ export type FileWrite = [path: string, text: string, maxBytes: number];
  * ponytail: no write-ahead log; a crash between the file writes and the append leaves files without their event.
  */
 export function commit(dir: string, files: FileWrite[], pending: PendingEvent[]): LedgerEvent[] {
-  const at = new Date().toISOString(), events: LedgerEvent[] = pending.map(e => ({ v: 1, at, ...e }));
-  const lines = events.map(e => JSON.stringify(e) + "\n");
-  lines.forEach((line, i) => { if (Buffer.byteLength(line) > EVENT_BYTES) throw new Error(`ledger event ${events[i]!.type} exceeds ${EVENT_BYTES} bytes`); });
-  const ledger = join(dir, "ledger.jsonl"), size = existsSync(ledger) ? statSync(ledger).size : 0;
-  if (size + Buffer.byteLength(lines.join("")) > LEDGER_BYTES) throw new Error(`ledger.jsonl would exceed ${LEDGER_BYTES} bytes; start a new study`);
-  for (const [path, text, max] of files) assertWritable(text, max, path);
+  const { events, lines } = prepareCommit(dir, files, pending), ledger = join(dir, "ledger.jsonl");
   for (const [path, text, max] of files) { mkdirSync(dirname(path), { recursive: true }); writeAtomic(path, text, max); }
   if (lines.length) appendFileSync(ledger, lines.join(""), { mode: 0o644 });
   return events;
