@@ -7,7 +7,7 @@ import { foldSkills, SKILL_BYTES, validateSkillProposal } from "../src/memory/sk
 import { readLedger } from "../src/study.ts";
 import { fakeRunner, tempDir } from "./helpers.ts";
 const actor = { kind: "agent" as const, id: "synthetic-agent" }, ctx = { actor }, pr = "https://github.com/example/synthetic/pull/1";
-const proposal = (name = "synthetic-skill") => ({ name, summary: "Synthetic reusable lesson", steps: ["Inspect the synthetic evidence", "Apply the synthetic lesson"], evidence: ["a".repeat(32), `mem:${"b".repeat(32)}`, "ares:synthetic/run:investigate"] });
+const proposal = (name = "synthetic-skill") => ({ name, summary: "Synthetic reusable lesson", steps: ["Inspect the synthetic evidence", "Apply the synthetic lesson"], evidence: ["a".repeat(32), "b".repeat(32), "ares:synthetic/run:investigate"] });
 function study() { const dir = tempDir(); ops.init(dir, { question: "Synthetic question" }, ctx); return dir; }
 const file = (dir: string, name = "synthetic-skill") => join(dir, "proposals", "skills", `${name}.md`);
 const ledger = (dir: string) => readFileSync(join(dir, "ledger.jsonl"), "utf8");
@@ -25,11 +25,11 @@ test("closed proposal fields, run names, required arrays and evidence types refu
   const dir = study(), before = ledger(dir);
   for (const raw of [null, [], { ...proposal(), extra: true }, { ...proposal(), name: "../escape" }, { ...proposal(), name: "-bad" }, { ...proposal(), name: "x".repeat(65) },
     { ...proposal(), summary: " " }, { ...proposal(), summary: "NUL\0summary" }, { ...proposal(), steps: [] }, { ...proposal(), steps: [1] }, { ...proposal(), steps: Array(SKILL_BYTES + 1).fill("x") },
-    { ...proposal(), steps: [""] }, { ...proposal(), evidence: "wrong" }, { ...proposal(), evidence: ["doi:10.0000/synthetic"] }, { ...proposal(), evidence: ["ares:"] }, { ...proposal(), evidence: ["amem:bad"] }]) {
+    { ...proposal(), steps: [""] }, { ...proposal(), evidence: "wrong" }, { ...proposal(), evidence: ["doi:10.0000/synthetic"] }, { ...proposal(), evidence: ["ares:"] }, { ...proposal(), evidence: [] }, { ...proposal(), evidence: ["ares:study"] }, { ...proposal(), evidence: ["ares:study/"] }, { ...proposal(), evidence: [`mem:${"a".repeat(32)}`] }, { ...proposal(), evidence: ["amem:bad"] }]) {
     await expect(ops.skillPropose(dir, raw, ctx)).rejects.toThrow("skill");
     expect(ledger(dir)).toBe(before); expect(existsSync(join(dir, "proposals"))).toBe(false);
   }
-  expect(validateSkillProposal({ ...proposal(), evidence: [] }).evidence).toEqual([]);
+  expect(validateSkillProposal({ ...proposal(), evidence: ["a".repeat(32)] }).evidence).toEqual(["a".repeat(32)]);
 });
 
 test("Markdown bound is inclusive at 16 KiB and counts UTF-8 bytes", async () => {
@@ -127,4 +127,13 @@ test("failed commit preflight creates no proposal directory", async () => {
   const dir = study(), before = ledger(dir);
   await expect(ops.skillPropose(dir, proposal(), { actor: { kind: "agent", id: "x".repeat(65_536) } })).rejects.toThrow("exceeds");
   expect(ledger(dir)).toBe(before); expect(existsSync(join(dir, "proposals"))).toBe(false);
+});
+
+test("evidence accepts 64 refs and refuses 65 before any write", async () => {
+  const refs = Array.from({ length: 64 }, (_, i) => i.toString(16).padStart(32, "0")), dir = study();
+  await ops.skillPropose(dir, { ...proposal(), evidence: refs }, ctx);
+  expect(ops.skillList(dir)[0]!.evidence).toEqual(refs);
+  const invalid = study(), before = ledger(invalid);
+  await expect(ops.skillPropose(invalid, { ...proposal(), evidence: [...refs, "ares:synthetic/run:investigate"] }, ctx)).rejects.toThrow("1..64 refs");
+  expect(ledger(invalid)).toBe(before); expect(existsSync(join(invalid, "proposals"))).toBe(false);
 });

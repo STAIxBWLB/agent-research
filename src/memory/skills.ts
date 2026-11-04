@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { assertWritable, boundedText, commit, onlyKeys, openStudy, plain, readLedger, readTextBounded, sha256, type Actor, type LedgerEvent } from "../study.ts";
 
-export const SKILL_PROPOSAL_VERSION = 1, SKILL_PROPOSALS = 100, SKILL_BYTES = 16 * 1024;
+export const SKILL_PROPOSAL_VERSION = 1, SKILL_PROPOSALS = 100, SKILL_BYTES = 16 * 1024, SKILL_EVIDENCE = 64;
 export interface SkillProposal { name: string; summary: string; steps: string[]; evidence: string[] }
 export type SkillDecision = "accept" | "reject" | "withdraw";
 export interface SkillRecord extends SkillProposal {
@@ -29,9 +29,10 @@ export function validateSkillProposal(raw: unknown, strict = true): SkillProposa
   if (!plain(raw)) bad("proposal object required");
   if (strict) { try { onlyKeys(raw, ["name", "summary", "steps", "evidence"], "skill proposal"); } catch { bad("unknown proposal field; use only name, summary, steps and evidence"); } }
   if (!Array.isArray(raw.steps) || !raw.steps.length || !Array.isArray(raw.evidence)) bad("steps must be a nonempty array and evidence an array");
-  if (raw.steps.length > SKILL_BYTES || raw.evidence.length > SKILL_BYTES) bad("proposal arrays exceed the 16 KiB format ceiling; shorten steps or evidence");
+  if (raw.evidence.length < 1 || raw.evidence.length > SKILL_EVIDENCE) bad("evidence requires 1..64 refs; supply at least one recorded amem id or ares: reference");
+  if (raw.steps.length > SKILL_BYTES) bad("proposal arrays exceed the 16 KiB format ceiling; shorten steps or evidence");
   const proposal: SkillProposal = { name: nameOf(raw.name), summary: text(raw.summary, "summary"), steps: raw.steps.map(value => text(value, "step")), evidence: raw.evidence.map(value => text(value, "evidence")) };
-  if (proposal.evidence.some(value => !/^(?:mem:)?[a-f0-9]{32}$/.test(value) && !/^ares:[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(value))) bad("evidence must contain amem ids or nonempty ares: refs");
+  if (proposal.evidence.some(value => !/^[a-f0-9]{32}$/.test(value) && !/^ares:[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(value))) bad("evidence must contain 32-hex amem ids or ares:<study-id>/... refs");
   try { assertWritable(markdown(proposal), SKILL_BYTES, "skill proposal"); } catch { bad("proposal Markdown exceeds 16 KiB; shorten summary, steps or evidence"); }
   return proposal;
 }
