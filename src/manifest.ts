@@ -8,6 +8,8 @@ export const FORMAT_VERSIONS = {
   studyPlan: 1,
   ledgerEvent: 1,
   experimentProtocol: 1,
+  experimentSelection: 1,
+  investigateResult: 1,
   executor: 1,
   experimentAttempt: 1,
 } as const;

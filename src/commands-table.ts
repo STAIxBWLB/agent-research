@@ -10,6 +10,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "plan show", usage: "plan show <dir> [--json]", mutates: false, options: json },
   { name: "status", usage: "status <dir> [--json]", mutates: false, options: json },
   { name: "scope", usage: "scope <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
+  { name: "selection", usage: "selection <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "protocol", usage: "protocol <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "executor set", usage: "executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--json]", mutates: true, options: { "--kind": "value", "--host": "value", "--workdir": "value", ...json } },
   { name: "executor check", usage: "executor check <dir> [--json]", mutates: "network", options: json },

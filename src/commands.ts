@@ -1,3 +1,4 @@
+import { setSelection } from "./exp/selection.ts";
 import { createHubClient } from "./plan/hub.ts";
 import { runPlan, type ControllerRuntime, type Observation, type StepNode } from "./plan/controller.ts";
 import { resolveSnapshot } from "./exp/snapshot.ts";
@@ -323,4 +324,15 @@ export async function planRun(dirArg: string, options: { parallel?: number }, ct
     },
   };
   return runPlan(dir, options, runtime);
+}
+
+
+export async function selection(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
+  const { dir, study } = openStudy(dirArg); requireExperiment(study);
+  return withLock(dir, () => {
+    const design = readDesign(dir);
+    if (!design) throw new Error("selection: protocol missing; run ares protocol <dir> --file PATH before setting a selection");
+    const result = setSelection(dir, raw, design.protocol, ctx.actor);
+    return { ...result, gate: gateState("design", readLedger(dir), binder(dir)) };
+  });
 }

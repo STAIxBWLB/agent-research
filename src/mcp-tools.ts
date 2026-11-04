@@ -51,6 +51,12 @@ const PLAN = obj({
   edges: { type: "array", maxItems: 512, items: { type: "array", minItems: 2, maxItems: 2, items: planId } },
 }, ["v", "nodes", "edges"]);
 
+const SELECTION = obj({
+  v: { type: "integer", enum: [1] }, run: text(64), metric: text(128),
+  baseline: obj({ commit: { type: "string", minLength: 40, maxLength: 40 } }, ["commit"]),
+  minSeeds: integer(1, 1000), minDelta: { type: "number", minimum: 0 },
+}, ["v", "run", "metric", "baseline", "minSeeds", "minDelta"]);
+
 export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_manifest", description: "Read this ares version, implemented commands and shared schema versions without opening a study or reaching an executor.", inputSchema: obj({}, []), annotations: read },
   { name: "ares_plan_set", description: "Validate a bounded revisioned DAG of existing steps, local gates and read-only hub references. Set it paused; changed consumed inputs become stale and need explicit retry. Never starts a controller.", inputSchema: obj({ study, plan: PLAN }, ["study", "plan"]), annotations: write },
@@ -59,6 +65,7 @@ export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_status", description: "Study summary: gates, candidate counts, verification counts, bibliography.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_scope_set", description: "Set scope.json (question, subquestions, include, exclude, yearFrom, yearTo, maxCandidates). A change returns the scope gate to pending.", inputSchema: obj({ study, scope: SCOPE }, ["study", "scope"]), annotations: write },
   { name: "ares_gate", description: "List gates, or approve/reject scope, screen, design or plan:node-id. Plan approvals bind all upstream output references and need complete upstream outputs; skip never bypasses them. The ledger records the actor; approval authority is workspace policy.", inputSchema: obj({ study, action: { type: "string", enum: ["list", "approve", "reject"] }, gate: text(133), reason }, ["study", "action"]), annotations: write },
+  { name: "ares_selection_set", description: "Set a declared investigation selection rule before results: run, primary metric, frozen baseline commit, minimum paired seeds and nonnegative improvement. Changes reopen the design gate; identical bytes leave the cutoff unchanged. Requires experiment mode and a protocol; starts no investigation or executor.", inputSchema: obj({ study, selection: SELECTION }, ["study", "selection"]), annotations: write },
   { name: "ares_protocol_set", description: "Set an experiment protocol after bounded validation of protocol and task/. Changes reopen design approval; attempt protocol identity excludes budget.", inputSchema: obj({ study, protocol: PROTOCOL }, ["study", "protocol"]), annotations: write },
   { name: "ares_executor_set", description: "Configure local or SSH Docker execution with an explicit private absolute workdir. Stores the host alias only, never credentials.", inputSchema: obj({ study, kind: { type: "string", enum: ["local", "ssh"] }, host: text(128), workdir: text(4096) }, ["study", "kind", "workdir"]), annotations: write },
   { name: "ares_executor_check", description: "Check executor Docker server, non-root uid:gid and digest-pinned image availability; pulls missing images.", inputSchema: obj({ study }, ["study"]), annotations: net },
@@ -95,6 +102,7 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
     ares_plan_show: a => ops.planShow(dir(a)),
     ares_status: a => ops.status(dir(a)),
     ares_scope_set: a => ops.scope(dir(a), a.scope, ctx),
+    ares_selection_set: a => ops.selection(dir(a), a.selection, ctx),
     ares_protocol_set: a => ops.protocol(dir(a), a.protocol, ctx),
     ares_executor_set: a => ops.executorSet(dir(a), { v: 1, kind: a.kind, ...(a.host !== undefined ? { host: a.host } : {}), workdir: a.workdir }, ctx),
     ares_executor_check: a => ops.executorCheck(dir(a), ctx),

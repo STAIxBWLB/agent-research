@@ -91,6 +91,12 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       result = await ops.scope(positional[0]!, await readInput(file, io), ctx);
       break;
     }
+    case "selection": {
+      count(spec, positional, 1);
+      const file = str("--file");
+      if (file === undefined) throw new Error("selection: input missing; pass --file PATH or --file - for a JSON rule");
+      result = await ops.selection(positional[0]!, await readInput(file, io), ctx); break;
+    }
     case "protocol": {
       count(spec, positional, 1);
       const file = str("--file");
