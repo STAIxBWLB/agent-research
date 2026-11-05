@@ -31,7 +31,7 @@ const SCOPE = obj({ question: text(2000), subquestions: texts(30, 1000), include
 const CARD = obj({ summary: text(4000), claims: texts(50, 1000), methods: text(4000), findings: text(4000), limitations: text(4000), relevance: text(4000) }, ["summary"]);
 const integer = (minimum: number, maximum: number) => ({ type: "integer", minimum, maximum });
 const WATCH = obj({ v: { type: "integer", enum: [1] }, queries: { type: "array", minItems: 1, maxItems: 20,
-  items: obj({ id: text(64), query: text(500), source: { type: "string", enum: ["openalex", "s2", "arxiv", "all"] }, yearFrom: year, limit: integer(1, 50) }, ["id", "query"]) }, rubric: text(8000) }, ["v", "queries"]);
+  items: obj({ id: text(64), query: text(4096), source: { type: "string", enum: ["openalex", "s2", "arxiv", "all"] }, yearFrom: year, limit: integer(1, 50) }, ["id", "query"]) }, rubric: text(8000) }, ["v", "queries"]);
 const argv = { type: "array", minItems: 1, maxItems: 128, items: { type: "string", maxLength: 4096 } };
 const image = { ...text(512), description: "Digest-pinned image: name@sha256:<64 lowercase hex digits>" };
 const stage = { type: "string", enum: ["candidate", "evaluator"] };
@@ -73,7 +73,7 @@ const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), paren
 
 export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_watch_set", description: "Set bounded v1 literature queries and an optional display-only rubric. At most 20 queries; identical config is a no-op. Does not search, screen or start a timer. Survey and experiment studies.", inputSchema: obj({ study, watch: WATCH }, ["study", "watch"]), annotations: { ...write, idempotentHint: true } },
-  { name: "ares_watch_run", description: "Run one finite watch pass through lit search under the study lock and scope gate. Adds only new candidates, never includes or screens. Records per-query search and one watch receipt, even when all sources fail. May hold the lock for about 20 minutes; other study mutations refuse. No resident process or schedule is started.", inputSchema: obj({ study }, ["study"]), annotations: net },
+  { name: "ares_watch_run", description: "Start one finite watch pass and return {started:true,configSha256} after config, scope gate and year preflight. Always detached: this ack is not completion. Inspect ares_watch_show for the watch.ran outcome. The background pass holds the study lock for up to about 20 minutes; duplicate starts refuse. Adds only new candidates, never screens. No timer or daemon is started.", inputSchema: obj({ study }, ["study"]), annotations: net },
   { name: "ares_watch_show", description: "Read watch config, recent event-timed run receipts and new candidates. No lock, network or write.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_console_add", description: "Register one readable study directory in the private bounded family registry. Does not scan the disk or activate the console. An already registered directory is a no-op.", inputSchema: obj({ study }, ["study"]), annotations: { ...write, idempotentHint: true } },
   { name: "ares_console_remove", description: "Remove only a listed study registration, including an unavailable path. Does not delete the study; absent entries are a no-op.", inputSchema: obj({ study }, ["study"]), annotations: { ...write, idempotentHint: true } },
@@ -132,13 +132,15 @@ function absolute(value: unknown, what: string): string {
 }
 
 /** MCP calls always come from an agent; the actor id is the detected agent or `mcp`. */
-export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(env), runtime: ops.ExperimentRuntime = {}): { tools: readonly McpTool[]; handlers: Record<string, McpHandler> } {
+export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(env), runtime: ops.ExperimentRuntime = {}): { tools: readonly McpTool[]; handlers: Record<string, McpHandler>; waitForIdle(): Promise<void> } {
   const detected = detectActor(env), actor: Actor = { kind: "agent", id: detected.kind === "agent" ? detected.id! : "mcp" };
   const ctx = { ...runtime, actor, http }, memoryEnv = { ...env, AGENTHUB_PEER_ID: actor.id };
   const dir = (a: Record<string, unknown>) => absolute(a.study, "study");
+  const background = new Set<Promise<void>>();
+  const track = (completion: Promise<void>) => { background.add(completion); void completion.then(() => { background.delete(completion); }); };
   const handlers: Record<string, McpHandler> = {
     ares_watch_set: a => ops.watchSet(dir(a), a.watch, ctx),
-    ares_watch_run: a => ops.watchRun(dir(a), ctx),
+    ares_watch_run: a => ops.watchRunDetached(dir(a), ctx, track),
     ares_watch_show: a => ops.watchShow(dir(a)),
     ares_console_add: a => ops.consoleAdd(dir(a), env),
     ares_console_remove: a => ops.consoleRemove(dir(a), env),
@@ -194,5 +196,5 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
     ares_cite_check: a => ops.cite(dir(a), absolute(a.draft, "draft")),
     ares_playbook: () => ({ playbook: PLAYBOOK }),
   };
-  return { tools: ARES_TOOLS, handlers };
+  return { tools: ARES_TOOLS, handlers, waitForIdle: async () => { await Promise.all([...background]); } };
 }

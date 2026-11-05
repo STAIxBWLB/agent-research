@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { addStudy, removeStudy, readRegistry } from "./console/registry.ts";
-import { readWatchSnapshot, setWatch, runWatch, showWatch } from "./lit/watch.ts";
+import { readWatchSnapshot, setWatch, runWatch, showWatch, type WatchSnapshot } from "./lit/watch.ts";
 import { runSetup, type SetupMode } from "./setup.ts";
 import { proposeSkill, decideSkill, listSkills } from "./memory/skills.ts";
 import { rankLessons, type LessonRankOptions } from "./memory/lessons.ts";
@@ -25,7 +25,7 @@ import { existsSync, readdirSync, utimesSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Http } from "./http.ts";
 import { readScope, scopeHash, setScope } from "./scope.ts";
-import { boundedText, commit, decideGate, gateState, GATES, initStudy, openStudy, readBytesBounded, readLedger, readTextBounded, requireGate, sha256, withLock, readPlanOwner, type Actor, type Binder, type GateName } from "./study.ts";
+import { boundedText, commit, decideGate, gateState, GATES, initStudy, openStudy, readBytesBounded, readLedger, readTextBounded, requireGate, sha256, withLock, readPlanOwner, type Actor, type Binder, type GateName, type Study } from "./study.ts";
 import { candidatesFile, includedHash, isVerified, loadCandidates, mergeCandidates, sameWork, verifySubject, type Candidate } from "./lit/candidates.ts";
 import { searchSource, SOURCES, type SourceName } from "./lit/sources.ts";
 import { verifyCandidates } from "./lit/verify.ts";
@@ -474,21 +474,41 @@ export const setup = (target: string, mode: SetupMode, env: NodeJS.ProcessEnv, o
 export async function watchSet(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
   const { dir } = openStudy(dirArg); return withLock(dir, () => setWatch(dir, raw, ctx.actor));
 }
+function watchPreflight(dir: string, study: Study): WatchSnapshot {
+  const snapshot = readWatchSnapshot(dir), scope = readScope(dir);
+  if (!snapshot) throw new Error("watch: no config; run ares watch set <dir> --file PATH before watch run");
+  if (!scope) throw new Error("gate scope: no scope yet; run ares scope before watch run");
+  requireGate(dir, study, "scope", binder(dir));
+  for (const query of snapshot.config.queries) if ((query.yearFrom ?? scope.yearFrom ?? 1000) > (scope.yearTo ?? 2100)) throw new Error(`watch query ${query.id}: yearFrom exceeds scope yearTo; correct that query or the scope before running`);
+  return snapshot;
+}
+function watchRunLocked(dir: string, snapshot: WatchSnapshot, ctx: Ctx) {
+  return runWatch(dir, snapshot, ctx.actor, query => {
+    // Refresh the held lock between bounded searches, with no recurring timer.
+    const time = new Date(); utimesSync(join(dir, ".ares.lock"), time, time);
+    return searchLocked(dir, query.query, query, ctx);
+  });
+}
 export async function watchRun(dirArg: string, ctx: Ctx) {
   const { dir, study } = openStudy(dirArg);
-  return withLock(dir, async () => {
-    const snapshot = readWatchSnapshot(dir), scope = readScope(dir);
-    if (!snapshot) throw new Error("watch: no config; run ares watch set <dir> --file PATH before watch run");
-    const { config } = snapshot;
-    if (!scope) throw new Error("gate scope: no scope yet; run ares scope before watch run");
-    requireGate(dir, study, "scope", binder(dir));
-    for (const query of config.queries) if ((query.yearFrom ?? scope.yearFrom ?? 1000) > (scope.yearTo ?? 2100)) throw new Error(`watch query ${query.id}: yearFrom exceeds scope yearTo; correct that query or the scope before running`);
-    return runWatch(dir, snapshot, ctx.actor, query => {
-      // A bounded search is at most three HTTP deadlines; refresh between queries, with no timer, for long passes.
-      const time = new Date(); utimesSync(join(dir, ".ares.lock"), time, time);
-      return searchLocked(dir, query.query, query, ctx);
-    });
+  return withLock(dir, () => watchRunLocked(dir, watchPreflight(dir, study), ctx));
+}
+export interface WatchStarted { started: true; configSha256: string }
+/** Acknowledge only validated admission; the finite pass keeps the same lock until its receipt is written. */
+export function watchRunDetached(dirArg: string, ctx: Ctx, track?: (completion: Promise<void>) => void): Promise<WatchStarted> {
+  const { dir, study } = openStudy(dirArg);
+  let accept!: (value: WatchStarted) => void, reject!: (cause: unknown) => void, started = false;
+  const admission = new Promise<WatchStarted>((resolve, refuse) => { accept = resolve; reject = refuse; });
+  const completion = withLock(dir, async () => {
+    const snapshot = watchPreflight(dir, study);
+    started = true; accept({ started: true, configSha256: snapshot.sha256 });
+    await watchRunLocked(dir, snapshot, ctx);
+  }).then(() => {}, cause => {
+    if (!started) reject(cause);
+    else console.error("ares watch: background pass failed; inspect ares watch show and lit list before retrying");
   });
+  track?.(completion);
+  return admission;
 }
 export const watchShow = (dir: string) => ({ ...showWatch(dir), newCandidates: list(dir, { status: "new", limit: 500 }) });
 

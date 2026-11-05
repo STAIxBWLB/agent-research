@@ -201,9 +201,15 @@ test("numeric future watch versions remain unchanged when v1 input is supplied",
   for (const v of [2, Number.MAX_SAFE_INTEGER]) {
     const dir = await study(); await ops.watchSet(dir, config, { actor });
     writeFileSync(watchPath(dir), JSON.stringify({ ...config, v })); const bytes = readFileSync(watchPath(dir)), before = ledger(dir), fake = fakeHttp(routes());
-    expect(() => validateWatch({ ...config, v })).toThrow("unsupported version");
-    await expect(ops.watchSet(dir, config, { actor })).rejects.toThrow("unsupported version");
-    await expect(ops.watchRun(dir, { actor, http: fake.http })).rejects.toThrow("unsupported version");
+    expect(() => validateWatch({ ...config, v })).toThrow("unsupported version is newer than this ares supports");
+    expect(() => validateWatch({ ...config, v })).toThrow("provide v1 input");
+    let inputMessage = "";
+    try { validateWatch({ ...config, v }); } catch (error) { inputMessage = (error as Error).message; }
+    expect(inputMessage).not.toContain("literature/watch.json");
+    await expect(ops.watchSet(dir, { ...config, v }, { actor })).rejects.toThrow("provide v1 input");
+    await expect(ops.watchSet(dir, config, { actor })).rejects.toThrow("keep literature/watch.json unchanged");
+    await expect(ops.watchRun(dir, { actor, http: fake.http })).rejects.toThrow("keep literature/watch.json unchanged");
+    expect(() => ops.watchShow(dir)).toThrow("unsupported version in literature/watch.json");
     expect(readFileSync(watchPath(dir))).toEqual(bytes); expect(ledger(dir)).toBe(before); expect(fake.requested).toEqual([]);
   }
 });
