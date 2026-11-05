@@ -1,0 +1,11 @@
+.ares { display: flex; flex-direction: column; gap: var(--acon-space-3); min-width: 0; }
+.ares-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--acon-space-2); }
+.ares-bar h2 { flex: 1; margin: 0; min-width: 0; font-size: var(--acon-text-lg); overflow-wrap: anywhere; }
+.ares-card { display: flex; flex-direction: column; gap: var(--acon-space-2); min-width: 0; }
+.ares-card h3 { margin: 0; font-size: var(--acon-text-base, 1rem); }
+.ares-card > p, .ares-prose { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ares-sub { margin: 0; color: var(--acon-text-2); overflow-wrap: anywhere; }
+.ares-pre { margin: 0; max-height: 40vh; overflow: auto; padding: var(--acon-space-3); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--acon-surface-2); border: 1px solid var(--acon-line); border-radius: var(--acon-radius-2); font: var(--acon-text-sm)/1.5 var(--acon-font-mono); }
+.ares-list { margin: 0; padding-left: 1.5em; overflow-wrap: anywhere; }
+.ares-list li + li { margin-top: var(--acon-space-1); }
+@media (max-width: 600px) { .ares-bar { align-items: flex-start; } .ares-bar h2 { flex-basis: 100%; } }

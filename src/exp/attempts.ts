@@ -74,6 +74,8 @@ function* records(dir: string): Generator<Attempt> {
 }
 function load(dir: string): Attempt[] { return [...records(dir)]; }
 function studyDir(dirArg: string): string { const { dir, study } = openStudy(dirArg); requireExperiment(study); return dir; }
+/** One pass of regular, byte-bounded records; callers retain only the projections they need. */
+export function* readAttemptRecords(dirArg: string): Generator<Attempt> { yield* records(studyDir(dirArg)); }
 export function listAttempts(dirArg: string, options: { run?: string; status?: string } = {}) {
   const dir = studyDir(dirArg), all = load(dir), totals = Object.fromEntries(STATUSES.map(status => [status, all.filter(a => a.status === status).length])) as Record<AttemptStatus, number>;
   if (options.run !== undefined) runName(options.run);

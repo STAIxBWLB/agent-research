@@ -139,8 +139,8 @@ test("CLI preview/apply/undo use only temp HOME and reject incompatible options 
   expect((await run(["setup", "claude", "--root", location, "--apply", "--json"], f.env)).code).toBe(0);
   expect((await run(["setup", "claude", "--undo", "--json"], f.env)).code).toBe(0);
   await expect(run(["setup", "claude", "--apply", "--undo"], f.env)).rejects.toThrow("conflict");
-  await expect(run(["setup", "console"], f.env)).rejects.toThrow("console setup is not available");
-  await expect(run(["setup", "unknown"], f.env)).rejects.toThrow("unknown target");
+  expect((await run(["setup", "console", "--json"], f.env)).code).toBe(0);
+  await expect(run(["setup", "unknown"], f.env)).rejects.toThrow("use claude|codex|kimi|pi|qwen|jcode|agy|all|console");
 });
 
 test("preexisting matching entries are not adopted, and invalid receipts stay untouched", () => {
@@ -177,7 +177,6 @@ test("a multiline TOML closing line beginning with # belongs to the saved entry,
 test("argument refusals give the relevant next step and file refusals are not double-suffixed", () => {
   const f = fixture();
   for (const [target, mode, options, expected] of [
-    ["console", "dry-run", f.options, "use an agent target"],
     ["unknown", "dry-run", f.options, "use claude|codex"],
     ["claude", "dry-run", { ...f.options, root: "relative" }, "pass --root ABS"],
     ["claude", "invalid", f.options, "choose dry-run, apply or undo"],
@@ -194,6 +193,8 @@ test("MCP setup previews, applies and undoes via the same operation with only fa
   const f = fixture(), location = root(), fake = fakeRunner([]), server = createAresMcp(f.env, fakeHttp([]).http, { runner: fake.runner });
   const tool = ARES_TOOLS.find(tool => tool.name === "ares_setup")!;
   expect(tool.annotations).toMatchObject({ readOnlyHint: false, openWorldHint: false });
+  expect(tool.description).toContain("agent-client MCP entry or console plugin manifest {api,tool,module,sha256}");
+  for (const promise of ["dry-run", "Root pins a release", "cwd selects the workspace", "Never changes instruction blocks or contacts the network"]) expect(tool.description).toContain(promise);
   expect(validArguments({ target: "claude" }, tool.inputSchema)).toBe(true);
   expect(validArguments({ target: "claude", mode: "invalid" }, tool.inputSchema)).toBe(false);
   const args = { target: "claude", root: location, cwd: f.cwd };

@@ -90,6 +90,8 @@ export async function runWatch(dir: string, snapshot: WatchSnapshot, actor: Acto
     queries.push({ id: query.id, added: result.added, merged: result.merged, dropped: result.dropped, linked: result.linked,
       sources: result.sources.map(({ source, ok, returned }) => ({ source, ok, returned })), errors: sourceErrors(result.sources) });
   }
+  const surviving = new Set(loadCandidates(dir).map(row => row.id));
+  for (const id of addedIds) if (!surviving.has(id)) addedIds.delete(id);
   const run: WatchRun = { configSha256: snapshot.sha256, queries, added: queries.reduce((sum, row) => sum + row.added, 0), addedIds: [], addedIdsTotal: addedIds.size,
     ok: queries.some(row => row.sources.some(source => source.ok)) };
   for (const id of addedIds) {

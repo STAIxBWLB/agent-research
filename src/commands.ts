@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { addStudy, removeStudy, readRegistry } from "./console/registry.ts";
 import { readWatchSnapshot, setWatch, runWatch, showWatch } from "./lit/watch.ts";
 import { runSetup, type SetupMode } from "./setup.ts";
 import { proposeSkill, decideSkill, listSkills } from "./memory/skills.ts";
@@ -116,10 +118,11 @@ export function gateList(dirArg: string) {
   return gates.map(g => gateState(g, events, bind));
 }
 
-export async function gateDecide(dirArg: string, gate: string, decision: "approve" | "reject", reason: string | undefined, ctx: Ctx) {
+export async function gateDecide(dirArg: string, gate: string, decision: "approve" | "reject", reason: string | undefined, ctx: Ctx, guard?: () => void) {
   const { dir, study } = openStudy(dirArg), name = gateName(gate), why = reason === undefined ? undefined : boundedText(reason, "--reason", 500);
   if (name === "design" || name === "final") requireExperiment(study);
   return withLock(dir, () => {
+    guard?.();
     if (name === "final") requireFinalInputs(dir);
     if (name === "review" && decision === "approve") requireReviewReady(dir);
     if (name.startsWith("plan:") && !readPlanState(dir, readLedger(dir)).definition.nodes.some(n => n.id === name.slice(5) && n.kind === "gate")) throw new Error(`gate ${name}: no gate node ${name.slice(5)} in the plan; run ares gate list and select an existing gate`);
@@ -170,9 +173,10 @@ export function list(dirArg: string, options: { status?: string; limit?: number 
   };
 }
 
-export async function screen(dirArg: string, values: string[], decision: "include" | "exclude", reason: string | undefined, ctx: Ctx) {
+export async function screen(dirArg: string, values: string[], decision: "include" | "exclude", reason: string | undefined, ctx: Ctx, guard?: () => void) {
   const { dir, study } = openStudy(dirArg), wanted = ids(values), why = reason === undefined ? undefined : boundedText(reason, "--reason", 500);
   return withLock(dir, () => {
+    guard?.();
     const all = loadCandidates(dir), at = new Date().toISOString(), status = decision === "include" ? "included" : "excluded";
     for (const id of wanted) find(all, id);
     const approval = requireGate(dir, study, "scope", binder(dir));
@@ -440,10 +444,10 @@ export async function reviewResolve(dirArg: string, target: string, reason: stri
 export const reviewShow = (dir: string) => reviewReadiness(dir);
 
 /** Preview is read-only; confirmed outward writes and receipts share the study lock. */
-export async function archive(dirArg: string, options: { confirm?: string }, ctx: Pick<Ctx, "actor" | "runner">, env: NodeJS.ProcessEnv = process.env): Promise<ArchivePreview | ArchiveResult> {
+export async function archive(dirArg: string, options: { confirm?: string }, ctx: Pick<Ctx, "actor" | "runner">, env: NodeJS.ProcessEnv = process.env, guard?: () => void): Promise<ArchivePreview | ArchiveResult> {
   const { dir } = openStudy(dirArg);
   if (options.confirm === undefined) return previewArchive(dir);
-  return withLock(dir, () => exportArchive(dir, options.confirm!, ctx.actor, ctx.runner, env));
+  return withLock(dir, () => { guard?.(); return exportArchive(dir, options.confirm!, ctx.actor, ctx.runner, env); });
 }
 
 /** The study cwd binds amem's project; search and optional intent brief never write study files. */
@@ -460,8 +464,8 @@ export async function lessons(dirArg: string, options: LessonRankOptions & { for
 export async function skillPropose(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
   const { dir } = openStudy(dirArg); return withLock(dir, () => proposeSkill(dir, raw, ctx.actor));
 }
-export async function skillDecide(dirArg: string, name: string, decision: string, reason: string, pr: string | undefined, ctx: Pick<Ctx, "actor">) {
-  const { dir } = openStudy(dirArg); return withLock(dir, () => decideSkill(dir, name, decision, reason, pr, ctx.actor));
+export async function skillDecide(dirArg: string, name: string, decision: string, reason: string, pr: string | undefined, ctx: Pick<Ctx, "actor">, guard?: () => void) {
+  const { dir } = openStudy(dirArg); return withLock(dir, () => { guard?.(); return decideSkill(dir, name, decision, reason, pr, ctx.actor); });
 }
 export const skillList = (dir: string) => listSkills(dir);
 
@@ -487,3 +491,10 @@ export async function watchRun(dirArg: string, ctx: Ctx) {
   });
 }
 export const watchShow = (dir: string) => ({ ...showWatch(dir), newCandidates: list(dir, { status: "new", limit: 500 }) });
+
+function consoleHome(env: NodeJS.ProcessEnv): string {
+  return env.AGENTHUB_HOME?.trim() || join(env.HOME?.trim() || homedir(), ".agenthub");
+}
+export const consoleAdd = (dir: string, env: NodeJS.ProcessEnv) => addStudy(consoleHome(env), dir);
+export const consoleRemove = (dir: string, env: NodeJS.ProcessEnv) => removeStudy(consoleHome(env), dir);
+export const consoleList = (env: NodeJS.ProcessEnv) => readRegistry(consoleHome(env));

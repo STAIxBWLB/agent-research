@@ -4,7 +4,8 @@ import * as ops from "./commands.ts";
 import { createHttp, type Http } from "./http.ts";
 import type { McpHandler, McpTool } from "./mcp.ts";
 import { PLAYBOOK } from "./playbook.ts";
-import { STEP_COMMANDS } from "./plan/definition.ts";
+import { PLAN_ID_BYTES, STEP_COMMANDS } from "./plan/definition.ts";
+import { PLAN_GATE_BYTES } from "./plan/state.ts";
 import { detectActor, type Actor } from "./study.ts";
 
 const study = { type: "string", minLength: 1, maxLength: 4096, description: "Absolute path of the study directory (holds study.json)" };
@@ -46,7 +47,7 @@ const PROTOCOL = obj({
   budget: obj({ maxAttempts: integer(1, 1_000_000), maxWallHours: { type: "number", minimum: 0.000001, maximum: 1_000_000 }, maxGpuHours: { type: "number", minimum: 0, maximum: 64_000_000 } }, ["maxAttempts", "maxWallHours", "maxGpuHours"]),
 }, ["v", "method", "candidate", "evaluator", "metrics", "seeds", "limits", "network", "budget"]);
 
-const planId = text(128);
+const planId = text(PLAN_ID_BYTES);
 const PLAN = obj({
   v: { type: "integer", enum: [1] }, revision: integer(1, Number.MAX_SAFE_INTEGER),
   nodes: { type: "array", maxItems: 128, items: obj({
@@ -69,7 +70,7 @@ const SELECTION = obj({
 const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), parent: text(64), commit: { type: "string", minLength: 40, maxLength: 40 } }, ["id", "title", "hypothesis"]);
 
 export const ARES_TOOLS: readonly McpTool[] = [
-  { name: "ares_setup", description: "Preview, apply or undo the local ares MCP registration for an agent client. Defaults to dry-run and lists config/receipt actions. Apply writes the receipt first; undo refuses entry drift. Root pins a release; cwd selects the workspace for agy. Never changes instruction blocks or contacts the network.", inputSchema: obj({ target: { type: "string", enum: [...SETUP_TARGETS, "all"] }, mode: { type: "string", enum: ["dry-run", "apply", "undo"] }, root: text(4096), cwd: text(4096) }, ["target"]), annotations: write },
+  { name: "ares_setup", description: "Preview, apply or undo a local agent-client MCP entry or console plugin manifest {api,tool,module,sha256}. Defaults to dry-run and lists config/receipt actions. Apply writes the receipt first; undo refuses entry drift. Root pins a release; cwd selects the workspace for agy. Never changes instruction blocks or contacts the network.", inputSchema: obj({ target: { type: "string", enum: [...SETUP_TARGETS, "all", "console"] }, mode: { type: "string", enum: ["dry-run", "apply", "undo"] }, root: text(4096), cwd: text(4096) }, ["target"]), annotations: write },
   { name: "ares_manifest", description: "Read this ares version, implemented commands and shared schema versions without opening a study or reaching an executor.", inputSchema: obj({}, []), annotations: read },
   { name: "ares_archive", description: "Preview pending derived lessons without writes. With the current full-list fingerprint, export up to 200 new amem notes and commit returned ids/hashes; remaining reports later batches. A partial failure records successes; repeat the same confirmation to continue. Applies to survey and experiment studies.", inputSchema: obj({ study, confirm: { type: "string", minLength: 64, maxLength: 64 } }, ["study"]), annotations: net },
   { name: "ares_lessons", description: "Read project-scoped amem lessons with half-life ranking. Query intent when supplied, otherwise the study question; intent also returns a brief. Output relevance, decayed score, ordinal rank and age in days. No study write or lock. Survey and experiment.", inputSchema: obj({ study, for: text(1000), halfLife: { type: "number", minimum: 1, maximum: 3650 }, limit: integer(1, 50) }, ["study"]), annotations: { ...read, openWorldHint: true } },
@@ -81,7 +82,7 @@ export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_plan_show", description: "Read the definition revision, ledger-derived node states and last observations, gate decisions, uncertain nodes, controller owner and resolved hubProject without taking a lock or contacting an executor/hub.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_status", description: "Study summary: gates, candidate counts, verification counts, bibliography.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_scope_set", description: "Set scope.json (question, subquestions, include, exclude, yearFrom, yearTo, maxCandidates). A change returns the scope gate to pending.", inputSchema: obj({ study, scope: SCOPE }, ["study", "scope"]), annotations: write },
-  { name: "ares_gate", description: "List gates, or approve/reject scope, screen, design, final, review or plan:node-id. Plan approvals bind all upstream output references and need complete upstream outputs; skip never bypasses them. The ledger records the actor; approval authority is workspace policy.", inputSchema: obj({ study, action: { type: "string", enum: ["list", "approve", "reject"] }, gate: text(133), reason }, ["study", "action"]), annotations: write },
+  { name: "ares_gate", description: "List gates, or approve/reject scope, screen, design, final, review or plan:node-id. Plan approvals bind all upstream output references and need complete upstream outputs; skip never bypasses them. The ledger records the actor; approval authority is workspace policy.", inputSchema: obj({ study, action: { type: "string", enum: ["list", "approve", "reject"] }, gate: text(PLAN_GATE_BYTES), reason }, ["study", "action"]), annotations: write },
   { name: "ares_idea_add", description: "Add an experiment idea to the ledger, with optional existing parent and frozen commit. Unique run-name ids and commit ownership; at most 1000 ideas. Starts no work.", inputSchema: obj({ study, idea: IDEA }, ["study", "idea"]), annotations: write },
   { name: "ares_idea_decide", description: "Record refine/pivot with a reason of at most 2000 bytes. Ideas with commits require terminal own-commit attempts (at most 200). Untested ideas omit attempts to attach a first commit or pivot. Refine requires --commit with unique idea ownership; Pivot accepts optional cause/retryWhen (2000 bytes each); refine refuses them. Pivot rejects commit and closes further decisions. Starts no work.", inputSchema: obj({ study, id: text(64), decision: { type: "string", enum: ["refine", "pivot"] }, reason: text(2000), cause: text(2000), retryWhen: text(2000), attempts: { type: "array", maxItems: 200, items: attemptId }, commit: { type: "string", minLength: 40, maxLength: 40 } }, ["study", "id", "decision", "reason"]), annotations: write },
   { name: "ares_investigate_show", description: "Read investigation candidate/baseline paired-seed scores, winner or no-winner reason and all run attempt totals/exclusions. No executor or network calls.", inputSchema: obj({ study }, ["study"]), annotations: read },

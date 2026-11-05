@@ -164,3 +164,20 @@ test("run config hash matches stored bytes and watch.set, while rubric remains c
   expect(second.configSha256).toBe(sha256(readFileSync(watchPath(dir)))); expect(second.configSha256).not.toBe(hash);
   expect(Object.hasOwn(readLedger(dir).at(-1)!.data, "rubric")).toBe(false);
 });
+
+
+test("run receipts keep only newly added ids surviving a later cross-query bridge merge", async () => {
+  const dir = await study();
+  await ops.watchSet(dir, { v: 1, queries: [{ id: "initial", query: "initial", source: "openalex" }, { id: "bridge", query: "bridge", source: "openalex" }] }, { actor });
+  const first = { ...paper("a"), title: "Synthetic A" }, second = { ...paper("b"), title: "Synthetic B" }, bridge = { ...paper("a"), title: "Synthetic B" };
+  const fake = fakeHttp([
+    ["https://api.openalex.org/works?search=initial&", ok(JSON.stringify({ results: [first, second] }))],
+    ["https://api.openalex.org/works?search=bridge&", ok(JSON.stringify({ results: [bridge] }))],
+  ]);
+  const result = await ops.watchRun(dir, { actor, http: fake.http }), surviving = loadCandidates(dir).map(row => row.id);
+  expect(surviving).toEqual(["doi:10.0000/synthetic-a"]);
+  expect(result.addedIds).toEqual(surviving); expect(result.addedIdsTotal).toBe(1);
+  expect(result.added).toBe(2); expect(result.queries.map(row => row.added)).toEqual([2, 0]); expect(result.queries[1]!.merged).toBe(1);
+  expect(readLedger(dir).at(-1)).toMatchObject({ type: "watch.ran", data: { added: 2, addedIds: surviving, addedIdsTotal: 1 } });
+  expect(fake.requested).toHaveLength(2);
+});

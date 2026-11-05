@@ -1,5 +1,7 @@
 import { gateState, plain, sha256, boundedText, onlyKeys, type Actor, type GateName, type GateState, type LedgerEvent, type PendingEvent } from "../study.ts";
-import { readPlan, validatePlan, type PlanDefinition, type PlanNode } from "./definition.ts";
+import { PLAN_ID_BYTES, readPlan, validatePlan, type PlanDefinition, type PlanNode } from "./definition.ts";
+
+export const PLAN_GATE_BYTES = "plan:".length + PLAN_ID_BYTES;
 
 export type NodeStatus = "pending" | "ready" | "dispatched" | "done" | "failed" | "cancelled" | "uncertain" | "stale" | "skipped";
 export interface NodeState { id: string; kind: PlanNode["kind"]; status: NodeStatus; dispatchId?: string; dispatchCount?: number; retryOf?: string; output?: unknown; attemptId?: string; taskId?: number; hubProject?: string; reason?: string; gate?: GateState; lastObserved?: { revision: number; dispatchId: string; status: NodeStatus; at: string; output?: unknown; reason?: string } }
@@ -92,7 +94,8 @@ function refresh(state: PlanState, decisions: Map<string, LedgerEvent>): void {
   else if (state.state === "done") state.state = "paused";
 }
 /** Sole state authority: replay ledger events; no cache or snapshot is written. */
-export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
+/** Optional observer sees each effective, refreshed event; it must not mutate the folded state. */
+export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, event: LedgerEvent) => void): PlanState | undefined {
   let state: PlanState | undefined;
   const decisions = new Map<string, LedgerEvent>();
   const dispatches = new Set<string>();
@@ -100,7 +103,7 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
     const d = event.data;
     if (event.type === "gate.approve" || event.type === "gate.reject") {
       if (typeof d.gate === "string") decisions.set(d.gate, event);
-      if (state) refresh(state, decisions);
+      if (state) { refresh(state, decisions); onEvent?.(state, event); }
       continue;
     }
     if (event.type === "plan.set") {
@@ -120,7 +123,7 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
         if (stale.has(n.id) && consumed(value)) reset(value, "stale");
         return value;
       }), uncertain: [] };
-      refresh(state, decisions); continue;
+      refresh(state, decisions); onEvent?.(state, event); continue;
     }
     if (!state) continue;
     if (!["plan.control", "plan.paused", "node.intent", "node.observed", "node.stale"].includes(event.type)) continue;
@@ -166,7 +169,7 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
             node.status = "failed"; delete node.output;
             node.reason = "hub child task binding changed or invalid; inspect ahub study show and retry explicitly";
             node.lastObserved = { revision: d.revision as number, dispatchId, status: "failed", at: event.at, reason: node.reason };
-            refresh(state, decisions); continue;
+            refresh(state, decisions); onEvent?.(state, event); continue;
           }
           node.taskId = d.taskId as number;
         }
@@ -178,7 +181,7 @@ export function foldPlan(events: LedgerEvent[]): PlanState | undefined {
         node.lastObserved = { revision: d.revision as number, dispatchId, status: node.status, at: event.at, ...(d.output !== undefined ? { output: d.output } : {}), ...(node.reason !== undefined ? { reason: node.reason } : {}) };
       }
     }
-    refresh(state, decisions);
+    refresh(state, decisions); onEvent?.(state, event);
   }
   return state;
 }

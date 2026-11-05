@@ -1,0 +1,506 @@
+import { afterAll, expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
+import * as child from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import type { ConsolePlugin } from "@staix/agent-console/contract";
+import { registerConsoleConformance } from "@staix/agent-console/conformance";
+import { scanPlugins } from "../node_modules/@staix/agent-console/src/plugins.ts";
+import plugin from "../src/ui/plugin.ts";
+import * as ops from "../src/commands.ts";
+import { run } from "../src/cli.ts";
+import { addStudy, readRegistry } from "../src/console/registry.ts";
+import { appendEvent, commit, openStudy, readLedger } from "../src/study.ts";
+import { readProtocol, protocolHash, designBinding } from "../src/exp/protocol.ts";
+import { finalGateBinding, requireFinalInputs } from "../src/exp/final.ts";
+import { runSetup } from "../src/setup.ts";
+import { fakeHttp, tempDir } from "./helpers.ts";
+
+const typed: ConsolePlugin = plugin, actor = { kind: "person" as const }, ctx = { actor, http: fakeHttp([]).http };
+const BASE = "a".repeat(40), WIN = "b".repeat(40);
+function makeStudy(home: string, name: string, mode = "survey") { const dir = join(home, name); ops.init(dir, { question: `Synthetic ${name}`, mode }, ctx); return dir; }
+let serial = 0;
+function attempt(dir: string, frozen: string, run: string, seed: number, value: number, status = "succeeded") {
+  const id = (++serial).toString(16).padStart(16, "0"), protocol = readProtocol(dir)!, folder = join(dir, "runs", run, "attempts"); fs.mkdirSync(folder, { recursive: true });
+  const binding = run === "final" ? finalGateBinding(dir) : undefined;
+  fs.writeFileSync(join(folder, `${id}.json`), JSON.stringify({ v: 1, id, studyId: openStudy(dir).study.id, run, commit: frozen, seed, protocolHash: protocolHash(protocol), protocol,
+    executor: { v: 1, kind: "local", workdir: "/synthetic" }, stages: {}, stage: "evaluator", status, label: "synthetic", startedAt: "2030-01-01T00:00:00Z", endedAt: "2030-01-01T00:00:01Z", sealBinding: designBinding(dir),
+    ...(binding ? { finalBinding: binding, finalWinner: requireFinalInputs(dir).winner } : {}), metrics: status === "succeeded" ? [{ name: "score", value, unit: "points", provenance: "ares-observed" }] : [], outputs: [] }));
+  appendEvent(dir, actor, "attempt.started", { id, run, commit: frozen, seed }); appendEvent(dir, actor, `attempt.${status}`, { id, run, stage: "evaluator", status }); return id;
+}
+async function fixtures(home: string) {
+  const family = join(home, "family"), survey = makeStudy(home, "survey"), experiment = makeStudy(home, "experiment", "experiment"), gone = makeStudy(home, "gone");
+  await ops.scope(survey, { question: "Synthetic survey" }, ctx);
+  const candidates = [{ id: "doi:10.0000/live", doi: "10.0000/live", title: "Synthetic live candidate", authors: [], year: 2024, sources: ["openalex"], status: "new", addedAt: "2030-01-01T00:00:00Z" },
+    { id: "doi:10.0000/screened", doi: "10.0000/screened", title: "Synthetic screened candidate", authors: [], year: 2024, sources: ["openalex"], status: "excluded", addedAt: "2030-01-01T00:00:00Z" }];
+  fs.writeFileSync(join(survey, "literature", "candidates.json"), JSON.stringify(candidates));
+  await ops.watchSet(survey, { v: 1, queries: [{ id: "synthetic", query: "synthetic", source: "openalex" }], rubric: "Synthetic human rubric" }, ctx);
+  appendEvent(survey, actor, "watch.ran", { configSha256: "a".repeat(64), queries: [], added: 3, addedIds: [candidates[0]!.id, candidates[1]!.id, "doi:10.0000/absorbed"], addedIdsTotal: 3, ok: false });
+  await ops.skillPropose(survey, { name: "synthetic-procedure", summary: "Synthetic reusable procedure", steps: ["Inspect synthetic evidence"], evidence: ["a".repeat(32)] }, ctx);
+  fs.mkdirSync(join(survey, "paper")); fs.writeFileSync(join(survey, "paper", "manuscript.md"), "Synthetic manuscript.\n"); const build = await ops.paperBuild(survey, ctx);
+  await ops.reviewAdd(survey, { v: 1, reviewer: { id: "synthetic", modelFamily: "synthetic" }, buildSha256: build.evidenceSha256,
+    checklist: { negativeResults: true, denominators: true, limitations: true, reproducibility: true }, findings: [{ id: "contradiction", kind: "contradiction", location: "Synthetic section", text: "Synthetic open contradiction", blocking: true }] }, ctx);
+  fs.mkdirSync(join(experiment, "task", "evaluator"), { recursive: true }); fs.writeFileSync(join(experiment, "task", "task.md"), "Synthetic task"); fs.writeFileSync(join(experiment, "task", "evaluator", "run"), "Synthetic evaluator");
+  await ops.protocol(experiment, { v: 1, method: "synthetic", candidate: { image: `fixture@sha256:${"a".repeat(64)}`, command: ["candidate"] }, evaluator: { image: `fixture@sha256:${"b".repeat(64)}`, command: ["evaluator"] },
+    metrics: [{ name: "score", unit: "points", direction: "max" }], seeds: [1, 2], limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts: 100, maxWallHours: 1, maxGpuHours: 0 } }, ctx);
+  await ops.finalSeeds(experiment, { v: 1, seeds: [2] }, ctx); await ops.selection(experiment, { v: 1, run: "investigate", metric: "score", baseline: { commit: BASE }, minSeeds: 1, minDelta: 1 }, ctx);
+  attempt(experiment, BASE, "investigate", 1, 10); attempt(experiment, WIN, "investigate", 1, 12); await ops.investigateClose(experiment, ctx);
+  await ops.gateDecide(experiment, "design", "approve", undefined, ctx); await ops.gateDecide(experiment, "final", "approve", undefined, ctx);
+  attempt(experiment, BASE, "final", 2, 10); attempt(experiment, WIN, "final", 2, 12); await ops.finalClose(experiment, ctx);
+  const failed = attempt(experiment, WIN, "posthoc", 1, 0, "failed"), unknown = attempt(experiment, WIN, "posthoc", 1, 0, "unknown");
+  for (const dir of [survey, experiment]) {
+    const events = readLedger(dir); fs.writeFileSync(join(dir, "ledger.jsonl"), events.map((event, index) => JSON.stringify({ ...event, at: `2030-01-01T00:00:${String(index % 60).padStart(2, "0")}.000Z` })).join("\n") + "\n");
+  }
+  for (const dir of [survey, experiment, gone]) addStudy(family, dir);
+  fs.renameSync(gone, join(home, "moved"));
+  return { home, family, survey, experiment, gone, failed, unknown };
+}
+const persistent = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "ares-console-conformance-"))), conf = await fixtures(persistent);
+afterAll(() => fs.rmSync(persistent, { recursive: true, force: true }));
+// Enabled action confirmation cases live in console-actions.test.ts; invalid actions below cannot write.
+registerConsoleConformance(typed, { home: conf.family, destructive: [], assets: [`manuscript:${openStudy(conf.survey).study.id}`] });
+
+const context = (home: string) => ({ home, log: (_line: string) => {}, features: ["inbox.form", "action.meta"] });
+const rows = (value: unknown) => value as Record<string, any>[];
+
+test("manifest, panels and stable inbox groups use real handlers without subprocess/network or writes", async () => {
+  const f = await fixtures(fs.realpathSync(tempDir())), before = [f.family + "/research/studies.json", join(f.survey, "ledger.jsonl"), join(f.experiment, "ledger.jsonl")].map(path => [path, fs.readFileSync(path)] as const);
+  const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async () => { throw new Error("network forbidden in console reads"); }) as unknown as typeof fetch);
+  const spawnSpy = spyOn(child, "spawn").mockImplementation((() => { throw new Error("subprocess forbidden in console reads"); }) as typeof child.spawn);
+  try {
+    const provider = await typed.open(context(f.family)), snapshot = await provider.snapshot({ panel: "studies", after: 0 });
+    expect(typed.manifest).toMatchObject({ api: 1, tool: "ares", pollMs: 15000, capabilities: { confirm: true, inbox: true, multiProject: false, search: false } });
+    const summaries = rows(snapshot.studies); expect(summaries).toHaveLength(3);
+    const exp = summaries.find(row => row.dir === f.experiment)!; expect(exp.attempts.byStatus).toMatchObject({ failed: 1, unknown: 1 }); expect(exp.final.status).toBe("qualified");
+    expect(exp.review.ready).toBe(false); expect(summaries.find(row => row.dir === f.gone)).toMatchObject({ available: false });
+    expect(readRegistry(f.family).studies).toContain(f.gone);
+    const detail = await provider.snapshot({ panel: "study", study: f.survey, after: 0 }); expect((detail.study as any).manuscript.id).toBe(`manuscript:${openStudy(f.survey).study.id}`);
+    const first = await provider.snapshot({ panel: "inbox", after: 0 }), second = await provider.snapshot({ panel: "inbox", after: 0 }), items = rows(first.items);
+    expect(new Set(items.map(row => row.group))).toEqual(new Set(["decision", "candidate", "review", "alert"]));
+    const candidate = items.filter(row => row.group === "candidate"); expect(candidate).toHaveLength(1); expect(candidate[0]!.detail).toContain("See study rubric"); expect(candidate[0]!.title).toBe("Synthetic live candidate");
+    expect(items.some(row => row.kind === "skill" && row.verbs.some((verb: any) => verb.label === "Accept" && verb.form))).toBe(true);
+    expect(items.some(row => row.kind === "review" && row.verbs.length === 0)).toBe(true);
+    expect(items.filter(row => row.kind === "attempt")).toHaveLength(2); expect(items.some(row => row.kind === "watch")).toBe(true);
+    expect(items.map(row => [row.id, row.at])).toEqual(rows(second.items).map(row => [row.id, row.at]));
+    const actualTimes = new Set([...readLedger(f.survey), ...readLedger(f.experiment)].map(event => event.at));
+    for (const item of items.filter(row => row.kind !== "unavailable")) expect(actualTimes.has(item.at)).toBe(true);
+    for (const item of items) for (const verb of item.verbs) expect(verb.destructive).toBe(true);
+    for (const action of ["gate.approve", "gate.reject", "screen.include", "screen.exclude", "skill.accept", "skill.reject", "skill.withdraw", "archive.confirm", "unknown"]) expect((await provider.action({ action, confirmed: true }, { identity: "local", node: "local", via: "console" })).ok).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled(); expect(spawnSpy).not.toHaveBeenCalled();
+    for (const [path, bytes] of before) expect(fs.readFileSync(path)).toEqual(bytes);
+  } finally { fetchSpy.mockRestore(); spawnSpy.mockRestore(); }
+});
+
+test("snapshot cursor is ledger-byte sum and unchanged views return an empty delta", async () => {
+  const f = await fixtures(fs.realpathSync(tempDir())), provider = await typed.open(context(f.family));
+  const first = await provider.snapshot({ panel: "studies", after: 0 }), expected = fs.statSync(join(f.survey, "ledger.jsonl")).size + fs.statSync(join(f.experiment, "ledger.jsonl")).size;
+  expect(first.cursor).toBe(expected); expect(await provider.snapshot({ panel: "studies", after: expected })).toEqual({ cursor: expected, changed: false });
+  const detail = await provider.snapshot({ panel: "study", study: f.survey, after: expected }); expect(detail.changed).toBe(true); expect((detail.study as any).dir).toBe(f.survey);
+  const unknown = await provider.snapshot({ panel: "study", study: "/unregistered/synthetic", after: 0 }); expect(unknown.study).toBeNull(); expect(unknown.error).toContain("not registered");
+  appendEvent(f.survey, actor, "synthetic.changed", {}); const next = await provider.snapshot({ panel: "studies", after: expected }); expect(next.changed).toBe(true); expect(next.cursor).not.toBe(expected);
+});
+
+test("only known current-built manuscript ids serve bounded plain text", async () => {
+  const f = await fixtures(fs.realpathSync(tempDir())), provider = await typed.open(context(f.family));
+  const asset = await provider.asset!({ id: `manuscript:${openStudy(f.survey).study.id}` }); expect(asset).toMatchObject({ mime: "text/plain", name: "manuscript.md" }); expect(Buffer.from(asset!.bytes).toString()).toBe("Synthetic manuscript.\n");
+  for (const id of ["unknown", "manuscript:../../private", `manuscript:${openStudy(f.experiment).study.id}`]) expect(await provider.asset!({ id })).toBeNull();
+  const built = join(f.survey, "paper", "build", "manuscript.md"); fs.unlinkSync(built); fs.symlinkSync(join(f.survey, "paper", "manuscript.md"), built);
+  expect(await provider.asset!({ id: `manuscript:${openStudy(f.survey).study.id}` })).toBeNull();
+});
+
+test("console setup registers a verifiable plugin and changed module is stale", () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), env = { HOME: home, AGENTHUB_HOME: family };
+  const report = runSetup("console", "apply", { env }); expect(report.applied).toBe(true);
+  expect(scanPlugins(family).entries.find(row => row.tool === "ares")?.status).toBe("verified");
+  const fake = fs.realpathSync(tempDir()); fs.mkdirSync(join(fake, "bin")); fs.mkdirSync(join(fake, "src", "ui"), { recursive: true });
+  fs.writeFileSync(join(fake, "package.json"), JSON.stringify({ name: "@staix/agent-research", version: "9.0.0" })); fs.writeFileSync(join(fake, "bin", "ares.js"), "// synthetic\n");
+  fs.writeFileSync(join(fake, "src", "ui", "plugin.ts"), "export default {};\n"); const other = join(home, "other-family");
+  const versioned = runSetup("console", "apply", { env: { ...env, AGENTHUB_HOME: other }, root: fake }); expect(versioned.applied).toBe(true);
+  expect(scanPlugins(other).entries[0]?.status).toBe("verified"); fs.appendFileSync(join(fake, "src", "ui", "plugin.ts"), "// changed\n"); expect(scanPlugins(other).entries[0]?.status).toBe("stale");
+});
+
+test("registry CLI add/remove/list and setup console operate only on temp family paths", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), env = { HOME: home, AGENTHUB_HOME: family }, study = makeStudy(home, "cli");
+  expect((await run(["console", "add", study, "--json"], env)).code).toBe(0); expect(JSON.parse((await run(["console", "list", "--json"], env)).text).studies).toEqual([fs.realpathSync(study)]);
+  expect((await run(["setup", "console", "--json"], env)).code).toBe(0); expect(fs.existsSync(join(family, "console"))).toBe(false);
+  expect((await run(["console", "remove", study, "--json"], env)).code).toBe(0); expect(JSON.parse((await run(["console", "list", "--json"], env)).text).studies).toEqual([]);
+});
+
+test("registry and availability changes refresh even when the ledger-byte cursor collides", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), first = makeStudy(home, "first"); addStudy(family, first);
+  const provider = await typed.open(context(family)), initial = await provider.snapshot({ panel: "studies", after: 0 });
+  const zero = makeStudy(home, "zero"); fs.writeFileSync(join(zero, "ledger.jsonl"), ""); addStudy(family, zero);
+  const added = await provider.snapshot({ panel: "studies", after: initial.cursor as number }); expect(added.cursor).toBe(initial.cursor); expect(added.changed).toBe(true); expect(rows(added.studies)).toHaveLength(2);
+  fs.renameSync(zero, join(home, "moved-zero"));
+  const moved = await provider.snapshot({ panel: "studies", after: added.cursor as number }); expect(moved.cursor).toBe(added.cursor); expect(moved.changed).toBe(true); expect(rows(moved.studies).find(row => row.dir === zero)).toMatchObject({ available: false });
+});
+
+
+test("an unrelated ledger event does not change when an unchanged pending gate started waiting", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "waiting"); addStudy(family, study);
+  fs.writeFileSync(join(study, "literature", "candidates.json"), JSON.stringify([{ id: "doi:10.0000/waiting", title: "Synthetic included candidate", authors: [], sources: ["openalex"], status: "included", addedAt: "2030-01-01T00:00:00Z" }]));
+  const provider = await typed.open(context(family)), first = await provider.snapshot({ panel: "inbox", after: 0 });
+  const scope = rows(first.items).find(row => row.kind === "gate" && row.title.includes("screen"))!;
+  appendEvent(study, actor, "synthetic.unrelated", {});
+  const next = await provider.snapshot({ panel: "inbox", after: first.cursor as number });
+  expect(rows(next.items).find(row => row.id === scope.id)?.at).toBe(scope.at);
+});
+
+
+test("unavailable alerts keep the last read event time or an explicit stable epoch sentinel", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "unavailable"); addStudy(family, study);
+  const provider = await typed.open(context(family)); await provider.snapshot({ panel: "studies", after: 0 });
+  const latest = readLedger(study).at(-1)!.at; fs.renameSync(study, join(home, "moved-unavailable"));
+  const alerts = new WeakMap<object, Record<string, any>>();
+  const unavailable = async (reader: Awaited<ReturnType<typeof typed.open>>) => {
+    const snapshot = await reader.snapshot({ panel: "inbox", after: 0 });
+    // With no readable ledger, cursor 0 can legitimately return an empty delta; retain the last sent view.
+    if (snapshot.changed === false) { expect(snapshot.cursor).toBe(0); expect(alerts.has(reader)).toBe(true); return alerts.get(reader)!; }
+    const alert = rows(snapshot.items).find(row => row.kind === "unavailable")!; expect(alert).toBeDefined(); alerts.set(reader, alert); return alert;
+  };
+  const cached = await unavailable(provider); expect(cached.at).toBe(latest); expect((await unavailable(provider)).at).toBe(cached.at);
+  const fresh = await typed.open(context(family)), first = await unavailable(fresh);
+  expect(first.at).toBe("1970-01-01T00:00:00.000Z"); expect(first.detail).toContain("ledger time unavailable");
+  addStudy(family, makeStudy(home, "unrelated-registration")); const second = await unavailable(fresh);
+  expect(second.id).toBe(first.id); expect(second.at).toBe(first.at);
+});
+
+test("truncated watch receipts show one event-timed overflow notice without inferring candidate provenance", async () => {
+  const f = await fixtures(fs.realpathSync(tempDir())), file = join(f.survey, "literature", "candidates.json");
+  const candidates = JSON.parse(fs.readFileSync(file, "utf8")); candidates.push({ ...candidates[0], id: "doi:10.0000/unrecorded", title: "Synthetic unrecorded new candidate" }); fs.writeFileSync(file, JSON.stringify(candidates));
+  appendEvent(f.survey, actor, "watch.ran", { added: 5, addedIds: [candidates[0].id, candidates[1].id], addedIdsTotal: 5, ok: true });
+  const event = readLedger(f.survey).at(-1)!, provider = await typed.open(context(f.family));
+  const items = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items), candidatesShown = items.filter(row => row.kind === "candidate");
+  expect(candidatesShown).toHaveLength(1); expect(candidatesShown[0]!.title).toBe("Synthetic live candidate");
+  const notices = items.filter(row => row.kind === "watch-overflow"); expect(notices).toHaveLength(1); expect(notices[0]!.title).toContain("3 watch candidate ids"); expect(notices[0]!.at).toBe(event.at); expect(notices[0]!.verbs).toEqual([]);
+  expect(rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.id === notices[0]!.id)?.at).toBe(event.at);
+});
+
+
+function lastEventTime(dir: string, at: string) {
+  const events = readLedger(dir); events.at(-1)!.at = at; fs.writeFileSync(join(dir, "ledger.jsonl"), events.map(event => JSON.stringify(event)).join("\n") + "\n");
+}
+
+test("inbox totals and failure alerts read each bounded attempt record once across multiple pages", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "many-attempts", "experiment"), folder = join(study, "runs", "investigate", "attempts");
+  fs.mkdirSync(folder, { recursive: true }); const count = 401;
+  for (let i = 0; i < count; i++) {
+    const id = (i + 1).toString(16).padStart(16, "0"), status = ["succeeded", "failed", "unknown"][i % 3]!;
+    fs.writeFileSync(join(folder, `${id}.json`), JSON.stringify({ v: 1, id, run: "investigate", stage: "evaluator", status, stages: {}, protocol: {}, executor: {}, startedAt: "2030-01-01T00:00:00Z", label: "synthetic", commit: BASE, seed: 1, metrics: [], outputs: [] }));
+  }
+  addStudy(family, study); const provider = await typed.open(context(family)), original = fs.openSync, reads = new Map<string, number>();
+  const spy = spyOn(fs, "openSync").mockImplementation(((file: fs.PathLike, flags: fs.OpenMode, mode?: fs.Mode) => {
+    if (String(file).startsWith(folder + "/") && String(file).endsWith(".json")) reads.set(String(file), (reads.get(String(file)) ?? 0) + 1);
+    return original(file, flags, mode);
+  }) as typeof fs.openSync);
+  let snapshot: Record<string, unknown>;
+  try { snapshot = await provider.snapshot({ panel: "inbox", after: 0 }); } finally { spy.mockRestore(); }
+  expect(reads.size).toBe(count); expect([...reads.values()].every(value => value === 1)).toBe(true);
+  expect(rows(snapshot.items).filter(row => row.kind === "attempt")).toHaveLength(267);
+  const studies = await provider.snapshot({ panel: "studies", after: 0 }); expect(rows(studies.studies)[0]!.attempts).toEqual({ total: count, byStatus: { running: 0, succeeded: 134, failed: 134, cancelled: 0, unknown: 133 } });
+});
+
+test("an unavailable study caches a readable ledger time before its ledger also becomes unreadable", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "partial-unavailable"); addStudy(family, study);
+  const at = "2030-02-01T00:00:00.000Z"; lastEventTime(study, at); fs.writeFileSync(join(study, "study.json"), "invalid study JSON");
+  const provider = await typed.open(context(family)), first = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.kind === "unavailable")!;
+  expect(first.at).toBe(at); fs.unlinkSync(join(study, "ledger.jsonl"));
+  const second = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.kind === "unavailable")!;
+  expect(second.id).toBe(first.id); expect(second.at).toBe(at); expect(second.detail).not.toContain("ledger time unavailable");
+});
+
+test("plan gate waiting time follows accepted ancestor outputs and approvals, not unrelated observations", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "plan-times");
+  const step = (id: string, query = "synthetic") => ({ id, kind: "step", command: "lit.search", args: { query } });
+  const nodes = [step("base"), { id: "upstream", kind: "gate", needs: ["base"], binds: ["base"] }, { id: "decision", kind: "gate", needs: ["upstream"], binds: ["upstream"] }, step("unrelated")];
+  await ops.planSet(study, { v: 1, nodes, edges: [] }, ctx);
+  appendEvent(study, actor, "node.intent", { revision: 1, node: "base", dispatchId: "base-1" });
+  appendEvent(study, actor, "node.observed", { revision: 1, node: "base", dispatchId: "base-1", status: "done", output: { sha256: "a".repeat(64) } });
+  await ops.gateDecide(study, "plan:upstream", "approve", undefined, ctx);
+  const at = "2030-03-01T00:00:00.000Z"; lastEventTime(study, at); addStudy(family, study);
+  const provider = await typed.open(context(family));
+  const waiting = async () => rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.kind === "gate" && row.title.includes("plan:decision"))!;
+  const first = await waiting(); expect(first.at).toBe(at);
+  appendEvent(study, actor, "node.intent", { revision: 1, node: "unrelated", dispatchId: "other-1" });
+  appendEvent(study, actor, "node.observed", { revision: 1, node: "unrelated", dispatchId: "other-1", status: "done", output: { sha256: "b".repeat(64) } }); lastEventTime(study, "2030-03-02T00:00:00.000Z");
+  expect((await waiting()).at).toBe(first.at);
+  appendEvent(study, actor, "node.observed", { revision: 1, node: "base", dispatchId: "base-1", status: "done", output: { sha256: "c".repeat(64) } }); lastEventTime(study, "2030-03-03T00:00:00.000Z");
+  expect((await waiting()).at).toBe(first.at);
+  await ops.planSet(study, { v: 1, nodes: [...nodes.slice(0, 3), step("unrelated", "changed")], edges: [] }, ctx); lastEventTime(study, "2030-03-04T00:00:00.000Z");
+  const second = await waiting(); expect(second.id).toBe(first.id); expect(second.at).toBe(first.at);
+});
+
+test("final gate waiting time follows protocol and selection changes in its design binding", async () => {
+  for (const input of ["protocol", "selection"]) {
+    const f = await fixtures(fs.realpathSync(tempDir())), old = finalGateBinding(f.experiment);
+    if (input === "protocol") await ops.protocol(f.experiment, { ...readProtocol(f.experiment)!, method: "Changed synthetic method" }, ctx);
+    else await ops.selection(f.experiment, { v: 1, run: "investigate", metric: "score", baseline: { commit: BASE }, minSeeds: 1, minDelta: 2 }, ctx);
+    const at = "2030-04-01T00:00:00.000Z"; lastEventTime(f.experiment, at); expect(finalGateBinding(f.experiment)).not.toBe(old);
+    const provider = await typed.open(context(f.family)), items = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items), gate = items.find(row => row.kind === "gate" && row.title === "Approve or reject final")!;
+    expect(gate.at).toBe(at);
+    await ops.protocol(f.experiment, readProtocol(f.experiment)!, ctx); lastEventTime(f.experiment, "2030-04-02T00:00:00.000Z");
+    expect(rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.id === gate.id)?.at).toBe(at);
+    appendEvent(f.experiment, actor, "synthetic.unrelated", {}); lastEventTime(f.experiment, "2030-04-03T00:00:00.000Z");
+    expect(rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.id === gate.id)?.at).toBe(at);
+  }
+});
+
+
+test("screen waiting time does not move when excluding an unrelated new candidate", async () => {
+  const f = await fixtures(fs.realpathSync(tempDir())); await ops.gateDecide(f.survey, "scope", "approve", undefined, ctx);
+  const file = join(f.survey, "literature", "candidates.json"), candidates = JSON.parse(fs.readFileSync(file, "utf8")); candidates[1].status = "new"; fs.writeFileSync(file, JSON.stringify(candidates));
+  await ops.screen(f.survey, ["doi:10.0000/live"], "include", "Synthetic inclusion", ctx); const at = "2030-05-01T00:00:00.000Z"; lastEventTime(f.survey, at);
+  const provider = await typed.open(context(f.family)); const waiting = async () => rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.kind === "gate" && row.title === "Approve or reject screen")!;
+  const first = await waiting(); expect(first.at).toBe(at);
+  await ops.screen(f.survey, ["doi:10.0000/screened"], "exclude", "Synthetic exclusion", ctx); lastEventTime(f.survey, "2030-05-02T00:00:00.000Z");
+  const second = await waiting(); expect(second.id).toBe(first.id); expect(second.at).toBe(first.at);
+});
+
+
+test("manuscript source and build edits refresh same-cursor views and invalidate stale review links", async () => {
+  for (const relative of [["paper", "manuscript.md"], ["paper", "build", "manuscript.md"], ["paper", "build", "evidence.json"]]) {
+    const f = await fixtures(fs.realpathSync(tempDir())), provider = await typed.open(context(f.family)), input = { panel: "study", study: f.survey }, journal = fs.readFileSync(join(f.survey, "ledger.jsonl"));
+    const first = await provider.snapshot({ ...input, after: 0 }), initial = first.study as Record<string, any>;
+    expect(initial.manuscript).not.toBeNull(); expect(initial.review.buildSha256).not.toBeNull();
+    expect(initial.gates.find((gate: any) => gate.gate === "review").state).toBe("pending");
+    expect(await provider.snapshot({ ...input, after: first.cursor as number })).toEqual({ cursor: first.cursor, changed: false });
+    const file = join(f.survey, ...relative), original = fs.readFileSync(file, "utf8");
+    fs.writeFileSync(file, relative.at(-1) === "evidence.json" ? JSON.stringify({ ...JSON.parse(original), manuscriptSha256: "f".repeat(64) }) : original + "Manual synthetic edit.\n");
+    const changed = await provider.snapshot({ ...input, after: first.cursor as number }), stale = changed.study as Record<string, any>;
+    expect(changed.changed).toBe(true); expect(changed.cursor).toBe(first.cursor); expect(stale.manuscript).toBeNull(); expect(stale.review.buildSha256).toBeNull();
+    expect(stale.review.unmet.some((row: any) => row.code === "build")).toBe(true); expect(stale.gates.find((gate: any) => gate.gate === "review").state).toBe("none");
+    expect(fs.readFileSync(join(f.survey, "ledger.jsonl"))).toEqual(journal);
+    expect(await provider.snapshot({ ...input, after: changed.cursor as number })).toEqual({ cursor: changed.cursor, changed: false });
+    fs.writeFileSync(file, original);
+    const restored = await provider.snapshot({ ...input, after: changed.cursor as number }); expect(restored.changed).toBe(true); expect(restored.cursor).toBe(first.cursor); expect((restored.study as Record<string, any>).manuscript).not.toBeNull();
+  }
+});
+
+
+test("many failed watch receipts keep distinct event-timed alerts stable across snapshots and appends", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "failed-watch-runs"), count = 250, at = "2030-06-01T00:00:00.000Z";
+  commit(study, [], Array.from({ length: count }, () => ({ actor, type: "watch.ran", data: { configSha256: "a".repeat(64), queries: [], added: 0, addedIds: [], addedIdsTotal: 0, ok: false } })));
+  const events = readLedger(study); for (const event of events) if (event.type === "watch.ran") event.at = at;
+  fs.writeFileSync(join(study, "ledger.jsonl"), events.map(event => JSON.stringify(event)).join("\n") + "\n"); addStudy(family, study);
+  const provider = await typed.open(context(family)), first = await provider.snapshot({ panel: "inbox", after: 0 });
+  const alerts = rows(first.items).filter(row => row.kind === "watch"); expect(alerts).toHaveLength(count); expect(new Set(alerts.map(row => row.id)).size).toBe(count);
+  for (const alert of alerts) { expect(alert.at).toBe(at); expect(alert.group).toBe("alert"); expect(alert.verbs).toEqual([]); }
+  const identities = alerts.map(row => [row.id, row.at]);
+  expect(rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).filter(row => row.kind === "watch").map(row => [row.id, row.at])).toEqual(identities);
+  expect(await provider.snapshot({ panel: "inbox", after: first.cursor as number })).toEqual({ cursor: first.cursor, changed: false });
+  appendEvent(study, actor, "synthetic.unrelated", {});
+  expect(rows((await provider.snapshot({ panel: "inbox", after: first.cursor as number })).items).filter(row => row.kind === "watch").map(row => [row.id, row.at])).toEqual(identities);
+});
+
+
+test("attempt read failures are unavailable with a reason instead of zero and remain visible in the inbox", async () => {
+  for (const malformed of [false, true]) {
+    const f = await fixtures(fs.realpathSync(tempDir())), file = join(f.experiment, "runs", "posthoc", "attempts", `${f.failed}.json`), original = fs.readFileSync(file, "utf8");
+    fs.writeFileSync(file, malformed ? "invalid JSON" : JSON.stringify({ ...JSON.parse(original), v: 2 }));
+    const journal = fs.readFileSync(join(f.experiment, "ledger.jsonl")), broken = fs.readFileSync(file), provider = await typed.open(context(f.family));
+    const study = rows((await provider.snapshot({ panel: "studies", after: 0 })).studies).find(row => row.dir === f.experiment)!;
+    expect(study.available).toBe(true); expect(study.attempts.available).toBe(false); expect(study.attempts.total).toBeUndefined(); expect(study.attempts.byStatus).toBeUndefined(); expect(study.attempts.reason.length).toBeGreaterThan(0);
+    const first = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).filter(row => row.kind === "partial-read" && row.project === openStudy(f.experiment).study.id);
+    expect(first).toHaveLength(1); expect(first[0]!.detail).toContain("attempts:"); expect(first[0]!.at).toBe(readLedger(f.experiment).at(-1)!.at); expect(first[0]!.verbs).toEqual([]);
+    const second = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.id === first[0]!.id)!; expect(second.at).toBe(first[0]!.at);
+    expect(fs.readFileSync(file)).toEqual(broken); expect(fs.readFileSync(join(f.experiment, "ledger.jsonl"))).toEqual(journal);
+  }
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), dir = makeStudy(home, "empty-attempts", "experiment"); addStudy(family, dir);
+  const provider = await typed.open(context(family)), study = rows((await provider.snapshot({ panel: "studies", after: 0 })).studies)[0]!;
+  expect(study.attempts.total).toBe(0); expect(study.attempts.available).not.toBe(false);
+});
+
+test("one bounded partial-read inbox alert lists failed skill, watch and review readers and clears after repair", async () => {
+  const f = await fixtures(fs.realpathSync(tempDir())), proposal = join(f.survey, "proposals", "skills", "synthetic-procedure.md"), original = fs.readFileSync(proposal, "utf8");
+  await ops.watchSet(f.survey, { v: 1, queries: [{ id: "synthetic", query: "synthetic" }] }, ctx);
+  const watchFile = join(f.survey, "literature", "watch.json"), watch = fs.readFileSync(watchFile), goodJournal = fs.readFileSync(join(f.survey, "ledger.jsonl"));
+  fs.writeFileSync(proposal, original + "Manual edit"); fs.writeFileSync(watchFile, JSON.stringify({ v: 2, queries: [] }));
+  appendEvent(f.survey, actor, "review.added", { id: "malformed-review", review: { v: 2 } });
+  const journal = fs.readFileSync(join(f.survey, "ledger.jsonl")), provider = await typed.open(context(f.family));
+  const first = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).filter(row => row.kind === "partial-read" && row.project === openStudy(f.survey).study.id);
+  expect(first).toHaveLength(1); for (const name of ["skills", "watch", "review"]) expect(first[0]!.detail).toContain(`${name}:`);
+  expect(first[0]!.detail.length).toBeLessThanOrEqual(1000); expect(first[0]!.detail).toContain("refresh"); expect(first[0]!.verbs).toEqual([]); expect(first[0]!.at).toBe(readLedger(f.survey).at(-1)!.at);
+  expect(fs.readFileSync(join(f.survey, "ledger.jsonl"))).toEqual(journal); expect(fs.readFileSync(watchFile, "utf8")).toBe(JSON.stringify({ v: 2, queries: [] }));
+  fs.writeFileSync(proposal, original); fs.writeFileSync(watchFile, watch); fs.writeFileSync(join(f.survey, "ledger.jsonl"), goodJournal);
+  expect(rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).some(row => row.kind === "partial-read" && row.project === openStudy(f.survey).study.id)).toBe(false);
+});
+
+test("unchanged pending gate bindings retain their waiting time across binder-irrelevant events", async () => {
+  type Fixture = Awaited<ReturnType<typeof fixtures>>;
+  type Prepared = { dir: string; gate: string; mutate: () => unknown | Promise<unknown> };
+  const cases: { name: string; prepare: (f: Fixture) => Promise<Prepared> }[] = [
+    { name: "scope", prepare: async f => {
+      await ops.scope(f.survey, { question: "Timing scope" }, ctx);
+      const data = readLedger(f.survey).findLast(event => event.type === "scope.set")!.data;
+      return { dir: f.survey, gate: "scope", mutate: () => appendEvent(f.survey, actor, "scope.set", { ...data }) };
+    } },
+    { name: "screen", prepare: async f => {
+      await ops.gateDecide(f.survey, "scope", "approve", undefined, ctx);
+      await ops.screen(f.survey, ["doi:10.0000/live"], "include", "Timing included baseline", ctx);
+      return { dir: f.survey, gate: "screen", mutate: () => ops.screen(f.survey, ["doi:10.0000/screened"], "exclude", "Unrelated excluded candidate", ctx) };
+    } },
+    { name: "design", prepare: async f => {
+      await ops.protocol(f.experiment, { ...readProtocol(f.experiment)!, method: "Timing design" }, ctx);
+      return { dir: f.experiment, gate: "design", mutate: () => ops.protocol(f.experiment, readProtocol(f.experiment)!, ctx) };
+    } },
+    { name: "final", prepare: async f => {
+      await ops.protocol(f.experiment, { ...readProtocol(f.experiment)!, method: "Timing final" }, ctx);
+      return { dir: f.experiment, gate: "final", mutate: () => appendEvent(f.experiment, actor, "investigate.closed", { run: "unrelated-run", sha256: "d".repeat(64), ruleSha256: "e".repeat(64), winner: WIN }) };
+    } },
+    { name: "review", prepare: async f => {
+      const old = readLedger(f.survey).find(event => event.type === "review.added")!;
+      fs.writeFileSync(join(f.survey, "paper", "manuscript.md"), "Synthetic revised manuscript.\n");
+      const build = await ops.paperBuild(f.survey, ctx);
+      await ops.reviewAdd(f.survey, { v: 1, reviewer: { id: "timing-current", modelFamily: "timing-current" }, buildSha256: build.evidenceSha256,
+        checklist: { negativeResults: true, denominators: true, limitations: true, reproducibility: true }, findings: [] }, ctx);
+      return { dir: f.survey, gate: "review", mutate: () => ops.reviewResolve(f.survey, `${String(old.data.id)}/contradiction`, "Resolve older build only", ctx) };
+    } },
+    { name: "plan", prepare: async f => {
+      const definition = { v: 1, nodes: [
+        { id: "source", kind: "step", command: "lit.search", args: { query: "source" } },
+        { id: "timing", kind: "gate", needs: ["source"], binds: ["source"] },
+        { id: "unrelated", kind: "step", command: "lit.search", args: { query: "unrelated" } },
+      ], edges: [] };
+      await ops.planSet(f.survey, definition, ctx);
+      appendEvent(f.survey, actor, "node.intent", { revision: 1, node: "source", dispatchId: "source-timing" });
+      appendEvent(f.survey, actor, "node.observed", { revision: 1, node: "source", dispatchId: "source-timing", status: "done", output: { sha256: "a".repeat(64) } });
+      return { dir: f.survey, gate: "plan:timing", mutate: async () => {
+        appendEvent(f.survey, actor, "node.intent", { revision: 1, node: "unrelated", dispatchId: "unrelated-timing" });
+        appendEvent(f.survey, actor, "node.observed", { revision: 1, node: "unrelated", dispatchId: "unrelated-timing", status: "done", output: { sha256: "b".repeat(64) } });
+        lastEventTime(f.survey, "2030-06-02T00:00:00.000Z");
+        return ops.planSet(f.survey, definition, ctx);
+      } };
+    } },
+  ];
+  for (const scenario of cases) {
+    const f = await fixtures(fs.realpathSync(tempDir())), { dir, gate, mutate } = await scenario.prepare(f);
+    lastEventTime(dir, "2030-06-01T00:00:00.000Z");
+    const state = ops.gateList(dir).find(row => row.gate === gate)!;
+    expect(state.state).toBe("pending"); expect(state.current).toBeDefined();
+    const provider = await typed.open(context(f.family)), studyId = openStudy(dir).study.id;
+    const waiting = async () => rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.kind === "gate" && row.project === studyId && row.title === `Approve or reject ${gate}`)!;
+    const first = await waiting(); expect(first).toBeDefined(); expect(first.at).toBe("2030-06-01T00:00:00.000Z");
+    await mutate(); lastEventTime(dir, "2030-06-03T00:00:00.000Z");
+    const current = ops.gateList(dir).find(row => row.gate === gate)!; expect(current.state).toBe("pending"); expect(current.current).toBe(state.current);
+    const second = await waiting(); expect(second).toBeDefined(); expect({ scenario: scenario.name, id: second.id, at: second.at }).toEqual({ scenario: scenario.name, id: first.id, at: first.at });
+    expect(readLedger(dir).at(-1)!.at).not.toBe(first.at);
+  }
+});
+
+test("normal same-cursor polling detects record corruption and repair without ledger events", async () => {
+  for (const kind of ["attempt", "skill", "watch"] as const) {
+    const f = await fixtures(fs.realpathSync(tempDir())), dir = kind === "attempt" ? f.experiment : f.survey;
+    const target = kind === "attempt" ? join(dir, "runs", "posthoc", "attempts", `${f.failed}.json`)
+      : kind === "skill" ? join(dir, "proposals", "skills", "synthetic-procedure.md") : join(dir, "literature", "watch.json");
+    const original = fs.readFileSync(target), corrupt = kind === "skill" ? Buffer.concat([original, Buffer.from("\nEdited proposal without a receipt\n")]) : Buffer.from("not valid JSON\n");
+    const journals = [f.survey, f.experiment].map(study => [join(study, "ledger.jsonl"), fs.readFileSync(join(study, "ledger.jsonl"))] as const);
+    const provider = await typed.open(context(f.family)), studyId = openStudy(dir).study.id, reader = kind === "attempt" ? "attempts" : kind === "skill" ? "skills" : "watch";
+    const views: { panel: string; study?: string }[] = [{ panel: kind === "skill" ? "study" : "studies", ...(kind === "skill" ? { study: dir } : {}) }, { panel: "inbox" }];
+    const cursors = new Map<string, number>(), healthy = new Map<string, Record<string, unknown>>();
+    const poll = async (view: { panel: string; study?: string }) => {
+      const after = cursors.get(view.panel) ?? 0;
+      if (cursors.has(view.panel)) expect(after).toBeGreaterThan(0);
+      const snapshot = await provider.snapshot({ ...view, after }); expect(typeof snapshot.cursor).toBe("number");
+      if (cursors.has(view.panel)) expect(snapshot.cursor).toBe(after);
+      cursors.set(view.panel, snapshot.cursor as number); return snapshot;
+    };
+    for (const view of views) {
+      const first = await poll(view); expect(first.changed).toBe(true); healthy.set(view.panel, first);
+      expect((await poll(view)).changed).toBe(false);
+    }
+    fs.writeFileSync(target, corrupt);
+    let alert: Record<string, unknown> | undefined;
+    for (const view of views) {
+      const broken = await poll(view); expect(broken.changed).toBe(true);
+      if (view.panel === "inbox") {
+        const alerts = rows(broken.items).filter(row => row.kind === "partial-read" && row.project === studyId);
+        expect(alerts).toHaveLength(1); alert = alerts[0]!; expect(alert.detail).toContain(`${reader}:`); expect(alert.verbs).toEqual([]); expect(alert.at).toBe(readLedger(dir).at(-1)!.at);
+      } else if (kind === "skill") {
+        const detail = rows([broken.study])[0]!; expect(detail.skills).toBeNull(); expect(detail.errors.skills).toContain("proposal");
+      } else {
+        const summary = rows(broken.studies).find(row => row.dir === dir)!; expect(summary.available).toBe(true);
+        if (kind === "attempt") { expect(summary.attempts.available).toBe(false); expect(typeof summary.attempts.reason).toBe("string"); }
+        else expect(summary.lastWatch).toBeNull();
+      }
+      // The same error must itself be stable: no new ids or timestamps on a normal unchanged poll.
+      expect((await poll(view)).changed).toBe(false);
+    }
+    fs.writeFileSync(target, original);
+    for (const view of views) {
+      const repaired = await poll(view); expect(repaired.changed).toBe(true);
+      const first = healthy.get(view.panel)!;
+      if (view.panel === "inbox") {
+        expect(rows(repaired.items).some(row => row.kind === "partial-read" && row.project === studyId)).toBe(false);
+        expect(repaired.items).toEqual(first.items);
+      } else if (kind === "skill") {
+        const detail = rows([repaired.study])[0]!, initial = rows([first.study])[0]!;
+        expect(detail.skills).toEqual(initial.skills); expect(detail.errors.skills).toBeUndefined();
+      } else {
+        const summary = rows(repaired.studies).find(row => row.dir === dir)!, initial = rows(first.studies).find(row => row.dir === dir)!;
+        expect(kind === "attempt" ? summary.attempts : summary.lastWatch).toEqual(kind === "attempt" ? initial.attempts : initial.lastWatch);
+      }
+      expect((await poll(view)).changed).toBe(false);
+    }
+    // Repeating the same failure after repair keeps its event-derived identity/time, still without force-refresh.
+    const inbox = views.find(view => view.panel === "inbox")!;
+    fs.writeFileSync(target, corrupt); const repeated = await poll(inbox); expect(repeated.changed).toBe(true);
+    const again = rows(repeated.items).filter(row => row.kind === "partial-read" && row.project === studyId);
+    expect(again).toHaveLength(1); expect({ id: again[0]!.id, at: again[0]!.at }).toEqual({ id: alert!.id, at: alert!.at });
+    fs.writeFileSync(target, original); expect((await poll(inbox)).changed).toBe(true); expect((await poll(inbox)).changed).toBe(false);
+    for (const [file, bytes] of journals) expect(fs.readFileSync(file)).toEqual(bytes);
+    expect(fs.readFileSync(target)).toEqual(original);
+  }
+});
+
+test("fresh studies have no optional-phase errors while a configured investigation remains readable", async () => {
+  for (const mode of ["survey", "experiment", "protocol-only", "selection-only"] as const) {
+    const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, `fresh-${mode}`, mode === "survey" ? "survey" : "experiment");
+    fs.mkdirSync(join(study, "paper")); fs.writeFileSync(join(study, "paper", "manuscript.md"), "Synthetic unbuilt source manuscript.\n");
+    if (mode === "protocol-only" || mode === "selection-only") {
+      fs.mkdirSync(join(study, "task", "evaluator"), { recursive: true });
+      fs.writeFileSync(join(study, "task", "task.md"), "Synthetic task"); fs.writeFileSync(join(study, "task", "evaluator", "run"), "Synthetic evaluator");
+      await ops.protocol(study, readProtocol(conf.experiment)!, ctx);
+      if (mode === "selection-only") await ops.selection(study, { v: 1, run: "investigate", metric: "score", baseline: { commit: BASE }, minSeeds: 1, minDelta: 1 }, ctx);
+    }
+    addStudy(family, study);
+    const journal = fs.readFileSync(join(study, "ledger.jsonl")), source = fs.readFileSync(join(study, "paper", "manuscript.md")), files = fs.readdirSync(study);
+    const provider = await typed.open(context(family)), list = await provider.snapshot({ panel: "studies", after: 0 }), summary = rows(list.studies).find(row => row.dir === study)!;
+    expect(summary.available).toBe(true); expect(summary.final).toBeNull(); expect(summary.attempts.total).toBe(0); expect(summary.attempts.available).not.toBe(false);
+    const detail = rows([(await provider.snapshot({ panel: "study", study, after: 0 })).study])[0]!;
+    expect(detail.final).toBeNull(); expect(detail.manuscript).toBeNull();
+    if (mode === "selection-only") {
+      expect(detail.investigation).toMatchObject({ run: "investigate", winner: null, reason: "no-baseline" });
+      expect(fs.existsSync(join(study, "runs", "investigate", "investigate.json"))).toBe(false); expect(detail.archive).toMatchObject({ pendingCount: 1 });
+    } else { expect(detail.investigation).toBeNull(); expect(detail.archive).toMatchObject({ pendingCount: 0 }); }
+    for (const reader of ["final", "investigation", "posthoc", "manuscript", "archive"]) expect(detail.errors[reader]).toBeUndefined();
+    if (mode !== "survey") expect(detail.posthoc).toMatchObject({ run: "posthoc", attempts: [] });
+    const inbox = await provider.snapshot({ panel: "inbox", after: 0 });
+    expect(rows(inbox.items).some(row => row.kind === "partial-read" || row.kind === "unavailable")).toBe(false);
+    expect((await provider.snapshot({ panel: "inbox", after: inbox.cursor as number })).changed).toBe(false);
+    expect(fs.readFileSync(join(study, "ledger.jsonl"))).toEqual(journal); expect(fs.readFileSync(join(study, "paper", "manuscript.md"))).toEqual(source); expect(fs.readdirSync(study)).toEqual(files);
+    expect(fs.existsSync(join(study, ".ares.lock"))).toBe(false);
+  }
+});
+
+test("a final artifact or close receipt keeps strict final-reader failures visible and never repairs data", async () => {
+  for (const corrupt of ["invalid-json", "missing-file", "invalid-receipt", "artifact-only"] as const) {
+    const f = await fixtures(fs.realpathSync(tempDir())), file = join(f.experiment, "runs", "final", "final.json"), journal = join(f.experiment, "ledger.jsonl");
+    if (corrupt === "invalid-json") fs.writeFileSync(file, "not valid final JSON\n");
+    else if (corrupt === "missing-file") fs.unlinkSync(file);
+    else {
+      let events = readLedger(f.experiment);
+      if (corrupt === "invalid-receipt") events.findLast(event => event.type === "final.closed")!.data.sha256 = "d".repeat(64);
+      else events = events.filter(event => event.type !== "final.closed");
+      fs.writeFileSync(journal, events.map(event => JSON.stringify(event)).join("\n") + "\n");
+    }
+    const before = fs.readFileSync(journal), artifact = fs.existsSync(file) ? fs.readFileSync(file) : null, provider = await typed.open(context(f.family));
+    const summary = rows((await provider.snapshot({ panel: "studies", after: 0 })).studies).find(row => row.dir === f.experiment)!;
+    expect(summary.available).toBe(true); expect(summary.final).toBeNull();
+    const detail = rows([(await provider.snapshot({ panel: "study", study: f.experiment, after: 0 })).study])[0]!;
+    expect(detail.final).toBeNull(); expect(typeof detail.errors.final).toBe("string"); expect(detail.errors.final.length).toBeGreaterThan(0);
+    const inbox = await provider.snapshot({ panel: "inbox", after: 0 }), alerts = rows(inbox.items).filter(row => row.kind === "partial-read" && row.project === openStudy(f.experiment).study.id);
+    expect(alerts).toHaveLength(1); expect(alerts[0]!.detail).toContain("final:"); expect(alerts[0]!.verbs).toEqual([]);
+    expect((await provider.snapshot({ panel: "inbox", after: inbox.cursor as number })).changed).toBe(false);
+    expect(fs.readFileSync(journal)).toEqual(before); expect(fs.existsSync(file) ? fs.readFileSync(file) : null).toEqual(artifact); expect(fs.existsSync(join(f.experiment, ".ares.lock"))).toBe(false);
+  }
+});

@@ -56,6 +56,9 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
   let result: unknown, code = 0;
   switch (spec.name) {
+    case "console add": count(spec, positional, 1); result = ops.consoleAdd(positional[0]!, env); break;
+    case "console remove": count(spec, positional, 1); result = ops.consoleRemove(positional[0]!, env); break;
+    case "console list": count(spec, positional, 0); result = ops.consoleList(env); break;
     case "watch set": {
       count(spec, positional, 1); const file = str("--file");
       if (file === undefined) throw new Error("watch set: input missing; pass --file PATH or --file - for watch JSON");
