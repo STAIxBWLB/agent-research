@@ -55,7 +55,10 @@ function update(home: string, change: (current: StudyRegistry) => StudyRegistry)
   let owner: { dev: number; ino: number } | undefined;
   try {
     // Capture the created path before descriptor inspection so a failed fstat still has guarded cleanup.
-    owner = lstatSync(lock);
+    try { owner = lstatSync(lock); } catch (error) {
+      try { owner = fstatSync(fd); } catch { /* Unknown identity must leave a stale lock for manual recovery. */ }
+      throw error;
+    }
     owner = fstatSync(fd);
     const current = readRegistry(home), next = change(current);
     if (next === current) return current;
@@ -63,8 +66,10 @@ function update(home: string, change: (current: StudyRegistry) => StudyRegistry)
     guard(home, file); writeAtomic(file, content, STUDY_REGISTRY_BYTES, 0o600); return next;
   } finally {
     try { closeSync(fd); } finally {
-      try { const current = lstatSync(lock); if (!owner || current.dev === owner.dev && current.ino === owner.ino) unlinkSync(lock); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      if (owner) {
+        try { const current = lstatSync(lock); if (current.dev === owner.dev && current.ino === owner.ino) unlinkSync(lock); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      }
     }
   }
 }

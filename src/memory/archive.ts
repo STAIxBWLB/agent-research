@@ -8,6 +8,15 @@ export const ARCHIVE_NOTES = 200;
 export interface ArchiveReceipt { sha256: string; id: string }
 export interface ArchivePreview { fingerprint: string; notes: { sha256: string; note: AmemNote }[] }
 export interface ArchiveResult extends ArchivePreview { written: ArchiveReceipt[]; remaining: number }
+/** Carries receipt progress for adapters; CLI/MCP retain the existing retry instruction verbatim. */
+export class ArchivePartialError extends Error {
+  readonly failureMessage: string;
+  constructor(readonly exportedCount: number, failure: unknown) {
+    const detail = failure instanceof Error ? failure.message : "amem failure; check amem --version before retrying";
+    super(`archive: ${exportedCount} note(s) written and receipted; rerun with the same --confirm to continue; ${detail}`);
+    this.failureMessage = detail;
+  }
+}
 function hex(value: unknown, length: 32 | 64): value is string {
   return typeof value === "string" && value.length === length && /^[a-f0-9]+$/.test(value);
 }
@@ -49,6 +58,6 @@ export async function exportArchive(dirArg: string, fingerprint: string, actor: 
     catch (error) { failure = error; break; }
   }
   if (written.length) commit(dir, [], [{ actor, type: "archive.exported", data: { fingerprint, notes: written } }]);
-  if (failure) throw new Error(`archive: ${written.length} note(s) written and receipted; rerun with the same --confirm to continue; ${failure instanceof Error ? failure.message : "amem failure; check amem --version before retrying"}`);
+  if (failure) throw new ArchivePartialError(written.length, failure);
   return { ...preview, written, remaining: preview.notes.length - written.length };
 }

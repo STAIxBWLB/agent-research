@@ -140,3 +140,39 @@ test("failed initial lock identity capture still cleans up the created path", ()
   try { expect(() => addStudy(f.family, f.dir)).toThrow("Synthetic identity capture failure"); } finally { stat.mockRestore(); open.mockRestore(); }
   expect(fs.existsSync(lock)).toBe(false); expect(addStudy(f.family, f.dir).studies).toEqual([f.dir]);
 });
+
+
+test("initial path inspection failure uses descriptor identity and preserves a replacement lock", () => {
+  const f = fixture(), originalOpen = fs.openSync, originalStat = fs.lstatSync, lock = `${f.file}.lock`; let created = false, failed = false;
+  const open = spyOn(fs, "openSync").mockImplementation(((value: fs.PathLike, ...args: unknown[]) => {
+    const fd = (originalOpen as any)(value, ...args); if (String(value) === lock) created = true; return fd;
+  }) as typeof fs.openSync);
+  const stat = spyOn(fs, "lstatSync").mockImplementation(((value: fs.PathLike, ...args: unknown[]) => {
+    if (String(value) === lock && created && !failed) {
+      failed = true; fs.renameSync(lock, `${lock}.old`); fs.writeFileSync(lock, "replacement owner"); throw new Error("Synthetic initial path inspection failure");
+    }
+    return (originalStat as any)(value, ...args);
+  }) as typeof fs.lstatSync);
+  try { expect(() => addStudy(f.family, f.dir)).toThrow("Synthetic initial path inspection failure"); } finally { stat.mockRestore(); open.mockRestore(); }
+  expect(fs.readFileSync(lock, "utf8")).toBe("replacement owner");
+  expect(() => addStudy(f.family, f.dir)).toThrow("remove this stale lock only after confirming");
+});
+
+test("unknown lock identity leaves a stale lock and names manual recovery on retry", () => {
+  const f = fixture(), originalOpen = fs.openSync, originalPathStat = fs.lstatSync, originalFdStat = fs.fstatSync, lock = `${f.file}.lock`; let lockFd: number | undefined, failed = false;
+  const open = spyOn(fs, "openSync").mockImplementation(((value: fs.PathLike, ...args: unknown[]) => {
+    const fd = (originalOpen as any)(value, ...args); if (String(value) === lock) lockFd = fd; return fd;
+  }) as typeof fs.openSync);
+  const pathStat = spyOn(fs, "lstatSync").mockImplementation(((value: fs.PathLike, ...args: unknown[]) => {
+    if (String(value) === lock && lockFd !== undefined && !failed) { failed = true; throw new Error("Synthetic unknown lock identity"); }
+    return (originalPathStat as any)(value, ...args);
+  }) as typeof fs.lstatSync);
+  const fdStat = spyOn(fs, "fstatSync").mockImplementation(((fd: number, ...args: unknown[]) => {
+    if (fd === lockFd) throw new Error("Synthetic unavailable descriptor identity"); return (originalFdStat as any)(fd, ...args);
+  }) as typeof fs.fstatSync);
+  try { expect(() => addStudy(f.family, f.dir)).toThrow("Synthetic unknown lock identity"); } finally { fdStat.mockRestore(); pathStat.mockRestore(); open.mockRestore(); }
+  expect(fs.existsSync(lock)).toBe(true); expect(fs.existsSync(f.file)).toBe(false);
+  expect(() => addStudy(f.family, f.dir)).toThrow(lock);
+  expect(() => addStudy(f.family, f.dir)).toThrow("remove this stale lock only after confirming no registry command is running");
+  fs.unlinkSync(lock); expect(addStudy(f.family, f.dir).studies).toEqual([f.dir]);
+});

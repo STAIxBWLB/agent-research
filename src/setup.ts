@@ -219,7 +219,7 @@ function acquireSetupLock(file: string): () => void {
 /** Agent setup only. Console dispatch is deliberately separate for the plugin integration. */
 export function runSetup(target: string, mode: SetupMode, options: { env: NodeJS.ProcessEnv; cwd?: string; root?: string }): SetupReport {
   if (target === "console") return consoleManifest(mode, options.env, options.root ?? OWN_ROOT, options.root !== undefined);
-  if (target !== "all" && !(SETUP_TARGETS as readonly string[]).includes(target)) fail("unknown target", `use ${SETUP_TARGETS.join("|")}|all`);
+  if (target !== "all" && !(SETUP_TARGETS as readonly string[]).includes(target)) fail("unknown target", `use ${SETUP_TARGETS.join("|")}|all|console`);
   if (!["dry-run", "apply", "undo"].includes(mode)) fail("unsupported setup mode", "choose dry-run, apply or undo and rerun ares setup");
   const env = options.env, root = install(options.root ?? OWN_ROOT), desired: McpEntry = { command: "bun", args: ["--smol", join(root, "bin", "ares.js"), "mcp"] };
   const table = hosts(env, options.cwd ?? process.cwd()), family = absolute(env.AGENTHUB_HOME?.trim() || join(absolute(env.HOME?.trim() || homedir(), "HOME"), ".agenthub"), "AGENTHUB_HOME");

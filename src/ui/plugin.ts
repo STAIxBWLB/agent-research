@@ -8,7 +8,7 @@ import { foldPlan, canonical, PLAN_GATE_BYTES } from "../plan/state.ts";
 import { readRegistry, MAX_REGISTERED_STUDIES } from "../console/registry.ts";
 import { readAttemptRecords, type Attempt } from "../exp/attempts.ts";
 import { createHttp } from "../http.ts";
-import { previewArchive, ARCHIVE_NOTES } from "../memory/archive.ts";
+import { previewArchive, ARCHIVE_NOTES, ArchivePartialError } from "../memory/archive.ts";
 import { spawnRunner, type ProcessRunner } from "../exp/executor.ts";
 import { readProtocol } from "../exp/protocol.ts";
 import { readSelection } from "../exp/selection.ts";
@@ -323,7 +323,12 @@ export function createPlugin(runtime: Runtime = {}) { return {
           else if (target.action === "skill.decide") await ops.skillDecide(target.study, target.name!, target.decision!, target.reason!, target.pr, command, guard);
           else await ops.archive(target.study, archive, command, env, guard);
           seen.clear(); return { ok: true, message: `${target.wireAction} recorded; refresh the study to inspect its ledger` };
-        } catch (cause) { return { ok: false, error: error(cause) }; }
+        } catch (cause) {
+          const message = cause instanceof ArchivePartialError
+            ? line(`archive: ${cause.exportedCount} note${cause.exportedCount === 1 ? "" : "s"} exported and receipted; open a new archive preview and confirm it to export the rest; ${cause.failureMessage}`)
+            : error(cause);
+          return { ok: false, error: message };
+        }
       },
       async asset(input) {
         if (!input.id.startsWith("manuscript:")) return null;

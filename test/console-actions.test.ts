@@ -181,15 +181,22 @@ test("console archive budget stops before another child and commits returned ids
   await ops.ideaAdd(f.experiment, { id: "second", title: "Second pivot", hypothesis: "Second hypothesis" }, ctx);
   await ops.ideaDecide(f.experiment, "second", { decision: "pivot", reason: "Second abandoned direction" }, ctx);
   let clock = 0;
-  const fake = fakeRunner([{ exitCode: 0, stdout: JSON.stringify({ id: noteId, kind: "fail" }), stderr: "private diagnostic" }]);
-  const plugin: ConsolePlugin = createPlugin({ env: f.env, now: () => clock, runner: async request => { const result = await fake.runner(request); clock = CONSOLE_ARCHIVE_MS + 1; return result; } });
+  const fake = fakeRunner([noteId, "b".repeat(32)].map(id => ({ exitCode: 0, stdout: JSON.stringify({ id, kind: "fail" }), stderr: "private diagnostic" })));
+  const plugin: ConsolePlugin = createPlugin({ env: f.env, now: () => clock, runner: async request => { const result = await fake.runner(request); clock += CONSOLE_ARCHIVE_MS + 1; return result; } });
   const provider = await plugin.open({ home: f.family, log: () => {}, features: ["action.meta"] }), input = actions(f)[3]!, pending = await preview(provider, input), count = readLedger(f.experiment).length;
   const result = await provider.action({ ...input, confirmed: true, fingerprint: pending.fingerprint }, META);
-  expect(result.ok).toBe(false); expect("error" in result && result.error).toContain("1 note(s)"); expect("error" in result && result.error).toMatch(/rerun|retry|continue/);
+  expect(result.ok).toBe(false); expect("error" in result && result.error).toContain("1 note exported and receipted"); expect("error" in result && result.error).toContain("open a new archive preview and confirm it"); expect("error" in result && result.error).not.toContain("--confirm");
   expect(fake.requests).toHaveLength(1); expect(fake.requests[0]!.timeoutMs!).toBeGreaterThan(0); expect(fake.requests[0]!.timeoutMs!).toBeLessThanOrEqual(CONSOLE_ARCHIVE_MS);
   expect(readLedger(f.experiment)).toHaveLength(count + 1);
   expect(readLedger(f.experiment).at(-1)).toMatchObject({ type: "archive.exported", actor: { kind: "person", id: META.identity }, data: { notes: [{ id: noteId }] } });
   expect(ledger(f.experiment)).not.toContain("private diagnostic"); expect(fs.existsSync(join(f.experiment, ".ares.lock"))).toBe(false);
+  const stale = await provider.action({ ...input, confirmed: true, fingerprint: pending.fingerprint }, META);
+  expect(stale.ok).toBe(false); expect("error" in stale && stale.error).toContain("stale"); expect(fake.requests).toHaveLength(1);
+  const fresh = await preview(provider, input); expect(fresh.fingerprint).not.toBe(pending.fingerprint);
+  expect((await provider.action({ ...input, confirmed: true, fingerprint: fresh.fingerprint }, META)).ok).toBe(true);
+  expect(fake.requests).toHaveLength(2); expect(readLedger(f.experiment)).toHaveLength(count + 2);
+  expect(readLedger(f.experiment).filter(event => event.type === "archive.exported").flatMap(event => (event.data.notes as { id: string }[]).map(note => note.id))).toEqual([noteId, "b".repeat(32)]);
+  expect(fs.existsSync(join(f.experiment, ".ares.lock"))).toBe(false);
 });
 
 test("the pinned writable console routes all four actions through shell-issued confirm tokens", async () => {
