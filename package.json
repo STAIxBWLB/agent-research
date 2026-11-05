@@ -30,6 +30,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "bun x tsc --noEmit && bun scripts/check-boundary.ts && bun test && bun pm pack --dry-run"
+    "check": "bun x tsc --noEmit && bun scripts/check-boundary.ts && bun test && bun pm pack --dry-run",
+    "release:stage": "bun scripts/release.ts stage",
+    "release:smoke": "bun scripts/release-smoke.ts"
   }
 }

@@ -6,7 +6,14 @@ This checkout implements A1 literature studies, A2 container experiments and the
 
 ## Install
 
-Requires Bun 1.4.2 or newer. Not yet published to npm; run from a checkout:
+Requires Bun 1.4.2 or newer. After the first tagged release is published, install from npm:
+
+```sh
+bun add -g @staix/agent-research
+ares --help
+```
+
+Or run from a checkout:
 
 ```sh
 bun install --frozen-lockfile
@@ -532,7 +539,7 @@ MCP uses shared command handlers; `ares_setup` exposes the same registration pre
 
 Within a supported schema, readers preserve additive fields on study/attempt records and keep ledger events with unknown kinds. Appending to the ledger leaves prior lines intact; updating an attempt keeps unrecognized fields and stage entries. Unknown stage entries remain readable, including logs and totals, but budget-gated starts refuse with an upgrade instruction because this version cannot account for their resource use. A future schema version or unknown execution status/stage is refused with an upgrade instruction, leaving the original data unchanged. Unknown plan versions or node kinds are refused without changing plan.json. Command input remains strict so unknown options or protocol fields cannot silently change an experiment.
 
-The private scope/card/candidate storage and evaluator metrics object are not family interchange schemas. The console registration uses agent-console API 1 rather than an ares interchange format. Signed runner receipts, campaign contracts and vault notes are not implemented or advertised here. Setup and `--root` registration are available; publishing the first npm release remains separate work.
+The private scope/card/candidate storage and evaluator metrics object are not family interchange schemas. The console registration uses agent-console API 1 rather than an ares interchange format. Signed runner receipts, campaign contracts and vault notes are not implemented or advertised here. Setup and `--root` registration are available. See Release below for the first-publication procedure.
 
 ## Environment
 
@@ -546,7 +553,15 @@ Keys are sent with requests only; they are never written to the study.
 
 ## Not implemented yet
 
-Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, signed executor receipts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, vault-mem reference notes (after vault-mem#73), the `copilot` and `step` autonomy modes, and npm publishing.
+Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, signed executor receipts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, vault-mem reference notes (after vault-mem#73), the `copilot` and `step` autonomy modes.
+
+## Release
+
+A `v*` tag must equal `v` plus the `package.json` version and have a dated `## [VERSION] - YYYY-MM-DD` section in `CHANGELOG.md`. The release workflow runs validation on Ubuntu and macOS, verifies a staged tarball against its SHA-256 manifest, and installs it into a clean prefix for CLI version, manifest and MCP smoke checks. Publication uses the exact validated Linux tarball with provenance; a GitHub release follows with the dated changelog notes, tarball and hash manifest. Never move a release tag or reuse a published version.
+
+Publication runs only when the repository variable `NPM_PUBLISH_ENABLED` is `true` and a reviewer approves the `npm-production` environment. It uses Node 24 and npm 11.5.1 or newer with [npm OIDC trusted publishing](https://docs.npmjs.com/trusted-publishers), without an npm token. After merge, the owner configures the npm trusted publisher for repository `STAIxBWLB/agent-research`, workflow `release.yml` and environment `npm-production`, enables the repository gate, and creates the release tag. These are owner steps; preparing the workflow does not establish that the package has been published.
+
+Version 0.1.0 is the initial publication. There is no prior published minor line, so no N-1 compatibility claim is made yet for CLI, MCP tools or study/ledger formats. N-1 CI checks begin at the next minor release against the latest published patch of the preceding minor line.
 
 ## Development
 
