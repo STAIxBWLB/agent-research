@@ -151,7 +151,13 @@ test("unavailable alerts keep the last read event time or an explicit stable epo
   const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "unavailable"); addStudy(family, study);
   const provider = await typed.open(context(family)); await provider.snapshot({ panel: "studies", after: 0 });
   const latest = readLedger(study).at(-1)!.at; fs.renameSync(study, join(home, "moved-unavailable"));
-  const unavailable = async (reader: Awaited<ReturnType<typeof typed.open>>) => rows((await reader.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.kind === "unavailable")!;
+  const alerts = new WeakMap<object, Record<string, any>>();
+  const unavailable = async (reader: Awaited<ReturnType<typeof typed.open>>) => {
+    const snapshot = await reader.snapshot({ panel: "inbox", after: 0 });
+    // With no readable ledger, cursor 0 can legitimately return an empty delta; retain the last sent view.
+    if (snapshot.changed === false) { expect(snapshot.cursor).toBe(0); expect(alerts.has(reader)).toBe(true); return alerts.get(reader)!; }
+    const alert = rows(snapshot.items).find(row => row.kind === "unavailable")!; expect(alert).toBeDefined(); alerts.set(reader, alert); return alert;
+  };
   const cached = await unavailable(provider); expect(cached.at).toBe(latest); expect((await unavailable(provider)).at).toBe(cached.at);
   const fresh = await typed.open(context(family)), first = await unavailable(fresh);
   expect(first.at).toBe("1970-01-01T00:00:00.000Z"); expect(first.detail).toContain("ledger time unavailable");
