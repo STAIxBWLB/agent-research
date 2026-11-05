@@ -1,0 +1,122 @@
+name: Release
+
+# Readiness work does not create a tag or enable publication.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.ref_name }}
+  RELEASE_SHA: ${{ github.sha }}
+
+jobs:
+  validate:
+    name: Release validation (${{ matrix.os }})
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tagged commit is on main
+        run: git merge-base --is-ancestor "$RELEASE_SHA" origin/main || { echo "$RELEASE_TAG ($RELEASE_SHA) is not on origin/main"; exit 1; }
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - name: Require matching package version, tag, commit and dated changelog
+        run: bun scripts/release.ts validate
+      - run: bun install --frozen-lockfile
+      - name: Stage the exact npm artifact
+        run: bun run release:stage "$RUNNER_TEMP/release-package"
+      - run: bun run check
+      - name: Smoke-test the staged package in a clean prefix
+        run: bun run release:smoke "$RUNNER_TEMP/release-package"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: runner.os == 'Linux'
+        with:
+          name: release-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/release-package/package.tgz
+            ${{ runner.temp }}/release-package/manifest.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish approved artifact with npm OIDC
+    needs: validate
+    # Absent this opt-in, publication is skipped. Readiness work does not set the variable.
+    if: github.repository == 'STAIxBWLB/agent-research' && vars.NPM_PUBLISH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm-production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: release-${{ github.sha }}
+          path: ${{ runner.temp }}/publish-package
+      - name: Verify actual toolchain and validated artifact binding
+        run: bun scripts/release.ts verify "$RUNNER_TEMP/publish-package" --publish >> "$GITHUB_ENV"
+      - name: Publish only the verified tarball
+        run: npm publish "$RUNNER_TEMP/publish-package/package.tgz" --registry https://registry.npmjs.org --provenance --access public --tag "$NPM_DIST_TAG" --ignore-scripts
+
+  github-release:
+    name: Publish the GitHub release after npm
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: release-${{ github.sha }}
+          path: ${{ runner.temp }}/release-assets
+      - name: Verify assets and prepare release notes
+        run: bun scripts/release.ts notes "$RUNNER_TEMP/release-assets" "$RUNNER_TEMP/release-notes.md" >> "$GITHUB_ENV"
+      - name: Create the GitHub release without changing tags or existing assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          flags=()
+          if [ "$RELEASE_PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$RELEASE_TAG" "$RELEASE_ASSETS.tgz" "$RELEASE_ASSETS.manifest.json" --repo "$GITHUB_REPOSITORY" --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md" --verify-tag "${flags[@]}"
