@@ -11,9 +11,9 @@ import { createHttp } from "../http.ts";
 import { previewArchive, ARCHIVE_NOTES, ArchivePartialError } from "../memory/archive.ts";
 import { spawnRunner, type ProcessRunner } from "../exp/executor.ts";
 import { readProtocol } from "../exp/protocol.ts";
-import { readSelection } from "../exp/selection.ts";
-import { readClosedFinal } from "../exp/final.ts";
-import { readCurrentBuild } from "../paper/build.ts";
+import { readSelection, selectionPath } from "../exp/selection.ts";
+import { readClosedFinal, finalResultPath } from "../exp/final.ts";
+import { readCurrentBuild, paperBuildPaths } from "../paper/build.ts";
 import { loadCandidates } from "../lit/candidates.ts";
 import { openStudy, readLedger, readBytesBounded, readTextBounded, sha256, boundedText, plain, type LedgerEvent } from "../study.ts";
 
@@ -108,6 +108,10 @@ function attempts(dir: string, all: boolean) {
   }
   return { total, byStatus, rows };
 }
+/** Presence is not validity: any present artifact is still checked by its existing bounded reader. */
+function recordPresent(file: string): boolean {
+  try { lstatSync(file); return true; } catch (cause) { if ((cause as NodeJS.ErrnoException).code === "ENOENT") return false; throw cause; }
+}
 function loadStudy(dir: string, features: readonly string[], input: { panel: string; study?: string; id?: string }) {
   const { study } = openStudy(dir), events = readLedger(dir), errors: Record<string, string> = {}, key = sha256(dir).slice(0, 16);
   const detailed = input.panel === "study" && (input.study === dir || !input.study && input.id === study.id), inbox = input.panel === "inbox";
@@ -120,8 +124,14 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
   };
   const status = ops.status(dir), gates = ops.gateList(dir);
   const attempt = study.mode === "experiment" ? readCall("attempts", () => attempts(dir, inbox), errors) : null;
-  const investigation = detailed && study.mode === "experiment" ? readCall("investigation", () => ops.investigateShow(dir), errors) : null;
-  const final = study.mode === "experiment" ? readCall("final", () => readClosedFinal(dir).result, errors) : null;
+  const investigation = detailed && study.mode === "experiment" ? readCall("investigation", () => {
+    const configured = recordPresent(selectionPath(dir)) || events.some(event => event.type === "selection.set" || event.type === "investigate.closed");
+    return configured ? ops.investigateShow(dir) : null;
+  }, errors) : null;
+  const final = study.mode === "experiment" ? readCall("final", () => {
+    const recorded = recordPresent(finalResultPath(dir)) || events.some(event => event.type === "final.closed");
+    return recorded ? readClosedFinal(dir).result : null;
+  }, errors) : null;
   const posthoc = detailed && study.mode === "experiment" ? readCall("posthoc", () => ops.posthocShow(dir), errors) : null;
   const review = readCall("review", () => ops.reviewShow(dir), errors), skills = detailed || inbox ? readCall("skills", () => ops.skillList(dir), errors) : null;
   const reviewFailure = review?.unmet.find(row => row.code === "review-journal");
@@ -162,7 +172,10 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
   for (const [index, event] of events.entries()) if (event.type === "watch.ran" && event.data.ok === false) add("watch", event.at + index, "alert", "Every watch source failed", event.at, "Inspect ares watch show and retry after restoring source access");
   }
   const archive = detailed ? readCall("archive", () => { const preview = previewArchive(dir); return { pendingCount: preview.notes.length, fingerprint: preview.fingerprint }; }, errors) : null;
-  const manuscript = detailed && readCall("manuscript", () => readCurrentBuild(dir), errors) ? { id: `manuscript:${study.id}` } : null;
+  const manuscript = detailed && readCall("manuscript", () => {
+    const paths = paperBuildPaths(dir), recorded = recordPresent(paths.manuscript) || recordPresent(paths.evidence) || events.some(event => event.type === "paper.built");
+    return recorded ? readCurrentBuild(dir) : null;
+  }, errors) ? { id: `manuscript:${study.id}` } : null;
   const failures = Object.entries(errors);
   if (inbox && failures.length) {
     const perFailure = Math.floor(800 / failures.length);

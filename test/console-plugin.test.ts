@@ -451,3 +451,56 @@ test("normal same-cursor polling detects record corruption and repair without le
     expect(fs.readFileSync(target)).toEqual(original);
   }
 });
+
+test("fresh studies have no optional-phase errors while a configured investigation remains readable", async () => {
+  for (const mode of ["survey", "experiment", "protocol-only", "selection-only"] as const) {
+    const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, `fresh-${mode}`, mode === "survey" ? "survey" : "experiment");
+    fs.mkdirSync(join(study, "paper")); fs.writeFileSync(join(study, "paper", "manuscript.md"), "Synthetic unbuilt source manuscript.\n");
+    if (mode === "protocol-only" || mode === "selection-only") {
+      fs.mkdirSync(join(study, "task", "evaluator"), { recursive: true });
+      fs.writeFileSync(join(study, "task", "task.md"), "Synthetic task"); fs.writeFileSync(join(study, "task", "evaluator", "run"), "Synthetic evaluator");
+      await ops.protocol(study, readProtocol(conf.experiment)!, ctx);
+      if (mode === "selection-only") await ops.selection(study, { v: 1, run: "investigate", metric: "score", baseline: { commit: BASE }, minSeeds: 1, minDelta: 1 }, ctx);
+    }
+    addStudy(family, study);
+    const journal = fs.readFileSync(join(study, "ledger.jsonl")), source = fs.readFileSync(join(study, "paper", "manuscript.md")), files = fs.readdirSync(study);
+    const provider = await typed.open(context(family)), list = await provider.snapshot({ panel: "studies", after: 0 }), summary = rows(list.studies).find(row => row.dir === study)!;
+    expect(summary.available).toBe(true); expect(summary.final).toBeNull(); expect(summary.attempts.total).toBe(0); expect(summary.attempts.available).not.toBe(false);
+    const detail = rows([(await provider.snapshot({ panel: "study", study, after: 0 })).study])[0]!;
+    expect(detail.final).toBeNull(); expect(detail.manuscript).toBeNull();
+    if (mode === "selection-only") {
+      expect(detail.investigation).toMatchObject({ run: "investigate", winner: null, reason: "no-baseline" });
+      expect(fs.existsSync(join(study, "runs", "investigate", "investigate.json"))).toBe(false); expect(detail.archive).toMatchObject({ pendingCount: 1 });
+    } else { expect(detail.investigation).toBeNull(); expect(detail.archive).toMatchObject({ pendingCount: 0 }); }
+    for (const reader of ["final", "investigation", "posthoc", "manuscript", "archive"]) expect(detail.errors[reader]).toBeUndefined();
+    if (mode !== "survey") expect(detail.posthoc).toMatchObject({ run: "posthoc", attempts: [] });
+    const inbox = await provider.snapshot({ panel: "inbox", after: 0 });
+    expect(rows(inbox.items).some(row => row.kind === "partial-read" || row.kind === "unavailable")).toBe(false);
+    expect((await provider.snapshot({ panel: "inbox", after: inbox.cursor as number })).changed).toBe(false);
+    expect(fs.readFileSync(join(study, "ledger.jsonl"))).toEqual(journal); expect(fs.readFileSync(join(study, "paper", "manuscript.md"))).toEqual(source); expect(fs.readdirSync(study)).toEqual(files);
+    expect(fs.existsSync(join(study, ".ares.lock"))).toBe(false);
+  }
+});
+
+test("a final artifact or close receipt keeps strict final-reader failures visible and never repairs data", async () => {
+  for (const corrupt of ["invalid-json", "missing-file", "invalid-receipt", "artifact-only"] as const) {
+    const f = await fixtures(fs.realpathSync(tempDir())), file = join(f.experiment, "runs", "final", "final.json"), journal = join(f.experiment, "ledger.jsonl");
+    if (corrupt === "invalid-json") fs.writeFileSync(file, "not valid final JSON\n");
+    else if (corrupt === "missing-file") fs.unlinkSync(file);
+    else {
+      let events = readLedger(f.experiment);
+      if (corrupt === "invalid-receipt") events.findLast(event => event.type === "final.closed")!.data.sha256 = "d".repeat(64);
+      else events = events.filter(event => event.type !== "final.closed");
+      fs.writeFileSync(journal, events.map(event => JSON.stringify(event)).join("\n") + "\n");
+    }
+    const before = fs.readFileSync(journal), artifact = fs.existsSync(file) ? fs.readFileSync(file) : null, provider = await typed.open(context(f.family));
+    const summary = rows((await provider.snapshot({ panel: "studies", after: 0 })).studies).find(row => row.dir === f.experiment)!;
+    expect(summary.available).toBe(true); expect(summary.final).toBeNull();
+    const detail = rows([(await provider.snapshot({ panel: "study", study: f.experiment, after: 0 })).study])[0]!;
+    expect(detail.final).toBeNull(); expect(typeof detail.errors.final).toBe("string"); expect(detail.errors.final.length).toBeGreaterThan(0);
+    const inbox = await provider.snapshot({ panel: "inbox", after: 0 }), alerts = rows(inbox.items).filter(row => row.kind === "partial-read" && row.project === openStudy(f.experiment).study.id);
+    expect(alerts).toHaveLength(1); expect(alerts[0]!.detail).toContain("final:"); expect(alerts[0]!.verbs).toEqual([]);
+    expect((await provider.snapshot({ panel: "inbox", after: inbox.cursor as number })).changed).toBe(false);
+    expect(fs.readFileSync(journal)).toEqual(before); expect(fs.existsSync(file) ? fs.readFileSync(file) : null).toEqual(artifact); expect(fs.existsSync(join(f.experiment, ".ares.lock"))).toBe(false);
+  }
+});
