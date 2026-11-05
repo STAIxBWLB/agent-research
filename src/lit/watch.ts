@@ -30,8 +30,8 @@ export function validateWatch(raw: unknown): WatchConfig {
   try {
     if (!plain(raw)) bad("config must be an object");
     if (raw.v !== 1) {
-      if (!Object.hasOwn(raw, "v")) bad("config requires v: 1");
-      throw new WatchVersionError("watch config: unsupported version; use an ares version supporting this config and keep literature/watch.json unchanged");
+      if (typeof raw.v === "number" && Number.isSafeInteger(raw.v) && raw.v > 1) throw new WatchVersionError("watch config: unsupported version; use an ares version supporting this config and keep literature/watch.json unchanged");
+      bad("config version is malformed; set v to 1");
     }
     onlyKeys(raw, ["v", "queries", "rubric"], "watch config");
     if (!Array.isArray(raw.queries) || raw.queries.length < 1 || raw.queries.length > WATCH_QUERIES) bad("queries must contain 1..20 entries");

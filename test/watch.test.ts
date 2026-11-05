@@ -181,3 +181,29 @@ test("run receipts keep only newly added ids surviving a later cross-query bridg
   expect(readLedger(dir).at(-1)).toMatchObject({ type: "watch.ran", data: { added: 2, addedIds: surviving, addedIdsTotal: 1 } });
   expect(fake.requested).toHaveLength(2);
 });
+
+test("malformed version fields give a v1 correction and stored malformed versions are repairable", async () => {
+  const malformed: unknown[] = ["1", "2", null, false, {}, [], 0, 0.5, 1.5, -1, Number.MAX_SAFE_INTEGER + 1, undefined];
+  for (const v of malformed) {
+    const input = v === undefined ? { queries: config.queries } : { ...config, v };
+    expect(() => validateWatch(input)).toThrow("set v to 1");
+    const dir = await study(); await ops.watchSet(dir, config, { actor }); writeFileSync(watchPath(dir), JSON.stringify(input));
+    const bytes = readFileSync(watchPath(dir)), before = ledger(dir), fake = fakeHttp(routes());
+    expect(() => ops.watchShow(dir)).toThrow("literature/watch.json");
+    await expect(ops.watchRun(dir, { actor, http: fake.http })).rejects.toThrow("ares watch set");
+    expect(readFileSync(watchPath(dir))).toEqual(bytes); expect(ledger(dir)).toBe(before); expect(fake.requested).toEqual([]);
+    expect((await ops.watchSet(dir, config, { actor })).changed).toBe(true); expect(readWatch(dir)).toEqual(config);
+    expect((await ops.watchRun(dir, { actor, http: fake.http })).ok).toBe(true);
+  }
+});
+
+test("numeric future watch versions remain unchanged when v1 input is supplied", async () => {
+  for (const v of [2, Number.MAX_SAFE_INTEGER]) {
+    const dir = await study(); await ops.watchSet(dir, config, { actor });
+    writeFileSync(watchPath(dir), JSON.stringify({ ...config, v })); const bytes = readFileSync(watchPath(dir)), before = ledger(dir), fake = fakeHttp(routes());
+    expect(() => validateWatch({ ...config, v })).toThrow("unsupported version");
+    await expect(ops.watchSet(dir, config, { actor })).rejects.toThrow("unsupported version");
+    await expect(ops.watchRun(dir, { actor, http: fake.http })).rejects.toThrow("unsupported version");
+    expect(readFileSync(watchPath(dir))).toEqual(bytes); expect(ledger(dir)).toBe(before); expect(fake.requested).toEqual([]);
+  }
+});

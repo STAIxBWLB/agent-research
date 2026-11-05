@@ -30,6 +30,8 @@ const SKILL = obj({ name: text(64), summary: text(16384), steps: { ...texts(1638
 const SCOPE = obj({ question: text(2000), subquestions: texts(30, 1000), include: texts(50, 500), exclude: texts(50, 500), yearFrom: year, yearTo: year, maxCandidates: { type: "integer", minimum: 1, maximum: 5000 } }, ["question"]);
 const CARD = obj({ summary: text(4000), claims: texts(50, 1000), methods: text(4000), findings: text(4000), limitations: text(4000), relevance: text(4000) }, ["summary"]);
 const integer = (minimum: number, maximum: number) => ({ type: "integer", minimum, maximum });
+const WATCH = obj({ v: { type: "integer", enum: [1] }, queries: { type: "array", minItems: 1, maxItems: 20,
+  items: obj({ id: text(64), query: text(500), source: { type: "string", enum: ["openalex", "s2", "arxiv", "all"] }, yearFrom: year, limit: integer(1, 50) }, ["id", "query"]) }, rubric: text(8000) }, ["v", "queries"]);
 const argv = { type: "array", minItems: 1, maxItems: 128, items: { type: "string", maxLength: 4096 } };
 const image = { ...text(512), description: "Digest-pinned image: name@sha256:<64 lowercase hex digits>" };
 const stage = { type: "string", enum: ["candidate", "evaluator"] };
@@ -70,6 +72,12 @@ const SELECTION = obj({
 const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), parent: text(64), commit: { type: "string", minLength: 40, maxLength: 40 } }, ["id", "title", "hypothesis"]);
 
 export const ARES_TOOLS: readonly McpTool[] = [
+  { name: "ares_watch_set", description: "Set bounded v1 literature queries and an optional display-only rubric. At most 20 queries; identical config is a no-op. Does not search, screen or start a timer. Survey and experiment studies.", inputSchema: obj({ study, watch: WATCH }, ["study", "watch"]), annotations: { ...write, idempotentHint: true } },
+  { name: "ares_watch_run", description: "Run one finite watch pass through lit search under the study lock and scope gate. Adds only new candidates, never includes or screens. Records per-query search and one watch receipt, even when all sources fail. May hold the lock for about 20 minutes; other study mutations refuse. No resident process or schedule is started.", inputSchema: obj({ study }, ["study"]), annotations: net },
+  { name: "ares_watch_show", description: "Read watch config, recent event-timed run receipts and new candidates. No lock, network or write.", inputSchema: obj({ study }, ["study"]), annotations: read },
+  { name: "ares_console_add", description: "Register one readable study directory in the private bounded family registry. Does not scan the disk or activate the console. An already registered directory is a no-op.", inputSchema: obj({ study }, ["study"]), annotations: { ...write, idempotentHint: true } },
+  { name: "ares_console_remove", description: "Remove only a listed study registration, including an unavailable path. Does not delete the study; absent entries are a no-op.", inputSchema: obj({ study }, ["study"]), annotations: { ...write, idempotentHint: true } },
+  { name: "ares_console_list", description: "Read the private bounded study registry without scanning the disk or removing unavailable entries. No lock, network or write.", inputSchema: obj({}, []), annotations: read },
   { name: "ares_setup", description: "Preview, apply or undo a local agent-client MCP entry or console plugin manifest {api,tool,module,sha256}. Defaults to dry-run and lists config/receipt actions. Apply writes the receipt first; undo refuses entry drift. Root pins a release; cwd selects the workspace for agy. Never changes instruction blocks or contacts the network.", inputSchema: obj({ target: { type: "string", enum: [...SETUP_TARGETS, "all", "console"] }, mode: { type: "string", enum: ["dry-run", "apply", "undo"] }, root: text(4096), cwd: text(4096) }, ["target"]), annotations: write },
   { name: "ares_manifest", description: "Read this ares version, implemented commands and shared schema versions without opening a study or reaching an executor.", inputSchema: obj({}, []), annotations: read },
   { name: "ares_archive", description: "Preview pending derived lessons without writes. With the current full-list fingerprint, export up to 200 new amem notes and commit returned ids/hashes; remaining reports later batches. A partial failure records successes; repeat the same confirmation to continue. Applies to survey and experiment studies.", inputSchema: obj({ study, confirm: { type: "string", minLength: 64, maxLength: 64 } }, ["study"]), annotations: net },
@@ -129,6 +137,12 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
   const ctx = { ...runtime, actor, http }, memoryEnv = { ...env, AGENTHUB_PEER_ID: actor.id };
   const dir = (a: Record<string, unknown>) => absolute(a.study, "study");
   const handlers: Record<string, McpHandler> = {
+    ares_watch_set: a => ops.watchSet(dir(a), a.watch, ctx),
+    ares_watch_run: a => ops.watchRun(dir(a), ctx),
+    ares_watch_show: a => ops.watchShow(dir(a)),
+    ares_console_add: a => ops.consoleAdd(dir(a), env),
+    ares_console_remove: a => ops.consoleRemove(dir(a), env),
+    ares_console_list: () => ops.consoleList(env),
     ares_manifest: () => ops.manifest(),
     ares_setup: a => ops.setup(a.target as string, (a.mode ?? "dry-run") as SetupMode, env, { ...(a.root === undefined ? {} : { root: absolute(a.root, "root") }), ...(a.cwd === undefined ? {} : { cwd: absolute(a.cwd, "cwd") }) }),
     ares_archive: a => ops.archive(dir(a), { ...(a.confirm === undefined ? {} : { confirm: a.confirm as string }) }, ctx, memoryEnv),
