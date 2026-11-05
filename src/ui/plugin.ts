@@ -98,6 +98,8 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
   const final = study.mode === "experiment" ? readCall("final", () => readClosedFinal(dir).result, errors) : null;
   const posthoc = detailed && study.mode === "experiment" ? readCall("posthoc", () => ops.posthocShow(dir), errors) : null;
   const review = readCall("review", () => ops.reviewShow(dir), errors), skills = detailed || inbox ? readCall("skills", () => ops.skillList(dir), errors) : null;
+  const reviewFailure = review?.unmet.find(row => row.code === "review-journal");
+  if (reviewFailure) errors.review = line(reviewFailure.message);
   const watch = readCall("watch", () => ops.watchShow(dir), errors), lastWatch = watch?.runs[0] ?? null;
   if (inbox) {
   const planTimes = gates.some(row => row.gate.startsWith("plan:")) ? planGateTimes(events) : new Map<string, string>();
@@ -131,8 +133,14 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
   }
   const archive = detailed ? readCall("archive", () => { const preview = previewArchive(dir); return { pendingCount: preview.notes.length, fingerprint: preview.fingerprint }; }, errors) : null;
   const manuscript = detailed && readCall("manuscript", () => readCurrentBuild(dir), errors) ? { id: `manuscript:${study.id}` } : null;
+  const failures = Object.entries(errors);
+  if (inbox && failures.length) {
+    const perFailure = Math.floor(800 / failures.length);
+    add("partial-read", "records", "alert", "Study data partially unavailable", at,
+      failures.map(([name, reason]) => `${name}: ${line(reason, Math.max(20, perFailure - name.length - 2))}`).join("; ") + "; Inspect the study panel, restore readable records or use a compatible ares version, then refresh.");
+  }
   const summary = { id: study.id, dir, available: true, question: status.question, mode: status.mode, autonomy: status.autonomy, gates,
-    attempts: attempt ? { total: attempt.total, byStatus: attempt.byStatus } : { total: 0, byStatus: {} },
+    attempts: attempt ? { total: attempt.total, byStatus: attempt.byStatus } : study.mode === "experiment" ? { available: false, reason: errors.attempts ?? "Attempt records could not be read; inspect ares attempt list and restore readable records, then refresh" } : { total: 0, byStatus: {} },
     final: final ? { status: final.status, ...(final.reason ? { reason: final.reason } : {}) } : null,
     review: review ? { ready: review.ready, unmet: review.unmet } : null, lastWatch };
   return { summary, targets, detail: detailed ? { ...summary, investigation, final, posthoc, review, skills, watch, archive, manuscript, errors } : null, items, at };

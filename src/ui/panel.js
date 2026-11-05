@@ -69,6 +69,8 @@ export default (host) => {
     })) : null);
   const attemptRows = (attempts) => {
     const value = record(attempts), byStatus = record(value.byStatus);
+    if (value.available === false) return h("section", { class: "ares-card" }, h("h3", { text: "Attempts unavailable" }),
+      ui.notice(line(value.reason) || "Attempt records could not be read. Inspect the study records and refresh.", "err"));
     return h("section", { class: "ares-card" }, h("h3", { text: `Attempts: ${number(value.total)}` }),
       ui.rows(Object.entries(byStatus), ([state, count]) => ui.row({ title: state, sub: number(count), chip: { text: state, tone: tone(state) } })) ?? ui.empty("No attempt status details"));
   };
@@ -79,9 +81,10 @@ export default (host) => {
         const available = study.available !== false;
         const finalState = study.final?.status, reviewState = study.review?.ready === true ? "Review ready" : study.review ? "Review pending" : "Review unavailable";
         const watchState = study.lastWatch ? `${study.lastWatch.ok ? "Watch answered" : "Watch failed"}: ${number(study.lastWatch.added)} added` : "No watch run";
+        const attempts = study.attempts?.available === false ? `Attempts unavailable: ${line(study.attempts.reason) || "Attempt records could not be read."}` : `${number(study.attempts?.total)} attempts`;
         const pending = rows(study.gates).filter((gate) => gate.state === "pending").length;
         return ui.row({ title: line(study.question) || text(study.id, "Unavailable study"),
-          sub: available ? [text(study.mode), text(study.autonomy), `${number(study.attempts?.total)} attempts`, `${pending} pending gates`, finalState ? `Final ${finalState}` : "Final unavailable", reviewState, watchState].join(" | ") : text(study.reason, "Study cannot be read; its registration is retained."),
+          sub: available ? [text(study.mode), text(study.autonomy), attempts, `${pending} pending gates`, finalState ? `Final ${finalState}` : "Final unavailable", reviewState, watchState].join(" | ") : text(study.reason, "Study cannot be read; its registration is retained."),
           chip: { text: available ? text(study.mode, "study") : "unavailable", tone: available ? "neutral" : "err" },
           ...(typeof study.dir === "string" ? { onOpen: () => go("study", { study: study.dir }) } : {}) });
       }) ?? ui.empty("No registered studies", "Register one with ares console add <dir>. Ares does not scan the disk for studies.")];

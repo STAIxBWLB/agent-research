@@ -285,3 +285,36 @@ test("many failed watch receipts keep distinct event-timed alerts stable across 
   appendEvent(study, actor, "synthetic.unrelated", {});
   expect(rows((await provider.snapshot({ panel: "inbox", after: first.cursor as number })).items).filter(row => row.kind === "watch").map(row => [row.id, row.at])).toEqual(identities);
 });
+
+
+test("attempt read failures are unavailable with a reason instead of zero and remain visible in the inbox", async () => {
+  for (const malformed of [false, true]) {
+    const f = await fixtures(fs.realpathSync(tempDir())), file = join(f.experiment, "runs", "posthoc", "attempts", `${f.failed}.json`), original = fs.readFileSync(file, "utf8");
+    fs.writeFileSync(file, malformed ? "invalid JSON" : JSON.stringify({ ...JSON.parse(original), v: 2 }));
+    const journal = fs.readFileSync(join(f.experiment, "ledger.jsonl")), broken = fs.readFileSync(file), provider = await typed.open(context(f.family));
+    const study = rows((await provider.snapshot({ panel: "studies", after: 0 })).studies).find(row => row.dir === f.experiment)!;
+    expect(study.available).toBe(true); expect(study.attempts.available).toBe(false); expect(study.attempts.total).toBeUndefined(); expect(study.attempts.byStatus).toBeUndefined(); expect(study.attempts.reason.length).toBeGreaterThan(0);
+    const first = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).filter(row => row.kind === "partial-read" && row.project === openStudy(f.experiment).study.id);
+    expect(first).toHaveLength(1); expect(first[0]!.detail).toContain("attempts:"); expect(first[0]!.at).toBe(readLedger(f.experiment).at(-1)!.at); expect(first[0]!.verbs).toEqual([]);
+    const second = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.id === first[0]!.id)!; expect(second.at).toBe(first[0]!.at);
+    expect(fs.readFileSync(file)).toEqual(broken); expect(fs.readFileSync(join(f.experiment, "ledger.jsonl"))).toEqual(journal);
+  }
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), dir = makeStudy(home, "empty-attempts", "experiment"); addStudy(family, dir);
+  const provider = await typed.open(context(family)), study = rows((await provider.snapshot({ panel: "studies", after: 0 })).studies)[0]!;
+  expect(study.attempts.total).toBe(0); expect(study.attempts.available).not.toBe(false);
+});
+
+test("one bounded partial-read inbox alert lists failed skill, watch and review readers and clears after repair", async () => {
+  const f = await fixtures(fs.realpathSync(tempDir())), proposal = join(f.survey, "proposals", "skills", "synthetic-procedure.md"), original = fs.readFileSync(proposal, "utf8");
+  await ops.watchSet(f.survey, { v: 1, queries: [{ id: "synthetic", query: "synthetic" }] }, ctx);
+  const watchFile = join(f.survey, "literature", "watch.json"), watch = fs.readFileSync(watchFile), goodJournal = fs.readFileSync(join(f.survey, "ledger.jsonl"));
+  fs.writeFileSync(proposal, original + "Manual edit"); fs.writeFileSync(watchFile, JSON.stringify({ v: 2, queries: [] }));
+  appendEvent(f.survey, actor, "review.added", { id: "malformed-review", review: { v: 2 } });
+  const journal = fs.readFileSync(join(f.survey, "ledger.jsonl")), provider = await typed.open(context(f.family));
+  const first = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).filter(row => row.kind === "partial-read" && row.project === openStudy(f.survey).study.id);
+  expect(first).toHaveLength(1); for (const name of ["skills", "watch", "review"]) expect(first[0]!.detail).toContain(`${name}:`);
+  expect(first[0]!.detail.length).toBeLessThanOrEqual(1000); expect(first[0]!.detail).toContain("refresh"); expect(first[0]!.verbs).toEqual([]); expect(first[0]!.at).toBe(readLedger(f.survey).at(-1)!.at);
+  expect(fs.readFileSync(join(f.survey, "ledger.jsonl"))).toEqual(journal); expect(fs.readFileSync(watchFile, "utf8")).toBe(JSON.stringify({ v: 2, queries: [] }));
+  fs.writeFileSync(proposal, original); fs.writeFileSync(watchFile, watch); fs.writeFileSync(join(f.survey, "ledger.jsonl"), goodJournal);
+  expect(rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).some(row => row.kind === "partial-read" && row.project === openStudy(f.survey).study.id)).toBe(false);
+});
