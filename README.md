@@ -2,7 +2,7 @@
 
 Research engine for the agent family ([agent-hub](https://github.com/STAIxBWLB/agent-hub), [agent-mem](https://github.com/STAIxBWLB/agent-mem), [vault-mem](https://github.com/STAIxBWLB/vault-mem), [agent-console](https://github.com/STAIxBWLB/agent-console)). The plan and phases are in [#1](https://github.com/STAIxBWLB/agent-research/issues/1).
 
-This checkout implements A1 literature studies, A2 container experiments and the A3 plan DAG: an append-only ledger, approval gates, verified reference identifiers, frozen candidate snapshots, separate evaluator containers, attempt records and a resumable controller with read-only hub task references. Investigation selection, idea decisions, winner/no-winner results, declared ablations, reserved-seed final evaluation and exploratory posthoc results are available. Paper check/build and build-bound review gates render evidence-backed Markdown. A5 adds amem lesson reads/archive and a reviewed skill proposal queue. Automatic idea generation/writing/reviewing and the console panel remain later work.
+This checkout implements A1 literature studies, A2 container experiments and the A3 plan DAG: an append-only ledger, approval gates, verified reference identifiers, frozen candidate snapshots, separate evaluator containers, attempt records and a resumable controller with read-only hub task references. Investigation selection, idea decisions, winner/no-winner results, declared ablations, reserved-seed final evaluation and exploratory posthoc results are available. Paper check/build and build-bound review gates render evidence-backed Markdown. A5 adds amem lesson reads/archive and a reviewed skill proposal queue. A6 adds local client setup, registered-study console panels and confirmed decisions, and finite literature watch passes. Automatic idea generation/writing/reviewing remains later work.
 
 ## Install
 
@@ -13,7 +13,20 @@ bun install --frozen-lockfile
 bun bin/ares.js --help
 ```
 
-Register the MCP server with an agent host by hand, for example `claude mcp add ares -- bun /path/to/agent-research/bin/ares.js mcp`.
+In the examples below, `ares` means the executable `bin/ares.js`; use `bun bin/ares.js` from the checkout when it is not on PATH. Register its MCP entry with an agent client using a write-free preview, then apply only the inspected plan:
+
+```sh
+ares setup all --json
+ares setup all --apply --json
+ares setup agy --apply --json
+ares setup console --apply --json
+```
+
+Targets are `claude`, `codex`, `kimi`, `pi`, `qwen`, `jcode`, `agy`, `all` and `console`. `all` covers the six user-level agent clients; it excludes workspace-local `agy` and the separate console registration. Run `setup agy` from its workspace. Only the ares MCP server entry is edited; instruction blocks remain dotfiles-owned. The command is `bun --smol <root>/bin/ares.js mcp`.
+
+Setup is dry-run by default and lists config, receipt and lock paths plus the entry it would change. `--apply` writes a private receipt under `$AGENTHUB_HOME/research/setup/` before changing the client file, is idempotent, and preserves unrelated settings. `--undo` restores the prior entry only while the installed entry is unchanged; user edits are refused and retained. Config/receipt links and foreign-owned mutable paths are refused. A per-config exclusive lock serializes writers; a stale lock requires checking that its owner is no longer active before manual cleanup.
+
+`--root ABS` selects and pins an existing agent-research release root, including its `package.json` and `bin/ares.js`; relative roots are refused. For example, preview `ares setup codex --root /absolute/releases/0.1.0 --json`, then add `--apply`. Console registration writes the API-1 `{api, tool, module, sha256}` manifest at `$AGENTHUB_HOME/console/plugins/ares.json`, or `ares@<version>.json` with `--root`. The module is the absolute `<root>/src/ui/plugin.ts` path. Re-run setup after a package change; use the same versioned root when undoing its console registration. The console loader verifies the module hash and trusted package tree. Setup starts no client or console process.
 
 ## Literature workflow
 
@@ -32,6 +45,71 @@ ares cite check study draft.md              # exit 1 on unknown or unverified [@
 ```
 
 `ares playbook` prints the full standalone workflow and its rules. Study commands accept `--json`; see the command list for exact usage.
+
+## Literature watch workflow
+
+A watch is a saved, bounded search pass for either a survey or an experiment study. It is not a resident watcher. Configure an initialized study with a scope first; in gates mode, approve its current scope before running:
+
+```json
+{
+  "v": 1,
+  "queries": [
+    {"id": "recent", "query": "synthetic research topic", "source": "all", "yearFrom": 2020, "limit": 20}
+  ],
+  "rubric": "Display this context beside new candidates for the human screener."
+}
+```
+
+```sh
+ares lessons study --for "refresh the literature watch"
+ares watch set study --file watch.json
+ares watch run study --json
+ares watch show study --json
+```
+
+There are at most 20 uniquely named queries, each at most 500 characters, with source `openalex|s2|arxiv|all`, optional yearFrom and limit 1..50. The rubric is at most 8,000 UTF-8 bytes and is display-only: ares never scores against it. `watch set` writes bounded `literature/watch.json` and `watch.set`; identical stored bytes are a no-op. Valid input can repair corrupt JSON and malformed version values, including string "1", null, a missing v or fractional 1.5; the refusal says to set v to 1. Only a safe integer v greater than 1 is an unsupported future version, which remains unchanged. Read failures name the file and set/restore recovery.
+
+`watch run` holds one study lock for the full pass, reusing the existing scope gate and `lit search` merge path for each query. Other mutating commands for that study, including another watch start, are refused until it finishes. At the maximum, sequential HTTP deadlines can total 20 minutes (20 queries x 3 sources x 20 seconds), plus parsing and local file work. Queries do not run in parallel and ares starts no timer, daemon or recurring process. Each query records `lit.search`, then one `watch.ran` records counts, source errors as host/status only, the stored config byte hash, and up to 500 surviving new candidate ids plus their full total. The rubric stays in config rather than being copied to every run. Aggregate `added` retains the per-query search counts, even when a later merge absorbs an earlier new record. CLI `watch run` waits for completion; a run where every source fails is still recorded and exits 1.
+
+MCP `ares_watch_run` is always detached: after validating config, scope and query years under the study lock, it returns `{started:true,configSha256}`. This acknowledges admission, not completion. The same MCP process runs the finite pass while remaining responsive to ping and tool listing; no separate background daemon is spawned. Use `ares_watch_show` to inspect the eventual `watch.ran` outcome, including `ok:false` if every source failed. A second start while the study is locked refuses; wait for the recorded outcome before starting another pass.
+
+Watch never includes, excludes or verifies candidates, and never approves the screen gate. New records remain `new`; existing screening states survive merges. Inspect `watch show`, then screen and verify through the normal literature workflow. Show is read-only, with current config/rubric, the ten most recent runs, and a bounded list of still-new candidates. The `watch.run` plan step takes `{}` and returns `{added}`; an all-source failure fails the node.
+
+## Scheduling watch passes
+
+Recurrence belongs to the person. Ares does not register or enable a schedule. Choose one of these approaches and replace every absolute path, task class and peer with values for the intended project.
+
+### Agent-hub schedule
+
+Merge an entry into that project's machine-local `.agenthub/config.local.json` (not committed `config.json`):
+
+```json
+{
+  "schedules": [
+    {
+      "id": "ares-watch",
+      "every": "1h",
+      "class": "implement",
+      "title": "Run one saved literature watch",
+      "owner": "codex",
+      "queue": "ready",
+      "detail": "Run one pass: /absolute/path/to/bun --smol /absolute/path/to/agent-research/bin/ares.js watch run /absolute/path/to/study --json. Inspect new candidates; do not screen automatically."
+    }
+  ]
+}
+```
+
+Use an existing class and configured peer. Agent-hub requires intervals of at least 15 minutes; `every` accepts `<n>m`, `<n>h` or `<n>d`. This schedule proposes a board task for the peer, never executes the command itself. The peer must accept and perform the task through its normal workflow. A still-open task from the previous scheduled run prevents another proposal; held or missed periods do not replay as a burst. The person can inspect it with `ahub schedule list`. Only the person's local configuration enables this behavior.
+
+### User cron
+
+A user crontab can run one pass directly, without agent-hub. The absolute Bun executable and ares entrypoint avoid cron's restricted PATH:
+
+```cron
+0 * * * * /absolute/path/to/bun --smol /absolute/path/to/agent-research/bin/ares.js watch run /absolute/path/to/study --json >> /absolute/path/to/ares-watch.log 2>&1
+```
+
+Use the intended user's HOME/family configuration and required search environment, with the study scope already approved. This is a user crontab line, with no username column. Overlapping runs are refused by the study lock; cron does not bypass approval or screening. Neither recipe creates an ares resident watcher.
 
 ## Experiment workflow
 
@@ -254,6 +332,27 @@ A proposal input is `{name, summary, steps, evidence}`: a run-name `name`, nonbl
 
 Survey and experiment studies both support lessons, archive and all skill commands. Survey archives can export resolved review contradictions, and are empty when no eligible lessons exist. Selection, ideas and experiment-result operations remain experiment-only. All A5 acceptance tests use synthetic records and fake runners; no live amem or vault interoperability is claimed.
 
+## Console workflow
+
+Register only studies the console should read; ares never scans the disk:
+
+```sh
+ares console add /absolute/path/to/study
+ares console list --json
+ares setup console --json
+ares setup console --apply --json
+# To remove only the registration, including one whose study moved:
+ares console remove /absolute/path/to/study
+```
+
+The bounded version-1 registry is `$AGENTHUB_HOME/research/studies.json` (at most 200 absolute/canonical study directories, private 0600 file in a 0700 directory). Add requires a readable study; add/remove are idempotent. A moved or unreadable study remains registered and appears as `unavailable`, with its restore reason. Remove can use its listed path without reopening the study.
+
+The API-1 plugin supplies `studies` and `study` panels, plus inbox items for pending gates, still-new recorded watch candidates with the current display rubric, proposed skills, open review findings, failed/unknown attempts and unavailable studies. A truncated watch receipt produces an event-timed overflow notice rather than guessing provenance for unrecorded ids. Partially unreadable records produce an alert instead of false zero counts; empty stores and unfinished optional phases are normal. The study view links only the fresh built manuscript (at most 2 MiB) as `text/plain`; ares generates no PDF or figures. Reads stay in process, with no search, container or plan-control subprocess.
+
+Every console write first returns a write-free preview and fingerprint. Confirmation recomputes the selected study and bound content under the existing command lock and refuses drift. The wire ids are `gate.approve`, `gate.reject`, `screen.include`, `screen.exclude`, `skill.accept`, `skill.reject`, `skill.withdraw` and `archive.confirm`. The id selects the decision; there is no separate page-supplied decision field. Rejections and screening/skill decisions require reasons; skill acceptance also requires the reviewed HTTP(S) PR URL. The ledger actor is the person, with verified `meta.identity` when the console supplies it; page actor/meta fields and other unsupported action fields are refused. A read-only console (`acon serve --read-only`) refuses actions before invoking the plugin.
+
+Console archive writes to amem only after confirmation and has a 25-second total child-process budget inside the console's 30-second provider ceiling. Returned note ids are receipted on partial failure; refresh and review a new console preview to continue, or inspect `ares archive` from the CLI. The final study step remains archive, after paper/review and skill decisions. No live amem/vault or deployed-console interoperability is claimed by the offline fixture tests.
+
 ## Plan and conductor workflow
 
 A plan connects existing commands, approval gates and read-only hub task references. It can close investigate, ablate and final results and bind their output references to downstream gates. Create a study first. This offline example checks two drafts, with an approval between them: put citation-free text in `plan-study/draft.md` and `plan-study/final.md`, and save this definition as `draft-plan.json`:
@@ -291,7 +390,7 @@ ares plan show plan-study --json
 
 `run` exits 0 when the plan is done. Each controller start restores an unfinished plan paused; resume it explicitly from another terminal or MCP client. SIGINT/SIGTERM stops admission, drains active command calls, records paused when still running, and releases the controller lock. Detached attempts stay alive for `attempt reconcile`. A live or foreign controller owner is refused; a dead same-host owner is recoverable by pid and process start identity, never by lock age. Waiting observations use 1 s to 30 s backoff, reset on progress, and unchanged polls write nothing.
 
-Plan definitions accept at most 128 nodes, 512 explicit edges and 128-byte ids, with no cycles or missing dependency endpoints. `needs` and `edges` both supply dependencies; a gate's `binds` may name only upstream nodes. A step command is one of `lit.search`, `lit.verify`, `lit.bib`, `cite.check`, `attempt.run`, `investigate.close`, `ablate.close`, `final.close`, `paper.build`. Close/build steps take no args. Named `args` carry CLI options without `--`, including `year-from`; positional inputs are `query` for search, optional `ids` for verify, and `draft` for cite check. `attempt.run` needs `repo` and `commit`, always detaches, and accepts the existing seed/run/label/retry options. Steps refuse controller-owned `json` and `detach` arguments. Relative `repo` and `draft` resolve against the study directory. Scope, screen and design prerequisites still apply to the underlying commands.
+Plan definitions accept at most 128 nodes, 512 explicit edges and 128-byte ids, with no cycles or missing dependency endpoints. `needs` and `edges` both supply dependencies; a gate's `binds` may name only upstream nodes. A step command is one of `lit.search`, `lit.verify`, `lit.bib`, `cite.check`, `attempt.run`, `investigate.close`, `ablate.close`, `final.close`, `paper.build`, `watch.run`. Close/build and `watch.run` steps take no args. `watch.run` uses the saved watch synchronously and emits the completed `{added}` count; every-source failure records the run and fails the node. Named `args` carry CLI options without `--`, including `year-from`; positional inputs are `query` for search, optional `ids` for verify, and `draft` for cite check. `attempt.run` needs `repo` and `commit`, always detaches, and accepts the existing seed/run/label/retry options. Steps refuse controller-owned `json` and `detach` arguments. Relative `repo` and `draft` resolve against the study directory. Scope, screen and design prerequisites still apply to the underlying commands.
 
 `--parallel` admits 1..8 step nodes (default 1); the existing one-active-attempt-per-study rule still applies. Plan state is replayed from ledger events. `plan show` is lock-free and lists each node's current status, last observation, attempt/retry/task references, gate decisions, uncertain nodes and controller owner. It also shows `hubProject` when a hub read resolves a board.
 
@@ -337,6 +436,7 @@ Sealing and metrics are **ares-observed**: ares builds the argv and checks the o
 | `plan.json` | validated versioned plan definition and revision |
 | `.ares.plan.lock` | controller pid, host, process start identity and ownership token |
 | `scope.json` | the scope |
+| `literature/watch.json` | bounded saved queries and display-only rubric |
 | `literature/candidates.json` | merged candidates, screening and verification |
 | `literature/cards/*.json` | extraction cards |
 | `refs/references.bib` | generated bibliography |
@@ -354,18 +454,25 @@ Sealing and metrics are **ares-observed**: ares builds the argv and checks the o
 | `executor.json` | executor kind, optional SSH alias and required workdir |
 | `runs/<run>/attempts/<id>.json` | attempt identity, stage receipts, status, metrics and artifact/log metadata |
 
-Experiment logs and outputs live on the executor at `<workdir>/<study-id>/<attempt-id>/`, not in the study. Existing A1 survey studies remain readable without migration.
+Experiment logs and outputs live on the executor at `<workdir>/<study-id>/<attempt-id>/`, not in the study. Existing A1 survey studies remain readable without migration. Family-local setup receipts and the study registry live under `$AGENTHUB_HOME/research/`; they are not copied into each study.
 
 ## Commands
 
 The implemented CLI surface below comes from `src/commands-table.ts`; `ares --help` prints current usage. Every operation exposing `--json` supports structured output.
 
 ```text
-ares archive <dir> [--confirm FINGERPRINT] [--json]
-ares lessons <dir> [--for TEXT] [--half-life DAYS] [--limit N] [--json]
 ares skill propose <dir> --file PATH|- [--json]
 ares skill decide <dir> <name> <accept|reject|withdraw> --reason TEXT [--pr URL] [--json]
 ares skill list <dir> [--json]
+ares lessons <dir> [--for TEXT] [--half-life DAYS] [--limit N] [--json]
+ares archive <dir> [--confirm FINGERPRINT] [--json]
+ares setup <claude|codex|kimi|pi|qwen|jcode|agy|all|console> [--apply|--undo] [--root ABS] [--json]
+ares watch set <dir> --file PATH|- [--json]
+ares watch run <dir> [--json]
+ares watch show <dir> [--json]
+ares console add <dir> [--json]
+ares console remove <dir> [--json]
+ares console list [--json]
 ares manifest [--json]
 ares init <dir> --question TEXT [--mode survey|experiment] [--autonomy auto|gates] [--json]
 ares run <dir> [--parallel 1..8] [--json]
@@ -415,15 +522,17 @@ ares mcp
 
 Memory tools are `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide` and `ares_skill_list`; `ares_idea_decide` accepts pivot cause/retryWhen. Archive may write external amem notes; lessons reads external amem. Both carry `openWorldHint`; skill operations stay local. MCP calls preserve agent attribution even without a native shell marker.
 
-MCP uses shared command handlers; `init`, the controller loop `run`, and the server entrypoint `mcp` are CLI-only. Investigation tools are `ares_selection_set`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show` and `ares_investigate_close`. Plan tools are `ares_plan_set`, `ares_plan_show` and `ares_plan_control`; `ares_gate` accepts `plan:<node-id>`. Setting, showing or controlling a plan never starts the controller loop. Start `ares run` in a separate terminal before resuming through MCP. Experiment tools are `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile` and `ares_attempt_logs`; `ares_gate` accepts `design`, `final` and `review`. Paper/review tools are `ares_paper_check`, `ares_paper_build`, `ares_review_add`, `ares_review_resolve` and `ares_review_show`. Phase tools include `ares_final_seeds`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_final_close` and `ares_posthoc_show`. Attempt run is always detached over MCP, and executor-reaching tools carry `openWorldHint`.
+Watch tools are `ares_watch_set` (`{study, watch}`), `ares_watch_run` and `ares_watch_show` (`{study}`). `ares_watch_run` always returns the detached admission result `{started:true,configSha256}` after config/scope/year preflight under the study lock. Read the eventual completed result through `ares_watch_show`; `watch.ran` records an all-source failure as `ok:false`. The finite pass stays in the MCP process, which can still answer ping and `tools/list`; another start while locked refuses. CLI `watch run` and the `watch.run` plan step remain synchronous. Registry tools are `ares_console_add` and `ares_console_remove` (`{study}`), and `ares_console_list` (no arguments). These use the same shared operations as the CLI. Registry commands manage local registration only; they do not start a console.
+
+MCP uses shared command handlers; `ares_setup` exposes the same registration preview/apply/undo operations. `init`, the controller loop `run`, and the server entrypoint `mcp` are CLI-only. Investigation tools are `ares_selection_set`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show` and `ares_investigate_close`. Plan tools are `ares_plan_set`, `ares_plan_show` and `ares_plan_control`; `ares_gate` accepts `plan:<node-id>`. Setting, showing or controlling a plan never starts the controller loop. Start `ares run` in a separate terminal before resuming through MCP. Experiment tools are `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile` and `ares_attempt_logs`; `ares_gate` accepts `design`, `final` and `review`. Paper/review tools are `ares_paper_check`, `ares_paper_build`, `ares_review_add`, `ares_review_resolve` and `ares_review_show`. Phase tools include `ares_final_seeds`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_final_close` and `ares_posthoc_show`. Attempt run is always detached over MCP, and executor-reaching tools carry `openWorldHint`.
 
 ## Version and format discovery
 
-`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `study`, `ledgerEvent`, `experimentProtocol`, `executor`, `experimentAttempt`, `studyPlan`, `experimentSelection`, `investigateResult`, `experimentFinalSeeds`, `ablateResult`, `finalResult` and `paperEvidence`, all version 1, carried by each record's `v` field. `skillProposal: 1` is also listed; proposal Markdown carries `skillProposal: 1` frontmatter and skill events carry that version in their data. The `ledgerEvents` list advertises `archive.exported`, `skill.proposed` and `skill.decided` in the version-1 ledger envelope. Unsupported ledger/proposal versions are refused without rewriting their bytes.
+`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `study`, `ledgerEvent`, `experimentProtocol`, `executor`, `experimentAttempt`, `studyPlan`, `experimentSelection`, `investigateResult`, `experimentFinalSeeds`, `ablateResult`, `finalResult` and `paperEvidence`, all version 1, carried by each record's `v` field. `skillProposal: 1` is also listed; proposal Markdown carries `skillProposal: 1` frontmatter and skill events carry that version in their data. The `ledgerEvents` list advertises `archive.exported`, `skill.proposed`, `skill.decided`, `watch.set` and `watch.ran` in the version-1 ledger envelope. The manifest also lists `studyRegistry: 1` and `watchConfig: 1`. Unsupported ledger/proposal/registry/watch versions are refused without rewriting their bytes. `mcp.tools` publishes `{name, readOnly}` for installers; grants are fail-closed for mutating or outside-reaching tools.
 
 Within a supported schema, readers preserve additive fields on study/attempt records and keep ledger events with unknown kinds. Appending to the ledger leaves prior lines intact; updating an attempt keeps unrecognized fields and stage entries. Unknown stage entries remain readable, including logs and totals, but budget-gated starts refuse with an upgrade instruction because this version cannot account for their resource use. A future schema version or unknown execution status/stage is refused with an upgrade instruction, leaving the original data unchanged. Unknown plan versions or node kinds are refused without changing plan.json. Command input remains strict so unknown options or protocol fields cannot silently change an experiment.
 
-The private scope/card/candidate storage and evaluator metrics object are not family interchange schemas. Signed runner receipts, campaign contracts, console plugin manifests and vault notes are not implemented or advertised here. `ares setup` and versioned install roots remain A6 work under dotfiles#318.
+The private scope/card/candidate storage and evaluator metrics object are not family interchange schemas. The console registration uses agent-console API 1 rather than an ares interchange format. Signed runner receipts, campaign contracts and vault notes are not implemented or advertised here. Setup and `--root` registration are available; publishing the first npm release remains separate work.
 
 ## Environment
 
@@ -437,7 +546,7 @@ Keys are sent with requests only; they are never written to the study.
 
 ## Not implemented yet
 
-Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, signed executor receipts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, vault-mem reference notes (after vault-mem#73), the console plugin, `ares setup`, scheduled searches, the `copilot` and `step` autonomy modes.
+Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, signed executor receipts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, vault-mem reference notes (after vault-mem#73), the `copilot` and `step` autonomy modes, and npm publishing.
 
 ## Development
 

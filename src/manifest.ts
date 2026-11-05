@@ -8,6 +8,8 @@ export const FORMAT_VERSIONS = {
   study: 1,
   paperEvidence: 1,
   skillProposal: 1,
+  studyRegistry: 1,
+  watchConfig: 1,
   studyPlan: 1,
   ledgerEvent: 1,
   experimentProtocol: 1,
@@ -20,15 +22,17 @@ export const FORMAT_VERSIONS = {
   experimentAttempt: 1,
 } as const;
 export const MEMORY_LEDGER_EVENTS = ["archive.exported", "skill.proposed", "skill.decided"] as const;
+export const WATCH_LEDGER_EVENTS = ["watch.set", "watch.ran"] as const;
+export const LEDGER_EVENTS = [...MEMORY_LEDGER_EVENTS, ...WATCH_LEDGER_EVENTS] as const;
 export interface Manifest {
   v: 1;
   name: "ares";
   version: string;
   commands: { name: string; usage: string }[];
   formats: typeof FORMAT_VERSIONS;
-  ledgerEvents: typeof MEMORY_LEDGER_EVENTS[number][];
+  ledgerEvents: typeof LEDGER_EVENTS[number][];
   mcp: { server: "ares"; tools: { name: string; readOnly: boolean }[] };
 }
 export function manifest(): Manifest {
-  return { v: 1, name: "ares", version, commands: COMMANDS.map(({ name, usage }) => ({ name, usage })), formats: { ...FORMAT_VERSIONS }, ledgerEvents: [...MEMORY_LEDGER_EVENTS], mcp: { server: "ares", tools: ARES_TOOLS.map(tool => ({ name: tool.name, readOnly: tool.annotations.readOnlyHint === true && tool.annotations.openWorldHint !== true })) } };
+  return { v: 1, name: "ares", version, commands: COMMANDS.map(({ name, usage }) => ({ name, usage })), formats: { ...FORMAT_VERSIONS }, ledgerEvents: [...LEDGER_EVENTS], mcp: { server: "ares", tools: ARES_TOOLS.map(tool => ({ name: tool.name, readOnly: tool.annotations.readOnlyHint === true && tool.annotations.openWorldHint !== true })) } };
 }

@@ -263,7 +263,8 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
 export async function runMcp(env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const [{ serveMcp }, { createAresMcp }] = await Promise.all([import("./mcp.ts"), import("./mcp-tools.ts")]);
   const server = createAresMcp(env);
-  await serveMcp({ tools: server.tools, handlers: server.handlers, name: "ares", version });
+  try { await serveMcp({ tools: server.tools, handlers: server.handlers, name: "ares", version }); }
+  finally { await server.waitForIdle(); }
 }
 
 /** Standard input stops at the input bound instead of buffering everything first. */
