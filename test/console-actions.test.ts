@@ -89,13 +89,13 @@ test("all eight decision-level actions preview without any filesystem mutation o
   expect(files(f.home)).toEqual(before); expect(fake.requests).toEqual([]);
 });
 
-test("confirming every action appends one person-attributed event and ignores page identity claims", async () => {
+test("confirming every action appends one event attributed only to verified person metadata", async () => {
   const f = await fixture(fs.realpathSync(tempDir())), fake = fakeRunner([{ exitCode: 0, stdout: JSON.stringify({ id: noteId, kind: "fail" }), stderr: "private diagnostic" }]), provider = await open(f, fake.runner);
   const types = ["gate.approve", "lit.screen", "skill.decided", "archive.exported"];
   const fetchSpy = spyOn(globalThis, "fetch").mockImplementation((async () => { throw new Error("console action network forbidden"); }) as unknown as typeof fetch);
   try {
     for (const [index, action] of actions(f).entries()) {
-      const input: Input = { ...action, actor: { kind: "agent", id: "page-spoof" }, meta: { identity: "page-spoof" } }, pending = await preview(provider, input), dir = input.study as string, count = readLedger(dir).length;
+      const input: Input = { ...action }, pending = await preview(provider, input), dir = input.study as string, count = readLedger(dir).length;
       const result = await provider.action({ ...input, confirmed: true, fingerprint: pending.fingerprint }, META);
       expect(result.ok).toBe(true); expect(readLedger(dir)).toHaveLength(count + 1);
       expect(readLedger(dir).at(-1)).toMatchObject({ type: types[index], actor: { kind: "person", id: META.identity } });
@@ -109,8 +109,8 @@ test("confirming every action appends one person-attributed event and ignores pa
   expect(ledger(f.experiment)).not.toContain("private diagnostic"); expect(fs.existsSync(f.env.AMEM_HOME)).toBe(false);
 });
 
-test("without verified action metadata the actor is a person with no page-provided id", async () => {
-  const f = await fixture(fs.realpathSync(tempDir())), provider = await open(f), input = { ...actions(f)[0]!, actor: { kind: "agent", id: "page-spoof" }, meta: { identity: "page-spoof" } };
+test("without verified action metadata a valid action records a person without an id", async () => {
+  const f = await fixture(fs.realpathSync(tempDir())), provider = await open(f), input = { ...actions(f)[0]! };
   const pending = await preview(provider, input); expect((await provider.action({ ...input, confirmed: true, fingerprint: pending.fingerprint })).ok).toBe(true);
   expect(readLedger(f.survey).at(-1)!.actor).toEqual({ kind: "person" });
 });
@@ -210,7 +210,7 @@ test("the pinned writable console routes all four actions through shell-issued c
     }
     expect(files(f.home)).toEqual(previewBefore); expect(fake.requests).toEqual([]);
     for (const [index, action] of actions(f).entries()) {
-      const input: Input = { ...action, actor: { kind: "agent", id: "page-spoof" }, meta: { identity: "page-spoof" } }, before = files(f.home), dir = input.study as string, count = readLedger(dir).length, requested = fake.requests.length;
+      const input: Input = { ...action }, before = files(f.home), dir = input.study as string, count = readLedger(dir).length, requested = fake.requests.length;
       const pendingResponse = await request(input), pending = await responseJson(pendingResponse);
       expect(pendingResponse.status).toBe(200); expect(pending.needsConfirm).toBe(true); expect(pending.confirmToken).toMatch(/^[a-f0-9]{64}$/);
       expect(files(f.home)).toEqual(before); expect(fake.requests).toHaveLength(requested);
@@ -279,5 +279,37 @@ test("maximum-byte plan gate ids approve and reject through direct and inbox con
     expect(readLedger(f.survey)).toHaveLength(count + 1);
     expect(readLedger(f.survey).at(-1)).toMatchObject({ type: `gate.${decision}`, actor: { kind: "person", id: META.identity }, data: { gate } });
     expect(fake.requests).toEqual([]);
+  }
+});
+
+
+test("page identity claims are unknown fields and refuse before preview or confirmed writes", async () => {
+  const f = await fixture(fs.realpathSync(tempDir())), fake = fakeRunner([]), provider = await open(f, fake.runner);
+  const input = actions(f)[0]!, pending = await preview(provider, input), before = files(f.home);
+  for (const claim of [{ actor: { kind: "agent", id: "page-spoof" } }, { meta: { identity: "page-spoof" } }, { identity: "page-spoof" }]) {
+    for (const envelope of [{}, { confirmed: true, fingerprint: pending.fingerprint }]) {
+      const result = await provider.action({ ...input, ...claim, ...envelope }, META);
+      expect(result.ok).toBe(false); expect("needsConfirm" in result && result.needsConfirm).toBe(false);
+      expect(files(f.home)).toEqual(before); expect(fake.requests).toEqual([]);
+    }
+  }
+});
+
+test("all eight wire actions reject unknown and cross-action fields before any outward write", async () => {
+  const f = await fixture(fs.realpathSync(tempDir())), fake = fakeRunner([]), provider = await open(f, fake.runner), before = files(f.home);
+  for (const input of previewActions(f)) {
+    const pending = await preview(provider, input);
+    const crossAction = input.action.startsWith("gate.") ? { ids: [candidateId] }
+      : input.action.startsWith("screen.") ? { name: proposalName }
+      : input.action === "skill.accept" ? { gate: "screen" }
+      : input.action.startsWith("skill.") ? { pr }
+      : { reason: "Archive does not accept a reason" };
+    for (const extra of [{ unknown: true }, { decision: input.action.split(".")[1] }, crossAction]) {
+      for (const envelope of [{}, { confirmed: true, fingerprint: pending.fingerprint }]) {
+        const result = await provider.action({ ...input, ...extra, ...envelope }, META);
+        expect(result.ok).toBe(false); expect("needsConfirm" in result && result.needsConfirm).toBe(false);
+        expect(files(f.home)).toEqual(before); expect(fake.requests).toEqual([]);
+      }
+    }
   }
 });

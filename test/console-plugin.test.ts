@@ -380,3 +380,68 @@ test("unchanged pending gate bindings retain their waiting time across binder-ir
     expect(readLedger(dir).at(-1)!.at).not.toBe(first.at);
   }
 });
+
+test("normal same-cursor polling detects record corruption and repair without ledger events", async () => {
+  for (const kind of ["attempt", "skill", "watch"] as const) {
+    const f = await fixtures(fs.realpathSync(tempDir())), dir = kind === "attempt" ? f.experiment : f.survey;
+    const target = kind === "attempt" ? join(dir, "runs", "posthoc", "attempts", `${f.failed}.json`)
+      : kind === "skill" ? join(dir, "proposals", "skills", "synthetic-procedure.md") : join(dir, "literature", "watch.json");
+    const original = fs.readFileSync(target), corrupt = kind === "skill" ? Buffer.concat([original, Buffer.from("\nEdited proposal without a receipt\n")]) : Buffer.from("not valid JSON\n");
+    const journals = [f.survey, f.experiment].map(study => [join(study, "ledger.jsonl"), fs.readFileSync(join(study, "ledger.jsonl"))] as const);
+    const provider = await typed.open(context(f.family)), studyId = openStudy(dir).study.id, reader = kind === "attempt" ? "attempts" : kind === "skill" ? "skills" : "watch";
+    const views: { panel: string; study?: string }[] = [{ panel: kind === "skill" ? "study" : "studies", ...(kind === "skill" ? { study: dir } : {}) }, { panel: "inbox" }];
+    const cursors = new Map<string, number>(), healthy = new Map<string, Record<string, unknown>>();
+    const poll = async (view: { panel: string; study?: string }) => {
+      const after = cursors.get(view.panel) ?? 0;
+      if (cursors.has(view.panel)) expect(after).toBeGreaterThan(0);
+      const snapshot = await provider.snapshot({ ...view, after }); expect(typeof snapshot.cursor).toBe("number");
+      if (cursors.has(view.panel)) expect(snapshot.cursor).toBe(after);
+      cursors.set(view.panel, snapshot.cursor as number); return snapshot;
+    };
+    for (const view of views) {
+      const first = await poll(view); expect(first.changed).toBe(true); healthy.set(view.panel, first);
+      expect((await poll(view)).changed).toBe(false);
+    }
+    fs.writeFileSync(target, corrupt);
+    let alert: Record<string, unknown> | undefined;
+    for (const view of views) {
+      const broken = await poll(view); expect(broken.changed).toBe(true);
+      if (view.panel === "inbox") {
+        const alerts = rows(broken.items).filter(row => row.kind === "partial-read" && row.project === studyId);
+        expect(alerts).toHaveLength(1); alert = alerts[0]!; expect(alert.detail).toContain(`${reader}:`); expect(alert.verbs).toEqual([]); expect(alert.at).toBe(readLedger(dir).at(-1)!.at);
+      } else if (kind === "skill") {
+        const detail = rows([broken.study])[0]!; expect(detail.skills).toBeNull(); expect(detail.errors.skills).toContain("proposal");
+      } else {
+        const summary = rows(broken.studies).find(row => row.dir === dir)!; expect(summary.available).toBe(true);
+        if (kind === "attempt") { expect(summary.attempts.available).toBe(false); expect(typeof summary.attempts.reason).toBe("string"); }
+        else expect(summary.lastWatch).toBeNull();
+      }
+      // The same error must itself be stable: no new ids or timestamps on a normal unchanged poll.
+      expect((await poll(view)).changed).toBe(false);
+    }
+    fs.writeFileSync(target, original);
+    for (const view of views) {
+      const repaired = await poll(view); expect(repaired.changed).toBe(true);
+      const first = healthy.get(view.panel)!;
+      if (view.panel === "inbox") {
+        expect(rows(repaired.items).some(row => row.kind === "partial-read" && row.project === studyId)).toBe(false);
+        expect(repaired.items).toEqual(first.items);
+      } else if (kind === "skill") {
+        const detail = rows([repaired.study])[0]!, initial = rows([first.study])[0]!;
+        expect(detail.skills).toEqual(initial.skills); expect(detail.errors.skills).toBeUndefined();
+      } else {
+        const summary = rows(repaired.studies).find(row => row.dir === dir)!, initial = rows(first.studies).find(row => row.dir === dir)!;
+        expect(kind === "attempt" ? summary.attempts : summary.lastWatch).toEqual(kind === "attempt" ? initial.attempts : initial.lastWatch);
+      }
+      expect((await poll(view)).changed).toBe(false);
+    }
+    // Repeating the same failure after repair keeps its event-derived identity/time, still without force-refresh.
+    const inbox = views.find(view => view.panel === "inbox")!;
+    fs.writeFileSync(target, corrupt); const repeated = await poll(inbox); expect(repeated.changed).toBe(true);
+    const again = rows(repeated.items).filter(row => row.kind === "partial-read" && row.project === studyId);
+    expect(again).toHaveLength(1); expect({ id: again[0]!.id, at: again[0]!.at }).toEqual({ id: alert!.id, at: alert!.at });
+    fs.writeFileSync(target, original); expect((await poll(inbox)).changed).toBe(true); expect((await poll(inbox)).changed).toBe(false);
+    for (const [file, bytes] of journals) expect(fs.readFileSync(file)).toEqual(bytes);
+    expect(fs.readFileSync(target)).toEqual(original);
+  }
+});

@@ -85,3 +85,58 @@ test("failed registry rename releases its lock and preserves prior bytes", () =>
   try { expect(() => addStudy(f.family, other)).toThrow("Synthetic rename failure"); } finally { spy.mockRestore(); }
   expect(fs.readFileSync(f.file)).toEqual(before); expect(fs.existsSync(`${f.file}.lock`)).toBe(false);
 });
+
+
+test("failed lock fstat releases the created lock and permits a later write", () => {
+  const f = fixture(), originalOpen = fs.openSync, originalStat = fs.fstatSync; let lockFd: number | undefined;
+  const open = spyOn(fs, "openSync").mockImplementation(((value: fs.PathLike, ...args: unknown[]) => {
+    const fd = (originalOpen as any)(value, ...args); if (String(value) === `${f.file}.lock`) lockFd = fd; return fd;
+  }) as typeof fs.openSync);
+  const stat = spyOn(fs, "fstatSync").mockImplementation(((fd: number, ...args: unknown[]) => {
+    if (fd === lockFd) throw new Error("Synthetic lock fstat failure"); return (originalStat as any)(fd, ...args);
+  }) as typeof fs.fstatSync);
+  try { expect(() => addStudy(f.family, f.dir)).toThrow("Synthetic lock fstat failure"); } finally { stat.mockRestore(); open.mockRestore(); }
+  expect(fs.existsSync(`${f.file}.lock`)).toBe(false); expect(fs.existsSync(f.file)).toBe(false);
+  expect(addStudy(f.family, f.dir).studies).toEqual([f.dir]);
+});
+
+test("failed lock close still removes the lock and permits a later command", () => {
+  const f = fixture(), originalOpen = fs.openSync, originalClose = fs.closeSync; let lockFd: number | undefined;
+  const open = spyOn(fs, "openSync").mockImplementation(((value: fs.PathLike, ...args: unknown[]) => {
+    const fd = (originalOpen as any)(value, ...args); if (String(value) === `${f.file}.lock`) lockFd = fd; return fd;
+  }) as typeof fs.openSync);
+  const close = spyOn(fs, "closeSync").mockImplementation(((fd: number) => {
+    originalClose(fd); if (fd === lockFd) throw new Error("Synthetic lock close failure");
+  }) as typeof fs.closeSync);
+  try { expect(() => addStudy(f.family, f.dir)).toThrow("Synthetic lock close failure"); } finally { close.mockRestore(); open.mockRestore(); }
+  expect(fs.existsSync(`${f.file}.lock`)).toBe(false);
+  expect(removeStudy(f.family, f.dir).studies).toEqual([]);
+});
+
+test("failed descriptor inspection does not remove a replacement lock inode", () => {
+  const f = fixture(), originalOpen = fs.openSync, originalStat = fs.fstatSync, lock = `${f.file}.lock`; let lockFd: number | undefined;
+  const open = spyOn(fs, "openSync").mockImplementation(((value: fs.PathLike, ...args: unknown[]) => {
+    const fd = (originalOpen as any)(value, ...args); if (String(value) === lock) lockFd = fd; return fd;
+  }) as typeof fs.openSync);
+  const stat = spyOn(fs, "fstatSync").mockImplementation(((fd: number, ...args: unknown[]) => {
+    if (fd === lockFd) { fs.renameSync(lock, `${lock}.old`); fs.writeFileSync(lock, "other owner"); throw new Error("Synthetic replaced lock"); }
+    return (originalStat as any)(fd, ...args);
+  }) as typeof fs.fstatSync);
+  try { expect(() => addStudy(f.family, f.dir)).toThrow("Synthetic replaced lock"); } finally { stat.mockRestore(); open.mockRestore(); }
+  expect(fs.readFileSync(lock, "utf8")).toBe("other owner");
+  expect(() => addStudy(f.family, f.dir)).toThrow("locked");
+});
+
+
+test("failed initial lock identity capture still cleans up the created path", () => {
+  const f = fixture(), originalOpen = fs.openSync, originalStat = fs.lstatSync, lock = `${f.file}.lock`; let created = false, failed = false;
+  const open = spyOn(fs, "openSync").mockImplementation(((value: fs.PathLike, ...args: unknown[]) => {
+    const fd = (originalOpen as any)(value, ...args); if (String(value) === lock) created = true; return fd;
+  }) as typeof fs.openSync);
+  const stat = spyOn(fs, "lstatSync").mockImplementation(((value: fs.PathLike, ...args: unknown[]) => {
+    if (String(value) === lock && created && !failed) { failed = true; throw new Error("Synthetic identity capture failure"); }
+    return (originalStat as any)(value, ...args);
+  }) as typeof fs.lstatSync);
+  try { expect(() => addStudy(f.family, f.dir)).toThrow("Synthetic identity capture failure"); } finally { stat.mockRestore(); open.mockRestore(); }
+  expect(fs.existsSync(lock)).toBe(false); expect(addStudy(f.family, f.dir).studies).toEqual([f.dir]);
+});

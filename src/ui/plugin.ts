@@ -176,17 +176,24 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
   return { summary, targets, detail: detailed ? { ...summary, investigation, final, posthoc, review, skills, watch, archive, manuscript, errors } : null, items, at };
 }
 interface Selection { wireAction: string; action: "gate" | "screen" | "skill.decide" | "archive.confirm"; study: string; gate?: string; ids?: string[]; name?: string; decision?: string; reason?: string; pr?: string }
-const ACTIONS: Record<string, { action: Selection["action"]; decision?: string }> = {
-  "gate.approve": { action: "gate", decision: "approve" }, "gate.reject": { action: "gate", decision: "reject" },
-  "screen.include": { action: "screen", decision: "include" }, "screen.exclude": { action: "screen", decision: "exclude" },
-  "skill.accept": { action: "skill.decide", decision: "accept" }, "skill.reject": { action: "skill.decide", decision: "reject" }, "skill.withdraw": { action: "skill.decide", decision: "withdraw" },
-  "archive.confirm": { action: "archive.confirm" },
+const ACTIONS: Record<string, { action: Selection["action"]; decision?: string; fields: readonly string[] }> = {
+  "gate.approve": { action: "gate", decision: "approve", fields: ["gate", "reason"] }, "gate.reject": { action: "gate", decision: "reject", fields: ["gate", "reason"] },
+  "screen.include": { action: "screen", decision: "include", fields: ["ids", "reason"] }, "screen.exclude": { action: "screen", decision: "exclude", fields: ["ids", "reason"] },
+  "skill.accept": { action: "skill.decide", decision: "accept", fields: ["name", "reason", "pr"] }, "skill.reject": { action: "skill.decide", decision: "reject", fields: ["name", "reason"] }, "skill.withdraw": { action: "skill.decide", decision: "withdraw", fields: ["name", "reason"] },
+  "archive.confirm": { action: "archive.confirm", fields: [] },
 };
 function refusal(message: string): never { throw new Error(`console action: ${message}; refresh the study and review a new preview before confirming`); }
 function field(value: unknown, name: string, max = 500): string {
   let text: string;
   try { text = boundedText(value, `console ${name}`, max); } catch { refusal(`${name} requires nonblank text within ${max} bytes`); }
   if (Buffer.byteLength(text) > max) refusal(`${name} exceeds ${max} bytes`); return text;
+}
+const SHELL_FIELDS = ["action", "study", "id", "answers", "confirmed", "fingerprint"];
+function validateActionInput(input: Args): void {
+  if (typeof input.action !== "string" || !Object.hasOwn(ACTIONS, input.action)) refusal("unknown action");
+  const route = ACTIONS[input.action]!;
+  const extra = Object.keys(input).find(key => !SHELL_FIELDS.includes(key) && !route.fields.includes(key));
+  if (extra !== undefined) refusal(`unknown field ${line(extra, 80)} for ${input.action}; remove it`);
 }
 function selection(input: Args, home: string): Selection {
   if (typeof input.action !== "string" || !Object.hasOwn(ACTIONS, input.action)) refusal("unknown action");
@@ -196,7 +203,6 @@ function selection(input: Args, home: string): Selection {
   const result: Selection = { action, wireAction: input.action, study };
   if (action === "archive.confirm") return result;
   result.decision = route.decision!;
-  if (input.decision !== undefined && input.decision !== result.decision) refusal("decision conflicts with the selected action");
   if (action === "gate") {
     result.gate = field(input.gate, "gate", PLAN_GATE_BYTES);
     if (!["approve", "reject"].includes(result.decision)) refusal("gate decision must be approve or reject");
@@ -253,14 +259,17 @@ export function createPlugin(runtime: Runtime = {}) { return {
       assets,
       async snapshot(input) {
         const registry = readRegistry(ctx.home);
-        const probe = (file: string) => { try { const info = statSync(file); return [info.isFile(), info.size, info.mtimeMs, info.ctimeMs, info.mode, info.ino]; } catch { return null; } };
-        const probes = registry.studies.map(dir => ({ ledger: probe(join(dir, "ledger.jsonl")), study: probe(join(dir, "study.json")),
-          manuscript: probe(join(dir, "paper", "manuscript.md")), builtManuscript: probe(join(dir, "paper", "build", "manuscript.md")), evidence: probe(join(dir, "paper", "build", "evidence.json")) }));
-        const cursor = probes.reduce((sum, row) => sum + (row.ledger?.[0] ? row.ledger[1] as number : 0), 0);
-        const view = `${input.panel}:${str(input.study) ?? str(input.id) ?? ""}`, signature = sha256(JSON.stringify([registry.studies, probes]));
-        if (input.after > 0 && input.after === cursor && seen.get(view) === signature) return { cursor, changed: false };
-        if (!seen.has(view) && seen.size >= MAX_REGISTERED_STUDIES + 2) seen.clear();
-        seen.set(view, signature);
+        const cursor = registry.studies.reduce((sum, dir) => {
+          try { const info = statSync(join(dir, "ledger.jsonl")); return sum + (info.isFile() ? info.size : 0); } catch { return sum; }
+        }, 0);
+        const view = `${input.panel}:${str(input.study) ?? str(input.id) ?? ""}`;
+        const deliver = (payload: Args): Args => {
+          const hash = sha256(canonical(payload));
+          if (input.after === cursor && seen.get(view) === hash) return { cursor, changed: false };
+          if (!seen.has(view) && seen.size >= MAX_REGISTERED_STUDIES + 2) seen.clear();
+          seen.set(view, hash);
+          return { ...payload, changed: true };
+        };
         const registered = new Set(registry.studies); for (const dir of lastAt.keys()) if (!registered.has(dir)) lastAt.delete(dir);
         if (input.panel === "inbox") targets.clear();
         const studies: Args[] = [], details = new Map<string, Args>(), items: Item[] = [];
@@ -274,15 +283,16 @@ export function createPlugin(runtime: Runtime = {}) { return {
             items.push({ id: `unavailable:${key}`, group: "alert", kind: "unavailable", title: "Study unavailable", detail: `${reason}${at === EPOCH ? "; ledger time unavailable" : ""}`, project: key, at, verbs: [], link: { panel: "study", params: { study: dir } } });
           }
         }
-        if (input.panel === "inbox") return { cursor, changed: true, items };
+        if (input.panel === "inbox") return deliver({ cursor, items });
         if (input.panel === "study") {
           const selected = str(input.study) ?? registry.studies.find(dir => details.get(dir)?.id === str(input.id));
-          return { cursor, changed: true, studies, study: selected ? details.get(selected) ?? null : null, ...(!selected ? { error: "Choose a registered study" } : !details.has(selected) ? { error: "Requested study is not registered; use ares console add or choose a registered study" } : {}) };
+          return deliver({ cursor, studies, study: selected ? details.get(selected) ?? null : null, ...(!selected ? { error: "Choose a registered study" } : !details.has(selected) ? { error: "Requested study is not registered; use ares console add or choose a registered study" } : {}) });
         }
-        return { cursor, changed: true, studies };
+        return deliver({ cursor, studies });
       },
       async action(input, meta) {
         try {
+          validateActionInput(input);
           const now = runtime.now ?? (() => performance.now()), deadline = now() + CONSOLE_ARCHIVE_MS;
           let request = input;
           if (input.study === undefined && typeof input.id === "string") {

@@ -52,16 +52,20 @@ function update(home: string, change: (current: StudyRegistry) => StudyRegistry)
   mkdirSync(dir, { recursive: true, mode: 0o700 }); guard(home, file); chmodSync(dir, 0o700);
   let fd: number;
   try { fd = openSync(lock, "wx", 0o600); } catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") busy(); throw error; }
-  const owner = fstatSync(fd);
+  let owner: { dev: number; ino: number } | undefined;
   try {
+    // Capture the created path before descriptor inspection so a failed fstat still has guarded cleanup.
+    owner = lstatSync(lock);
+    owner = fstatSync(fd);
     const current = readRegistry(home), next = change(current);
     if (next === current) return current;
     const content = JSON.stringify(next, null, 2) + "\n"; assertWritable(content, STUDY_REGISTRY_BYTES, "study registry");
     guard(home, file); writeAtomic(file, content, STUDY_REGISTRY_BYTES, 0o600); return next;
   } finally {
-    closeSync(fd);
-    try { const current = lstatSync(lock); if (current.dev === owner.dev && current.ino === owner.ino) unlinkSync(lock); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    try { closeSync(fd); } finally {
+      try { const current = lstatSync(lock); if (!owner || current.dev === owner.dev && current.ino === owner.ino) unlinkSync(lock); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    }
   }
 }
 function canonical(dir: string, mustExist: boolean): string {
