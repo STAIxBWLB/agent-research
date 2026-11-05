@@ -287,7 +287,7 @@ test("page identity claims are unknown fields and refuse before preview or confi
   const f = await fixture(fs.realpathSync(tempDir())), fake = fakeRunner([]), provider = await open(f, fake.runner);
   const input = actions(f)[0]!, pending = await preview(provider, input), before = files(f.home);
   for (const claim of [{ actor: { kind: "agent", id: "page-spoof" } }, { meta: { identity: "page-spoof" } }, { identity: "page-spoof" }]) {
-    for (const envelope of [{}, { confirmed: true, fingerprint: pending.fingerprint }]) {
+    for (const envelope of [{}, { confirmed: true as const, fingerprint: pending.fingerprint }]) {
       const result = await provider.action({ ...input, ...claim, ...envelope }, META);
       expect(result.ok).toBe(false); expect("needsConfirm" in result && result.needsConfirm).toBe(false);
       expect(files(f.home)).toEqual(before); expect(fake.requests).toEqual([]);
@@ -305,7 +305,7 @@ test("all eight wire actions reject unknown and cross-action fields before any o
       : input.action.startsWith("skill.") ? { pr }
       : { reason: "Archive does not accept a reason" };
     for (const extra of [{ unknown: true }, { decision: input.action.split(".")[1] }, crossAction]) {
-      for (const envelope of [{}, { confirmed: true, fingerprint: pending.fingerprint }]) {
+      for (const envelope of [{}, { confirmed: true as const, fingerprint: pending.fingerprint }]) {
         const result = await provider.action({ ...input, ...extra, ...envelope }, META);
         expect(result.ok).toBe(false); expect("needsConfirm" in result && result.needsConfirm).toBe(false);
         expect(files(f.home)).toEqual(before); expect(fake.requests).toEqual([]);
