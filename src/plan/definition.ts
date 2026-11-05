@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { COMMANDS } from "../commands-table.ts";
 import { boundedText, commit, onlyKeys, plain, readJsonFile, sha256, type Actor } from "../study.ts";
 
-export const PLAN_BYTES = 65_536;
+export const PLAN_BYTES = 65_536, PLAN_ID_BYTES = 128;
 export const STEP_COMMANDS = ["lit.search", "lit.verify", "lit.bib", "cite.check", "attempt.run", "investigate.close", "ablate.close", "final.close", "paper.build", "watch.run"] as const;
 export type StepCommand = typeof STEP_COMMANDS[number];
 export type StepArgs = Record<string, string | number | boolean | string[]>;
@@ -17,8 +17,8 @@ export interface PlanDefinition { v: 1; revision: number; nodes: PlanNode[]; edg
 const retry = "correct the definition and run ares plan set again";
 const compatible = "use an ares version that supports this plan, keeping plan.json unchanged";
 function nodeId(raw: unknown, what = "plan node id"): string {
-  const id = boundedText(raw, what, 128);
-  if (Buffer.byteLength(id) > 128) throw new Error(`${what}: at most 128 bytes`);
+  const id = boundedText(raw, what, PLAN_ID_BYTES);
+  if (Buffer.byteLength(id) > PLAN_ID_BYTES) throw new Error(`${what}: at most ${PLAN_ID_BYTES} bytes`);
   return id;
 }
 function references(raw: unknown, name: string): string[] {

@@ -318,3 +318,65 @@ test("one bounded partial-read inbox alert lists failed skill, watch and review 
   fs.writeFileSync(proposal, original); fs.writeFileSync(watchFile, watch); fs.writeFileSync(join(f.survey, "ledger.jsonl"), goodJournal);
   expect(rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).some(row => row.kind === "partial-read" && row.project === openStudy(f.survey).study.id)).toBe(false);
 });
+
+test("unchanged pending gate bindings retain their waiting time across binder-irrelevant events", async () => {
+  type Fixture = Awaited<ReturnType<typeof fixtures>>;
+  type Prepared = { dir: string; gate: string; mutate: () => unknown | Promise<unknown> };
+  const cases: { name: string; prepare: (f: Fixture) => Promise<Prepared> }[] = [
+    { name: "scope", prepare: async f => {
+      await ops.scope(f.survey, { question: "Timing scope" }, ctx);
+      const data = readLedger(f.survey).findLast(event => event.type === "scope.set")!.data;
+      return { dir: f.survey, gate: "scope", mutate: () => appendEvent(f.survey, actor, "scope.set", { ...data }) };
+    } },
+    { name: "screen", prepare: async f => {
+      await ops.gateDecide(f.survey, "scope", "approve", undefined, ctx);
+      await ops.screen(f.survey, ["doi:10.0000/live"], "include", "Timing included baseline", ctx);
+      return { dir: f.survey, gate: "screen", mutate: () => ops.screen(f.survey, ["doi:10.0000/screened"], "exclude", "Unrelated excluded candidate", ctx) };
+    } },
+    { name: "design", prepare: async f => {
+      await ops.protocol(f.experiment, { ...readProtocol(f.experiment)!, method: "Timing design" }, ctx);
+      return { dir: f.experiment, gate: "design", mutate: () => ops.protocol(f.experiment, readProtocol(f.experiment)!, ctx) };
+    } },
+    { name: "final", prepare: async f => {
+      await ops.protocol(f.experiment, { ...readProtocol(f.experiment)!, method: "Timing final" }, ctx);
+      return { dir: f.experiment, gate: "final", mutate: () => appendEvent(f.experiment, actor, "investigate.closed", { run: "unrelated-run", sha256: "d".repeat(64), ruleSha256: "e".repeat(64), winner: WIN }) };
+    } },
+    { name: "review", prepare: async f => {
+      const old = readLedger(f.survey).find(event => event.type === "review.added")!;
+      fs.writeFileSync(join(f.survey, "paper", "manuscript.md"), "Synthetic revised manuscript.\n");
+      const build = await ops.paperBuild(f.survey, ctx);
+      await ops.reviewAdd(f.survey, { v: 1, reviewer: { id: "timing-current", modelFamily: "timing-current" }, buildSha256: build.evidenceSha256,
+        checklist: { negativeResults: true, denominators: true, limitations: true, reproducibility: true }, findings: [] }, ctx);
+      return { dir: f.survey, gate: "review", mutate: () => ops.reviewResolve(f.survey, `${String(old.data.id)}/contradiction`, "Resolve older build only", ctx) };
+    } },
+    { name: "plan", prepare: async f => {
+      const definition = { v: 1, nodes: [
+        { id: "source", kind: "step", command: "lit.search", args: { query: "source" } },
+        { id: "timing", kind: "gate", needs: ["source"], binds: ["source"] },
+        { id: "unrelated", kind: "step", command: "lit.search", args: { query: "unrelated" } },
+      ], edges: [] };
+      await ops.planSet(f.survey, definition, ctx);
+      appendEvent(f.survey, actor, "node.intent", { revision: 1, node: "source", dispatchId: "source-timing" });
+      appendEvent(f.survey, actor, "node.observed", { revision: 1, node: "source", dispatchId: "source-timing", status: "done", output: { sha256: "a".repeat(64) } });
+      return { dir: f.survey, gate: "plan:timing", mutate: async () => {
+        appendEvent(f.survey, actor, "node.intent", { revision: 1, node: "unrelated", dispatchId: "unrelated-timing" });
+        appendEvent(f.survey, actor, "node.observed", { revision: 1, node: "unrelated", dispatchId: "unrelated-timing", status: "done", output: { sha256: "b".repeat(64) } });
+        lastEventTime(f.survey, "2030-06-02T00:00:00.000Z");
+        return ops.planSet(f.survey, definition, ctx);
+      } };
+    } },
+  ];
+  for (const scenario of cases) {
+    const f = await fixtures(fs.realpathSync(tempDir())), { dir, gate, mutate } = await scenario.prepare(f);
+    lastEventTime(dir, "2030-06-01T00:00:00.000Z");
+    const state = ops.gateList(dir).find(row => row.gate === gate)!;
+    expect(state.state).toBe("pending"); expect(state.current).toBeDefined();
+    const provider = await typed.open(context(f.family)), studyId = openStudy(dir).study.id;
+    const waiting = async () => rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).find(row => row.kind === "gate" && row.project === studyId && row.title === `Approve or reject ${gate}`)!;
+    const first = await waiting(); expect(first).toBeDefined(); expect(first.at).toBe("2030-06-01T00:00:00.000Z");
+    await mutate(); lastEventTime(dir, "2030-06-03T00:00:00.000Z");
+    const current = ops.gateList(dir).find(row => row.gate === gate)!; expect(current.state).toBe("pending"); expect(current.current).toBe(state.current);
+    const second = await waiting(); expect(second).toBeDefined(); expect({ scenario: scenario.name, id: second.id, at: second.at }).toEqual({ scenario: scenario.name, id: first.id, at: first.at });
+    expect(readLedger(dir).at(-1)!.at).not.toBe(first.at);
+  }
+});

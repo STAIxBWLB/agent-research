@@ -1,5 +1,7 @@
 import { gateState, plain, sha256, boundedText, onlyKeys, type Actor, type GateName, type GateState, type LedgerEvent, type PendingEvent } from "../study.ts";
-import { readPlan, validatePlan, type PlanDefinition, type PlanNode } from "./definition.ts";
+import { PLAN_ID_BYTES, readPlan, validatePlan, type PlanDefinition, type PlanNode } from "./definition.ts";
+
+export const PLAN_GATE_BYTES = "plan:".length + PLAN_ID_BYTES;
 
 export type NodeStatus = "pending" | "ready" | "dispatched" | "done" | "failed" | "cancelled" | "uncertain" | "stale" | "skipped";
 export interface NodeState { id: string; kind: PlanNode["kind"]; status: NodeStatus; dispatchId?: string; dispatchCount?: number; retryOf?: string; output?: unknown; attemptId?: string; taskId?: number; hubProject?: string; reason?: string; gate?: GateState; lastObserved?: { revision: number; dispatchId: string; status: NodeStatus; at: string; output?: unknown; reason?: string } }

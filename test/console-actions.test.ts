@@ -257,3 +257,27 @@ test("confirmation guard catches content changed as the mutation lock is acquire
   finally { spy.mockRestore(); }
   expect(changed).toBe(true); expect(ledger(f.survey)).toBe(before); expect(ops.list(f.survey, { status: "new" }).candidates.find(row => row.id === candidateId)?.title).toBe("Changed at lock acquisition");
 });
+
+
+test("maximum-byte plan gate ids approve and reject through direct and inbox confirmation routes", async () => {
+  const nodeId = "g".repeat(128), gate = `plan:${nodeId}`;
+  expect(Buffer.byteLength(nodeId)).toBe(128); expect(Buffer.byteLength(gate)).toBe(133);
+  for (const route of ["direct", "inbox"] as const) for (const decision of ["approve", "reject"] as const) {
+    const f = await fixture(fs.realpathSync(tempDir())), fake = fakeRunner([]);
+    await ops.planSet(f.survey, { v: 1, nodes: [{ id: nodeId, kind: "gate", binds: [] }], edges: [] }, ctx);
+    const provider = await open(f, fake.runner);
+    let input: Input = { action: `gate.${decision}`, study: f.survey, gate, reason: "Synthetic maximum-id decision" };
+    if (route === "inbox") {
+      const snapshot = await provider.snapshot({ panel: "inbox", after: 0 });
+      const item = (snapshot.items as Record<string, any>[]).find(row => row.kind === "gate" && row.title === `Approve or reject ${gate}`);
+      expect(item).toBeDefined();
+      input = { action: `gate.${decision}`, id: item!.id, reason: "Synthetic maximum-id decision" };
+    }
+    const before = ledger(f.survey), count = readLedger(f.survey).length, pending = await preview(provider, input);
+    expect(ledger(f.survey)).toBe(before); expect(fake.requests).toEqual([]);
+    expect((await provider.action({ ...input, confirmed: true, fingerprint: pending.fingerprint }, META)).ok).toBe(true);
+    expect(readLedger(f.survey)).toHaveLength(count + 1);
+    expect(readLedger(f.survey).at(-1)).toMatchObject({ type: `gate.${decision}`, actor: { kind: "person", id: META.identity }, data: { gate } });
+    expect(fake.requests).toEqual([]);
+  }
+});

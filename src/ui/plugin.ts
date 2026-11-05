@@ -4,12 +4,14 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { version } from "../../package.json";
 import * as ops from "../commands.ts";
-import { foldPlan, canonical } from "../plan/state.ts";
+import { foldPlan, canonical, PLAN_GATE_BYTES } from "../plan/state.ts";
 import { readRegistry, MAX_REGISTERED_STUDIES } from "../console/registry.ts";
 import { readAttemptRecords, type Attempt } from "../exp/attempts.ts";
 import { createHttp } from "../http.ts";
 import { previewArchive, ARCHIVE_NOTES } from "../memory/archive.ts";
 import { spawnRunner, type ProcessRunner } from "../exp/executor.ts";
+import { readProtocol } from "../exp/protocol.ts";
+import { readSelection } from "../exp/selection.ts";
 import { readClosedFinal } from "../exp/final.ts";
 import { readCurrentBuild } from "../paper/build.ts";
 import { loadCandidates } from "../lit/candidates.ts";
@@ -37,39 +39,63 @@ const stamp = (value: unknown, fallback = EPOCH) => typeof value === "string" &&
 function readCall<T>(name: string, fn: () => T, errors: Record<string, string>): T | null {
   try { return fn(); } catch (cause) { errors[name] = error(cause); return null; }
 }
-function planGateTimes(events: LedgerEvent[]): Map<string, string> {
-  const waiting = new Map<string, string>(); let previous = new Map<string, string | undefined>();
+interface GateInputs { selectionRun?: string; review?: { manuscriptSha256: string; evidenceSha256: string; ids: ReadonlySet<string> } }
+/** Every gate advances only when an input consumed by its binder changes, never merely on an event kind. */
+function gateWaitingTimes(events: LedgerEvent[], inputs: GateInputs): Map<string, string> {
+  const waiting = new Map<string, string>(), previous = new Map<string, string | undefined>();
+  const observe = (gate: string, input: unknown, at: string) => {
+    const signature = input === undefined ? undefined : canonical(input);
+    if (previous.get(gate) === signature) return;
+    previous.set(gate, signature);
+    if (signature === undefined) waiting.delete(gate); else waiting.set(gate, at);
+  };
   foldPlan(events, (state, event) => {
-    const current = new Map<string, string | undefined>();
-    for (const node of state.nodes) if (node.kind === "gate") {
-      const gate = `plan:${node.id}`, binding = node.gate?.current; current.set(gate, binding);
-      if (binding === undefined) waiting.delete(gate);
-      else if (previous.get(gate) !== binding) waiting.set(gate, event.at);
-    }
-    for (const gate of waiting.keys()) if (!current.has(gate)) waiting.delete(gate);
-    previous = current;
+    const names = new Set<string>();
+    for (const node of state.nodes) if (node.kind === "gate") { const gate = `plan:${node.id}`; names.add(gate); observe(gate, node.gate?.current, event.at); }
+    for (const gate of previous.keys()) if (gate.startsWith("plan:") && !names.has(gate)) { observe(gate, undefined, event.at); previous.delete(gate); }
   });
-  return waiting;
-}
-function gateTime(gate: string, events: LedgerEvent[], fallback: string, planTimes: ReadonlyMap<string, string>): string {
-  if (gate.startsWith("plan:")) return stamp(planTimes.get(gate), fallback);
-  const types: Record<string, string[]> = { scope: ["scope.set"], screen: ["lit.screen"], design: ["protocol.set", "selection.set", "final.seeds.set"], final: ["protocol.set", "selection.set", "final.seeds.set", "investigate.closed", "ablate.closed"], review: ["paper.built", "review.added", "review.resolved"] };
-  const previous = new Map<string, string>(), included = new Set<string>(); let at = fallback;
+  const included = new Set<string>();
+  let investigate: string | undefined, protocol: [string, string] | undefined, selection: string | undefined, reserved: string | undefined, ablate: string | undefined, hasAblations = false;
+  let paper: [string, string] | undefined, reviewChanges = 0;
+  const experiment = (at: string) => {
+    // These are the exact source hashes in readDesign/finalGateBinding; only the selected run's close is consumed.
+    const design = protocol ? [...protocol, ...(selection === undefined ? [] : [selection]), ...(reserved === undefined ? [] : [reserved])] : undefined;
+    observe("design", design, at);
+    observe("final", design && selection && reserved && investigate && (!hasAblations || ablate) ? [investigate, ablate ?? null, design] : undefined, at);
+  };
+  const review = (at: string) => {
+    const current = inputs.review;
+    // reviewBinding hashes only this build's added/resolved review events. Each valid selected event adds a hash.
+    observe("review", current && paper?.[0] === current.manuscriptSha256 && paper[1] === current.evidenceSha256 ? [paper, reviewChanges] : undefined, at);
+  };
   for (const event of events) {
-    if (!(types[gate] ?? []).includes(event.type)) continue;
-    let signature: string;
-    if (event.type === "lit.screen") {
-      let changed = false;
-      for (const id of Array.isArray(event.data.ids) ? event.data.ids : []) if (typeof id === "string") {
-        if (event.data.decision === "include" && !included.has(id)) { included.add(id); changed = true; }
-        else if (event.data.decision === "exclude" && included.delete(id)) changed = true;
+    const data = event.data;
+    switch (event.type) {
+      case "scope.set": if (typeof data.sha256 === "string") observe("scope", data.sha256, event.at); break;
+      case "lit.screen": {
+        let changed = false;
+        for (const id of Array.isArray(data.ids) ? data.ids : []) if (typeof id === "string") {
+          if (data.decision === "include" && !included.has(id)) { included.add(id); changed = true; }
+          else if (data.decision === "exclude" && included.delete(id)) changed = true;
+        }
+        if (changed) observe("screen", included.size ? [...included].sort() : undefined, event.at); break;
       }
-      if (!changed) continue;
-      signature = JSON.stringify([...included].sort());
-    } else signature = event.type === "protocol.set" ? JSON.stringify([event.data.sha256, event.data.treeHash]) : typeof event.data.sha256 === "string" ? event.data.sha256 : JSON.stringify(event.data);
-    if (previous.get(event.type) !== signature) { previous.set(event.type, signature); at = stamp(event.at, at); }
+      case "protocol.set":
+        if (typeof data.sha256 === "string" && typeof data.treeHash === "string") protocol = [data.sha256, data.treeHash];
+        experiment(event.at); break;
+      case "selection.set": if (typeof data.sha256 === "string") selection = data.sha256; experiment(event.at); break;
+      case "final.seeds.set": if (typeof data.sha256 === "string") reserved = data.sha256; experiment(event.at); break;
+      case "investigate.closed": if (data.run === inputs.selectionRun && typeof data.sha256 === "string") investigate = data.sha256; experiment(event.at); break;
+      case "ablate.added": hasAblations = true; experiment(event.at); break;
+      case "ablate.closed": if (typeof data.sha256 === "string") ablate = data.sha256; experiment(event.at); break;
+      case "paper.built":
+        if (typeof data.manuscriptSha256 === "string" && typeof data.evidenceSha256 === "string") paper = [data.manuscriptSha256, data.evidenceSha256];
+        review(event.at); break;
+      case "review.added": if (typeof data.id === "string" && inputs.review?.ids.has(data.id)) { reviewChanges++; review(event.at); } break;
+      case "review.resolved": if (typeof data.reviewId === "string" && inputs.review?.ids.has(data.reviewId)) { reviewChanges++; review(event.at); } break;
+    }
   }
-  return at;
+  return waiting;
 }
 function attempts(dir: string, all: boolean) {
   const byStatus = { running: 0, succeeded: 0, failed: 0, cancelled: 0, unknown: 0 }, rows: Pick<Attempt, "id" | "status" | "reason">[] = [];
@@ -102,8 +128,12 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
   if (reviewFailure) errors.review = line(reviewFailure.message);
   const watch = readCall("watch", () => ops.watchShow(dir), errors), lastWatch = watch?.runs[0] ?? null;
   if (inbox) {
-  const planTimes = gates.some(row => row.gate.startsWith("plan:")) ? planGateTimes(events) : new Map<string, string>();
-  for (const gate of gates.filter(row => row.state === "pending")) add("gate", `${gate.gate}:${gate.current}`, "decision", `Approve or reject ${gate.gate}`, gateTime(gate.gate, events, stamp(events[0]?.at, stamp(study.createdAt)), planTimes), study.question,
+  const protocol = gates.some(row => row.gate === "final" && row.state === "pending") ? readProtocol(dir) : undefined;
+  const gateTimes = gateWaitingTimes(events, {
+    ...(protocol ? { selectionRun: readSelection(dir, protocol)?.run } : {}),
+    ...(review?.buildSha256 && review.manuscriptSha256 ? { review: { manuscriptSha256: review.manuscriptSha256, evidenceSha256: review.buildSha256, ids: new Set(review.reviews.map(row => row.id)) } } : {}),
+  });
+  for (const gate of gates.filter(row => row.state === "pending")) add("gate", `${gate.gate}:${gate.current}`, "decision", `Approve or reject ${gate.gate}`, stamp(gateTimes.get(gate.gate), stamp(events[0]?.at, stamp(study.createdAt))), study.question,
     [{ id: "gate.approve", label: "Approve", destructive: true }, { id: "gate.reject", label: "Reject", destructive: true, reason: "required" }], { gate: gate.gate });
   const current = new Map(loadCandidates(dir).filter(row => row.status === "new").map(row => [row.id, row])), watched = new Map<string, LedgerEvent>();
   for (const event of events) if (event.type === "watch.ran" && Array.isArray(event.data.addedIds)) for (const id of event.data.addedIds) if (typeof id === "string" && current.has(id)) watched.set(id, event);
@@ -168,7 +198,7 @@ function selection(input: Args, home: string): Selection {
   result.decision = route.decision!;
   if (input.decision !== undefined && input.decision !== result.decision) refusal("decision conflicts with the selected action");
   if (action === "gate") {
-    result.gate = field(input.gate, "gate", 80);
+    result.gate = field(input.gate, "gate", PLAN_GATE_BYTES);
     if (!["approve", "reject"].includes(result.decision)) refusal("gate decision must be approve or reject");
   } else if (action === "screen") {
     if (!["include", "exclude"].includes(result.decision)) refusal("screen decision must be include or exclude");
