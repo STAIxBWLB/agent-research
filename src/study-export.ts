@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, isAbsolute, sep } from "node:path";
 import { readAttemptRecords, type Attempt, type AttemptStatus } from "./exp/attempts.ts";
 import { ablateResultPath, readClosedAblate } from "./exp/ablate.ts";
@@ -8,12 +8,13 @@ import { readSelection } from "./exp/selection.ts";
 import { designBinding, protocolHash, readProtocol } from "./exp/protocol.ts";
 import { FORMAT_VERSIONS } from "./manifest.ts";
 import { PAPER_EVIDENCE_BYTES, paperBuildPaths } from "./paper/build.ts";
-import { assertWritable, openStudy, plain, readLedger, readTextBounded, sha256, writeAtomic, type LedgerEvent } from "./study.ts";
+import { assertWritable, openStudy, plain, readLedger, readTextBounded, sha256, withLock, writeAtomic, type LedgerEvent } from "./study.ts";
 
 /** Reader bound for every bundle file; writeAtomic refuses anything larger. */
 export const BUNDLE_FILE_BYTES = 64 * 1024 * 1024;
 export const BUNDLE_FILES = ["manifest.json", "ledger.jsonl", "attempts.jsonl", "results.json", "reviews.jsonl", "evidence.json"] as const;
 const STATUSES: AttemptStatus[] = ["running", "succeeded", "failed", "cancelled", "unknown"];
+const SHA256 = /^[a-f0-9]{64}$/;
 const HEX = /^[a-f0-9]{16,64}$/;
 const TOKEN = /^[a-z][a-z0-9_.:-]{0,47}$/;
 /** Closed data keys per ledger event type; unlisted types keep the envelope with empty data. Never host, containerId or hubProject. */
@@ -118,17 +119,17 @@ function evidence(dir: string) {
   try { raw = JSON.parse(readTextBounded(path, PAPER_EVIDENCE_BYTES)); } catch { throw new Error("study export: paper/build/evidence.json is unreadable, invalid JSON or oversized; rebuild the paper before exporting"); }
   if (!plain(raw) || raw.v !== 1 || !Array.isArray(raw.placeholders)) throw new Error("study export: paper/build/evidence.json has an unsupported shape; rebuild the paper before exporting");
   return {
-    v: 1, manuscriptSha256: typeof raw.manuscriptSha256 === "string" ? raw.manuscriptSha256 : null,
+    v: 1, manuscriptSha256: typeof raw.manuscriptSha256 === "string" && SHA256.test(raw.manuscriptSha256) ? raw.manuscriptSha256 : null,
     placeholders: (raw.placeholders as Record<string, unknown>[]).filter(p => p.kind === "number").map(p => {
       const ref = typeof p.ref === "string" ? p.ref : "", attempt = /^(?:attempt|posthoc):([a-f0-9]{16})\./.exec(ref)?.[1];
       const source = plain(p.source) ? p.source : {};
-      return { refSha256: sha256(ref), family: /^[a-z]+/.exec(ref)?.[0] ?? "other", ...(attempt ? { attempt } : {}), sourceSha256: typeof source.sha256 === "string" ? source.sha256 : null };
+      return { refSha256: sha256(ref), family: /^[a-z]+/.exec(ref)?.[0] ?? "other", ...(attempt ? { attempt } : {}), sourceSha256: typeof source.sha256 === "string" && SHA256.test(source.sha256) ? source.sha256 : null };
     }),
   };
 }
 
 const SCANS: [string, RegExp][] = [
-  ["absolute path", /(^|[\s"'=:(,[{])(\/[^\s"']|~\/)/u],
+  ["absolute path", /(^|[\s"'=:(,[{])(\/|~\/)/u],
   ["absolute path", /\b[A-Za-z]:\\/],
   ["url", /\b[a-z][a-z0-9+.-]*:\/\/|\b(?:mailto|urn|file|data):/i],
   ["key-like token", /\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{12,}|\b(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{12,}|\bxox[abprs]-[A-Za-z0-9-]{8,}|\bAKIA[0-9A-Z]{12,}|\beyJ[A-Za-z0-9_-]{16,}/],
@@ -142,7 +143,7 @@ export function scanBundle(files: Record<string, string>): void {
 }
 
 function emptyDir(path: string): void {
-  if (existsSync(path)) { if (readdirSync(path).length) throw new Error("study export: --bundle directory is not empty; choose a new or empty directory"); }
+  if (existsSync(path)) { if (!lstatSync(path).isDirectory()) throw new Error("study export: --bundle exists and is not a directory; choose a new or empty directory"); if (readdirSync(path).length) throw new Error("study export: --bundle directory is not empty; choose a new or empty directory"); }
   else mkdirSync(path, { recursive: true });
 }
 
@@ -153,11 +154,9 @@ function realTarget(path: string): string {
   while (!existsSync(current)) { const parent = dirname(current); if (parent === current) break; tail.unshift(basename(current)); current = parent; }
   return join(realpathSync(current), ...tail);
 }
-/** Build the content-free bundle from committed study files only; never reads the executor workdir. */
-export function exportBundle(dirArg: string, options: { bundle: string; list?: boolean }, maxFileBytes = BUNDLE_FILE_BYTES): BundleManifest | BundleListing {
-  const { dir, study } = openStudy(dirArg), target = resolve(options.bundle), inside = relative(realpathSync(dir), realTarget(target));
-  if (inside === "" || (!(inside === ".." || inside.startsWith(".." + sep)) && !isAbsolute(inside))) throw new Error("study export: --bundle is inside the study directory; choose a directory outside the study");
-  if (options.list) return { bundle: options.bundle, files: [...BUNDLE_FILES], wouldWrite: true };
+/** Caller holds the study lock across every bounded source read. */
+function readBundle(dirArg: string, maxFileBytes: number) {
+  const { dir, study } = openStudy(dirArg);
   const events = readLedger(dir);
   const zero = () => Object.fromEntries(STATUSES.map(s => [s, 0])) as Record<AttemptStatus, number>;
   const byStatus = zero(), runCounts = new Map<string, Record<AttemptStatus, number>>(), attemptLines: string[] = [];
@@ -197,6 +196,18 @@ export function exportBundle(dirArg: string, options: { bundle: string; list?: b
     files: Object.fromEntries(Object.entries(files).map(([name, text]) => [name, sha256(text)])),
   };
   files["manifest.json"] = JSON.stringify(manifest, null, 2) + "\n";
+  return { files, manifest };
+}
+
+/** Read one locked study snapshot, then validate and publish without holding the study lock. */
+export async function exportBundle(dirArg: string, options: { bundle: string; list?: boolean }, maxFileBytes = BUNDLE_FILE_BYTES): Promise<BundleManifest | BundleListing> {
+  const dir = resolve(dirArg), target = resolve(options.bundle), inside = relative(realpathSync(dir), realTarget(target));
+  if (inside === "" || (!(inside === ".." || inside.startsWith(".." + sep)) && !isAbsolute(inside))) throw new Error("study export: --bundle is inside the study directory; choose a directory outside the study");
+  if (options.list) {
+    await withLock(dir, () => openStudy(dir));
+    return { bundle: options.bundle, files: [...BUNDLE_FILES], wouldWrite: true };
+  }
+  const { files, manifest } = await withLock(dir, () => readBundle(dir, maxFileBytes));
   scanBundle(files);
   for (const name of BUNDLE_FILES) assertWritable(files[name]!, maxFileBytes, `study export: ${name}; nothing was written`);
   emptyDir(target);

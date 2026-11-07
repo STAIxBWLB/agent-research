@@ -129,7 +129,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "study export": {
       count(spec, positional, 1); const bundle = str("--bundle");
       if (bundle === undefined) throw new Error("study export: --bundle DIR is required; pass a new or empty output directory");
-      result = ops.studyExport(positional[0]!, { bundle, ...(flags["--list"] ? { list: true } : {}) }); break;
+      result = await ops.studyExport(positional[0]!, { bundle, ...(flags["--list"] ? { list: true } : {}) }); break;
     }
     case "scope": {
       count(spec, positional, 1);

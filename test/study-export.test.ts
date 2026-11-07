@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as ops from "../src/commands.ts";
@@ -6,7 +7,7 @@ import { run } from "../src/cli.ts";
 import { ARES_TOOLS } from "../src/mcp-tools.ts";
 import { protocolHash, readProtocol } from "../src/exp/protocol.ts";
 import { exportBundle, scanBundle } from "../src/study-export.ts";
-import { appendEvent, openStudy } from "../src/study.ts";
+import { appendEvent, openStudy, withLock } from "../src/study.ts";
 import { fakeHttp, fakeRunner, tempDir } from "./helpers.ts";
 
 const actor = { kind: "person" as const }, ctx = { actor, http: fakeHttp([]).http }, BASE = "a".repeat(40), WIN = "b".repeat(40), ABL = "c".repeat(40);
@@ -44,7 +45,7 @@ function numericStatusAndReasons(value: unknown, path = "", out: Record<string, 
 
 test("AC1/AC3: bundle counts equal attempt list, rows carry identity, results match closed files", async () => {
   const dir = await study(), out = join(tempDir(), "bundle");
-  const manifest = ops.studyExport(dir, { bundle: out }) as Exclude<ReturnType<typeof ops.studyExport>, { wouldWrite: true }>;
+  const manifest = await ops.studyExport(dir, { bundle: out }) as Exclude<Awaited<ReturnType<typeof ops.studyExport>>, { wouldWrite: true }>;
   expect(readdirSync(out).sort()).toEqual(["attempts.jsonl", "evidence.json", "ledger.jsonl", "manifest.json", "results.json", "reviews.jsonl"]);
   const listed = ops.attemptList(dir, { limit: 200 });
   expect(manifest.counts.byStatus).toEqual(listed.totals); expect(manifest.counts.attempts).toBe(listed.total);
@@ -65,7 +66,7 @@ test("AC1/AC3: bundle counts equal attempt list, rows carry identity, results ma
 });
 
 test("AC2: no bundle file carries paths, mounts, container ids, argv, env, URLs or keys", async () => {
-  const dir = await study(), out = join(tempDir(), "bundle"); ops.studyExport(dir, { bundle: out });
+  const dir = await study(), out = join(tempDir(), "bundle"); await ops.studyExport(dir, { bundle: out });
   const all = readdirSync(out).map(f => readFileSync(join(out, f), "utf8")).join("\n");
   for (const needle of ["/Users/", "/srv/", "/work", "gpu-box", "f".repeat(64), "ARES_SEED", "docker", "argv", "mounts", "containerId", "workdir", "http", openStudy(dir).study.id])
     expect(all).not.toContain(needle);
@@ -75,7 +76,7 @@ test("AC2: a planted path or key-like token refuses the whole export and writes 
   for (const metric of ["/Users/someone/secret/data", "/work", "sk-AbCdEf0123456789xyzQ", "see https://example.test/x", "mailto:a", "urn:x:y", "A=secret"]) {
     const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", metric);
     const out = join(tempDir(), "bundle");
-    expect(() => ops.studyExport(dir, { bundle: out })).toThrow("study export: refused");
+    await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("study export: refused");
     expect(existsSync(out)).toBe(false);
   }
   expect(() => scanBundle({ "x": "AWS AKIAABCDEFGHIJKLMNOP" })).toThrow("key-like");
@@ -98,7 +99,7 @@ test("review regressions: ledger allowlist, label and prose, closed results, run
   const dir = await study();
   await ops.executorSet(dir, { v: 1, kind: "ssh", host: "dgx02", workdir: "/srv/exec" }, ctx);
   attempt(dir, "constructor", WIN, 1, 1, "succeeded", "/work");
-  const out = join(tempDir(), "bundle"), manifest = ops.studyExport(dir, { bundle: out }) as { counts: { byRun: Record<string, Record<string, number>> } };
+  const out = join(tempDir(), "bundle"), manifest = await ops.studyExport(dir, { bundle: out }) as { counts: { byRun: Record<string, Record<string, number>> } };
   const all = readdirSync(out).map(f => readFileSync(join(out, f), "utf8")).join("\n");
   for (const needle of ["dgx02", "/work", "confidential", "\"label\""]) expect(all).not.toContain(needle);
   const ledger = readFileSync(join(out, "ledger.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l));
@@ -110,31 +111,31 @@ test("review regressions: ledger allowlist, label and prose, closed results, run
   const tampered = await study(), file = join(tampered, "runs", "ablate", "ablate.json");
   writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), v: 99 }, null, 2) + "\n");
   const out2 = join(tempDir(), "bundle");
-  expect(() => ops.studyExport(tampered, { bundle: out2 })).toThrow("ablate result is not a verified closed result");
+  await expect(ops.studyExport(tampered, { bundle: out2 })).rejects.toThrow("ablate result is not a verified closed result");
   expect(existsSync(out2)).toBe(false);
 
   const out3 = join(tempDir(), "bundle");
-  expect(() => exportBundle(dir, { bundle: out3 }, 1024)).toThrow("nothing was written");
+  await expect(exportBundle(dir, { bundle: out3 }, 1024)).rejects.toThrow("nothing was written");
   expect(existsSync(out3)).toBe(false);
-  expect(() => ops.studyExport(dir, { bundle: join(dir, "export") })).toThrow("inside the study directory");
-  expect(() => ops.studyExport(dir, { bundle: dir })).toThrow("inside the study directory");
+  await expect(ops.studyExport(dir, { bundle: join(dir, "export") })).rejects.toThrow("inside the study directory");
+  await expect(ops.studyExport(dir, { bundle: dir })).rejects.toThrow("inside the study directory");
   expect(existsSync(join(dir, "export"))).toBe(false);
 });
 
 test("round 2: one-token free text, broader path scan, symlinked target, early attempt bound", async () => {
   const { symlinkSync } = await import("node:fs");
   const base = await study();
-  const out = join(tempDir(), "bundle"); ops.studyExport(base, { bundle: out });
+  const out = join(tempDir(), "bundle"); await ops.studyExport(base, { bundle: out });
   expect(readFileSync(join(out, "results.json"), "utf8")).not.toContain("removes");
   for (const metric of ["//server/share", "/비밀"]) {
     const d = await study(); attempt(d, "posthoc", WIN, 1, 1, "succeeded", "synthetic", metric);
-    const o = join(tempDir(), "bundle"); expect(() => ops.studyExport(d, { bundle: o })).toThrow("absolute path"); expect(existsSync(o)).toBe(false);
+    const o = join(tempDir(), "bundle"); await expect(ops.studyExport(d, { bundle: o })).rejects.toThrow("absolute path"); expect(existsSync(o)).toBe(false);
   }
   const link = join(tempDir(), "link"); symlinkSync(base, link);
-  expect(() => ops.studyExport(base, { bundle: join(link, "nested", "bundle") })).toThrow("inside the study directory");
+  await expect(ops.studyExport(base, { bundle: join(link, "nested", "bundle") })).rejects.toThrow("inside the study directory");
   expect(existsSync(join(base, "nested"))).toBe(false);
   const o2 = join(tempDir(), "bundle");
-  expect(() => exportBundle(base, { bundle: o2 }, 600)).toThrow("attempts.jsonl would exceed 600 bytes");
+  await expect(exportBundle(base, { bundle: o2 }, 600)).rejects.toThrow("attempts.jsonl would exceed 600 bytes");
   expect(existsSync(o2)).toBe(false);
 });
 
@@ -148,16 +149,69 @@ test("round 3: cancellation prose is classified, generated codes retained, and d
     const file = join(dir, "runs", "posthoc", "attempts", `${attemptId}.json`);
     writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), reason }));
   }
-  const out = join(tempDir(), "bundle"); ops.studyExport(dir, { bundle: out });
+  const out = join(tempDir(), "bundle"); await ops.studyExport(dir, { bundle: out });
   const text = readFileSync(join(out, "attempts.jsonl"), "utf8"), rows = text.trim().split("\n").map(line => JSON.parse(line));
   expect(rows.find(row => row.id === id).reasonClass).toBe("cancel-reason");
   expect(rows.find(row => row.id === known).reasonClass).toBe("candidate-exit");
   expect(rows.find(row => row.id === unknown).reasonClass).toBe("other");
   expect(text).not.toContain("confidential"); expect(fake.requests).toHaveLength(2);
   const inside = join(dir, "..cache", "bundle");
-  expect(() => ops.studyExport(dir, { bundle: inside })).toThrow("inside the study directory");
+  await expect(ops.studyExport(dir, { bundle: inside })).rejects.toThrow("inside the study directory");
   expect(existsSync(join(dir, "..cache"))).toBe(false);
   // An actual sibling is still outside; '..'-prefixed names must not decide containment.
   const sibling = join(tempDir(), "..cache", "bundle");
-  expect(() => ops.studyExport(dir, { bundle: sibling })).not.toThrow();
+  await expect(ops.studyExport(dir, { bundle: sibling })).resolves.toMatchObject({ bundle: 1 });
+});
+
+
+test("boundary slashes refuse while embedded unit slashes remain valid", async () => {
+  for (const metric of ["/", "/ secret", "/'x"]) {
+    const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", metric);
+    const out = join(tempDir(), "bundle");
+    await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("absolute path");
+    expect(existsSync(out)).toBe(false);
+  }
+  expect(() => scanBundle({ x: JSON.stringify({ unit: "tokens/s" }) })).not.toThrow();
+});
+
+test("study reads share one lock and output publication happens after release", async () => {
+  const dir = await study(), out = join(tempDir(), "bundle"), lock = join(dir, ".ares.lock");
+  await withLock(dir, async () => {
+    await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("study is locked");
+    expect(existsSync(out)).toBe(false);
+  });
+  mkdirSync(join(dir, "paper", "build"), { recursive: true });
+  writeFileSync(join(dir, "paper", "build", "evidence.json"), JSON.stringify({ v: 1, manuscriptSha256: "a".repeat(64), placeholders: [] }));
+  const open = fs.openSync, rename = fs.renameSync, reads: string[] = [];
+  const readSpy = spyOn(fs, "openSync").mockImplementation(((file, flags, mode) => {
+    if (String(file).startsWith(dir + "/") && String(file) !== lock) {
+      expect(existsSync(lock)).toBe(true); reads.push(String(file));
+    }
+    return open(file, flags, mode);
+  }) as typeof fs.openSync);
+  const writeSpy = spyOn(fs, "renameSync").mockImplementation(((from, to) => {
+    if (String(to).startsWith(out + "/")) expect(existsSync(lock)).toBe(false);
+    return rename(from, to);
+  }) as typeof fs.renameSync);
+  try { await ops.studyExport(dir, { bundle: out }); }
+  finally { readSpy.mockRestore(); writeSpy.mockRestore(); }
+  for (const name of ["study.json", "ledger.jsonl", "final.json", "ablate.json", "investigate.json", "evidence.json"]) expect(reads.some(file => file.endsWith("/" + name))).toBe(true);
+  expect(existsSync(lock)).toBe(false);
+});
+
+test("evidence only exports full SHA-256 hash strings", async () => {
+  const dir = await study(), folder = join(dir, "paper", "build"); mkdirSync(folder, { recursive: true });
+  for (const hash of ["confidential", "a".repeat(16), "b".repeat(64)]) {
+    writeFileSync(join(folder, "evidence.json"), JSON.stringify({ v: 1, manuscriptSha256: hash, placeholders: [{ kind: "number", ref: "investigate.reason", source: { sha256: hash } }] }));
+    const out = join(tempDir(), "bundle"); await ops.studyExport(dir, { bundle: out });
+    const evidence = JSON.parse(readFileSync(join(out, "evidence.json"), "utf8"));
+    expect(evidence.manuscriptSha256).toBe(hash.length === 64 ? hash : null);
+    expect(evidence.placeholders[0].sourceSha256).toBe(hash.length === 64 ? hash : null);
+  }
+});
+
+test("an existing regular-file target gives the named directory recovery step", async () => {
+  const dir = await study(), out = join(tempDir(), "bundle"); writeFileSync(out, "keep");
+  await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("study export: --bundle exists and is not a directory; choose a new or empty directory");
+  expect(readFileSync(out, "utf8")).toBe("keep");
 });
