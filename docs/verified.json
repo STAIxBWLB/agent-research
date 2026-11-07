@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "documents": {
+    "README.md": {
+      "verifiedAgainst": "b3b2abfef2428099acb55b606a23c9b1d92c6084",
+      "paths": [
+        "src/",
+        "bin/",
+        "scripts/",
+        ".github/workflows/"
+      ]
+    },
+    "src/playbook.ts": {
+      "verifiedAgainst": "b3b2abfef2428099acb55b606a23c9b1d92c6084",
+      "paths": [
+        "src/"
+      ]
+    }
+  }
+}

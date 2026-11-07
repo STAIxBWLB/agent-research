@@ -6,12 +6,16 @@ This checkout implements A1 literature studies, A2 container experiments and the
 
 ## Install
 
-Requires Bun 1.4.2 or newer. After the first tagged release is published, install from npm:
+<!-- facts:install -->
+Requires Bun 1.4.2 or newer. Install from npm:
 
 ```sh
 bun add -g @staix/agent-research
 ares --help
 ```
+<!-- /facts:install -->
+
+Tagged releases are published to npm; 0.1.0 was the first.
 
 Or run from a checkout:
 
@@ -320,7 +324,7 @@ A no-argument `paper.build` conductor step emits `{sha256}` of the committed evi
 
 ## Memory and skill proposal workflow
 
-Use amem 0.20.3 or a compatible CLI. Start each phase with an intent-specific lesson read, then archive only at the end of the study:
+Lessons and archive call the `amem` CLI on PATH (`search --json --explain`, `brief --json`, `note add - --json`). Its output parser was written against amem 0.20.3; the tests use a fake runner, so no amem version is tested live here. Start each phase with an intent-specific lesson read, then archive only at the end of the study:
 
 ```sh
 ares lessons study --for "compare candidate hypotheses" --half-life 180 --limit 50 --json
@@ -421,7 +425,7 @@ A ready hub node records its unit's child task id and waits for that task's appr
 
 The `design` gate binds the exact protocol bytes and the sorted `task/` file tree hashes, plus the raw selection file hash when present. Editing any sealed input reopens the gate. A budget-only change also reopens it, while the comparable attempt protocol hash excludes budget. The executor configuration is outside the seal; the attempt records the executor it used.
 
-Sealing and metrics are **ares-observed**: ares builds the argv and checks the observed container configuration. They are never **host-observed** or **runner-attested**. Signed receipts await [agent-hub#1018](https://github.com/STAIxBWLB/agent-hub/issues/1018). This seal neither attests to an untrusted host nor establishes support for a research claim.
+Sealing and metrics are **ares-observed**: ares builds the argv and checks the observed container configuration. They are never **host-observed** or **runner-attested**. agent-hub 0.26.0 added signed receipts from a registered external runner for hub research attempts ([agent-hub#1018](https://github.com/STAIxBWLB/agent-hub/issues/1018)), so far covered by source and test-key fixtures only. Ares does not read or bind those receipts; that integration and a live registered runner are still needed before an ares attempt can be runner-attested. This seal neither attests to an untrusted host nor establishes support for a research claim.
 
 ## What the checks mean
 
@@ -467,6 +471,7 @@ Experiment logs and outputs live on the executor at `<workdir>/<study-id>/<attem
 
 The implemented CLI surface below comes from `src/commands-table.ts`; `ares --help` prints current usage. Every operation exposing `--json` supports structured output.
 
+<!-- facts:commands -->
 ```text
 ares skill propose <dir> --file PATH|- [--json]
 ares skill decide <dir> <name> <accept|reject|withdraw> --reason TEXT [--pr URL] [--json]
@@ -526,6 +531,11 @@ ares cite check <dir> <draft> [--json]
 ares playbook
 ares mcp
 ```
+<!-- /facts:commands -->
+
+<!-- facts:mcp-tools -->
+The MCP server publishes 52 tools: `ares_watch_set`, `ares_watch_run`, `ares_watch_show`, `ares_console_add`, `ares_console_remove`, `ares_console_list`, `ares_setup`, `ares_manifest`, `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide`, `ares_skill_list`, `ares_plan_set`, `ares_plan_control`, `ares_plan_show`, `ares_status`, `ares_scope_set`, `ares_gate`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show`, `ares_investigate_close`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_posthoc_show`, `ares_final_close`, `ares_final_seeds`, `ares_selection_set`, `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile`, `ares_attempt_logs`, `ares_lit_search`, `ares_lit_list`, `ares_lit_screen`, `ares_lit_card`, `ares_lit_verify`, `ares_lit_bib`, `ares_review_add`, `ares_review_resolve`, `ares_review_show`, `ares_paper_build`, `ares_paper_check`, `ares_cite_check`, `ares_playbook`.
+<!-- /facts:mcp-tools -->
 
 Memory tools are `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide` and `ares_skill_list`; `ares_idea_decide` accepts pivot cause/retryWhen. Archive may write external amem notes; lessons reads external amem. Both carry `openWorldHint`; skill operations stay local. MCP calls preserve agent attribution even without a native shell marker.
 
@@ -553,13 +563,15 @@ Keys are sent with requests only; they are never written to the study.
 
 ## Not implemented yet
 
-Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, signed executor receipts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, vault-mem reference notes (after vault-mem#73), the `copilot` and `step` autonomy modes.
+Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, binding agent-hub runner receipts (agent-hub#1018) to ares attempts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, exporting verified references as vault-mem reference notes (vault-mem 0.5.0 accepts reference metadata since vault-mem#73; the ares side is not built), the `copilot` and `step` autonomy modes.
 
 ## Release
 
 Prepare a release on a clean release branch with `bun run release:prepare <version>`. This bumps `package.json` and moves the Unreleased notes into a dated CHANGELOG section. Review and merge that bump through a PR, then fast-forward local `main` to `origin/main`. On clean, synchronized `main`, the owner runs `bun run release:tag`. It verifies the version, dated notes and successful `Check` / `ci-ok` result for that exact main commit, refuses an existing local or remote tag, and creates and pushes an annotated `v<version>` tag. Never hand-create or move a release tag or reuse a published version.
 
-The tag workflow first waits up to 30 minutes for the exact commit's main-push `Check` workflow and `ci-ok` aggregate to succeed. A failed, skipped or cancelled result refuses release. It checks the matching package version, dated CHANGELOG and main ancestry before staging. It reuses CI rather than rerunning the full suite, then installs dependencies, stages a hash-bound tarball and runs clean-prefix CLI, manifest and MCP smoke checks on Ubuntu and macOS. Publication uses the exact validated Linux tarball with provenance. The GitHub release follows with the dated notes, tarball and hash manifest; reruns edit the existing release and replace assets, with three bounded attempts for GitHub 429/5xx errors. npm publication remains one-time; an already published version cannot be republished.
+Documentation stamps must be fresh before tagging. `docs/verified.json` records, for `README.md` and `src/playbook.ts` (the `ares playbook` text), the commit their prose was last checked against and the source paths it describes. `bun run check` warns about a stale document; `bun run release:tag` and the tag workflow run `bun scripts/check-docs.mjs --require-fresh` and refuse. To restamp in the release PR, reread each stale document against the release PR's base commit on `origin/main`, fix the prose, and set its `verifiedAgainst` to that base commit (it survives the squash merge; never stamp a branch commit). Mechanical README facts (install line, command list, MCP tools) are generated: run `bun scripts/readme-facts.ts --write` after changing `package.json`, `src/commands-table.ts` or the MCP tool table.
+
+The tag workflow first waits up to 30 minutes for the exact commit's main-push `Check` workflow and `ci-ok` aggregate to succeed. A failed, skipped or cancelled result refuses release. It checks fresh documentation stamps, the matching package version, dated CHANGELOG and main ancestry before staging. It reuses CI rather than rerunning the full suite, then installs dependencies, stages a hash-bound tarball and runs clean-prefix CLI, manifest and MCP smoke checks on Ubuntu and macOS. Publication uses the exact validated Linux tarball with provenance. The GitHub release follows with the dated notes, tarball and hash manifest; reruns edit the existing release and replace assets, with three bounded attempts for GitHub 429/5xx errors. When the `SITE_DISPATCH_TOKEN` secret is set, the workflow then sends a `product-release` dispatch to STAIxBWLB/agent-hub-site so the family portal re-syncs; a dispatch failure does not fail the release. npm publication remains one-time; an already published version cannot be republished.
 
 Publication runs only when `NPM_PUBLISH_ENABLED` is `true` and a reviewer approves `npm-production`. It uses Node 24 and npm 11.5.1 or newer with [npm OIDC trusted publishing](https://docs.npmjs.com/trusted-publishers), without an npm token. The owner manages trusted-publisher settings, environment approval and branch protection requiring `ci-ok`; the scripts do not change those settings.
 
@@ -569,7 +581,7 @@ Version 0.1.0 is the initial publication. There is no prior published minor line
 
 ```sh
 bun install --frozen-lockfile
-bun run check   # typecheck, boundary check, tests (no network), package dry-run
+bun run check   # typecheck, boundary check, README facts, doc stamps, tests (no network), package dry-run
 ```
 
 Live executor acceptance is separate from the offline gate. From a checkout with the configured SSH executor, run `bun scripts/live-exp.ts --host dgx-h100-2`. It uses a CPU-only synthetic Git repository, checks commit-specific scores, evaluator isolation, oversized logs, read-only log retrieval and archive containment, and prints a bounded summary. It removes its labeled containers and leaves private artifacts for inspection. The recorded A2 live proof is in [PR #14](https://github.com/STAIxBWLB/agent-research/pull/14); it covers that dgx Docker configuration, not every host or the local backend.
