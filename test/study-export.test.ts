@@ -29,7 +29,7 @@ async function study() {
   await ops.protocol(dir, { v: 1, method: "synthetic", candidate: { image: IMAGE, command: ["candidate"] }, evaluator: { image: IMAGE, command: ["evaluator"] }, metrics: [{ name: "score", unit: "points", direction: "max" }], seeds: [1, 2], limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts: 100, maxWallHours: 1, maxGpuHours: 0 } }, ctx);
   await ops.finalSeeds(dir, { v: 1, seeds: [2] }, ctx); await ops.selection(dir, { v: 1, run: "investigate", metric: "score", baseline: { commit: BASE }, minSeeds: 1, minDelta: 1 }, ctx);
   attempt(dir, "investigate", BASE, 1, 10); attempt(dir, "investigate", WIN, 1, 12); attempt(dir, "investigate", ABL, 1, 3, "failed");
-  await ops.investigateClose(dir, ctx); await ops.ablateAdd(dir, { id: "without", commit: ABL, removes: "synthetic component" }, ctx);
+  await ops.investigateClose(dir, ctx); await ops.ablateAdd(dir, { id: "without", commit: ABL, removes: "confidential" }, ctx);
   attempt(dir, "ablate", WIN, 1, 12); attempt(dir, "ablate", ABL, 1, 11); await ops.ablateClose(dir, ctx);
   await ops.gateDecide(dir, "final", "approve", undefined, ctx);
   attempt(dir, "final", BASE, 2, 10); attempt(dir, "final", WIN, 2, 12); await ops.finalClose(dir, ctx);
@@ -100,7 +100,7 @@ test("review regressions: ledger allowlist, label and prose, closed results, run
   attempt(dir, "constructor", WIN, 1, 1, "succeeded", "/work");
   const out = join(tempDir(), "bundle"), manifest = ops.studyExport(dir, { bundle: out }) as { counts: { byRun: Record<string, Record<string, number>> } };
   const all = readdirSync(out).map(f => readFileSync(join(out, f), "utf8")).join("\n");
-  for (const needle of ["dgx02", "/work", "synthetic component", "\"label\""]) expect(all).not.toContain(needle);
+  for (const needle of ["dgx02", "/work", "confidential", "\"label\""]) expect(all).not.toContain(needle);
   const ledger = readFileSync(join(out, "ledger.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l));
   expect(ledger.find(e => e.type === "executor.set").data).toEqual({ kind: "ssh" });
   expect((manifest.counts.byRun["constructor"] as unknown)).toEqual({ running: 0, succeeded: 1, failed: 0, cancelled: 0, unknown: 0 });
@@ -119,4 +119,21 @@ test("review regressions: ledger allowlist, label and prose, closed results, run
   expect(() => ops.studyExport(dir, { bundle: join(dir, "export") })).toThrow("inside the study directory");
   expect(() => ops.studyExport(dir, { bundle: dir })).toThrow("inside the study directory");
   expect(existsSync(join(dir, "export"))).toBe(false);
+});
+
+test("round 2: one-token free text, broader path scan, symlinked target, early attempt bound", async () => {
+  const { symlinkSync } = await import("node:fs");
+  const base = await study();
+  const out = join(tempDir(), "bundle"); ops.studyExport(base, { bundle: out });
+  expect(readFileSync(join(out, "results.json"), "utf8")).not.toContain("removes");
+  for (const metric of ["//server/share", "/비밀"]) {
+    const d = await study(); attempt(d, "posthoc", WIN, 1, 1, "succeeded", "synthetic", metric);
+    const o = join(tempDir(), "bundle"); expect(() => ops.studyExport(d, { bundle: o })).toThrow("absolute path"); expect(existsSync(o)).toBe(false);
+  }
+  const link = join(tempDir(), "link"); symlinkSync(base, link);
+  expect(() => ops.studyExport(base, { bundle: join(link, "nested", "bundle") })).toThrow("inside the study directory");
+  expect(existsSync(join(base, "nested"))).toBe(false);
+  const o2 = join(tempDir(), "bundle");
+  expect(() => exportBundle(base, { bundle: o2 }, 600)).toThrow("attempts.jsonl would exceed 600 bytes");
+  expect(existsSync(o2)).toBe(false);
 });

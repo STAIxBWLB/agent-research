@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
-import { join, relative, resolve, isAbsolute } from "node:path";
+import { existsSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
+import { basename, dirname, join, relative, resolve, isAbsolute } from "node:path";
 import { readAttemptRecords, type Attempt, type AttemptStatus } from "./exp/attempts.ts";
 import { ablateResultPath, readClosedAblate } from "./exp/ablate.ts";
 import { finalResultPath, readClosedFinal } from "./exp/final.ts";
@@ -47,10 +47,12 @@ function reduceData(data: Record<string, unknown>, keys: readonly string[]): Rec
   for (const key of keys) { const value = Object.hasOwn(data, key) ? data[key] : undefined; if (closed(value)) out[key] = value; else if (Array.isArray(value) && value.every(closed)) out[key] = value; }
   return out;
 }
-/** Keep numbers, booleans, null, hashes and closed tokens recursively; drop every other string. */
+/** Result keys that hold free text even when a value happens to be one token. */
+const FREE_TEXT_KEYS = new Set(["removes", "reason", "reasons", "description", "note", "notes", "label", "text", "message", "cause", "retryWhen", "method", "question"]);
+/** Keep numbers, booleans, null, hashes and closed tokens recursively; drop free-text keys and every other string. */
 function project(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(project).filter(v => v !== undefined);
-  if (plain(value)) { const out: Record<string, unknown> = {}; for (const [k, v] of Object.entries(value)) { const p = project(v); if (p !== undefined) out[k] = p; } return out; }
+  if (plain(value)) { const out: Record<string, unknown> = {}; for (const [k, v] of Object.entries(value)) { if (FREE_TEXT_KEYS.has(k)) continue; const p = project(v); if (p !== undefined) out[k] = p; } return out; }
   return closed(value) ? value : undefined;
 }
 function reduceEvent(event: LedgerEvent) {
@@ -119,7 +121,7 @@ function evidence(dir: string) {
 }
 
 const SCANS: [string, RegExp][] = [
-  ["absolute path", /(^|[\s"'=:(,[{])(\/[A-Za-z0-9._~-]|~\/)/],
+  ["absolute path", /(^|[\s"'=:(,[{])(\/[^\s"']|~\/)/u],
   ["absolute path", /\b[A-Za-z]:\\/],
   ["url", /\b[a-z][a-z0-9+.-]*:\/\/|\b(?:mailto|urn|file|data):/i],
   ["key-like token", /\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{12,}|\b(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{12,}|\bxox[abprs]-[A-Za-z0-9-]{8,}|\bAKIA[0-9A-Z]{12,}|\beyJ[A-Za-z0-9_-]{16,}/],
@@ -137,16 +139,28 @@ function emptyDir(path: string): void {
   else mkdirSync(path, { recursive: true });
 }
 
+/** Real path of the nearest existing ancestor with the missing tail re-appended, so symlinks cannot hide containment. */
+function realTarget(path: string): string {
+  const tail: string[] = [];
+  let current = path;
+  while (!existsSync(current)) { const parent = dirname(current); if (parent === current) break; tail.unshift(basename(current)); current = parent; }
+  return join(realpathSync(current), ...tail);
+}
 /** Build the content-free bundle from committed study files only; never reads the executor workdir. */
 export function exportBundle(dirArg: string, options: { bundle: string; list?: boolean }, maxFileBytes = BUNDLE_FILE_BYTES): BundleManifest | BundleListing {
-  const { dir, study } = openStudy(dirArg), target = resolve(options.bundle), inside = relative(resolve(dir), target);
+  const { dir, study } = openStudy(dirArg), target = resolve(options.bundle), inside = relative(realpathSync(dir), realTarget(target));
   if (inside === "" || (!inside.startsWith("..") && !isAbsolute(inside))) throw new Error("study export: --bundle is inside the study directory; choose a directory outside the study");
   if (options.list) return { bundle: options.bundle, files: [...BUNDLE_FILES], wouldWrite: true };
   const events = readLedger(dir);
-  const attempts = study.mode === "experiment" ? [...readAttemptRecords(dir)] : [];
   const zero = () => Object.fromEntries(STATUSES.map(s => [s, 0])) as Record<AttemptStatus, number>;
-  const byStatus = zero(), runCounts = new Map<string, Record<AttemptStatus, number>>();
-  for (const a of attempts) {
+  const byStatus = zero(), runCounts = new Map<string, Record<AttemptStatus, number>>(), attemptLines: string[] = [];
+  let attemptBytes = 0;
+  // One pass; only the projected row and counts outlive each raw record.
+  for (const a of study.mode === "experiment" ? readAttemptRecords(dir) : []) {
+    const line = JSON.stringify(attemptRow(a)) + "\n";
+    attemptBytes += Buffer.byteLength(line);
+    if (attemptBytes > maxFileBytes) throw new Error(`study export: attempts.jsonl would exceed ${maxFileBytes} bytes; nothing was written`);
+    attemptLines.push(line);
     byStatus[a.status]++;
     let row = runCounts.get(a.run); if (!row) runCounts.set(a.run, row = zero()); row[a.status]++;
   }
@@ -159,7 +173,7 @@ export function exportBundle(dirArg: string, options: { bundle: string; list?: b
   const lines = (rows: unknown[]) => rows.map(r => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : "");
   const files: Record<string, string> = {
     "ledger.jsonl": lines(events.map(reduceEvent)),
-    "attempts.jsonl": lines(attempts.map(attemptRow)),
+    "attempts.jsonl": attemptLines.join(""),
     "results.json": JSON.stringify({
       investigate,
       ablate: experiment && existsSync(ablateResultPath(dir)) ? closedResult("ablate", () => readClosedAblate(dir)) : null,
@@ -172,7 +186,7 @@ export function exportBundle(dirArg: string, options: { bundle: string; list?: b
     bundle: 1, formats: { ...FORMAT_VERSIONS }, studyIdSha256: sha256(study.id), mode: study.mode,
     protocolHash: protocol ? protocolHash(protocol) : null, sealBinding: study.mode === "experiment" ? designBinding(dir) ?? null : null,
     window: { from: events[0]?.at ?? null, to: events.at(-1)?.at ?? null },
-    counts: { attempts: attempts.length, byStatus, byRun, ledgerEvents: events.length, reviews: reviewRows.length },
+    counts: { attempts: attemptLines.length, byStatus, byRun, ledgerEvents: events.length, reviews: reviewRows.length },
     files: Object.fromEntries(Object.entries(files).map(([name, text]) => [name, sha256(text)])),
   };
   files["manifest.json"] = JSON.stringify(manifest, null, 2) + "\n";
