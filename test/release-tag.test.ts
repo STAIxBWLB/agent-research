@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { prepareRelease, tagRelease } from "../scripts/release-tag.ts";
 import type { ReleaseRunner } from "../scripts/release-ci.ts";
@@ -70,4 +70,17 @@ test("tag refuses undated/empty changelog and leaves a failed pushed tag for exp
   }
   const failed = fake({ pushFailure: true }); await expect(tagRelease({ root: prepared(), runner: failed.runner })).rejects.toThrow("tag exists locally but push did not complete");
   expect(creates(failed).map(call => call.args[0])).toEqual(["tag", "push"]); expect(failed.calls.some(call => call.args.includes("--delete") || call.args.includes("--force"))).toBe(false);
+});
+
+test("prepare/tag sanitize missing metadata and git failures with the next step", async () => {
+  const missing = fixture(); unlinkSync(join(missing, "package.json"));
+  for (const invoke of [() => prepareRelease("0.1.1", { root: missing, runner: fake({ branch: "release" }).runner }), () => tagRelease({ root: missing, runner: fake().runner })]) {
+    await expect(invoke()).rejects.toThrow("release metadata read: local file problem");
+    await expect(invoke()).rejects.toThrow("then rerun");
+  }
+  const runner: ReleaseRunner = async () => { throw Object.assign(new Error("private https://example.invalid/token"), { code: 128 }); };
+  for (const invoke of [() => prepareRelease("0.1.1", { root: fixture(), runner }), () => tagRelease({ root: prepared(), runner })]) {
+    try { await invoke(); throw new Error("expected refusal"); }
+    catch (cause) { const message = String(cause); expect(message).toContain("nonzero command exit"); expect(message).toContain("git access"); expect(message).toContain("then rerun"); expect(message).not.toContain("private"); expect(message).not.toContain("https://"); }
+  }
 });

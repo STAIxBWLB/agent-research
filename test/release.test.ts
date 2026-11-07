@@ -77,3 +77,13 @@ test("workflow gate order, aggregate, checkout pins and release smoke remain enf
   expect(release).not.toContain("bun run check"); expect(release).toContain("bun run release:smoke"); expect(release).toContain("bun scripts/release.ts gate");
   for (const workflow of [check, release]) for (const match of workflow.matchAll(/uses: actions\/checkout@([^ ]+)/g)) expect(match[1]).toBe("d23441a48e516b6c34aea4fa41551a30e30af803");
 });
+
+test("gate sanitizes file and lookup failures without losing the cause or next step", async () => {
+  const f = fixture(), env = { RELEASE_TAG: f.expected.tag, RELEASE_SHA: f.expected.commit };
+  const runner = async (program: "git" | "gh") => { if (program === "gh") throw new Error("private https://example.invalid/token (HTTP 403)"); return ""; };
+  try { await gateRelease(f.root, env, runner); throw new Error("expected refusal"); }
+  catch (cause) { const message = String(cause); expect(message).toContain("release CI GitHub lookup: HTTP 403"); expect(message).toContain("GH_TOKEN actions:read"); expect(message).toContain("then rerun"); expect(message).not.toContain("private"); expect(message).not.toContain("https://"); }
+  unlinkSync(join(f.root, "CHANGELOG.md"));
+  await expect(gateRelease(f.root, env, runner)).rejects.toThrow("release CHANGELOG read: local file problem");
+  await expect(gateRelease(f.root, env, runner)).rejects.toThrow("check the release job inputs");
+});

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { symlinkSync, writeFileSync } from "node:fs";
+import { symlinkSync, writeFileSync, unlinkSync, truncateSync } from "node:fs";
 import { join } from "node:path";
 import { publishGitHubRelease, type GitHubReleaseOptions } from "../scripts/release-github.ts";
 import type { ReleaseRunner } from "../scripts/release-ci.ts";
@@ -82,4 +82,39 @@ test("bad workflow inputs and missing or linked asset files refuse before gh", a
   const gh = fake([]); await expect(publishGitHubRelease({ ...f, assets: join(tempDir(), "missing") }, gh.runner, gh.pause)).rejects.toThrow(); expect(gh.calls).toEqual([]);
   const linked = join(tempDir(), "notes-link"); symlinkSync(f.notesFile, linked);
   await expect(publishGitHubRelease({ ...f, notesFile: linked }, gh.runner, gh.pause)).rejects.toThrow(); expect(gh.calls).toEqual([]);
+});
+
+test("create response failure reconciles an already-created release before edit/upload", async () => {
+  const f = fixture(), gh = fake(["{}", http(404), http(500), "exists", "edited", "uploaded"]);
+  await publishGitHubRelease(f, gh.runner, gh.pause);
+  expect(gh.calls.map(call => call.args.slice(0, 2))).toEqual([
+    ["api", `repos/${f.repo}/git/ref/tags/${f.tag}`], ["api", `repos/${f.repo}/releases/tags/${f.tag}`],
+    ["release", "create"], ["api", `repos/${f.repo}/releases/tags/${f.tag}`], ["release", "edit"], ["release", "upload"],
+  ]);
+  expect(gh.delays).toEqual([]);
+});
+
+test("create 500 then 422/exists recovers while create retries remain bounded", async () => {
+  const f = fixture(), gh = fake(["{}", http(404), http(500), http(404), http(422), "exists", "edited", "uploaded"]);
+  await publishGitHubRelease(f, gh.runner, gh.pause);
+  expect(gh.calls.filter(call => call.args[1] === "create")).toHaveLength(2);
+  expect(gh.calls.filter(call => call.args[1] === "edit")).toHaveLength(1);
+  expect(gh.calls.at(-1)!.args).toContain("--clobber"); expect(gh.delays).toEqual([1000]);
+  const failed = fake(["{}", http(404), http(503), http(404), http(503), http(404), http(503), http(404)]);
+  await expect(publishGitHubRelease(f, failed.runner, failed.pause)).rejects.toThrow("HTTP 503");
+  expect(failed.calls.filter(call => call.args[1] === "create")).toHaveLength(3);
+  expect(failed.delays).toEqual([1000, 2000]);
+});
+
+test("missing, oversized and linked assets/notes name local file problems and a usable next step", async () => {
+  for (const [suffix, bound] of [[".tgz", 16 * 1024 * 1024], [".manifest.json", 65536], ["notes", 1024 * 1024]] as const) {
+    for (const mode of ["missing", "oversized", "linked"]) {
+      const f = fixture(), file = suffix === "notes" ? f.notesFile : `${f.assets}${suffix}`, gh = fake([]);
+      if (mode === "oversized") truncateSync(file, bound + 1);
+      else { unlinkSync(file); if (mode === "linked") { const target = join(tempDir(), "target"); writeFileSync(target, "private payload"); symlinkSync(target, file); } }
+      try { await publishGitHubRelease(f, gh.runner, gh.pause); throw new Error("expected refusal"); }
+      catch (cause) { const message = String(cause); expect(message).toContain("assets/notes read: local file problem"); expect(message).toContain("check the release job inputs"); expect(message).toContain("then rerun"); expect(message).not.toContain(file); expect(message).not.toContain("private payload"); }
+      expect(gh.calls).toEqual([]);
+    }
+  }
 });

@@ -41,3 +41,20 @@ test("invalid GitHub responses fail without waiting", async () => {
     await expect(requireCi(sha, { runner: async () => value })).rejects.toThrow("release CI:");
   }
 });
+
+test("CI lookup failures name the operation, class and permission next step without raw diagnostics", async () => {
+  for (const error of [new Error("secret https://example.invalid/token (HTTP 403)"), Object.assign(new Error("secret https://example.invalid/token"), { code: "ENOENT" })]) {
+    for (const failJobs of [false, true]) {
+      const runner: ReleaseRunner = async (_p, args) => { if (failJobs && !args[1]!.includes("/jobs?")) return JSON.stringify({ workflow_runs: [run()] }); throw error; };
+      for (const invoke of [requireCi, waitForCi]) {
+        try { await invoke(sha, { runner }); throw new Error("expected refusal"); }
+        catch (cause) {
+          const message = String(cause); expect(message).toContain("release CI GitHub lookup");
+          expect(message).toContain("code" in error ? "spawn failure (ENOENT)" : "HTTP 403");
+          expect(message).toContain("GH_TOKEN actions:read"); expect(message).toContain("then rerun");
+          expect(message).not.toContain("secret"); expect(message).not.toContain("https://");
+        }
+      }
+    }
+  }
+});

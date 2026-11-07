@@ -1,4 +1,4 @@
-import { defaultReleaseRunner, waitForCi, type ReleaseRunner } from "./release-ci.ts";
+import { defaultReleaseRunner, waitForCi, releaseFailure, ReleaseError, type ReleaseRunner } from "./release-ci.ts";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
@@ -11,7 +11,7 @@ export const METADATA_BYTES = 65_536, CHANGELOG_BYTES = 1024 * 1024, ARCHIVE_BYT
 export interface ReleaseManifest { name: string; version: string; tag: string; commit: string; sha256: string; distTag: "latest" | "next" }
 export interface ReleaseIdentity { name: string; version: string; tag: string; commit: string }
 const required = ["package.json", "README.md", "CHANGELOG.md", "LICENSE", "bin/ares.js", "src/cli.ts", "src/ui/plugin.ts", "src/ui/panel.js", "src/ui/panel.css"];
-function fail(message: string): never { throw new Error(`release: ${message}; correct the candidate and stage a new artifact before publishing`); }
+function fail(message: string): never { throw new ReleaseError(`release: ${message}; correct the candidate and stage a new artifact before publishing`); }
 function json(file: string, bound = METADATA_BYTES): unknown {
   try { return JSON.parse(readTextBounded(file, bound, { noFollow: true })); } catch { fail(`${file} is unreadable, oversized or invalid JSON`); }
 }
@@ -42,13 +42,19 @@ export function identity(root = process.cwd(), env: NodeJS.ProcessEnv = process.
 }
 export function validateRelease(root = process.cwd(), env: NodeJS.ProcessEnv = process.env): ReleaseIdentity {
   if (!env.RELEASE_TAG || !env.RELEASE_SHA) fail("RELEASE_TAG and RELEASE_SHA are required for tag validation");
-  const result = identity(root, env); releaseSection(readTextBounded(join(root, "CHANGELOG.md"), CHANGELOG_BYTES), result.version); return result;
+  const result = identity(root, env);
+  let changelog: string;
+  try { changelog = readTextBounded(join(root, "CHANGELOG.md"), CHANGELOG_BYTES); }
+  catch (error) { throw releaseFailure("release CHANGELOG read", error, "check the release job inputs for a readable bounded CHANGELOG.md, then rerun", "local file problem"); }
+  releaseSection(changelog, result.version); return result;
 }
 export async function gateRelease(root = process.cwd(), env: NodeJS.ProcessEnv = process.env, runner: ReleaseRunner = defaultReleaseRunner(root)): Promise<void> {
-  const candidate = validateRelease(root, env);
-  try { await runner("git", ["merge-base", "--is-ancestor", candidate.commit, "origin/main"]); }
-  catch { fail("tag commit must be on origin/main; merge the candidate before tagging"); }
-  await waitForCi(candidate.commit, { runner });
+  try {
+    const candidate = validateRelease(root, env);
+    try { await runner("git", ["merge-base", "--is-ancestor", candidate.commit, "origin/main"]); }
+    catch (error) { throw releaseFailure("release gate main ancestry check (tag commit must be on origin/main)", error, "check git access and merge the candidate onto main, then rerun"); }
+    await waitForCi(candidate.commit, { runner });
+  } catch (error) { throw releaseFailure("release gate", error, "check the release job inputs and GH_TOKEN actions:read permission, then rerun"); }
 }
 export function assertPackageFiles(files: string[], expected?: string[]): void {
   if (!files.length || files.length > 4096 || new Set(files).size !== files.length) fail("archive file list is empty, duplicated or exceeds 4096 entries");
@@ -143,5 +149,5 @@ async function main(args: string[]) {
   } else fail("usage: release.ts gate | validate | stage DIR | verify DIR [--publish] | notes DIR FILE");
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { await main(process.argv.slice(2)); } catch (cause) { console.error(cause instanceof Error ? cause.message : "release failed; inspect the candidate before retrying"); process.exitCode = 1; }
+  try { await main(process.argv.slice(2)); } catch (cause) { console.error(releaseFailure("release operation", cause, "check the release job inputs, git access and GH_TOKEN permissions, then rerun").message); process.exitCode = 1; }
 }
