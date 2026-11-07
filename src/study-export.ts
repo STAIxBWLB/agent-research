@@ -139,21 +139,43 @@ function evidence(dir: string) {
   };
 }
 
+/** Path rules run on decoded keys and string values, so a boundary is a real character (a raw newline or tab included). */
+const PATH_SCANS: RegExp[] = [
+  // POSIX: `/` or `~/` not preceded by a letter, digit or underscore; units such as tokens/s keep a word character there.
+  /(?<![\p{L}\p{N}_])(?:\/|~\/)/u,
+  /\b[A-Za-z]:\\/,
+  // Windows root-relative (\Users\x), bare \ and UNC (\\server): any backslash not preceded by a word character or backslash.
+  /(?<![\p{L}\p{N}_\\])\\/u,
+];
+/** URL, key-like and env rules keep running over the serialized text. */
 const SCANS: [string, RegExp][] = [
-  // A true token boundary: any non-word character (or start) before `/`; units such as tokens/s keep a word character there.
-  ["absolute path", /(?<![\p{L}\p{N}_])(?:\/|~\/)/u],
-  ["absolute path", /\b[A-Za-z]:\\/],
-  // Windows root-relative (\Users\x), bare \ and UNC (\\server): any serialized backslash pair at a token boundary, whatever follows.
-  ["absolute path", /(?<![\p{L}\p{N}_\\])\\\\/u],
   ["url", /\b[a-z][a-z0-9+.-]*:\/\/|\b(?:mailto|urn|file|data):/i],
   ["key-like token", /\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{12,}|\b(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{12,}|\bxox[abprs]-[A-Za-z0-9-]{8,}|\bAKIA[0-9A-Z]{12,}|\beyJ[A-Za-z0-9_-]{16,}/],
   ["key-like token", /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])/],
   ["env value", /(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*=[^\s"]/],
 ];
+/** Every key and string value of a JSON document, or of each JSONL line; text that is not JSON is scanned as one string. */
+function* decodedStrings(text: string): Generator<string> {
+  const walk = function* (value: unknown): Generator<string> {
+    if (typeof value === "string") yield value;
+    else if (Array.isArray(value)) for (const item of value) yield* walk(item);
+    else if (value && typeof value === "object") for (const [key, item] of Object.entries(value)) { yield key; yield* walk(item); }
+  };
+  let whole: unknown, parsed = false;
+  try { whole = JSON.parse(text); parsed = true; } catch { /* JSONL or plain text */ }
+  if (parsed) { yield* walk(whole); return; }
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    try { yield* walk(JSON.parse(line)); } catch { yield line; }
+  }
+}
 /** Refuse the whole bundle if any file carries a path, URL, env assignment or key-like token. */
 export function scanBundle(files: Record<string, string>): void {
-  for (const [name, text] of Object.entries(files)) for (const [kind, pattern] of SCANS)
-    if (pattern.test(text)) throw new Error(`study export: refused; ${name} would contain a ${kind}. Remove it from the study record (for example an attempt label or ledger field) and retry; nothing was written`);
+  const refuse = (name: string, kind: string): never => { throw new Error(`study export: refused; ${name} would contain a ${kind}. Remove it from the study record (for example an attempt label or ledger field) and retry; nothing was written`); };
+  for (const [name, text] of Object.entries(files)) {
+    for (const value of decodedStrings(text)) if (PATH_SCANS.some(pattern => pattern.test(value))) refuse(name, "absolute path");
+    for (const [kind, pattern] of SCANS) if (pattern.test(text)) refuse(name, kind);
+  }
 }
 
 function emptyDir(path: string): void {
