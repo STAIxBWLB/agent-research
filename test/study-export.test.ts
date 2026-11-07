@@ -5,20 +5,20 @@ import * as ops from "../src/commands.ts";
 import { run } from "../src/cli.ts";
 import { ARES_TOOLS } from "../src/mcp-tools.ts";
 import { protocolHash, readProtocol } from "../src/exp/protocol.ts";
-import { scanBundle } from "../src/study-export.ts";
+import { exportBundle, scanBundle } from "../src/study-export.ts";
 import { appendEvent, openStudy } from "../src/study.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
 
 const actor = { kind: "person" as const }, ctx = { actor, http: fakeHttp([]).http }, BASE = "a".repeat(40), WIN = "b".repeat(40), ABL = "c".repeat(40);
 const IMAGE = `fixture@sha256:${"a".repeat(64)}`;
 let serial = 0;
-function attempt(dir: string, runName: string, commit: string, seed: number, value: number, status = "succeeded", label = "synthetic") {
+function attempt(dir: string, runName: string, commit: string, seed: number, value: number, status = "succeeded", label = "synthetic", metric = "score") {
   const id = (++serial).toString(16).padStart(16, "0"), protocol = readProtocol(dir)!, folder = join(dir, "runs", runName, "attempts"); mkdirSync(folder, { recursive: true });
   const stage = { image: IMAGE, argv: ["docker", "run", "--mount", "src=/Users/someone/work,dst=/work", "--env", "ARES_SEED=1"], mounts: [{ target: "/work/candidate", readOnly: true }], network: "none", limits: protocol.limits, user: "1001", containerId: "f".repeat(64), startedAt: "2030-01-01T00:00:00Z", endedAt: "2030-01-01T00:00:05Z", exitCode: 0, evidence: { logs: { stdout: { path: "/srv/exec/logs/candidate.stdout.log", sha256: "d".repeat(64), bytes: 3, truncated: false } } } };
   writeFileSync(join(folder, `${id}.json`), JSON.stringify({
     v: 1, id, studyId: openStudy(dir).study.id, run: runName, commit, treeId: "e".repeat(40), seed, label, protocolHash: protocolHash(protocol), sealBinding: "9".repeat(64), protocol,
     executor: { kind: "ssh", host: "gpu-box", workdir: "/srv/exec" }, paths: { snapshot: "/srv/exec/snap.tar" }, stages: { candidate: stage, evaluator: { ...stage, exitCode: 0 } }, stage: "evaluator", status,
-    startedAt: "2030-01-01T00:00:00Z", endedAt: "2030-01-01T00:00:10Z", metrics: [{ name: "score", value, unit: "points", provenance: "ares-observed" }], outputs: [{ path: "/srv/exec/out.json", sha256: "c".repeat(64), bytes: 9 }],
+    startedAt: "2030-01-01T00:00:00Z", endedAt: "2030-01-01T00:00:10Z", metrics: [{ name: metric, value, unit: "points", provenance: "ares-observed" }], outputs: [{ path: "/srv/exec/out.json", sha256: "c".repeat(64), bytes: 9 }],
     sealing: { separateContainers: true, evaluatorReadOnly: true, candidateHasNoEvaluator: true, verifiedBy: "ares-observed" },
   }));
   appendEvent(dir, actor, "attempt.started", { id, run: runName, commit, seed }); return id;
@@ -72,15 +72,16 @@ test("AC2: no bundle file carries paths, mounts, container ids, argv, env, URLs 
 });
 
 test("AC2: a planted path or key-like token refuses the whole export and writes nothing", async () => {
-  for (const label of ["/Users/someone/secret/data", "sk-AbCdEf0123456789xyzQ", "see https://example.test/x"]) {
-    const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", label);
+  for (const metric of ["/Users/someone/secret/data", "/work", "sk-AbCdEf0123456789xyzQ", "see https://example.test/x", "mailto:a", "urn:x:y", "A=secret"]) {
+    const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", metric);
     const out = join(tempDir(), "bundle");
     expect(() => ops.studyExport(dir, { bundle: out })).toThrow("study export: refused");
     expect(existsSync(out)).toBe(false);
   }
   expect(() => scanBundle({ "x": "AWS AKIAABCDEFGHIJKLMNOP" })).toThrow("key-like");
   expect(() => scanBundle({ "x": "TOKEN=abc" })).toThrow("env value");
-  expect(() => scanBundle({ "x": JSON.stringify({ at: "2030-01-01T00:00:00Z", sha: "a".repeat(64), unit: "points/s" }) })).not.toThrow();
+  for (const planted of ["/secret", "file:x", "data:x"]) expect(() => scanBundle({ x: JSON.stringify({ v: planted }) })).toThrow("refused");
+  expect(() => scanBundle({ "x": JSON.stringify({ at: "2030-01-01T00:00:00Z", sha: "a".repeat(64), unit: "points/s", ref: `attempt:${"a".repeat(16)}.score` }) })).not.toThrow();
 });
 
 test("AC4: CLI and MCP both expose the command; --list writes nothing; non-empty target refuses", async () => {
@@ -91,4 +92,31 @@ test("AC4: CLI and MCP both expose the command; --list writes nothing; non-empty
   expect(written.code).toBe(0); expect(JSON.parse(written.text).bundle).toBe(1);
   await expect(run(["study", "export", dir, "--bundle", out], {})).rejects.toThrow("not empty");
   expect(ARES_TOOLS.some(t => t.name === "ares_study_export")).toBe(true);
+});
+
+test("review regressions: ledger allowlist, label and prose, closed results, run names, bounds, target", async () => {
+  const dir = await study();
+  await ops.executorSet(dir, { v: 1, kind: "ssh", host: "dgx02", workdir: "/srv/exec" }, ctx);
+  attempt(dir, "constructor", WIN, 1, 1, "succeeded", "/work");
+  const out = join(tempDir(), "bundle"), manifest = ops.studyExport(dir, { bundle: out }) as { counts: { byRun: Record<string, Record<string, number>> } };
+  const all = readdirSync(out).map(f => readFileSync(join(out, f), "utf8")).join("\n");
+  for (const needle of ["dgx02", "/work", "synthetic component", "\"label\""]) expect(all).not.toContain(needle);
+  const ledger = readFileSync(join(out, "ledger.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l));
+  expect(ledger.find(e => e.type === "executor.set").data).toEqual({ kind: "ssh" });
+  expect(manifest.counts.byRun.constructor).toEqual({ running: 0, succeeded: 1, failed: 0, cancelled: 0, unknown: 0 });
+  const rows = readFileSync(join(out, "attempts.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l));
+  expect(rows.every(r => typeof r.labelSha256 === "string" && !("label" in r))).toBe(true);
+
+  const tampered = await study(), file = join(tampered, "runs", "ablate", "ablate.json");
+  writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), v: 99 }, null, 2) + "\n");
+  const out2 = join(tempDir(), "bundle");
+  expect(() => ops.studyExport(tampered, { bundle: out2 })).toThrow("ablate result is not a verified closed result");
+  expect(existsSync(out2)).toBe(false);
+
+  const out3 = join(tempDir(), "bundle");
+  expect(() => exportBundle(dir, { bundle: out3 }, 1024)).toThrow("nothing was written");
+  expect(existsSync(out3)).toBe(false);
+  expect(() => ops.studyExport(dir, { bundle: join(dir, "export") })).toThrow("inside the study directory");
+  expect(() => ops.studyExport(dir, { bundle: dir })).toThrow("inside the study directory");
+  expect(existsSync(join(dir, "export"))).toBe(false);
 });
