@@ -120,9 +120,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
-    env:
-      # Job level so the dispatch step's `if` can read it (a step's own env is not visible to its `if`).
-      SITE_DISPATCH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -141,8 +138,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bun scripts/release-github.ts "$RUNNER_TEMP/release-notes.md"
-      # Lets the family portal re-sync after a release; skipped without the secret and never fails the release.
-      - name: Notify agent-hub-site of the release
+
+  # Lets the family portal re-sync after a release. A separate job keeps the token away from the release-writing steps;
+  # it is skipped without the secret and never fails the release.
+  notify-site:
+    needs: github-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      # Job level so the step's `if` can read it (a step's own env is not visible to its `if`).
+      SITE_DISPATCH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+    steps:
+      - name: Dispatch product-release to STAIxBWLB/agent-hub-site
         if: env.SITE_DISPATCH_TOKEN != ''
         continue-on-error: true
         env:
