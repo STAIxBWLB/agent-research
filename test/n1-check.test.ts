@@ -1,0 +1,53 @@
+import { expect, test } from "bun:test";
+import { compareManifests, resolveN1, type ManifestLike } from "../scripts/n1-lib.ts";
+
+test("resolveN1: development toward the next minor checks the latest patch of the published line", () => {
+  expect(resolveN1("0.1.0", ["0.0.0-stage", "0.1.0"])).toBe("0.1.0");
+  expect(resolveN1("0.1.0", ["0.1.0", "0.1.1", "0.1.2"])).toBe("0.1.2");
+  expect(resolveN1("0.2.0", ["0.0.0-stage", "0.1.0", "0.1.3"])).toBe("0.1.3");
+  expect(resolveN1("0.2.0", ["0.1.0", "0.1.3", "0.2.0"])).toBe("0.2.0");
+  expect(resolveN1("1.0.0", ["0.1.0", "0.9.4", "1.0.0-rc.1"])).toBe("0.9.4");
+});
+
+test("resolveN1 fails closed without a previous stable minor line", () => {
+  expect(() => resolveN1("0.1.0", [])).toThrow("no published stable version");
+  expect(() => resolveN1("0.1.0", ["0.0.0-stage"])).toThrow("no published stable version");
+  expect(() => resolveN1("0.1.0-rc.1", ["0.1.0"])).toThrow("not a stable x.y.z");
+});
+
+const base: ManifestLike = {
+  commands: [{ name: "status", usage: "status <dir> [--json]" }, { name: "init", usage: "init <dir> --question TEXT [--autonomy auto|gates] [--json]" }],
+  mcp: { tools: [{ name: "ares_status", readOnly: true }, { name: "ares_init", readOnly: false }] },
+};
+const clone = (): ManifestLike => JSON.parse(JSON.stringify(base));
+
+test("compareManifests: identical and additive changes pass", () => {
+  expect(compareManifests(base, clone())).toEqual([]);
+  const next = clone();
+  next.commands.push({ name: "study export", usage: "study export <dir> --bundle DIR [--json]" });
+  next.commands[1]!.usage = "init <dir> --question TEXT [--mode survey|experiment] [--autonomy auto|gates|copilot|step] [--json]";
+  next.mcp.tools.push({ name: "ares_study_export", readOnly: false });
+  expect(compareManifests(base, next)).toEqual([]);
+});
+
+test("compareManifests: a removed command fails", () => {
+  const next = clone(); next.commands = next.commands.filter(c => c.name !== "status");
+  expect(compareManifests(base, next)).toEqual(['CLI: command "status" removed']);
+});
+
+test("compareManifests: a removed or renamed usage word and a narrowed enum fail", () => {
+  const renamed = clone(); renamed.commands[1]!.usage = "init <dir> --prompt TEXT [--autonomy auto|gates] [--json]";
+  expect(compareManifests(base, renamed)[0]).toContain('CLI: command "init" usage changed');
+  const narrowed = clone(); narrowed.commands[1]!.usage = "init <dir> --question TEXT [--autonomy auto] [--json]";
+  expect(compareManifests(base, narrowed)[0]).toContain('CLI: command "init" usage changed');
+});
+
+test("compareManifests: a removed tool fails", () => {
+  const next = clone(); next.mcp.tools = next.mcp.tools.filter(t => t.name !== "ares_init");
+  expect(compareManifests(base, next)).toEqual(['MCP: tool "ares_init" removed']);
+});
+
+test("compareManifests: a flipped readOnly fails in either direction", () => {
+  const next = clone(); next.mcp.tools[0]!.readOnly = false; next.mcp.tools[1]!.readOnly = true;
+  expect(compareManifests(base, next)).toEqual(['MCP: tool "ares_status" readOnly changed from true to false', 'MCP: tool "ares_init" readOnly changed from false to true']);
+});
