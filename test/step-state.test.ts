@@ -106,8 +106,11 @@ test("a prior step outcome cannot finish a cancelled replacement dispatch", asyn
   await ops.planControl(dir, { action: "resume", commandId: "resume-replacement", expectedRevision: 1 }, ctx);
   intent(dir, "replacement");
   await ops.planControl(dir, { action: "cancel", commandId: "cancel-replacement", node: "first", expectedRevision: 1 }, ctx);
+  const current = ops.planShow(dir);
+  expect(current.pauseReason).toBe("step");
   pause(dir, "old");
-  expect(ops.planShow(dir).pauseReason).toBeUndefined();
+  expect(ops.planShow(dir)).toEqual(current);
+  expect(ops.planShow(dir).nodes[0]!.stepCancellation?.dispatchId).toBe("replacement");
   expect(ops.planShow(dir).nodes[0]!.status).toBe("cancelled");
   expect(ops.planShow(dir).nodes[0]!.dispatchId).toBeUndefined();
 });
