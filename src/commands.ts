@@ -295,8 +295,10 @@ export async function planControl(dirArg: string, request: ControlRequest, ctx: 
   let result: ControlResult | undefined;
   await cancelAttempt(dir, prepared.attemptId!, "plan cancellation", ctx, () => {
     const events = readLedger(dir), state = readPlanState(dir, events);
-    if (state.nodes.find(node => node.id === request.node)?.dispatchId !== prepared.dispatchId) throw new Error("plan cancel: dispatch changed while cancelling the attempt; inspect ares plan show and retry with a new command-id");
+    // An identical cancel may have committed while this request waited for the attempt control lock.
     const current = prepareControl(state, events, request, ctx.actor, openStudy(dir).study.autonomy);
+    if (!current.event) { result = current.result; return []; }
+    if (state.nodes.find(node => node.id === request.node)?.dispatchId !== prepared.dispatchId) throw new Error("plan cancel: dispatch changed while cancelling the attempt; inspect ares plan show and retry with a new command-id");
     result = current.result;
     return current.event ? [current.event, ...(current.pause ? [current.pause] : [])] : [];
   });
