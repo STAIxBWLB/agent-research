@@ -45,7 +45,7 @@ async function prepare(version: string, options: PrepareOptions = {}): Promise<{
   if (!notes.trim()) fail("Unreleased has no notes; record the reviewed changes before preparing");
   const date = options.date ?? new Date().toISOString().slice(0, 10), newline = changelog.includes("\r\n") ? "\r\n" : "\n";
   const dated = changelog.slice(0, start) + `## Unreleased${newline}${newline}## [${version}] - ${date}${newline}` + rest;
-  releaseSection(dated.replaceAll("\r\n", "\n"), version);
+  releaseSection(dated, version);
   const indent = /\n(\t| +)"/.exec(source)?.[1] ?? "  ", packageText = JSON.stringify({ ...pkg, version }, null, indent) + "\n";
   assertWritable(packageText, METADATA_BYTES, "package.json"); assertWritable(dated, CHANGELOG_BYTES, "CHANGELOG.md");
   if (await cleanBranch(runner) !== branch) fail("branch changed while preparing");
@@ -68,7 +68,7 @@ async function mainHead(runner: ReleaseRunner): Promise<string> {
 /** Explicit operator action only: no tag is created until exact-HEAD CI and fresh Git checks pass. */
 async function tag(options: TagOptions = {}): Promise<{ version: string; tag: string; commit: string }> {
   const root = resolve(options.root ?? process.cwd()), runner = options.runner ?? defaultReleaseRunner(root), commit = await mainHead(runner), { version } = metadata(root), tag = `v${version}`;
-  validVersion(version); releaseSection(readMetadata(join(root, "CHANGELOG.md"), CHANGELOG_BYTES).replaceAll("\r\n", "\n"), version);
+  validVersion(version); releaseSection(readMetadata(join(root, "CHANGELOG.md"), CHANGELOG_BYTES), version);
   await requireCi(commit, { runner, ...(options.repo ? { repo: options.repo } : {}) });
   if (await mainHead(runner) !== commit) fail("HEAD moved while checking CI; inspect CI for the new commit");
   if ((await runner("git", ["tag", "--list", tag])).trim()) fail("tag already exists locally; never move an existing release tag");

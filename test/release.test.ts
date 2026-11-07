@@ -7,10 +7,10 @@ import { gateRelease, assertManifest, assertPackageFiles, assertToolchain, distT
 import { tempDir } from "./helpers.ts";
 const files = ["package.json", "README.md", "CHANGELOG.md", "LICENSE", "bin/ares.js", "src/cli.ts", "src/ui/plugin.ts", "src/ui/panel.js", "src/ui/panel.css"];
 const dated = "# Changelog\n\n## Unreleased\n\n## [0.1.0] - 2026-11-05\n\n- Initial publication.\n\n## [0.0.1] - 2026-01-01\n\n- Older fixture.\n";
-function fixture() {
+function fixture(changelog = dated) {
   const root = tempDir(), work = tempDir(), dir = join(work, "stage"); mkdirSync(dir);
   const pkg = { name: "@staix/agent-research", version: "0.1.0", bin: { ares: "bin/ares.js" } };
-  const content = (file: string) => file === "package.json" ? JSON.stringify(pkg) : file === "CHANGELOG.md" ? dated : "synthetic fixture\n";
+  const content = (file: string) => file === "package.json" ? JSON.stringify(pkg) : file === "CHANGELOG.md" ? changelog : "synthetic fixture\n";
   for (const file of files) { mkdirSync(join(root, file, ".."), { recursive: true }); writeFileSync(join(root, file), content(file)); }
   const env = { ...isolatedEnv(work), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
   const git = (args: string[]) => execFileSync("git", args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -86,4 +86,14 @@ test("gate sanitizes file and lookup failures without losing the cause or next s
   unlinkSync(join(f.root, "CHANGELOG.md"));
   await expect(gateRelease(f.root, env, runner)).rejects.toThrow("release CHANGELOG read: local file problem");
   await expect(gateRelease(f.root, env, runner)).rejects.toThrow("check the release job inputs");
+});
+
+test("CRLF release notes pass shared tag validation and emit LF-only GitHub notes", () => {
+  const changelog = dated.replace("- Initial publication.", "- Initial publication.\n- Second synthetic note.").replaceAll("\n", "\r\n");
+  const f = fixture(changelog), env = { RELEASE_TAG: f.expected.tag, RELEASE_SHA: f.expected.commit };
+  expect(validateRelease(f.root, env)).toEqual(f.expected);
+  const output = join(f.work, "notes.md"); releaseNotes(f.dir, output, f.root, env);
+  const notes = readFileSync(output, "utf8");
+  expect(notes).toContain("- Initial publication.\n- Second synthetic note.");
+  expect(notes).not.toContain("\r"); expect(notes).not.toContain("Older fixture");
 });

@@ -23,7 +23,7 @@ export function distTagFor(version: string): "latest" | "next" {
   return version.split("+")[0]!.includes("-") ? "next" : "latest";
 }
 export function releaseSection(text: string, version: string): string {
-  const prefix = `## [${version}] - `, lines = text.split("\n"), matches = lines.map((line, index) => line.startsWith(prefix) ? index : -1).filter(index => index >= 0);
+  const prefix = `## [${version}] - `, lines = text.replaceAll("\r\n", "\n").split("\n"), matches = lines.map((line, index) => line.startsWith(prefix) ? index : -1).filter(index => index >= 0);
   if (matches.length !== 1) fail("CHANGELOG needs exactly one dated section for this version; Unreleased is insufficient");
   const start = matches[0]!, date = lines[start]!.slice(prefix.length);
   if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date) || !Number.isFinite(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) fail("CHANGELOG release date must be a valid YYYY-MM-DD");
