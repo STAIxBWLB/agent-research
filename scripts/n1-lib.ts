@@ -1,10 +1,11 @@
 /**
  * N-1 resolution and manifest comparison, pure so they are unit-tested offline.
  *
- * Choice (#85): the checkout's target minor line is its package.json major.minor, unless that exact version is
- * already published; then the checkout is development toward the next minor (major.minor+1). N-1 is the latest
- * published stable patch of the highest minor line below the target. Prereleases (for example 0.0.0-stage) never
- * count. No such line fails closed.
+ * Choice (#85 round 3): N-1 is the latest published stable patch of the minor line directly below the checkout's
+ * major.minor core (-pre/+build stripped), whether or not the checkout version is published. Publishing 0.2.0 or a 0.2.1
+ * patch keeps N-1 on 0.1.x; the release bump to 0.3.0 moves it to 0.2.x. Prereleases in the registry list never count.
+ * With no stable version below the checkout's minor line (the initial publication line), there is nothing to check:
+ * resolveN1 returns undefined and the job skips.
  */
 type Triple = [number, number, number];
 function parse(version: string): Triple | undefined {
@@ -13,15 +14,17 @@ function parse(version: string): Triple | undefined {
 }
 const below = (a: Triple, b: Triple) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
 
-export function resolveN1(current: string, published: readonly string[]): string {
+export function resolveN1(current: string, published: readonly string[]): string | undefined {
   // Prerelease or build tags on the checkout only (0.2.0-rc.1) mark the same target minor; published lists stay stable-only.
   const core = /^(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(current)?.[1], here = core ? parse(core) : undefined;
   if (!here) throw new Error(`n1: package version ${current} is not x.y.z[-pre][+build]; fix package.json version and rerun bun scripts/n1-check.ts`);
-  const target: Triple = core === current && published.includes(current) ? [here[0], here[1] + 1, 0] : here;
+  const target = here;
   const stable = published.map(v => [v, parse(v)] as const).filter((e): e is readonly [string, Triple] => e[1] !== undefined && below(e[1], target));
-  if (!stable.length) throw new Error(`n1: no published stable version below ${target[0]}.${target[1]}; there is no previous minor line to check against; pin one with --version X.Y.Z or wait until a previous minor is published`);
+  if (!stable.length) return undefined;
   stable.sort(([, a], [, b]) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
-  return stable.at(-1)![0];
+  // The minor line directly below: the highest major.minor present, then its latest patch.
+  const [, top] = stable.at(-1)!, line = stable.filter(([, v]) => v[0] === top[0] && v[1] === top[1]);
+  return line.at(-1)![0];
 }
 
 export interface ManifestLike { commands: { name: string; usage: string }[]; mcp: { tools: { name: string; readOnly: boolean }[] } }
@@ -65,4 +68,13 @@ function widened(old: string, next: string): boolean {
   if (!oldBody!.includes("|") || oldOpen !== nextOpen || oldClose !== nextClose) return false;
   const values = new Set(nextBody!.split("|"));
   return oldBody!.split("|").every(v => values.has(v));
+}
+
+/** Study format check from the two manifests: N-1 must refuse a study version it does not support, or read it unchanged. */
+export type StudyFormatCheck = { expect: "refuse"; version: number } | { expect: "read"; version: number };
+export function studyFormatCheck(old: { formats?: { study?: unknown } }, next: { formats?: { study?: unknown } }): StudyFormatCheck {
+  const checkout = next.formats?.study, supported = old.formats?.study;
+  if (!Number.isSafeInteger(checkout) || (checkout as number) < 1) throw new Error("n1: checkout manifest has no valid formats.study; fix src/manifest.ts and rerun bun scripts/n1-check.ts");
+  if (!Number.isSafeInteger(supported) || (supported as number) < 1) throw new Error("n1: N-1 manifest has no valid formats.study; the installed N-1 package failed, check the install and rerun bun scripts/n1-check.ts");
+  return (supported as number) < (checkout as number) ? { expect: "refuse", version: checkout as number } : { expect: "read", version: checkout as number };
 }

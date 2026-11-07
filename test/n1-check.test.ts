@@ -1,19 +1,31 @@
 import { expect, test } from "bun:test";
-import { compareManifests, resolveN1, type ManifestLike } from "../scripts/n1-lib.ts";
+import { compareManifests, resolveN1, studyFormatCheck, type ManifestLike } from "../scripts/n1-lib.ts";
 import { json, parseArgs, run, spawnFailure, STEPS } from "../scripts/n1-check.ts";
 
-test("resolveN1: development toward the next minor checks the latest patch of the published line", () => {
-  expect(resolveN1("0.1.0", ["0.0.0-stage", "0.1.0"])).toBe("0.1.0");
-  expect(resolveN1("0.1.0", ["0.1.0", "0.1.1", "0.1.2"])).toBe("0.1.2");
+test("resolveN1: N-1 is the latest patch of the minor line directly below the checkout core, publication aside", () => {
+  expect(resolveN1("0.2.0", ["0.1.0", "0.1.3", "0.2.0"])).toBe("0.1.3");
+  expect(resolveN1("0.2.1", ["0.1.0", "0.2.0", "0.2.1"])).toBe("0.1.0");
+  expect(resolveN1("0.3.0", ["0.2.0", "0.2.2"])).toBe("0.2.2");
+  expect(resolveN1("0.3.0", ["0.1.0", "0.1.9", "0.2.0", "0.2.2"])).toBe("0.2.2");
   expect(resolveN1("0.2.0", ["0.0.0-stage", "0.1.0", "0.1.3"])).toBe("0.1.3");
-  expect(resolveN1("0.2.0", ["0.1.0", "0.1.3", "0.2.0"])).toBe("0.2.0");
   expect(resolveN1("1.0.0", ["0.1.0", "0.9.4", "1.0.0-rc.1"])).toBe("0.9.4");
+  expect(resolveN1("0.2.0-rc.1", ["0.1.0", "0.1.3"])).toBe("0.1.3");
+  expect(resolveN1("0.2.0+build.5", ["0.0.0-stage", "0.1.0"])).toBe("0.1.0");
 });
 
-test("resolveN1 fails closed without a previous stable minor line", () => {
-  expect(() => resolveN1("0.1.0", [])).toThrow("pin one with --version X.Y.Z or wait until a previous minor is published");
-  expect(() => resolveN1("0.1.0", ["0.0.0-stage"])).toThrow("no published stable version");
+test("resolveN1: the initial publication line has no N-1 and skips; a malformed checkout version fails", () => {
+  expect(resolveN1("0.1.0", ["0.0.0-stage", "0.1.0"])).toBeUndefined();
+  expect(resolveN1("0.1.0", [])).toBeUndefined();
+  expect(resolveN1("0.1.0-rc.1", ["0.1.0"])).toBeUndefined();
   expect(() => resolveN1("next", ["0.1.0"])).toThrow("fix package.json version");
+});
+
+test("studyFormatCheck: refuse when N-1 lacks the checkout study version, read otherwise", () => {
+  expect(studyFormatCheck({ formats: { study: 1 } }, { formats: { study: 2 } })).toEqual({ expect: "refuse", version: 2 });
+  expect(studyFormatCheck({ formats: { study: 2 } }, { formats: { study: 2 } })).toEqual({ expect: "read", version: 2 });
+  expect(studyFormatCheck({ formats: { study: 3 } }, { formats: { study: 2 } })).toEqual({ expect: "read", version: 2 });
+  expect(() => studyFormatCheck({ formats: {} }, { formats: { study: 2 } })).toThrow("N-1 manifest has no valid formats.study");
+  expect(() => studyFormatCheck({ formats: { study: 1 } }, {})).toThrow("checkout manifest has no valid formats.study");
 });
 
 const base: ManifestLike = {
@@ -71,7 +83,7 @@ test("resolveN1: a prerelease or build checkout targets its own minor core", () 
   expect(resolveN1("0.2.0-rc.1", ["0.1.0", "0.1.3"])).toBe("0.1.3");
   expect(resolveN1("0.2.0-rc.1", ["0.1.0", "0.1.3", "0.2.0"])).toBe("0.1.3");
   expect(resolveN1("0.2.0+build.5", ["0.0.0-stage", "0.1.0"])).toBe("0.1.0");
-  expect(() => resolveN1("0.1.0-rc.1", ["0.1.0"])).toThrow("no published stable version below 0.1");
+  expect(resolveN1("0.1.0-rc.1", ["0.1.0"])).toBeUndefined();
 });
 
 test("run: a missing executable fails with n1 context and an install or PATH step", async () => {

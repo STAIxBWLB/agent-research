@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- N-1 CI check (#85 T1): a networked `n1` CI job, required by `ci-ok`, resolves N-1 from npm (the latest stable patch of the highest minor line below the checkout's target minor; a checkout version that is already published targets the next minor, so today N-1 is 0.1.0), installs it into a temp prefix and fails on any removed N-1 command or usage word, removed MCP tool or flipped `readOnly`, on the checkout rewriting an N-1 study or ledger while reading it, or on N-1 not refusing a checkout study v2 with its unsupported-version error. It fails closed without a previous minor line. `bun run check` stays offline.
+- N-1 CI check (#85 T1): a networked `n1` CI job, required by `ci-ok`, resolves N-1 from npm (the latest stable patch of the minor line directly below the checkout's major.minor core, whether or not the checkout is published), installs it into a temp prefix and fails on any removed N-1 command or usage word, removed MCP tool or flipped `readOnly`, on the checkout rewriting an N-1 study or ledger while reading it, or on N-1 not refusing a checkout study version it does not advertise (or not reading one it does) with bytes unchanged. On the initial publication line, with no previous minor, it prints an explicit skip and exits 0; registry and parse errors still fail. `bun run check` stays offline.
 
 - Study export scan (#83): every rule (path, URL, key-like, env) now runs on decoded JSON/JSONL keys and string values, so a raw newline or tab before a path, URL, key or env assignment can no longer hide it; refusal messages are unchanged.
 

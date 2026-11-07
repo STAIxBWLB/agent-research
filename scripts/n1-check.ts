@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { readBytesBounded, readTextBounded, STUDY_BYTES } from "../src/study.ts";
-import { compareManifests, resolveN1, type ManifestLike } from "./n1-lib.ts";
+import { compareManifests, resolveN1, studyFormatCheck, type ManifestLike } from "./n1-lib.ts";
 
 const OUTPUT_BYTES = 4 * 1024 * 1024, LEDGER_BYTES = 16 * 1024 * 1024, PACKAGE = "@staix/agent-research";
 const root = resolve(import.meta.dir, "..");
@@ -59,7 +59,17 @@ async function main(): Promise<void> {
   const current = (JSON.parse(readTextBounded(join(root, "package.json"), 65_536)) as { version: string }).version;
   let n1: string;
   if (pinned !== undefined) n1 = pinned;
-  else n1 = resolveN1(current, json<string[]>(await run("npm", ["view", PACKAGE, "versions", "--json"], root), "npm view", STEPS.npm));
+  else {
+    const published = json<unknown>(await run("npm", ["view", PACKAGE, "versions", "--json"], root), "npm view", STEPS.npm);
+    if (!Array.isArray(published) || !published.every(v => typeof v === "string")) fail(`npm view ${PACKAGE} versions did not return a list of version strings; ${NETWORK}`);
+    const resolved = resolveN1(current, published as string[]);
+    if (resolved === undefined) {
+      const core = /^(\d+)\.(\d+)/.exec(current)!;
+      console.log(`n1: skipped; no published previous minor line below ${core[1]}.${core[2]}`);
+      return;
+    }
+    n1 = resolved;
+  }
   console.log(`n1: checkout ${current}, N-1 ${PACKAGE}@${n1}`);
 
   const work = mkdtempSync(join(tmpdir(), "ares-n1-"));
@@ -71,9 +81,10 @@ async function main(): Promise<void> {
     const next = (...args: string[]) => run("bun", [join(root, "bin", "ares.js"), ...args], work);
 
     // CLI and MCP surface.
-    const oldManifest = json<ManifestLike & { version: string }>(await old("manifest", "--json"), "N-1 manifest", STEPS.n1);
+    const oldManifest = json<ManifestLike & { version: string; formats?: { study?: unknown } }>(await old("manifest", "--json"), "N-1 manifest", STEPS.n1);
     if (oldManifest.version !== n1) fail(`installed manifest reports ${oldManifest.version}, expected ${n1}; clear the npm cache, ${NETWORK}`);
-    const breaks = compareManifests(oldManifest, json<ManifestLike>(await next("manifest", "--json"), "checkout manifest", STEPS.checkout));
+    const nextManifest = json<ManifestLike & { formats?: { study?: unknown } }>(await next("manifest", "--json"), "checkout manifest", STEPS.checkout);
+    const breaks = compareManifests(oldManifest, nextManifest);
     for (const line of breaks) console.error(line);
     if (breaks.length) fail(`${breaks.length} CLI/MCP break(s) against ${n1}; restore each listed N-1 command, usage or tool (readOnly included) and rerun bun scripts/n1-check.ts`);
     console.log(`n1: CLI ${oldManifest.commands.length} commands and MCP ${oldManifest.mcp.tools.length} tools kept`);
@@ -89,15 +100,17 @@ async function main(): Promise<void> {
     }
     console.log("n1: checkout reads N-1 survey and experiment studies and ledgers without rewriting bytes");
 
-    // Formats: N-1 refuses a checkout-written v2 study with its unsupported-version error, bytes unchanged.
-    const v2 = join(work, "checkout-v2");
-    json(await next("init", v2, "--question", "synthetic v2 study", "--autonomy", "copilot", "--json"), "checkout init v2", STEPS.checkout);
-    const v2Bytes = readBytesBounded(join(v2, "study.json"), STUDY_BYTES);
-    if ((JSON.parse(v2Bytes.toString("utf8")) as { v: unknown }).v !== 2) fail("checkout init --autonomy copilot did not write study v2; copilot policy must keep writing study v2, fix init and rerun bun scripts/n1-check.ts");
-    const refused = await old("status", v2, "--json");
-    if (refused.code === 0 || !/unsupported schema version/.test(refused.stderr + refused.stdout)) fail(`N-1 did not refuse a v2 study with its unsupported-version error (exit ${refused.code}); the checkout must keep writing a study version N-1 refuses (v2), so restore the v2 study.json version and rerun bun scripts/n1-check.ts`);
-    if (!v2Bytes.equals(readBytesBounded(join(v2, "study.json"), STUDY_BYTES))) fail("N-1 changed v2 study bytes while refusing; N-1 must keep refusing without writing, so stop N-1 from receiving a v2 study it can rewrite and rerun bun scripts/n1-check.ts");
-    console.log("n1: N-1 refuses checkout study v2 with its unsupported-version error, bytes unchanged");
+    // Formats: a checkout-written study at its newest version. N-1 refuses it unchanged when it lacks that version, else reads it unchanged.
+    const format = studyFormatCheck(oldManifest, nextManifest), latest = join(work, "checkout-latest");
+    json(await next("init", latest, "--question", "synthetic latest study", "--autonomy", "copilot", "--json"), "checkout init latest study", STEPS.checkout);
+    const latestBytes = readBytesBounded(join(latest, "study.json"), STUDY_BYTES);
+    if ((JSON.parse(latestBytes.toString("utf8")) as { v: unknown }).v !== format.version) fail(`checkout init --autonomy copilot did not write study v${format.version}; copilot policy must write the newest study format the manifest advertises, fix init or src/manifest.ts and rerun bun scripts/n1-check.ts`);
+    const read = await old("status", latest, "--json");
+    if (format.expect === "refuse") {
+      if (read.code === 0 || !/unsupported schema version/.test(read.stderr + read.stdout)) fail(`N-1 did not refuse a study v${format.version} it does not support with its unsupported-version error (exit ${read.code}); N-1 must keep refusing it, so check that the checkout writes the advertised study version and rerun bun scripts/n1-check.ts`);
+    } else if (read.code !== 0) fail(`N-1 advertises study v${format.version} but failed to read a checkout study (exit ${read.code}); the checkout must write studies N-1 can read, fix the study writer and rerun bun scripts/n1-check.ts`);
+    if (!latestBytes.equals(readBytesBounded(join(latest, "study.json"), STUDY_BYTES))) fail(`N-1 changed study v${format.version} bytes while ${format.expect === "refuse" ? "refusing" : "reading"}; N-1 status must stay read-only, so investigate the N-1 reader and rerun bun scripts/n1-check.ts`);
+    console.log(format.expect === "refuse" ? `n1: N-1 refuses checkout study v${format.version} with its unsupported-version error, bytes unchanged` : `n1: N-1 reads checkout study v${format.version} without rewriting bytes`);
     console.log("n1: ok");
   } finally { rmSync(work, { recursive: true, force: true }); }
 }
