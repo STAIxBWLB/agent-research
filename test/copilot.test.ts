@@ -166,7 +166,7 @@ test("paper diagnostics remain usable and review approval keeps the gate guidanc
   const f = await fixture(); await ops.autonomySet(f.dir, "copilot", "hypotheses", f.ctx);
   writeFileSync(join(f.dir, "hypotheses.md"), "Synthetic accepted numeric-source hypothesis\n");
   await accept(f.dir, "hypotheses", f.ctx); await ops.investigateClose(f.dir, f.ctx);
-  mkdirSync(join(f.dir, "paper")); writeFileSync(join(f.dir, "paper", "manuscript.md"), "Outcome: {{n:investigate.reason}}.\n");
+  mkdirSync(join(f.dir, "paper")); writeFileSync(join(f.dir, "paper", "manuscript.md"), "Outcome: {{n:investigate.reason}}. Same outcome: {{n:investigate.reason}}.\n");
   const built = await ops.paperBuild(f.dir, f.ctx);
   for (const modelFamily of ["family-a", "family-b"]) await ops.reviewAdd(f.dir, { v: 1, reviewer: { id: modelFamily, modelFamily }, buildSha256: built.evidenceSha256, checklist: { negativeResults: true, denominators: true, limitations: true, reproducibility: true }, findings: [] }, f.ctx);
   expect(ops.reviewShow(f.dir).ready).toBe(true);
@@ -174,6 +174,7 @@ test("paper diagnostics remain usable and review approval keeps the gate guidanc
   const before = bytes(f.dir), check = ops.paperCheck(f.dir);
   expect(check.ok).toBe(false); expect(check.findings.some(finding => finding.code === "unaccepted-draft")).toBe(true);
   expect(ops.reviewShow(f.dir).ready).toBe(false);
+  expect(ops.reviewShow(f.dir).unmet.filter(item => item.code === "accept-source")).toHaveLength(1);
   await expect(ops.gateDecide(f.dir, "review", "approve", undefined, f.ctx)).rejects.toThrow("ares gate approve <dir> accept:hypotheses");
   expect(bytes(f.dir)).toEqual(before);
 });

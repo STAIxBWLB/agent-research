@@ -110,7 +110,7 @@ export function reviewReadiness(dirArg: string) {
   let current: ReturnType<typeof readCurrentBuild> | undefined, check: ReturnType<typeof checkPaper> | undefined;
   try { current = readCurrentBuild(dir); check = current.check; } catch (error) { unmet.push({ code: "build", message: error instanceof Error ? error.message : "current build unavailable; run ares paper build" }); }
   if (!check) { try { check = checkPaper(dir); } catch (error) { unmet.push({ code: "paper-check", message: error instanceof Error ? error.message : "paper check unavailable; restore paper/manuscript.md" }); } }
-  for (const finding of check?.findings ?? []) if (finding.code === "unaccepted-draft") unmet.unshift({ code: "accept-source", message: finding.message });
+  for (const finding of check?.findings ?? []) if (finding.code === "unaccepted-draft" && !unmet.some(item => item.code === "accept-source" && item.message === finding.message)) unmet.unshift({ code: "accept-source", message: finding.message });
   if (check && !check.ok) unmet.push({ code: "paper-check", message: `paper check has ${check.findings.length} finding(s); run ares paper check --json and fix every finding` });
   let rows: ReviewRecord[] = [];
   try { rows = foldReviews(events); } catch (error) { unmet.push({ code: "review-journal", message: error instanceof Error ? error.message : "review journal invalid; restore its valid events" }); }
