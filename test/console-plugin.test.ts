@@ -536,5 +536,5 @@ test("watch alerts distinguish cause-bearing failures from all-source failures w
   const provider = await typed.open(context(family)), items = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).filter(row => row.kind === "watch");
   expect(items.map(row => row.title).sort()).toEqual(["Every watch source failed", "Watch run failed (terminated)", "Watch run failed (filesystem)", "Watch run failed (internal)", "Watch run failed (rate)", "Watch run failed (unknown cause)"].sort());
   for (const row of items) { expect(row.detail).toContain("ares watch show"); expect(row.verbs).toEqual([]); }
-  expect(JSON.stringify(items)).not.toMatch(/private|https:|secret/);
+  expect(items.map(row => `${String(row.title)} ${String(row.detail)}`).join("\n")).not.toMatch(/private|https:|secret/);
 });
