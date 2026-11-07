@@ -143,8 +143,8 @@ const SCANS: [string, RegExp][] = [
   // A true token boundary: any non-word character (or start) before `/`; units such as tokens/s keep a word character there.
   ["absolute path", /(?<![\p{L}\p{N}_])(?:\/|~\/)/u],
   ["absolute path", /\b[A-Za-z]:\\/],
-  // Windows root-relative (\Users\x) and UNC (\\server) paths: one or two leading backslashes, doubled in serialized JSON.
-  ["absolute path", /(?<![\p{L}\p{N}_\\])\\\\(?:\\\\)?[^\\\s"]/u],
+  // Windows root-relative (\Users\x), bare \ and UNC (\\server): any serialized backslash pair at a token boundary, whatever follows.
+  ["absolute path", /(?<![\p{L}\p{N}_\\])\\\\/u],
   ["url", /\b[a-z][a-z0-9+.-]*:\/\/|\b(?:mailto|urn|file|data):/i],
   ["key-like token", /\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{12,}|\b(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{12,}|\bxox[abprs]-[A-Za-z0-9-]{8,}|\bAKIA[0-9A-Z]{12,}|\beyJ[A-Za-z0-9_-]{16,}/],
   ["key-like token", /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])/],

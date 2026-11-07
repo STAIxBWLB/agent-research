@@ -303,3 +303,14 @@ test("#81 round 3: \\#private root path, 64-hex git ids and an inherited ledger 
   const last = readFileSync(join(out2, "ledger.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l)).at(-1);
   expect(last).toMatchObject({ type: "constructor", data: {} });
 });
+
+test("#81 round 4: a bare backslash and a backslash before whitespace refuse; escapes and newlines pass", async () => {
+  for (const metric of ["\\", "\\ Users\\x"]) {
+    const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", metric);
+    const out = join(tempDir(), "bundle");
+    await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("absolute path");
+    expect(existsSync(out)).toBe(false);
+    expect(() => scanBundle({ x: JSON.stringify({ v: metric }) })).toThrow("absolute path");
+  }
+  expect(() => scanBundle({ x: JSON.stringify({ v: String.raw`a\nb`, w: "line\nbreak" }) })).not.toThrow();
+});
