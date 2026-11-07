@@ -1,3 +1,4 @@
+import { validateAutonomyMode, validatePhase, PHASES, type Autonomy } from "./autonomy.ts";
 import { homedir } from "node:os";
 import { addStudy, removeStudy, readRegistry } from "./console/registry.ts";
 import { readWatchSnapshot, setWatch, runWatch, showWatch, recordWatchFailure, watchFailureClass, type WatchSnapshot } from "./lit/watch.ts";
@@ -25,7 +26,7 @@ import { existsSync, readdirSync, utimesSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Http } from "./http.ts";
 import { readScope, scopeHash, setScope } from "./scope.ts";
-import { boundedText, commit, decideGate, gateState, GATES, initStudy, openStudy, readBytesBounded, readLedger, readTextBounded, requireGate, sha256, withLock, readPlanOwner, type Actor, type Binder, type GateName, type Study } from "./study.ts";
+import { boundedText, commit, decideGate, gateState, GATES, initStudy, openStudy, readBytesBounded, readLedger, readTextBounded, requireGate, sha256, withLock, readPlanOwner, type Actor, type Binder, type GateName, type Study, STUDY_BYTES } from "./study.ts";
 import { candidatesFile, includedHash, isVerified, loadCandidates, mergeCandidates, sameWork, verifySubject, type Candidate } from "./lit/candidates.ts";
 import { searchSource, SOURCES, type SourceName } from "./lit/sources.ts";
 import { verifyCandidates } from "./lit/verify.ts";
@@ -63,6 +64,24 @@ function find(list: Candidate[], id: string): Candidate {
 export function init(dir: string, options: { question: string; mode?: string; autonomy?: string }, ctx: Pick<Ctx, "actor">) {
   const study = initStudy(dir, options, ctx.actor);
   return { created: resolve(dir), study };
+}
+
+export function autonomyShow(dirArg: string) {
+  const { study } = openStudy(dirArg), policy = study.autonomy;
+  const effective = Object.fromEntries(PHASES.map(phase => [phase, typeof policy === "string" ? policy : policy.phases[phase] ?? policy.default]));
+  return { autonomy: policy, effective };
+}
+export async function autonomySet(dirArg: string, rawMode: string, rawPhase: string | undefined, ctx: Pick<Ctx, "actor">) {
+  const mode = validateAutonomyMode(rawMode), phase = rawPhase === undefined ? undefined : validatePhase(rawPhase);
+  const { dir } = openStudy(dirArg);
+  return withLock(dir, () => {
+    const { study } = openStudy(dir), from = study.autonomy;
+    const to: Autonomy = phase !== undefined ? { default: typeof from === "string" ? from : from.default, phases: { ...(typeof from === "string" ? {} : from.phases), [phase]: mode } }
+      : typeof from === "string" ? mode : { default: mode, phases: { ...from.phases } };
+    const v = study.v === 2 || typeof to !== "string" || to === "copilot" || to === "step" ? 2 : 1;
+    commit(dir, [[join(dir, "study.json"), JSON.stringify({ ...study, v, autonomy: to }, null, 2) + "\n", STUDY_BYTES]], [{ actor: ctx.actor, type: "autonomy.set", data: { from, to, phase: phase ?? null } }]);
+    return autonomyShow(dir);
+  });
 }
 
 export async function protocol(dirArg: string, raw: unknown, ctx: Ctx) {

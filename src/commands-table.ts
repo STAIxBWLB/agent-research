@@ -2,6 +2,8 @@
 export interface CommandSpec { name: string; usage: string; mutates: boolean | "network"; options: Record<string, "flag" | "value"> }
 const json = { "--json": "flag" } as const;
 export const COMMANDS: readonly CommandSpec[] = [
+  { name: "autonomy show", usage: "autonomy show <dir> [--json]", mutates: false, options: json },
+  { name: "autonomy set", usage: "autonomy set <dir> <auto|gates|copilot|step> [--phase PHASE] [--json]", mutates: true, options: { "--phase": "value", ...json } },
   { name: "skill propose", usage: "skill propose <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "skill decide", usage: "skill decide <dir> <name> <accept|reject|withdraw> --reason TEXT [--pr URL] [--json]", mutates: true, options: { "--reason": "value", "--pr": "value", ...json } },
   { name: "skill list", usage: "skill list <dir> [--json]", mutates: false, options: json },
@@ -15,7 +17,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "console remove", usage: "console remove <dir> [--json]", mutates: true, options: json },
   { name: "console list", usage: "console list [--json]", mutates: false, options: json },
   { name: "manifest", usage: "manifest [--json]", mutates: false, options: json },
-  { name: "init", usage: "init <dir> --question TEXT [--mode survey|experiment] [--autonomy auto|gates] [--json]", mutates: true, options: { "--question": "value", "--mode": "value", "--autonomy": "value", ...json } },
+  { name: "init", usage: "init <dir> --question TEXT [--mode survey|experiment] [--autonomy auto|gates|copilot|step] [--json]", mutates: true, options: { "--question": "value", "--mode": "value", "--autonomy": "value", ...json } },
   { name: "run", usage: "run <dir> [--parallel 1..8] [--json]", mutates: "network", options: { "--parallel": "value", ...json } },
   { name: "plan set", usage: "plan set <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "plan control", usage: "plan control <dir> <pause|resume|retry|cancel|skip> [node] --command-id ID --expected-revision N [--json]", mutates: "network", options: { "--command-id": "value", "--expected-revision": "value", ...json } },

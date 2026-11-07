@@ -1,3 +1,5 @@
+import { validateAutonomy, validateAutonomyMode, resolveAutonomy, type Autonomy, type Phase } from "./autonomy.ts";
+export type { Autonomy } from "./autonomy.ts";
 import { hostname } from "node:os";
 import { spawnSync } from "node:child_process";
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync, lstatSync } from "node:fs";
@@ -5,10 +7,9 @@ import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 
 export type Mode = "survey" | "experiment";
-export type Autonomy = "auto" | "gates";
 export type GateName = "scope" | "screen" | "design" | "final" | "review" | `plan:${string}`;
 export const GATES: readonly GateName[] = ["scope", "screen", "design", "final", "review"];
-export interface Study { v: 1; id: string; question: string; mode: Mode; autonomy: Autonomy; createdAt: string }
+export interface Study { v: 1 | 2; id: string; question: string; mode: Mode; autonomy: Autonomy; createdAt: string }
 export interface Actor { kind: "person" | "agent" | "auto"; id?: string }
 export function requireExperiment(study: Study): void {
   if (study.mode !== "experiment") throw new Error("experiment command: study mode must be experiment; create a study with ares init <dir> --question TEXT --mode experiment");
@@ -105,19 +106,22 @@ export function openStudy(dir: string): { dir: string; study: Study } {
 }
 
 function validStudy(raw: unknown): Study {
-  if (plain(raw) && raw.v !== 1) throw new Error("study.json: unsupported schema version; use an ares version that supports this study, keeping the original file unchanged");
-  if (!plain(raw) || raw.v !== 1 || typeof raw.id !== "string" || typeof raw.question !== "string" || typeof raw.createdAt !== "string" ||
-    !["survey", "experiment"].includes(raw.mode as string) || !["auto", "gates"].includes(raw.autonomy as string)) throw new Error("study.json: malformed");
-  return raw as unknown as Study;
+  if (plain(raw) && raw.v !== 1 && raw.v !== 2) throw new Error("study.json: unsupported schema version; use an ares version that supports this study, keeping the original file unchanged");
+  if (!plain(raw) || (raw.v !== 1 && raw.v !== 2) || typeof raw.id !== "string" || typeof raw.question !== "string" || typeof raw.createdAt !== "string" ||
+    !["survey", "experiment"].includes(raw.mode as string)) throw new Error("study.json: malformed");
+  let autonomy: Autonomy;
+  try { autonomy = validateAutonomy(raw.autonomy); }
+  catch { throw new Error("study.json: unsupported or malformed autonomy policy; restore the last valid study.json or use a compatible ares version before retrying"); }
+  if (raw.v === 1 && (typeof autonomy !== "string" || autonomy === "copilot" || autonomy === "step")) throw new Error("study.json: this autonomy policy requires study v2; restore the valid v1 study and use ares autonomy set with a compatible ares version");
+  return { ...raw, autonomy } as unknown as Study;
 }
 
 export function initStudy(dir: string, options: { question: string; mode?: string; autonomy?: string }, actor: Actor): Study {
   const root = resolve(dir);
   if (existsSync(join(root, "study.json"))) throw new Error(`${root}: a study already exists here`);
-  const mode = options.mode ?? "survey", autonomy = options.autonomy ?? "gates";
+  const mode = options.mode ?? "survey", autonomy = validateAutonomyMode(options.autonomy ?? "gates");
   if (mode !== "survey" && mode !== "experiment") throw new Error("--mode: survey or experiment");
-  if (autonomy !== "auto" && autonomy !== "gates") throw new Error("--autonomy: auto or gates");
-  const study: Study = { v: 1, id: randomUUID(), question: boundedText(options.question, "--question", QUESTION_MAX), mode, autonomy, createdAt: new Date().toISOString() };
+  const study: Study = { v: autonomy === "auto" || autonomy === "gates" ? 1 : 2, id: randomUUID(), question: boundedText(options.question, "--question", QUESTION_MAX), mode, autonomy, createdAt: new Date().toISOString() };
   for (const sub of ["", "literature", "literature/cards", "refs"]) mkdirSync(join(root, sub), { recursive: true });
   // link() refuses an existing target, so two concurrent inits cannot both create the study.
   const text = JSON.stringify(study, null, 2) + "\n", tmp = join(root, `study.json.${randomUUID()}.tmp`);
@@ -252,11 +256,11 @@ export function decideGate(dir: string, gate: GateName, decision: "approve" | "r
  * `auto` approval goes into the command's own commit only when the command succeeds, so a failed command never
  * changes a gate.
  */
-export function requireGate(dir: string, study: Study, gate: GateName, binder: Binder): PendingEvent[] {
+export function requireGate(dir: string, study: Study, gate: GateName, binder: Binder, guardedPhase?: Phase): PendingEvent[] {
   if (gate === "design" || gate === "final") requireExperiment(study);
   const state = gateState(gate, readLedger(dir), binder);
   if (state.state === "approved") return [];
-  if (state.state === "pending" && study.autonomy === "auto") return [{ actor: { kind: "auto" }, type: "gate.approve", data: { gate, binding: state.current! } }];
+  if (state.state === "pending" && resolveAutonomy(study.autonomy, gate, guardedPhase) === "auto") return [{ actor: { kind: "auto" }, type: "gate.approve", data: { gate, binding: state.current! } }];
   if (state.state === "none" && gate === "final") throw new Error("gate final: complete reserved seeds and close investigate/required ablate inputs before final approval");
   if (state.state === "none" && gate.startsWith("plan:")) throw new Error(`gate ${gate}: upstream outputs are not complete; finish every upstream node and run ares gate list again`);
   if (state.state === "none") throw new Error(gate === "scope" ? "gate scope: no scope yet (run ares scope)" : gate === "design" ? "gate design: no protocol yet (run ares protocol)" : "gate screen: no included candidates yet");

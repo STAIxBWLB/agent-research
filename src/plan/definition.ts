@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { validatePhase, type Phase } from "../autonomy.ts";
 import { COMMANDS } from "../commands-table.ts";
 import { boundedText, commit, onlyKeys, plain, readJsonFile, sha256, type Actor } from "../study.ts";
 
@@ -7,7 +8,7 @@ export const PLAN_BYTES = 65_536, PLAN_ID_BYTES = 128;
 export const STEP_COMMANDS = ["lit.search", "lit.verify", "lit.bib", "cite.check", "attempt.run", "investigate.close", "ablate.close", "final.close", "paper.build", "watch.run"] as const;
 export type StepCommand = typeof STEP_COMMANDS[number];
 export type StepArgs = Record<string, string | number | boolean | string[]>;
-type BaseNode = { id: string; needs: string[] };
+type BaseNode = { id: string; needs: string[]; phase?: Phase };
 export type PlanNode = BaseNode & (
   { kind: "step"; command: StepCommand; args: StepArgs } |
   { kind: "hub"; campaign: string; unit: string } |
@@ -74,20 +75,20 @@ function validateDefinition(raw: unknown): PlanDefinition {
   const nodes: PlanNode[] = raw.nodes.map((n: unknown, index: number) => {
     if (!plain(n)) throw new Error(`plan node[${index}]: object required`);
     const id = nodeId(n.id, `plan node[${index}].id`), needs = n.needs === undefined ? [] : references(n.needs, `plan node ${String(n.id)}.needs`);
-    const base = { id, needs };
+    const base = { id, needs, ...(n.phase === undefined ? {} : { phase: validatePhase(n.phase) }) };
     switch (n.kind) {
       case "step": {
-        onlyKeys(n, ["id", "kind", "needs", "command", "args"], `plan step ${id}`);
+        onlyKeys(n, ["id", "kind", "needs", "phase", "command", "args"], `plan step ${id}`);
         if (!STEP_COMMANDS.includes(n.command as StepCommand)) throw new Error(`plan step ${id}: unknown command ${String(n.command)} (allowed: ${STEP_COMMANDS.join(", ")})`);
         const command = n.command as StepCommand;
         return { ...base, kind: "step", command, args: stepArgs(n.args ?? {}, command, id) };
       }
       case "hub": {
-        onlyKeys(n, ["id", "kind", "needs", "campaign", "unit"], `plan hub ${id}`);
+        onlyKeys(n, ["id", "kind", "needs", "phase", "campaign", "unit"], `plan hub ${id}`);
         return { ...base, kind: "hub", campaign: nodeId(n.campaign, `plan hub ${id}.campaign`), unit: nodeId(n.unit, `plan hub ${id}.unit`) };
       }
       case "gate":
-        onlyKeys(n, ["id", "kind", "needs", "binds"], `plan gate ${id}`);
+        onlyKeys(n, ["id", "kind", "needs", "phase", "binds"], `plan gate ${id}`);
         return { ...base, kind: "gate", binds: references(n.binds, `plan gate ${id}.binds`) };
       default: throw new Error(`plan node ${id}: unknown node kind ${String(n.kind)}; ${compatible}`);
     }
@@ -137,6 +138,17 @@ function validateDefinition(raw: unknown): PlanDefinition {
   if (Buffer.byteLength(JSON.stringify(result, null, 2) + "\n") > PLAN_BYTES) throw new Error(`plan: exceeds ${PLAN_BYTES} bytes`);
   return result;
 }
+/** A plan gate inherits only one explicitly declared phase shared by all immediate targets. */
+export function guardedPlanPhase(definition: PlanDefinition, gate: string): Phase | undefined {
+  if (!gate.startsWith("plan:")) return undefined;
+  const id = gate.slice(5);
+  if (!definition.nodes.some(node => node.id === id && node.kind === "gate")) return undefined;
+  const targets = definition.nodes.filter(node => node.needs.includes(id) || definition.edges.some(([from, to]) => from === id && to === node.id));
+  if (!targets.length || targets.some(node => node.kind === "hub" || node.phase === undefined)) return undefined;
+  const phases = new Set(targets.map(node => node.phase));
+  return phases.size === 1 ? targets[0]!.phase : undefined;
+}
+
 export function readPlan(dir: string): PlanDefinition | undefined {
   const file = join(dir, "plan.json");
   if (!existsSync(file)) return undefined;

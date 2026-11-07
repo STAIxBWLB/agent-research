@@ -1,3 +1,4 @@
+import { PHASES, AUTONOMY_MODES } from "./autonomy.ts";
 import { SETUP_TARGETS, type SetupMode } from "./setup.ts";
 import { isAbsolute } from "node:path";
 import * as ops from "./commands.ts";
@@ -53,7 +54,7 @@ const planId = text(PLAN_ID_BYTES);
 const PLAN = obj({
   v: { type: "integer", enum: [1] }, revision: integer(1, Number.MAX_SAFE_INTEGER),
   nodes: { type: "array", maxItems: 128, items: obj({
-    id: planId, kind: { type: "string", enum: ["step", "hub", "gate"] },
+    id: planId, kind: { type: "string", enum: ["step", "hub", "gate"] }, phase: { type: "string", enum: [...PHASES] },
     needs: { type: "array", maxItems: 128, items: planId },
     command: { type: "string", enum: [...STEP_COMMANDS] },
     args: { type: "object", maxProperties: 32, properties: {}, additionalProperties: { type: ["string", "number", "boolean", "array"], maxLength: 4096, maxItems: 500, items: text(300) } },
@@ -72,6 +73,8 @@ const SELECTION = obj({
 const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), parent: text(64), commit: { type: "string", minLength: 40, maxLength: 40 } }, ["id", "title", "hypothesis"]);
 
 export const ARES_TOOLS: readonly McpTool[] = [
+  { name: "ares_autonomy_show", description: "Read the study autonomy policy and effective mode for each phase; no writes.", inputSchema: obj({ study }, ["study"]), annotations: read },
+  { name: "ares_autonomy_set", description: `Set the default or one phase autonomy mode (${AUTONOMY_MODES.join("|")}) and record from/to/phase. Only auto approves pending gates; existing gate decisions remain unchanged. Copilot draft acceptance and step pausing are separate features.`, inputSchema: obj({ study, mode: text(16), phase: text(32) }, ["study", "mode"]), annotations: write },
   { name: "ares_watch_set", description: "Set bounded v1 literature queries and an optional display-only rubric. At most 20 queries; identical config is a no-op. Does not search, screen or start a timer. Survey and experiment studies.", inputSchema: obj({ study, watch: WATCH }, ["study", "watch"]), annotations: { ...write, idempotentHint: true } },
   { name: "ares_watch_run", description: "Start one finite watch pass and return {started:true,configSha256} after config, scope gate and year preflight. Always detached: this ack is not completion. Inspect ares_watch_show for the watch.ran outcome. The background pass holds the study lock for up to about 20 minutes; duplicate starts refuse. Adds only new candidates, never screens. No timer or daemon is started.", inputSchema: obj({ study }, ["study"]), annotations: net },
   { name: "ares_watch_show", description: "Read watch config, recent event-timed run receipts and new candidates. No lock, network or write.", inputSchema: obj({ study }, ["study"]), annotations: read },
@@ -139,6 +142,8 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
   const background = new Map<Promise<void>, () => void>();
   const track = (completion: Promise<void>, terminate: () => void) => { background.set(completion, terminate); void completion.then(() => { background.delete(completion); }); };
   const handlers: Record<string, McpHandler> = {
+    ares_autonomy_show: a => ops.autonomyShow(dir(a)),
+    ares_autonomy_set: a => ops.autonomySet(dir(a), a.mode as string, a.phase as string | undefined, ctx),
     ares_watch_set: a => ops.watchSet(dir(a), a.watch, ctx),
     ares_watch_run: a => ops.watchRunDetached(dir(a), ctx, track),
     ares_watch_show: a => ops.watchShow(dir(a)),

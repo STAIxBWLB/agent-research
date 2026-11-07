@@ -44,7 +44,7 @@ test("older attempt reader preserves newer additive fields during a real cancell
 test("unsupported study, ledger and attempt semantics refuse safely without rewriting newer data", async () => {
   const dir = tempDir(), created = ops.init(dir, { question: "Synthetic future?", mode: "experiment" }, ctx);
   const studyPath = join(dir, "study.json"), originalStudy = readTextBounded(studyPath, STUDY_BYTES);
-  const futureStudy = JSON.stringify({ ...created.study, v: 2, extension: true });
+  const futureStudy = JSON.stringify({ ...created.study, v: 3, extension: true });
   writeAtomic(studyPath, futureStudy, STUDY_BYTES);
   expect(() => ops.status(dir)).toThrow("use an ares version");
   expect(readTextBounded(studyPath, STUDY_BYTES)).toBe(futureStudy);
