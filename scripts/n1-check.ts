@@ -34,12 +34,18 @@ function run(command: string, args: string[], cwd: string, timeout = 120_000): P
     proc.on("close", code => { clearTimeout(timer); if (failure) reject(failure); else accept({ code: code ?? 1, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") }); });
   });
 }
-function json<T>(result: Result, what: string): T {
-  if (result.code !== 0) throw new Error(`n1: ${what} exited ${result.code}: ${result.stderr.trim().slice(0, 500)}; ${NETWORK}`);
-  try { return JSON.parse(result.stdout) as T; } catch { throw new Error(`n1: ${what} printed invalid JSON; ${NETWORK}`); }
+const NETWORK = "check npm registry access and rerun bun scripts/n1-check.ts";
+/** Next steps per child: only npm points at the registry; local N-1 and checkout commands name their own fix. */
+export const STEPS = {
+  npm: NETWORK,
+  n1: "the installed N-1 package failed; check the install and rerun bun scripts/n1-check.ts",
+  checkout: "fix the checkout command so it reads N-1 studies (or writes v2) and rerun bun scripts/n1-check.ts",
+} as const;
+export function json<T>(result: Result, what: string, step: string): T {
+  if (result.code !== 0) throw new Error(`n1: ${what} exited ${result.code}: ${result.stderr.trim().slice(0, 500)}; ${step}`);
+  try { return JSON.parse(result.stdout) as T; } catch { throw new Error(`n1: ${what} printed invalid JSON; ${step}`); }
 }
 const fail = (message: string): never => { throw new Error(`n1: ${message}`); };
-const NETWORK = "check npm registry access and rerun bun scripts/n1-check.ts";
 /** Only `--version X.Y.Z` is accepted; anything else is refused. */
 export { run };
 export function parseArgs(args: readonly string[]): { version?: string } {
@@ -53,7 +59,7 @@ async function main(): Promise<void> {
   const current = (JSON.parse(readTextBounded(join(root, "package.json"), 65_536)) as { version: string }).version;
   let n1: string;
   if (pinned !== undefined) n1 = pinned;
-  else n1 = resolveN1(current, json<string[]>(await run("npm", ["view", PACKAGE, "versions", "--json"], root), "npm view"));
+  else n1 = resolveN1(current, json<string[]>(await run("npm", ["view", PACKAGE, "versions", "--json"], root), "npm view", STEPS.npm));
   console.log(`n1: checkout ${current}, N-1 ${PACKAGE}@${n1}`);
 
   const work = mkdtempSync(join(tmpdir(), "ares-n1-"));
@@ -65,9 +71,9 @@ async function main(): Promise<void> {
     const next = (...args: string[]) => run("bun", [join(root, "bin", "ares.js"), ...args], work);
 
     // CLI and MCP surface.
-    const oldManifest = json<ManifestLike & { version: string }>(await old("manifest", "--json"), "N-1 manifest");
+    const oldManifest = json<ManifestLike & { version: string }>(await old("manifest", "--json"), "N-1 manifest", STEPS.n1);
     if (oldManifest.version !== n1) fail(`installed manifest reports ${oldManifest.version}, expected ${n1}; clear the npm cache, ${NETWORK}`);
-    const breaks = compareManifests(oldManifest, json<ManifestLike>(await next("manifest", "--json"), "checkout manifest"));
+    const breaks = compareManifests(oldManifest, json<ManifestLike>(await next("manifest", "--json"), "checkout manifest", STEPS.checkout));
     for (const line of breaks) console.error(line);
     if (breaks.length) fail(`${breaks.length} CLI/MCP break(s) against ${n1}; restore each listed N-1 command, usage or tool (readOnly included) and rerun bun scripts/n1-check.ts`);
     console.log(`n1: CLI ${oldManifest.commands.length} commands and MCP ${oldManifest.mcp.tools.length} tools kept`);
@@ -75,17 +81,17 @@ async function main(): Promise<void> {
     // Formats: an N-1-written study and ledger are read by the checkout without rewriting bytes.
     for (const mode of ["survey", "experiment"]) {
       const study = join(work, `n1-${mode}`);
-      json(await old("init", study, "--question", "synthetic n1 study", "--mode", mode, "--json"), `N-1 init ${mode}`);
+      json(await old("init", study, "--question", "synthetic n1 study", "--mode", mode, "--json"), `N-1 init ${mode}`, STEPS.n1);
       const before = { study: readBytesBounded(join(study, "study.json"), STUDY_BYTES), ledger: readBytesBounded(join(study, "ledger.jsonl"), LEDGER_BYTES) };
       const reads = [["status", study, "--json"], ["gate", "list", study, "--json"], ["autonomy", "show", study, "--json"], ...(mode === "experiment" ? [["attempt", "list", study, "--json"]] : [["lit", "list", study, "--json"]])];
-      for (const args of reads) json(await next(...args), `checkout ${args.slice(0, 2).join(" ")} on N-1 ${mode} study`);
+      for (const args of reads) json(await next(...args), `checkout ${args.slice(0, 2).join(" ")} on N-1 ${mode} study`, STEPS.checkout);
       if (!before.study.equals(readBytesBounded(join(study, "study.json"), STUDY_BYTES)) || !before.ledger.equals(readBytesBounded(join(study, "ledger.jsonl"), LEDGER_BYTES))) fail(`checkout rewrote an N-1 ${mode} study or ledger during reads; status, gate list, autonomy show and lit/attempt list must stay read-only on N-1 studies, fix the reader and rerun bun scripts/n1-check.ts`);
     }
     console.log("n1: checkout reads N-1 survey and experiment studies and ledgers without rewriting bytes");
 
     // Formats: N-1 refuses a checkout-written v2 study with its unsupported-version error, bytes unchanged.
     const v2 = join(work, "checkout-v2");
-    json(await next("init", v2, "--question", "synthetic v2 study", "--autonomy", "copilot", "--json"), "checkout init v2");
+    json(await next("init", v2, "--question", "synthetic v2 study", "--autonomy", "copilot", "--json"), "checkout init v2", STEPS.checkout);
     const v2Bytes = readBytesBounded(join(v2, "study.json"), STUDY_BYTES);
     if ((JSON.parse(v2Bytes.toString("utf8")) as { v: unknown }).v !== 2) fail("checkout init --autonomy copilot did not write study v2; copilot policy must keep writing study v2, fix init and rerun bun scripts/n1-check.ts");
     const refused = await old("status", v2, "--json");
