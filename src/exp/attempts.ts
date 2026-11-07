@@ -1,3 +1,4 @@
+import { requireCopilotAccept } from "../copilot.ts";
 import { resolveAutonomy } from "../autonomy.ts";
 import { readFinalSeeds, authorizeFinalAttempt, finalGateBinding, requirePosthocClosed } from "./final.ts";
 import { closeSync, existsSync, lstatSync, openSync, opendirSync, statSync, unlinkSync, writeSync } from "node:fs";
@@ -324,6 +325,7 @@ async function captureStage(dir: string, attempt: Attempt, ctx: AttemptContext, 
 export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: AttemptContext): Promise<Attempt> {
   const dir = studyDir(dirArg), { study } = openStudy(dir);
   const frozen = await withLock(dir, () => {
+    requireCopilotAccept(dir, "hypotheses");
     const design = readDesign(dir), executor = readExecutor(dir);
     if (!design) throw new Error("protocol: missing; run ares protocol <dir> --file PATH before attempt run");
     if (!executor) throw new Error("executor: missing; run ares executor set <dir> --kind local|ssh --workdir PATH before attempt run");
@@ -343,6 +345,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   if (options.expectedId !== undefined && wanted !== options.expectedId) throw new Error("attempt identity: changed since plan intent; reconcile the plan node before retrying");
   let created = false;
   let attempt = await withLock(dir, () => {
+    requireCopilotAccept(dir, "hypotheses");
     if (run === "posthoc") requirePosthocClosed(dir);
     if (finalAuthorization && authorizeFinalAttempt(dir, options.commit, seed).binding !== finalAuthorization.binding) throw new Error("final inputs changed during snapshot resolution; approve the current final gate before retrying");
     const attempts = load(dir), existing = attempts.find(a => a.id === wanted); if (existing) return existing;

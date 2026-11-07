@@ -12,12 +12,12 @@ test("all four string policies preserve their mode for every direct and plan gat
 });
 
 test("direct gates use the one declared phase mapping, and ignore guarded plan phase", () => {
-  expect(GATE_PHASES).toEqual({ scope: "scope", screen: "literature", design: "design", final: "final", review: "review" });
+  expect(GATE_PHASES).toEqual({ scope: "scope", screen: "literature", design: "design", final: "final", review: "review", "accept:hypotheses": "hypotheses", "accept:paper": "write", "accept:reviews": "review" });
   for (const mode of AUTONOMY_MODES) for (const [gate, phase] of Object.entries(GATE_PHASES)) {
     const policy = validateAutonomy({ default: "gates", phases: { [phase]: mode } });
     expect(resolveAutonomy(policy, gate)).toBe(mode);
     expect(resolveAutonomy(policy, gate, "archive")).toBe(mode);
-    for (const other of Object.keys(GATE_PHASES).filter(other => other !== gate)) expect(resolveAutonomy(policy, other)).toBe("gates");
+    for (const [other, otherPhase] of Object.entries(GATE_PHASES).filter(([other]) => other !== gate)) expect(resolveAutonomy(policy, other)).toBe(otherPhase === phase ? mode : "gates");
   }
 });
 

@@ -1,4 +1,5 @@
-import { validateAutonomyMode, validatePhase, PHASES, type Autonomy } from "./autonomy.ts";
+import { validateAutonomyMode, validatePhase, PHASES, ACCEPT_ARTIFACTS, resolveAutonomy, type AcceptArtifact, type Autonomy } from "./autonomy.ts";
+import { copilotBinding, requireCopilotAccept } from "./copilot.ts";
 import { homedir } from "node:os";
 import { addStudy, removeStudy, readRegistry } from "./console/registry.ts";
 import { readWatchSnapshot, setWatch, runWatch, showWatch, recordWatchFailure, watchFailureClass, type WatchSnapshot } from "./lit/watch.ts";
@@ -44,10 +45,10 @@ export interface Ctx extends ExperimentRuntime { actor: Actor; http: Http; signa
 const MAX_IDS = 200, DRAFT_BYTES = 2 * 1024 * 1024, BIB_BYTES = 16 * 1024 * 1024, CARD_BYTES = 65_536;
 
 export function binder(dir: string): Binder {
-  return gate => gate === "review" ? reviewBinding(dir) : gate === "final" ? finalGateBinding(dir) : gate.startsWith("plan:") ? planGateBinding(readPlanState(dir, readLedger(dir)), gate) : gate === "scope" ? scopeHash(dir) : gate === "design" ? designBinding(dir) : includedHash(loadCandidates(dir));
+  return gate => gate.startsWith("accept:") ? copilotBinding(dir, gate.slice(7) as AcceptArtifact) : gate === "review" ? reviewBinding(dir) : gate === "final" ? finalGateBinding(dir) : gate.startsWith("plan:") ? planGateBinding(readPlanState(dir, readLedger(dir)), gate) : gate === "scope" ? scopeHash(dir) : gate === "design" ? designBinding(dir) : includedHash(loadCandidates(dir));
 }
 function gateName(value: string): GateName {
-  if (!GATES.includes(value as GateName) && !value.startsWith("plan:")) throw new Error(`unknown gate: ${value} (${GATES.join(", ")})`);
+  if (!GATES.includes(value as GateName) && !ACCEPT_ARTIFACTS.some(artifact => value === `accept:${artifact}`) && !value.startsWith("plan:")) throw new Error("unknown gate: unsupported name; run ares gate list <dir> and choose a listed gate before approval or rejection");
   return value as GateName;
 }
 function ids(values: string[]): string[] {
@@ -133,7 +134,8 @@ export async function scope(dirArg: string, raw: unknown, ctx: Ctx) {
 export function gateList(dirArg: string) {
   const { dir, study } = openStudy(dirArg), events = readLedger(dir), bind = binder(dir);
   const plan = foldPlan(events);
-  const gates: GateName[] = [...GATES.filter(g => (g !== "design" && g !== "final") || study.mode === "experiment"), ...(plan?.nodes.filter(n => n.kind === "gate").map(n => `plan:${n.id}` as GateName) ?? [])];
+  const accepts = ACCEPT_ARTIFACTS.filter(artifact => resolveAutonomy(study.autonomy, `accept:${artifact}`) === "copilot").map(artifact => `accept:${artifact}` as GateName);
+  const gates: GateName[] = [...accepts, ...GATES.filter(g => (g !== "design" && g !== "final") || study.mode === "experiment"), ...(plan?.nodes.filter(n => n.kind === "gate").map(n => `plan:${n.id}` as GateName) ?? [])];
   return gates.map(g => gateState(g, events, bind));
 }
 
@@ -339,6 +341,7 @@ export async function planRun(dirArg: string, options: { parallel?: number }, ct
     actor: ctx.actor, ...(ctx.signal ? { signal: ctx.signal } : {}), ...(ctx.sleep ? { sleep: ctx.sleep } : {}),
     prepare: async (node, state) => {
       if (node.command !== "attempt.run") return {};
+      requireCopilotAccept(dir, "hypotheses");
       const design = readDesign(dir);
       if (!design) throw new Error("plan attempt: protocol missing; run ares protocol before resume");
       const options = attemptOptions(node, state.retryOf), snapshot = await resolveSnapshot(options.repo, options.commit, ctx.runner ?? spawnRunner);

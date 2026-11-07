@@ -448,7 +448,7 @@ ares autonomy set study auto --phase literature
 ares autonomy show study --json
 ```
 
-Phases are `scope`, `literature`, `hypotheses`, `design`, `investigate`, `ablate`, `final`, `posthoc`, `write`, `review` and `archive`. Only `auto` approves pending gates automatically; `gates`, `copilot` and `step` require recorded approval. Step execution is described below; copilot draft acceptance remains a separate follow-up (#52 T3). Approval authority remains workspace policy, with no person-only restriction.
+Phases are `scope`, `literature`, `hypotheses`, `design`, `investigate`, `ablate`, `final`, `posthoc`, `write`, `review` and `archive`. Only `auto` approves pending gates automatically; `gates`, `copilot` and `step` require recorded approval. Step execution and copilot draft acceptance are described below. Approval authority remains workspace policy, with no person-only restriction.
 
 | Gate | Phase |
 | --- | --- |
@@ -457,6 +457,9 @@ Phases are `scope`, `literature`, `hypotheses`, `design`, `investigate`, `ablate
 | `design` | `design` |
 | `final` | `final` |
 | `review` | `review` |
+| `accept:hypotheses` | `hypotheses` |
+| `accept:paper` | `write` |
+| `accept:reviews` | `review` |
 | `plan:<id>` | The declared phase shared by every guarded immediate downstream node; otherwise the study default |
 
 Plan nodes may declare `phase` from the same list. Dependencies through `needs` and explicit edges both identify guarded downstream nodes. Mixed phases, any undeclared target, no targets or a hub target use the study default; a gate's own `phase` is not a substitute, and command/run names are not inferred. Phase edits participate in node staleness; changing policy does not invalidate already-approved gates. The controller reloads policy inside each approval transaction.
@@ -466,6 +469,31 @@ With an effective `step` policy, the CLI controller keeps step work exclusive ev
 Use `ares plan control <dir> resume --command-id <new-id> --expected-revision <revision>` to continue. A resume through CLI or MCP changes the same durable plan state; MCP does not start a controller. The controller must already be running via `ares run` to admit work. Mode and phase are read again inside admission and completion transactions, so pending work follows the current recorded policy. Manual-only pending gate polls do not take a study lock.
 
 Legacy `auto|gates` string studies retain study v1 and their existing JSON layout. Object policies (`{default, phases}`), `copilot` and `step` require study v2. Once a study is v2, later policy changes never downgrade it. This reader supports v1 and v2; the published 0.1.0 reader rejects v2 with its unsupported-version guidance and leaves the file untouched. Plan `phase` is an optional v1 field: phase-free plans keep their previous shape, while the older strict 0.1.0 plan reader rejects a declared phase without changing the file.
+
+### Copilot draft acceptance
+
+A copilot phase produces drafts until an ordinary `accept:<artifact>` gate approves their current content hash. There are three aggregate artifacts; the guard is enabled by the **producing** phase's mode, not the consuming phase. `auto`, `gates` and `step` do not enable these guards. New studies still default to `gates`, with no implicit copilot override or automatic drafting.
+
+| Artifact gate and phase | Producer and content | Guarded consumers |
+| --- | --- | --- |
+| `accept:hypotheses`, `hypotheses` | Optional `hypotheses.md` plus the complete `idea.added`/`idea.decided` journal, produced by source edits and `idea add`/`idea decide` | `protocol`, attempt admission (all runs and plan preparation), `investigate close`, the closed-investigation reader used by ablate/final trusted-source paths, `paper build`, archive preview/export |
+| `accept:paper`, `write` | Manuscript source files under `paper/`, including notes/assets; `paper/build/` is derived and excluded | `review add`, `review resolve`, review readiness/approval, archive preview/export |
+| `accept:reviews`, `review` | Complete `review.added`/`review.resolved` journal across all builds, produced by `review add`/`review resolve` | Review readiness/approval, archive preview/export |
+
+Source edits or new relevant journal records make the prior accept stale (the gate becomes pending for its new hash). Gate decisions and unrelated ledger entries are excluded from artifact hashes, so approval never invalidates itself. Rebuilding or repairing `paper/build/` does not stale `accept:paper`; existing fresh-build, citation, number and review-readiness checks still apply. Acceptance is a workflow checkpoint, not scientific verification or a way to clear blocking findings.
+
+```sh
+ares autonomy set study copilot --phase write
+# Author or edit paper/manuscript.md and any source assets.
+ares paper check study
+ares paper build study
+ares gate list study
+ares gate approve study accept:paper
+```
+
+In-phase editing and own-draft diagnostics remain usable before acceptance: idea edits/list, paper check/build and review edits/show do not require accepting the artifact they produce. A build still consumes accepted hypotheses when that producing phase is copilot; review edits consume accepted paper source. Diagnostics that cannot use an unaccepted trusted source report the required gate and approval command. Plan adapters preserve the same refusal guidance and do not prepare an attempt backend before hypotheses acceptance.
+
+Approvals use the existing CLI/MCP gate handler, record the actor and bind the current hash. No agent/person exemption or person-only restriction is added, and accepts are never implicit auto approvals. Source reads are bounded: hypotheses Markdown at most 2 MiB; paper source at most 500 regular files, 64 MiB total, 1000 directories and 64 levels. Source links and special files are refused. Existing study-v2 copilot policy and version-1 gate/ledger records carry the feature; no new draft store or interchange format is introduced.
 
 ## Study files
 
@@ -539,8 +567,8 @@ ares protocol <dir> --file PATH|- [--json]
 ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--json]
 ares executor check <dir> [--json]
 ares gate list <dir> [--json]
-ares gate approve <dir> <scope|screen|design|final|review|plan:node-id> [--reason TEXT] [--json]
-ares gate reject <dir> <scope|screen|design|final|review|plan:node-id> --reason TEXT [--json]
+ares gate approve <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact> [--reason TEXT] [--json]
+ares gate reject <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact> --reason TEXT [--json]
 ares attempt run <dir> --repo PATH --commit SHA [--seed N] [--run NAME] [--label TEXT] [--retry ID] [--detach] [--json]
 ares attempt list <dir> [--run NAME] [--status running|succeeded|failed|cancelled|unknown] [--limit N] [--offset N] [--json]
 ares attempt show <dir> <id> [--json]
@@ -594,7 +622,7 @@ Keys are sent with requests only; they are never written to the study.
 
 ## Not implemented yet
 
-Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, binding agent-hub runner receipts (agent-hub#1018) to ares attempts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, exporting verified references as vault-mem reference notes (vault-mem 0.5.0 accepts reference metadata since vault-mem#73; the ares side is not built), copilot draft acceptance (#52 T3).
+Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, binding agent-hub runner receipts (agent-hub#1018) to ares attempts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, exporting verified references as vault-mem reference notes (vault-mem 0.5.0 accepts reference metadata since vault-mem#73; the ares side is not built).
 
 ## Release
 

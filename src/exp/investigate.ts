@@ -1,3 +1,4 @@
+import { requireCopilotAccept } from "../copilot.ts";
 import { readFinalSeeds, finalSeedsHash } from "./final.ts";
 import { foldIdeas } from "./ideas.ts";
 import { existsSync } from "node:fs";
@@ -162,7 +163,9 @@ export function showInvestigation(dirArg: string): InvestigateResult {
 }
 /** Caller holds the study lock; every refusal precedes the single file/event commit. */
 export function closeInvestigation(dirArg: string, actor: Actor): InvestigateResult {
-  const input = inputs(dirArg), file = investigateResultPath(input.dir, input.rule.run), previous = previousResult(file);
+  const input = inputs(dirArg);
+  requireCopilotAccept(input.dir, "hypotheses");
+  const file = investigateResultPath(input.dir, input.rule.run), previous = previousResult(file);
   if (input.attempts.some(a => a.status === "running")) throw new Error("investigate close: an attempt in the selected run is running; run ares attempt reconcile before closing");
   const result = calculate(input), text = JSON.stringify(result, null, 2) + "\n";
   if (previous !== text) commit(input.dir, [[file, text, INVESTIGATE_BYTES]], [{ actor, type: "investigate.closed", data: { run: input.rule.run, sha256: sha256(text), ruleSha256: input.ruleSha, winner: result.winner?.commit ?? null } }]);
@@ -172,7 +175,9 @@ export function closeInvestigation(dirArg: string, actor: Actor): InvestigateRes
 
 /** Read only a current, committed investigation result, never a hand-edited or stale winner. */
 export function readClosedInvestigation(dirArg: string): { result: InvestigateResult; sha256: string } {
-  const input = inputs(dirArg), text = previousResult(investigateResultPath(input.dir, input.rule.run));
+  const input = inputs(dirArg);
+  requireCopilotAccept(input.dir, "hypotheses");
+  const text = previousResult(investigateResultPath(input.dir, input.rule.run));
   if (text === undefined) throw new Error("investigate result: not closed; run ares investigate close before the next phase");
   const hash = sha256(text), receipt = input.events.findLast(e => e.type === "investigate.closed" && e.data.run === input.rule.run);
   if (!receipt || receipt.data.sha256 !== hash) throw new Error("investigate result: bytes do not match the latest close receipt; run ares investigate close to restore the committed result");

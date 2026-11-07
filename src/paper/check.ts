@@ -10,7 +10,7 @@ import { finalResultPath } from "../exp/final.ts";
 import { MANUSCRIPT_BYTES, parsePlaceholders, resolvePlaceholders } from "./placeholders.ts";
 
 export const MAX_CODE_NUMBERS = 500;
-export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result"; start: number; end: number; line: number; column: number; message: string }
+export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "unaccepted-draft" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result"; start: number; end: number; line: number; column: number; message: string }
 function blank(text: string, mask: Uint8Array): string { return text.split("").map((char, index) => mask[index] && char !== "\n" && char !== "\r" ? " " : char).join(""); }
 function mark(mask: Uint8Array, start: number, end: number) { mask.fill(1, start, end); }
 function escaped(text: string, index: number): boolean { let slashes = 0; while (index > 0 && text[--index] === "\\") slashes++; return slashes % 2 === 1; }
