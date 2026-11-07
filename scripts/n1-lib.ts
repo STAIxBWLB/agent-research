@@ -18,7 +18,7 @@ export function resolveN1(current: string, published: readonly string[]): string
   if (!here) throw new Error(`n1: package version ${current} is not a stable x.y.z; set a stable version`);
   const target: Triple = published.includes(current) ? [here[0], here[1] + 1, 0] : here;
   const stable = published.map(v => [v, parse(v)] as const).filter((e): e is readonly [string, Triple] => e[1] !== undefined && below(e[1], target));
-  if (!stable.length) throw new Error(`n1: no published stable version below ${target[0]}.${target[1]}; there is no previous minor line to check against`);
+  if (!stable.length) throw new Error(`n1: no published stable version below ${target[0]}.${target[1]}; there is no previous minor line to check against; pin one with --version X.Y.Z or wait until a previous minor is published`);
   stable.sort(([, a], [, b]) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
   return stable.at(-1)![0];
 }
@@ -42,18 +42,21 @@ export function compareManifests(old: ManifestLike, next: ManifestLike): string[
 }
 
 /**
- * A usage is kept when every N-1 word still appears in order, so additive options and widened enums
- * (`auto|gates` to `auto|gates|copilot|step`) are compatible while removed or renamed words are not.
+ * A usage is kept when every N-1 word still appears in order and every added word is optional syntax, meaning it sits
+ * inside a `[...]` group (bracket depth is tracked across words). Widened enums (`auto|gates` to `auto|gates|copilot|step`)
+ * are compatible; a removed or renamed word, or a new required positional or option, is not.
  */
 function usageKept(old: string, next: string): boolean {
-  const words = next.split(/\s+/);
-  let at = 0;
-  for (const word of old.split(/\s+/)) {
-    let found = false;
-    while (at < words.length) { const candidate = words[at++]!; if (candidate === word || widened(word, candidate)) { found = true; break; } }
-    if (!found) return false;
+  const oldWords = old.split(/\s+/).filter(Boolean);
+  let at = 0, depth = 0;
+  for (const word of next.split(/\s+/).filter(Boolean)) {
+    const optional = depth > 0 || word.startsWith("[");
+    depth += (word.match(/\[/g)?.length ?? 0) - (word.match(/\]/g)?.length ?? 0);
+    const wanted = oldWords[at];
+    if (wanted !== undefined && (word === wanted || widened(wanted, word))) { at++; continue; }
+    if (!optional) return false;
   }
-  return true;
+  return at === oldWords.length;
 }
 function widened(old: string, next: string): boolean {
   const split = (s: string) => /^([[<(]*)(.*?)([\]>)]*)$/.exec(s)!;

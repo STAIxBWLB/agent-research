@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { compareManifests, resolveN1, type ManifestLike } from "../scripts/n1-lib.ts";
+import { parseArgs } from "../scripts/n1-check.ts";
 
 test("resolveN1: development toward the next minor checks the latest patch of the published line", () => {
   expect(resolveN1("0.1.0", ["0.0.0-stage", "0.1.0"])).toBe("0.1.0");
@@ -10,7 +11,7 @@ test("resolveN1: development toward the next minor checks the latest patch of th
 });
 
 test("resolveN1 fails closed without a previous stable minor line", () => {
-  expect(() => resolveN1("0.1.0", [])).toThrow("no published stable version");
+  expect(() => resolveN1("0.1.0", [])).toThrow("pin one with --version X.Y.Z or wait until a previous minor is published");
   expect(() => resolveN1("0.1.0", ["0.0.0-stage"])).toThrow("no published stable version");
   expect(() => resolveN1("0.1.0-rc.1", ["0.1.0"])).toThrow("not a stable x.y.z");
 });
@@ -50,4 +51,18 @@ test("compareManifests: a removed tool fails", () => {
 test("compareManifests: a flipped readOnly fails in either direction", () => {
   const next = clone(); next.mcp.tools[0]!.readOnly = false; next.mcp.tools[1]!.readOnly = true;
   expect(compareManifests(base, next)).toEqual(['MCP: tool "ares_status" readOnly changed from true to false', 'MCP: tool "ares_init" readOnly changed from false to true']);
+});
+
+test("compareManifests: a new required positional or option fails; new words inside [...] pass", () => {
+  for (const usage of ["status <dir> <format> [--json]", "status <dir> --format FORMAT [--json]"]) {
+    const next = clone(); next.commands[0]!.usage = usage;
+    expect(compareManifests(base, next)[0]).toContain('CLI: command "status" usage changed');
+  }
+  const optional = clone(); optional.commands[0]!.usage = "status <dir> [--format FORMAT] [--mode survey|experiment] [--json]";
+  expect(compareManifests(base, optional)).toEqual([]);
+});
+
+test("n1-check refuses unknown arguments and accepts only --version X.Y.Z", () => {
+  expect(parseArgs([])).toEqual({}); expect(parseArgs(["--version", "0.1.0"])).toEqual({ version: "0.1.0" });
+  for (const args of [["--versio", "0.1.0"], ["--version"], ["--version", "latest"], ["--version", "0.1.0", "extra"], ["extra"]]) expect(() => parseArgs(args)).toThrow("remove unknown arguments");
 });
