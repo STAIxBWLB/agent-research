@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as ops from "../src/commands.ts";
-import { PHASES, type AutonomyMode } from "../src/autonomy.ts";
+import { PHASES, type AutonomyMode, type Phase } from "../src/autonomy.ts";
 import { guardedPlanPhase, validatePlan } from "../src/plan/definition.ts";
 import { runPlan, type ControllerRuntime } from "../src/plan/controller.ts";
 import { readLedger } from "../src/study.ts";
@@ -60,7 +60,7 @@ test("validated node phases are optional, strict and retained on every node kind
 });
 
 test("guarded phase uses immediate needs and edges only, with explicit uniform declarations", () => {
-  const cases: [unknown[], string[][], string | undefined][] = [
+  const cases: [unknown[], string[][], Phase | undefined][] = [
     [[target("next", "literature")], [], "literature"],
     [[target("next", "literature", [])], [["guard", "next"]], "literature"],
     [[target("one", "literature"), target("two", "literature")], [], "literature"],

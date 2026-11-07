@@ -16,7 +16,7 @@ function fixture(mode = "gates") {
 const bytes = (dir: string) => ["study.json", "ledger.jsonl"].map(file => readFileSync(join(dir, file), "utf8"));
 
 test("legacy auto/gates study shape and bytes survive all read-only policy paths", async () => {
-  for (const mode of ["auto", "gates"]) {
+  for (const mode of ["auto", "gates"] as const) {
     const f = fixture(mode), before = bytes(f.dir);
     expect(f.created.study.v).toBe(1); expect(f.created.study.autonomy).toBe(mode);
     expect(before[0]).toBe(JSON.stringify(f.created.study, null, 2) + "\n");
