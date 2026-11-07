@@ -103,7 +103,7 @@ test("review regressions: ledger allowlist, label and prose, closed results, run
   for (const needle of ["dgx02", "/work", "synthetic component", "\"label\""]) expect(all).not.toContain(needle);
   const ledger = readFileSync(join(out, "ledger.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l));
   expect(ledger.find(e => e.type === "executor.set").data).toEqual({ kind: "ssh" });
-  expect(manifest.counts.byRun.constructor).toEqual({ running: 0, succeeded: 1, failed: 0, cancelled: 0, unknown: 0 });
+  expect((manifest.counts.byRun["constructor"] as unknown)).toEqual({ running: 0, succeeded: 1, failed: 0, cancelled: 0, unknown: 0 });
   const rows = readFileSync(join(out, "attempts.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l));
   expect(rows.every(r => typeof r.labelSha256 === "string" && !("label" in r))).toBe(true);
 
