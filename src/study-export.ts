@@ -62,9 +62,12 @@ function project(value: unknown): unknown {
   if (plain(value)) { const out: Record<string, unknown> = {}; for (const [k, v] of Object.entries(value)) { if (FREE_TEXT_KEYS.has(k)) continue; const p = METRIC_KEYS.has(k) && typeof v === "string" ? v : project(v); if (p !== undefined) out[k] = p; } return out; }
   return closed(value) ? value : undefined;
 }
+/** A parseable ISO timestamp or null. */
+const isoAt = (value: unknown): string | null => typeof value === "string" && value.length <= 64 && /^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value)) ? value : null;
 function reduceEvent(event: LedgerEvent) {
   const actor = { kind: ACTOR_KINDS.has(event.actor?.kind as string) ? event.actor.kind : "other", ...(event.actor.id !== undefined ? { idSha256: sha256(event.actor.id) } : {}) };
-  return { v: event.v, at: event.at, actor, type: event.type, data: reduceData(plain(event.data) ? event.data : {}, LEDGER_KEYS[event.type] ?? []) };
+  const at = isoAt(event.at);
+  return { v: event.v, at, actor, type: TOKEN.test(event.type) ? event.type : "other", data: reduceData(plain(event.data) ? event.data : {}, LEDGER_KEYS[event.type] ?? []) };
 }
 // Closed codes emitted by attempts.ts, metrics.ts and artifacts.ts; never derive a class from user prose.
 const ATTEMPT_REASON_CODES = new Set([
@@ -89,14 +92,15 @@ function digest(image: unknown): string | null {
 }
 function attemptRow(a: Attempt) {
   const stages: Record<string, unknown> = {};
-  for (const [name, stage] of Object.entries(a.stages ?? {})) {
-    if (!stage) continue;
+  for (const name of ["candidate", "evaluator"] as const) {
+    const stage = plain(a.stages) && Object.hasOwn(a.stages, name) ? a.stages[name] : undefined;
+    if (!plain(stage)) continue;
     stages[name] = { exitCode: Number.isSafeInteger(stage.exitCode) ? stage.exitCode : null, durationMs: duration(stage.startedAt, stage.endedAt), network: stage.network === "none" ? "none" : "other", limits: plain(stage.limits) ? reduceData(stage.limits, ["cpus", "memoryMb", "pidsLimit", "wallSeconds", "gpus"]) : null, imageDigest: digest(stage.image) };
   }
   const reason = reasonClass(a.reason, a.status);
   return {
     id: a.id, run: a.run, studyIdSha256: sha256(String(a.studyId)), protocolHash: shaped(a.protocolHash, SHA256), sealBinding: shaped(a.sealBinding, SHA256), commit: shaped(a.commit, GIT_ID), treeId: shaped(a.treeId, GIT_ID),
-    snapshotSha256: shaped(a.snapshotSha256, SHA256), seed: a.seed, labelSha256: sha256(String(a.label ?? "")), retryOf: shaped(a.retryOf, ATTEMPT_ID), status: a.status, stage: a.stage, ...(reason ? { reasonClass: reason } : {}),
+    snapshotSha256: shaped(a.snapshotSha256, SHA256), seed: Number.isSafeInteger(a.seed) ? a.seed : null, labelSha256: sha256(String(a.label ?? "")), retryOf: shaped(a.retryOf, ATTEMPT_ID), status: a.status, stage: a.stage, ...(reason ? { reasonClass: reason } : {}),
     durationMs: duration(a.startedAt, a.endedAt), stages,
     metrics: (Array.isArray(a.metrics) ? a.metrics : []).map(m => ({ name: m.name, unit: m.unit, value: finite(m.value), provenance: m.provenance === "ares-observed" ? "ares-observed" : "other" })),
     outputs: (Array.isArray(a.outputs) ? a.outputs : []).map(o => ({ sha256: shaped(o.sha256, SHA256), bytes: finite(o.bytes) })),
@@ -116,7 +120,7 @@ function reviews(events: LedgerEvent[]) {
     for (const f of findings) { const kind = typeof f.kind === "string" && TOKEN.test(f.kind) ? f.kind : "other"; kinds[kind] = (kinds[kind] ?? 0) + 1; }
     const id = typeof e.data.id === "string" ? e.data.id : "";
     const family = typeof reviewer.modelFamily === "string" ? reviewer.modelFamily.trim().toLowerCase() : "";
-    return { idSha256: sha256(id), at: e.at, modelFamily: /^[a-z0-9][a-z0-9 ._-]{0,47}$/.test(family) ? family : "other", buildSha256: typeof review.buildSha256 === "string" && HEX.test(review.buildSha256) ? review.buildSha256 : null, findings: findings.length, blocking: findings.filter(f => f.blocking === true).length, kinds, resolved: resolved.get(id) ?? 0 };
+    return { idSha256: sha256(id), at: isoAt(e.at), modelFamily: /^[a-z0-9][a-z0-9 ._-]{0,47}$/.test(family) ? family : "other", buildSha256: typeof review.buildSha256 === "string" && HEX.test(review.buildSha256) ? review.buildSha256 : null, findings: findings.length, blocking: findings.filter(f => f.blocking === true).length, kinds, resolved: resolved.get(id) ?? 0 };
   });
 }
 function evidence(dir: string) {
@@ -201,7 +205,7 @@ function readBundle(dirArg: string, maxFileBytes: number) {
   const manifest: BundleManifest = {
     bundle: 1, formats: { ...FORMAT_VERSIONS }, studyIdSha256: sha256(study.id), mode: study.mode,
     protocolHash: protocol ? protocolHash(protocol) : null, sealBinding: study.mode === "experiment" ? designBinding(dir) ?? null : null,
-    window: { from: events[0]?.at ?? null, to: events.at(-1)?.at ?? null },
+    window: (() => { const ats = events.map(e => isoAt(e.at)).filter((v): v is string => v !== null); return { from: ats[0] ?? null, to: ats.at(-1) ?? null }; })(),
     counts: { attempts: attemptLines.length, byStatus, byRun, ledgerEvents: events.length, reviews: reviewRows.length },
     files: Object.fromEntries(Object.entries(files).map(([name, text]) => [name, sha256(text)])),
   };

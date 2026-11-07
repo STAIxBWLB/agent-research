@@ -270,11 +270,17 @@ test("#81 AC2: hand-edited hash fields, non-finite metrics and unknown provenanc
   for (const key of ["protocolHash", "sealBinding", "commit", "treeId", "snapshotSha256", "retryOf"]) record[key] = `${planted}${key}`;
   record.metrics = [{ name: "score", unit: "points", value: "1e999x", provenance: `${planted}prov` }];
   record.outputs = [{ sha256: `${planted}out`, bytes: "big", path: "x" }];
+  record.seed = `${planted}seed`; record.stages[`${planted}stage`] = record.stages.candidate;
   writeFileSync(file, JSON.stringify(record));
+  const ledger = join(dir, "ledger.jsonl");
+  writeFileSync(ledger, readFileSync(ledger, "utf8") + JSON.stringify({ v: 1, at: `${planted}at`, actor: { kind: "person" }, type: `${planted} type`, data: {} }) + "\n");
   const out = join(tempDir(), "bundle"); await ops.studyExport(dir, { bundle: out });
   const all = readdirSync(out).map(f => readFileSync(join(out, f), "utf8")).join("\n");
   expect(all).not.toContain(planted);
   const row = readFileSync(join(out, "attempts.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l)).find(r => r.id === id);
   expect(row).toMatchObject({ protocolHash: null, sealBinding: null, commit: null, treeId: null, snapshotSha256: null, retryOf: null });
+  expect(row.seed).toBeNull(); expect(Object.keys(row.stages).sort()).toEqual(["candidate", "evaluator"]);
+  const last = readFileSync(join(out, "ledger.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l)).at(-1);
+  expect(last).toMatchObject({ at: null, type: "other" });
   expect(row.metrics[0]).toMatchObject({ value: null, provenance: "other" }); expect(row.outputs[0]).toEqual({ sha256: null, bytes: null });
 });
