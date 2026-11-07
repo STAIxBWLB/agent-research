@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { compareManifests, resolveN1, type ManifestLike } from "../scripts/n1-lib.ts";
-import { parseArgs } from "../scripts/n1-check.ts";
+import { parseArgs, run, spawnFailure } from "../scripts/n1-check.ts";
 
 test("resolveN1: development toward the next minor checks the latest patch of the published line", () => {
   expect(resolveN1("0.1.0", ["0.0.0-stage", "0.1.0"])).toBe("0.1.0");
@@ -13,7 +13,7 @@ test("resolveN1: development toward the next minor checks the latest patch of th
 test("resolveN1 fails closed without a previous stable minor line", () => {
   expect(() => resolveN1("0.1.0", [])).toThrow("pin one with --version X.Y.Z or wait until a previous minor is published");
   expect(() => resolveN1("0.1.0", ["0.0.0-stage"])).toThrow("no published stable version");
-  expect(() => resolveN1("0.1.0-rc.1", ["0.1.0"])).toThrow("not a stable x.y.z");
+  expect(() => resolveN1("next", ["0.1.0"])).toThrow("fix package.json version");
 });
 
 const base: ManifestLike = {
@@ -65,4 +65,25 @@ test("compareManifests: a new required positional or option fails; new words ins
 test("n1-check refuses unknown arguments and accepts only --version X.Y.Z", () => {
   expect(parseArgs([])).toEqual({}); expect(parseArgs(["--version", "0.1.0"])).toEqual({ version: "0.1.0" });
   for (const args of [["--versio", "0.1.0"], ["--version"], ["--version", "latest"], ["--version", "0.1.0", "extra"], ["extra"]]) expect(() => parseArgs(args)).toThrow("remove unknown arguments");
+});
+
+test("resolveN1: a prerelease or build checkout targets its own minor core", () => {
+  expect(resolveN1("0.2.0-rc.1", ["0.1.0", "0.1.3"])).toBe("0.1.3");
+  expect(resolveN1("0.2.0-rc.1", ["0.1.0", "0.1.3", "0.2.0"])).toBe("0.1.3");
+  expect(resolveN1("0.2.0+build.5", ["0.0.0-stage", "0.1.0"])).toBe("0.1.0");
+  expect(() => resolveN1("0.1.0-rc.1", ["0.1.0"])).toThrow("no published stable version below 0.1");
+});
+
+test("run: a missing executable fails with n1 context and an install or PATH step", async () => {
+  const error = await run("ares-n1-missing-executable", [], process.cwd()).then(() => undefined, (e: Error) => e);
+  expect(error?.message).toMatch(/^n1: ares-n1-missing-executable could not be started .*install ares-n1-missing-executable or add it to PATH, then rerun bun scripts\/n1-check\.ts$/);
+  expect(spawnFailure("npm", new Error("Executable not found in $PATH: \"npm\"")).message).toContain("install npm or add it to PATH");
+  expect(spawnFailure("npm", Object.assign(new Error("EACCES"), { code: "EACCES" })).message).toContain("check PATH and permissions for npm");
+});
+
+test("run: timeout and output-bound failures carry n1 context and a rerun step", async () => {
+  const slow = await run("bun", ["-e", "await Bun.sleep(5000)"], process.cwd(), 50).then(() => undefined, (e: Error) => e);
+  expect(slow?.message).toMatch(/^n1: bun timed out after 50 ms; .*rerun bun scripts\/n1-check\.ts$/);
+  const loud = await run("bun", ["-e", "process.stdout.write('x'.repeat(5 * 1024 * 1024))"], process.cwd()).then(() => undefined, (e: Error) => e);
+  expect(loud?.message).toMatch(/^n1: bun output exceeded \d+ bytes; .*rerun bun scripts\/n1-check\.ts$/);
 });

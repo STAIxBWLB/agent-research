@@ -14,9 +14,10 @@ function parse(version: string): Triple | undefined {
 const below = (a: Triple, b: Triple) => a[0] < b[0] || (a[0] === b[0] && a[1] < b[1]);
 
 export function resolveN1(current: string, published: readonly string[]): string {
-  const here = parse(current);
-  if (!here) throw new Error(`n1: package version ${current} is not a stable x.y.z; set a stable version`);
-  const target: Triple = published.includes(current) ? [here[0], here[1] + 1, 0] : here;
+  // Prerelease or build tags on the checkout only (0.2.0-rc.1) mark the same target minor; published lists stay stable-only.
+  const core = /^(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.exec(current)?.[1], here = core ? parse(core) : undefined;
+  if (!here) throw new Error(`n1: package version ${current} is not x.y.z[-pre][+build]; fix package.json version and rerun bun scripts/n1-check.ts`);
+  const target: Triple = core === current && published.includes(current) ? [here[0], here[1] + 1, 0] : here;
   const stable = published.map(v => [v, parse(v)] as const).filter((e): e is readonly [string, Triple] => e[1] !== undefined && below(e[1], target));
   if (!stable.length) throw new Error(`n1: no published stable version below ${target[0]}.${target[1]}; there is no previous minor line to check against; pin one with --version X.Y.Z or wait until a previous minor is published`);
   stable.sort(([, a], [, b]) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);

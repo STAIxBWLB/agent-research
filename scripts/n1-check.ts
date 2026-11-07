@@ -11,17 +11,26 @@ import { compareManifests, resolveN1, type ManifestLike } from "./n1-lib.ts";
 const OUTPUT_BYTES = 4 * 1024 * 1024, LEDGER_BYTES = 16 * 1024 * 1024, PACKAGE = "@staix/agent-research";
 const root = resolve(import.meta.dir, "..");
 
+/** A child that cannot start: name the command and how to make it available. */
+export function spawnFailure(command: string, error: Error): Error {
+  const missing = (error as NodeJS.ErrnoException).code === "ENOENT" || /not found/i.test(error.message);
+  return new Error(missing
+    ? `n1: ${command} could not be started (${error.message}); install ${command} or add it to PATH, then rerun bun scripts/n1-check.ts`
+    : `n1: ${command} failed to start (${error.message}); check PATH and permissions for ${command}, then rerun bun scripts/n1-check.ts`);
+}
 interface Result { code: number; stdout: string; stderr: string }
 /** Bounded child process; output beyond the bound kills the child. */
 function run(command: string, args: string[], cwd: string, timeout = 120_000): Promise<Result> {
   return new Promise((accept, reject) => {
-    const proc = spawn(command, args, { cwd, env: { ...process.env, NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] });
+    let proc: ReturnType<typeof spawn>;
+    try { proc = spawn(command, args, { cwd, env: { ...process.env, NO_COLOR: "1" }, stdio: ["ignore", "pipe", "pipe"] }); }
+    catch (error) { reject(spawnFailure(command, error instanceof Error ? error : new Error(String(error)))); return; }
     const out: Buffer[] = [], err: Buffer[] = [];
     let bytes = 0, failure: Error | undefined;
-    const take = (sink: Buffer[]) => (chunk: Buffer) => { bytes += chunk.length; if (bytes > OUTPUT_BYTES) { failure ??= new Error(`n1: ${command} output exceeded ${OUTPUT_BYTES} bytes`); proc.kill("SIGKILL"); } else sink.push(chunk); };
-    proc.stdout.on("data", take(out)); proc.stderr.on("data", take(err));
-    const timer = setTimeout(() => { failure ??= new Error(`n1: ${command} timed out`); proc.kill("SIGKILL"); }, timeout);
-    proc.on("error", error => { clearTimeout(timer); reject(error); });
+    const take = (sink: Buffer[]) => (chunk: Buffer) => { bytes += chunk.length; if (bytes > OUTPUT_BYTES) { failure ??= new Error(`n1: ${command} output exceeded ${OUTPUT_BYTES} bytes; the child printed far more than a manifest or study command should, check that ${command} is the expected tool and rerun bun scripts/n1-check.ts`); proc.kill("SIGKILL"); } else sink.push(chunk); };
+    proc.stdout!.on("data", take(out)); proc.stderr!.on("data", take(err));
+    const timer = setTimeout(() => { failure ??= new Error(`n1: ${command} timed out after ${timeout} ms; check npm registry access or a hung child and rerun bun scripts/n1-check.ts`); proc.kill("SIGKILL"); }, timeout);
+    proc.on("error", error => { clearTimeout(timer); reject(spawnFailure(command, error)); });
     proc.on("close", code => { clearTimeout(timer); if (failure) reject(failure); else accept({ code: code ?? 1, stdout: Buffer.concat(out).toString("utf8"), stderr: Buffer.concat(err).toString("utf8") }); });
   });
 }
@@ -32,6 +41,7 @@ function json<T>(result: Result, what: string): T {
 const fail = (message: string): never => { throw new Error(`n1: ${message}`); };
 const NETWORK = "check npm registry access and rerun bun scripts/n1-check.ts";
 /** Only `--version X.Y.Z` is accepted; anything else is refused. */
+export { run };
 export function parseArgs(args: readonly string[]): { version?: string } {
   if (args.length === 0) return {};
   if (args.length === 2 && args[0] === "--version" && /^\d+\.\d+\.\d+$/.test(args[1]!)) return { version: args[1]! };
