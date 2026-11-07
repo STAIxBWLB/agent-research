@@ -29,6 +29,8 @@ export interface AttemptContext { actor: Actor; runner?: ProcessRunner; now?: ()
 export const ATTEMPT_BYTES = 1024 * 1024;
 // Startup includes bounded image pulls and two 5-minute transfers; claims never survive indefinitely after a crash.
 export const CONTROL_STALE_MS = 30 * 60_000;
+// Filesystem mtime has sub-ms precision; Date.now is integral. Tolerate small future skew on live locks.
+export const CONTROL_FUTURE_SKEW_MS = 60_000;
 const controlScope = new AsyncLocalStorage<{ dir: string; token: string }>();
 const STATUSES: AttemptStatus[] = ["running", "succeeded", "failed", "cancelled", "unknown"];
 const inspectFields = (prefix: string, fields: string[]) => fields.map(field => `${JSON.stringify(field)}:{{json ${prefix}.${field}}}`).join(",");
@@ -160,7 +162,7 @@ async function withControl<T>(dir: string, fn: () => Promise<T>): Promise<T> {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       let age = 0; try { age = Date.now() - statSync(path).mtimeMs; } catch { /* owner removed it */ }
       if (performance.now() - waitingSince >= 2000) throw new Error("attempt control: another operation is active; retry reconcile or cancel when it finishes (abandoned claims expire after 30 minutes)");
-      if (age < 0 || age >= CONTROL_STALE_MS) {
+      if (age < -CONTROL_FUTURE_SKEW_MS || age >= CONTROL_STALE_MS) {
         try { unlinkSync(path); }
         catch (failure) { if ((failure as NodeJS.ErrnoException).code !== "ENOENT") throw new Error("attempt control: abandoned lock could not be removed; restore study-directory ownership and permissions, then retry"); }
         continue;

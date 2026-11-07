@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSyn
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { autonomySet, init, gateDecide, gateList, planSet, planControl, planShow, planRun, finalSeeds, selection, investigateClose } from "../src/commands.ts";
-import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
+import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, CONTROL_FUTURE_SKEW_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
 import { finalGateBinding } from "../src/exp/final.ts";
@@ -605,5 +605,23 @@ test("overlapping identical plan cancels replay the first receipt after the disp
     expect(events.filter(event => event.type === "attempt.cancelled")).toHaveLength(1);
   } finally {
     release.resolve(); await Promise.allSettled([one, two].filter((value): value is ReturnType<typeof planControl> => value !== undefined)); spy.mockRestore();
+  }
+});
+
+for (const [label, skew, reclaimed] of [["slightly future", 1000, false], ["far future", CONTROL_FUTURE_SKEW_MS + 1000, true]] as const) test(`attempt control ${reclaimed ? "reclaims" : "respects"} a ${label} lock`, async () => {
+  const { dir, fake } = await setup(), attempt = await runAttempt(dir, request, fake.ctx), lock = join(dir, ".ares.control.lock"), token = "synthetic-lock-owner";
+  writeFileSync(lock, token); const baseline = Date.now(), future = new Date(baseline + skew); utimesSync(lock, future, future);
+  const now = spyOn(Date, "now").mockReturnValue(baseline), calls = fake.requests.length;
+  let pending: ReturnType<typeof cancelAttempt> | undefined;
+  try {
+    pending = cancelAttempt(dir, attempt.id, "synthetic cancellation", fake.ctx);
+    expect(readFileSync(lock, "utf8") !== token).toBe(reclaimed);
+    expect(fake.requests.length > calls).toBe(reclaimed);
+    if (!reclaimed) fs.unlinkSync(lock); // The test owner releases it; the waiter must not do so.
+    expect((await pending).status).toBe("cancelled");
+    expect(existsSync(lock)).toBe(false);
+  } finally {
+    if (existsSync(lock) && readFileSync(lock, "utf8") === token) fs.unlinkSync(lock);
+    if (pending) await Promise.allSettled([pending]); now.mockRestore();
   }
 });
