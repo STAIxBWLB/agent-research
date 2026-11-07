@@ -10,6 +10,8 @@ export default (host) => {
   const number = (value) => typeof value === "number" && Number.isFinite(value) ? String(value) : "Unavailable";
   const rows = (value) => Array.isArray(value) ? value : [];
   const record = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const autonomyLabel = (value) => typeof value === "string" ? text(value)
+    : `${text(record(value).default)}${Object.keys(record(record(value).phases)).length ? " (phase overrides)" : ""}`;
   const line = (value, max = 180) => {
     const valueText = text(value, "").replace(/\s+/g, " ").trim();
     return valueText.length > max ? `${valueText.slice(0, max - 3)}...` : valueText;
@@ -84,7 +86,7 @@ export default (host) => {
         const attempts = study.attempts?.available === false ? `Attempts unavailable: ${line(study.attempts.reason) || "Attempt records could not be read."}` : `${number(study.attempts?.total)} attempts`;
         const pending = rows(study.gates).filter((gate) => gate.state === "pending").length;
         return ui.row({ title: line(study.question) || text(study.id, "Unavailable study"),
-          sub: available ? [text(study.mode), text(study.autonomy), attempts, `${pending} pending gates`, finalState ? `Final ${finalState}` : "Final unavailable", reviewState, watchState].join(" | ") : text(study.reason, "Study cannot be read; its registration is retained."),
+          sub: available ? [text(study.mode), autonomyLabel(study.autonomy), attempts, `${pending} pending gates`, finalState ? `Final ${finalState}` : "Final unavailable", reviewState, watchState].join(" | ") : text(study.reason, "Study cannot be read; its registration is retained."),
           chip: { text: available ? text(study.mode, "study") : "unavailable", tone: available ? "neutral" : "err" },
           ...(typeof study.dir === "string" ? { onOpen: () => go("study", { study: study.dir }) } : {}) });
       }) ?? ui.empty("No registered studies", "Register one with ares console add <dir>. Ares does not scan the disk for studies.")];
@@ -106,8 +108,9 @@ export default (host) => {
     if (!study) return [toolbar("Study", true), ui.notice(text(snapshot.error, "Choose a registered study from the studies panel."), "warn")];
     const sections = [toolbar(text(study.question, "Study"), true), decisionNotice()];
     if (study.available === false) return [...sections, ui.notice(text(study.reason, "Study unavailable; its registration is retained."), "err"), h("p", { class: "ares-sub", text: text(study.dir, "") })];
-    sections.push(h("div", { class: "ares-bar" }, ui.chip(text(study.mode), "neutral"), ui.chip(text(study.autonomy), "neutral")),
+    sections.push(h("div", { class: "ares-bar" }, ui.chip(text(study.mode), "neutral"), ui.chip(autonomyLabel(study.autonomy), "neutral")),
       h("p", { class: "ares-sub", text: text(study.dir, "") }), gateRows(study.gates, study.dir), attemptRows(study.attempts));
+    if (study.autonomy && typeof study.autonomy === "object") sections.push(block("Autonomy policy", study.autonomy));
     const final = record(study.final);
     sections.push(h("section", { class: "ares-card" }, h("h3", { text: "Final status" }),
       typeof final.status === "string" ? ui.chip(final.status, tone(final.status)) : ui.empty("No current closed final"),

@@ -434,6 +434,31 @@ Sealing and metrics are **ares-observed**: ares builds the argv and checks the o
 
 `scope` binds to the content of `scope.json`; `screen` binds to the set of included papers; `design` binds the experiment protocol and task tree, plus selection/final-seeds files when present; `final` binds closed upstream results and design; `review` binds the current rendered/evidence hashes and current-build review/resolution event hashes; `plan:<node-id>` binds a plan gate to all upstream observed output references. Changing bound content returns its gate to pending. With `--autonomy auto` a pending gate is approved as `auto` when a command needs it; with `gates` (default) someone must run `ares gate approve`. The ledger records who approved: a person, an agent (detected from the agent environment) or `auto`. Which of them may approve is the workspace's policy, not the tool's. For experiments, automatic design and final approval is committed with a verified candidate start; a failed preparation records no approval. The review gate is approved explicitly after its readiness conditions pass; no current command auto-requires it.
 
+### Autonomy policy
+
+`ares autonomy show <dir> --json` reads the stored policy and effective mode for every phase. `ares autonomy set <dir> <auto|gates|copilot|step> [--phase PHASE]` changes the default or one override in a single study/ledger commit. The event records the actor, the complete `from` and `to` policies, and `phase` (null for a default change). A default change retains existing overrides. Earlier gate approvals and rejections are kept; policy changes do not re-decide them.
+
+```sh
+ares autonomy set study gates
+ares autonomy set study auto --phase literature
+ares autonomy show study --json
+```
+
+Phases are `scope`, `literature`, `hypotheses`, `design`, `investigate`, `ablate`, `final`, `posthoc`, `write`, `review` and `archive`. Only `auto` approves pending gates automatically; `gates`, `copilot` and `step` require recorded approval. This policy release stores all four modes but does not yet implement copilot draft acceptance or controller step-pausing (#52 T2/T3). Approval authority remains workspace policy, with no person-only restriction.
+
+| Gate | Phase |
+| --- | --- |
+| `scope` | `scope` |
+| `screen` | `literature` |
+| `design` | `design` |
+| `final` | `final` |
+| `review` | `review` |
+| `plan:<id>` | The declared phase shared by every guarded immediate downstream node; otherwise the study default |
+
+Plan nodes may declare `phase` from the same list. Dependencies through `needs` and explicit edges both identify guarded downstream nodes. Mixed phases, any undeclared target, no targets or a hub target use the study default; a gate's own `phase` is not a substitute, and command/run names are not inferred. Phase edits participate in node staleness; changing policy does not invalidate already-approved gates. The controller reloads policy inside each approval transaction.
+
+Legacy `auto|gates` string studies retain study v1 and their existing JSON layout. Object policies (`{default, phases}`), `copilot` and `step` require study v2. Once a study is v2, later policy changes never downgrade it. This reader supports v1 and v2; the published 0.1.0 reader rejects v2 with its unsupported-version guidance and leaves the file untouched. Plan `phase` is an optional v1 field: phase-free plans keep their previous shape, while the older strict 0.1.0 plan reader rejects a declared phase without changing the file.
+
 ## Study files
 
 | File | Content |
@@ -481,7 +506,9 @@ ares console add <dir> [--json]
 ares console remove <dir> [--json]
 ares console list [--json]
 ares manifest [--json]
-ares init <dir> --question TEXT [--mode survey|experiment] [--autonomy auto|gates] [--json]
+ares init <dir> --question TEXT [--mode survey|experiment] [--autonomy auto|gates|copilot|step] [--json]
+ares autonomy show <dir> [--json]
+ares autonomy set <dir> <auto|gates|copilot|step> [--phase PHASE] [--json]
 ares run <dir> [--parallel 1..8] [--json]
 ares plan set <dir> --file PATH|- [--json]
 ares plan control <dir> <pause|resume|retry|cancel|skip> [node] --command-id ID --expected-revision N [--json]
@@ -535,7 +562,7 @@ MCP uses shared command handlers; `ares_setup` exposes the same registration pre
 
 ## Version and format discovery
 
-`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `study`, `ledgerEvent`, `experimentProtocol`, `executor`, `experimentAttempt`, `studyPlan`, `experimentSelection`, `investigateResult`, `experimentFinalSeeds`, `ablateResult`, `finalResult` and `paperEvidence`, all version 1, carried by each record's `v` field. `skillProposal: 1` is also listed; proposal Markdown carries `skillProposal: 1` frontmatter and skill events carry that version in their data. The `ledgerEvents` list advertises `archive.exported`, `skill.proposed`, `skill.decided`, `watch.set` and `watch.ran` in the version-1 ledger envelope. The manifest also lists `studyRegistry: 1` and `watchConfig: 1`. Unsupported ledger/proposal/registry/watch versions are refused without rewriting their bytes. `mcp.tools` publishes `{name, readOnly}` for installers; grants are fail-closed for mutating or outside-reaching tools.
+`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `ledgerEvent`, `experimentProtocol`, `executor`, `experimentAttempt`, `studyPlan`, `experimentSelection`, `investigateResult`, `experimentFinalSeeds`, `ablateResult`, `finalResult` and `paperEvidence`, all version 1, carried by each record's `v` field. `study: 2` is the latest supported study format; legacy v1 is also supported. `skillProposal: 1` is also listed; proposal Markdown carries `skillProposal: 1` frontmatter and skill events carry that version in their data. The `ledgerEvents` list advertises `archive.exported`, `skill.proposed`, `skill.decided`, `watch.set`, `watch.ran` and `autonomy.set` in the version-1 ledger envelope. The manifest also lists `studyRegistry: 1` and `watchConfig: 1`. Unsupported ledger/proposal/registry/watch versions are refused without rewriting their bytes. `mcp.tools` publishes `{name, readOnly}` for installers; grants are fail-closed for mutating or outside-reaching tools.
 
 Within a supported schema, readers preserve additive fields on study/attempt records and keep ledger events with unknown kinds. Appending to the ledger leaves prior lines intact; updating an attempt keeps unrecognized fields and stage entries. Unknown stage entries remain readable, including logs and totals, but budget-gated starts refuse with an upgrade instruction because this version cannot account for their resource use. A future schema version or unknown execution status/stage is refused with an upgrade instruction, leaving the original data unchanged. Unknown plan versions or node kinds are refused without changing plan.json. Command input remains strict so unknown options or protocol fields cannot silently change an experiment.
 
@@ -553,7 +580,7 @@ Keys are sent with requests only; they are never written to the study.
 
 ## Not implemented yet
 
-Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, signed executor receipts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, vault-mem reference notes (after vault-mem#73), the `copilot` and `step` autonomy modes.
+Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, signed executor receipts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, vault-mem reference notes (after vault-mem#73), copilot draft acceptance and controller step-pausing (#52 T2/T3).
 
 ## Release
 

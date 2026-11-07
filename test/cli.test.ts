@@ -25,7 +25,7 @@ describe("AC8 CLI", () => {
     const dir = join(tempDir(), "s");
     await expect(run(["init", dir, "--question", "Q?", "--force"], {}, io())).rejects.toThrow("unknown or repeated option --force");
     await expect(run(["init", dir, "--question", "Q?", "--question", "R?"], {}, io())).rejects.toThrow("repeated");
-    await expect(run(["init", dir, "--question", "Q?", "--autonomy", "copilot"], {}, io())).rejects.toThrow("--autonomy");
+    await expect(run(["init", dir, "--question", "Q?", "--autonomy", "unknown"], {}, io())).rejects.toThrow("autonomy.mode");
     expect(existsSync(join(dir, "study.json"))).toBe(false);
     await expect(run(["lit", "frobnicate", dir], {}, io())).rejects.toThrow("unknown command");
     await expect(run(["lit", "search", dir, "q", "--limit", "many"], {}, io())).rejects.toThrow("--limit: integer required");
