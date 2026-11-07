@@ -1,3 +1,4 @@
+import { HttpError } from "../http.ts";
 import { join } from "node:path";
 import { assertWritable, boundedText, commit, onlyKeys, openStudy, plain, readLedger, readBytesBounded, sha256, type Actor } from "../study.ts";
 import { loadCandidates } from "./candidates.ts";
@@ -10,7 +11,8 @@ export interface WatchSnapshot { config: WatchConfig; sha256: string }
 export interface SearchResult { added: number; merged: number; dropped: number; linked: number; sources: { source: SourceName; ok: boolean; returned: number; error?: string }[] }
 export interface WatchError { host: string; status: number | null }
 export interface WatchQueryResult { id: string; added: number; merged: number; dropped: number; linked: number; sources: { source: SourceName; ok: boolean; returned: number }[]; errors: WatchError[] }
-export interface WatchRun { configSha256: string; queries: WatchQueryResult[]; added: number; addedIds: string[]; addedIdsTotal: number; ok: boolean }
+export type WatchFailureClass = "terminated" | "filesystem" | "network" | "rate" | "server" | "client" | "format" | "internal";
+export interface WatchRun { cause?: WatchFailureClass; configSha256: string; queries: WatchQueryResult[]; added: number; addedIds: string[]; addedIdsTotal: number; ok: boolean }
 const HOSTS: Record<SourceName, string> = { openalex: "api.openalex.org", s2: "api.semanticscholar.org", arxiv: "export.arxiv.org" };
 class WatchInputError extends Error {}
 class WatchVersionError extends WatchInputError {}
@@ -79,6 +81,17 @@ function sourceErrors(sources: SearchResult["sources"]): WatchError[] {
     const match = error.startsWith(prefix) ? /^(?:network|rate|server|client|format)(?: ([1-5][0-9]{2}))?$/.exec(error.slice(prefix.length)) : null;
     return { host, status: match?.[1] === undefined ? null : Number(match[1]) };
   });
+}
+/** A closed vocabulary only: thrown messages can contain request URLs, keys or response bodies. */
+export function watchFailureClass(error: unknown): WatchFailureClass {
+  if (error instanceof HttpError) return error.kind;
+  const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+  return ["ENOENT", "EACCES", "EPERM", "ENOSPC", "EIO", "EROFS", "ENOTDIR", "EISDIR"].includes(String(code)) ? "filesystem" : "internal";
+}
+/** Caller still holds the study lock; no partial query details or diagnostic text are copied. */
+export function recordWatchFailure(dir: string, snapshot: WatchSnapshot, actor: Actor, cause: WatchFailureClass): void {
+  const run: WatchRun = { configSha256: snapshot.sha256, queries: [], added: 0, addedIds: [], addedIdsTotal: 0, ok: false, cause };
+  commit(dir, [], [{ actor, type: "watch.ran", data: { ...run } }]);
 }
 /** One finite pass, using the caller's existing locked lit-search operation. No timer or screening. */
 export async function runWatch(dir: string, snapshot: WatchSnapshot, actor: Actor, search: (query: WatchQuery) => Promise<SearchResult>): Promise<WatchRun> {

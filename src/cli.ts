@@ -3,7 +3,7 @@ import { findCommand, help, type CommandSpec } from "./commands-table.ts";
 import * as ops from "./commands.ts";
 import { createHttp, type Http } from "./http.ts";
 import { PLAYBOOK } from "./playbook.ts";
-import { detectActor, readTextBounded } from "./study.ts";
+import { detectActor, readTextBounded, releaseStudyLocksForExit } from "./study.ts";
 
 const INPUT_BYTES = 65_536;
 export interface Io extends ops.ExperimentRuntime { readStdin?: () => Promise<string>; http?: Http; signal?: AbortSignal }
@@ -260,11 +260,16 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
 }
 
 /** `ares mcp`: stdout carries protocol frames only. */
-export async function runMcp(env: NodeJS.ProcessEnv = process.env): Promise<void> {
+export async function runMcp(env: NodeJS.ProcessEnv = process.env, http?: Http): Promise<void> {
   const [{ serveMcp }, { createAresMcp }] = await Promise.all([import("./mcp.ts"), import("./mcp-tools.ts")]);
-  const server = createAresMcp(env);
+  const server = createAresMcp(env, http);
+  const terminate = () => {
+    try { server.terminate(); }
+    finally { releaseStudyLocksForExit(); process.exit(143); }
+  };
+  process.once("SIGTERM", terminate);
   try { await serveMcp({ tools: server.tools, handlers: server.handlers, name: "ares", version }); }
-  finally { await server.waitForIdle(); }
+  finally { try { await server.waitForIdle(); } finally { process.off("SIGTERM", terminate); } }
 }
 
 /** Standard input stops at the input bound instead of buffering everything first. */

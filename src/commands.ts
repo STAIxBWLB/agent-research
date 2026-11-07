@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { addStudy, removeStudy, readRegistry } from "./console/registry.ts";
-import { readWatchSnapshot, setWatch, runWatch, showWatch, type WatchSnapshot } from "./lit/watch.ts";
+import { readWatchSnapshot, setWatch, runWatch, showWatch, recordWatchFailure, watchFailureClass, type WatchSnapshot } from "./lit/watch.ts";
 import { runSetup, type SetupMode } from "./setup.ts";
 import { proposeSkill, decideSkill, listSkills } from "./memory/skills.ts";
 import { rankLessons, type LessonRankOptions } from "./memory/lessons.ts";
@@ -495,19 +495,32 @@ export async function watchRun(dirArg: string, ctx: Ctx) {
 }
 export interface WatchStarted { started: true; configSha256: string }
 /** Acknowledge only validated admission; the finite pass keeps the same lock until its receipt is written. */
-export function watchRunDetached(dirArg: string, ctx: Ctx, track?: (completion: Promise<void>) => void): Promise<WatchStarted> {
+export function watchRunDetached(dirArg: string, ctx: Ctx, track?: (completion: Promise<void>, terminate: () => void) => void): Promise<WatchStarted> {
   const { dir, study } = openStudy(dirArg);
   let accept!: (value: WatchStarted) => void, reject!: (cause: unknown) => void, started = false;
+  let terminate = () => {};
   const admission = new Promise<WatchStarted>((resolve, refuse) => { accept = resolve; reject = refuse; });
   const completion = withLock(dir, async () => {
     const snapshot = watchPreflight(dir, study);
+    let settled = false;
+    terminate = () => {
+      if (settled) return; settled = true;
+      recordWatchFailure(dir, snapshot, ctx.actor, "terminated");
+      console.error("ares watch: terminated; inspect ares watch show and lit list before retrying");
+    };
     started = true; accept({ started: true, configSha256: snapshot.sha256 });
-    await watchRunLocked(dir, snapshot, ctx);
+    try { await watchRunLocked(dir, snapshot, ctx); settled = true; }
+    catch (cause) {
+      if (settled) return; settled = true;
+      const kind = watchFailureClass(cause);
+      recordWatchFailure(dir, snapshot, ctx.actor, kind);
+      console.error(`ares watch: background pass failed (${kind}); inspect ares watch show and lit list before retrying`);
+    }
   }).then(() => {}, cause => {
     if (!started) reject(cause);
-    else console.error("ares watch: background pass failed; inspect ares watch show and lit list before retrying");
+    else console.error(`ares watch: failure receipt could not be written (${watchFailureClass(cause)}); restore study storage, inspect ares watch show and lit list, then retry`);
   });
-  track?.(completion);
+  track?.(completion, () => terminate());
   return admission;
 }
 export const watchShow = (dir: string) => ({ ...showWatch(dir), newCandidates: list(dir, { status: "new", limit: 500 }) });

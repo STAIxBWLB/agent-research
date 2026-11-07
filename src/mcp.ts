@@ -12,6 +12,8 @@ const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 
 /** Runtime validation for the small schema vocabulary the tools use. Unknown keywords never widen acceptance. */
 export function validArguments(value: unknown, raw: unknown): boolean {
+  // An empty JSON schema delegates a frame-bounded field (watch version) to the shared validator.
+  if (plain(raw) && Object.keys(raw).length === 0) return true;
   const s = raw as Record<string, any>, type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
   const types: unknown[] = Array.isArray(s.type) ? s.type : [s.type];
   if (!types.includes(type) && !(type === "number" && Number.isSafeInteger(value) && types.includes("integer"))) return false;

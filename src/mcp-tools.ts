@@ -30,8 +30,8 @@ const SKILL = obj({ name: text(64), summary: text(16384), steps: { ...texts(1638
 const SCOPE = obj({ question: text(2000), subquestions: texts(30, 1000), include: texts(50, 500), exclude: texts(50, 500), yearFrom: year, yearTo: year, maxCandidates: { type: "integer", minimum: 1, maximum: 5000 } }, ["question"]);
 const CARD = obj({ summary: text(4000), claims: texts(50, 1000), methods: text(4000), findings: text(4000), limitations: text(4000), relevance: text(4000) }, ["summary"]);
 const integer = (minimum: number, maximum: number) => ({ type: "integer", minimum, maximum });
-const WATCH = obj({ v: { type: "integer", enum: [1] }, queries: { type: "array", minItems: 1, maxItems: 20,
-  items: obj({ id: text(64), query: text(4096), source: { type: "string", enum: ["openalex", "s2", "arxiv", "all"] }, yearFrom: year, limit: integer(1, 50) }, ["id", "query"]) }, rubric: text(8000) }, ["v", "queries"]);
+const WATCH = obj({ v: {}, queries: { type: "array", minItems: 1, maxItems: 20,
+  items: obj({ id: text(64), query: text(4096), source: { type: "string", enum: ["openalex", "s2", "arxiv", "all"] }, yearFrom: year, limit: integer(1, 50) }, ["id", "query"]) }, rubric: text(8000) }, ["queries"]);
 const argv = { type: "array", minItems: 1, maxItems: 128, items: { type: "string", maxLength: 4096 } };
 const image = { ...text(512), description: "Digest-pinned image: name@sha256:<64 lowercase hex digits>" };
 const stage = { type: "string", enum: ["candidate", "evaluator"] };
@@ -132,12 +132,12 @@ function absolute(value: unknown, what: string): string {
 }
 
 /** MCP calls always come from an agent; the actor id is the detected agent or `mcp`. */
-export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(env), runtime: ops.ExperimentRuntime = {}): { tools: readonly McpTool[]; handlers: Record<string, McpHandler>; waitForIdle(): Promise<void> } {
+export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(env), runtime: ops.ExperimentRuntime = {}): { tools: readonly McpTool[]; handlers: Record<string, McpHandler>; waitForIdle(): Promise<void>; terminate(): void } {
   const detected = detectActor(env), actor: Actor = { kind: "agent", id: detected.kind === "agent" ? detected.id! : "mcp" };
   const ctx = { ...runtime, actor, http }, memoryEnv = { ...env, AGENTHUB_PEER_ID: actor.id };
   const dir = (a: Record<string, unknown>) => absolute(a.study, "study");
-  const background = new Set<Promise<void>>();
-  const track = (completion: Promise<void>) => { background.add(completion); void completion.then(() => { background.delete(completion); }); };
+  const background = new Map<Promise<void>, () => void>();
+  const track = (completion: Promise<void>, terminate: () => void) => { background.set(completion, terminate); void completion.then(() => { background.delete(completion); }); };
   const handlers: Record<string, McpHandler> = {
     ares_watch_set: a => ops.watchSet(dir(a), a.watch, ctx),
     ares_watch_run: a => ops.watchRunDetached(dir(a), ctx, track),
@@ -196,5 +196,8 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
     ares_cite_check: a => ops.cite(dir(a), absolute(a.draft, "draft")),
     ares_playbook: () => ({ playbook: PLAYBOOK }),
   };
-  return { tools: ARES_TOOLS, handlers, waitForIdle: async () => { await Promise.all([...background]); } };
+  return { tools: ARES_TOOLS, handlers,
+    // Only for the entrypoint immediately before process exit; pending async work must not resume.
+    terminate: () => { for (const stop of background.values()) { try { stop(); } catch { console.error("ares watch: termination receipt failed (storage); restore study storage and inspect ares watch show before retrying"); } } },
+    waitForIdle: async () => { await Promise.all([...background.keys()]); } };
 }

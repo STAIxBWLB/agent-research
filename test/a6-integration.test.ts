@@ -1,10 +1,11 @@
-import { expect, test } from "bun:test";
+import { expect, test, spyOn } from "bun:test";
 import { existsSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import * as ops from "../src/commands.ts";
 import { run } from "../src/cli.ts";
 import { ARES_TOOLS, createAresMcp } from "../src/mcp-tools.ts";
+import { HttpError } from "../src/http.ts";
 import { serveMcp, validArguments } from "../src/mcp.ts";
 import { loadCandidates } from "../src/lit/candidates.ts";
 import { watchPath, type WatchConfig, type WatchRun } from "../src/lit/watch.ts";
@@ -51,7 +52,7 @@ test("A6 MCP discovery grants only local reads and schemas enforce bounded close
     expect(ops.manifest().mcp.tools.find(row => row.name === name)!.readOnly).toBe(readOnly && !external);
   }
   expect(validArguments({ study: "/synthetic", watch }, tool("ares_watch_set").inputSchema)).toBe(true);
-  for (const invalid of [{ ...watch, v: 2 }, { ...watch, unknown: true }, { ...watch, queries: [] }, { ...watch, queries: Array(21).fill(watch.queries[0]) },
+  for (const invalid of [{ ...watch, unknown: true }, { ...watch, queries: [] }, { ...watch, queries: Array(21).fill(watch.queries[0]) },
     { ...watch, queries: [{ id: "q", query: "x".repeat(4097) }] }, { ...watch, queries: [{ id: "q", query: "x", limit: 51 }] },
     { ...watch, queries: [{ id: "q", query: "x", yearFrom: 999 }] }, { ...watch, queries: [{ id: "q", query: "x", source: "unknown" }] },
     { ...watch, queries: [{ id: "q", query: "x", unknown: true }] }, { ...watch, rubric: "x".repeat(8001) }]) {
@@ -212,5 +213,53 @@ test("detached watch admission refuses missing config, pending scope and invalid
     try { await expect(call(f.server, "ares_watch_run", { study: f.dir })).rejects.toThrow(failure === "config" ? "no config" : failure === "scope" ? "scope" : "watch query late"); }
     finally { await f.server.waitForIdle(); }
     expect(journal(f.dir)).toEqual(before); expect(f.http.requested).toEqual([]); expect(existsSync(join(f.dir, ".ares.lock"))).toBe(false);
+  }
+});
+
+test("MCP watch versions reach the same runtime refusal as CLI without writes", async () => {
+  const f = await fixture(), before = journal(f.dir);
+  for (const v of [2, "1", null, 1.5, false, {}, [1], undefined]) {
+    const input = { ...(v === undefined ? {} : { v }), queries: watch.queries };
+    const args = { study: f.dir, watch: input };
+    expect(validArguments(args, tool("ares_watch_set").inputSchema)).toBe(true);
+    let cliMessage = "";
+    try { await run(["watch", "set", f.dir, "--file", "-"], f.env, { ...f.io, readStdin: async () => JSON.stringify(input) }); }
+    catch (error) { cliMessage = (error as Error).message; }
+    expect(cliMessage).toContain(v === 2 ? "unsupported version" : "set v to 1");
+    const output = new PassThrough(), inputStream = new PassThrough(); let bytes = "";
+    output.on("data", chunk => { bytes += String(chunk); });
+    const serving = serveMcp({ ...f.server, input: inputStream, output });
+    inputStream.end([
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: {} } },
+      { jsonrpc: "2.0", method: "notifications/initialized" },
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "ares_watch_set", arguments: args } },
+    ].map(row => JSON.stringify(row)).join("\n") + "\n");
+    await serving; output.end();
+    const reply = bytes.trim().split("\n").map(line => JSON.parse(line)).find(row => row.id === 2);
+    expect(reply.error).toBeUndefined(); expect(reply.result.isError).toBe(true);
+    expect(JSON.parse(reply.result.content[0].text).issues[0].message).toBe(cliMessage);
+  }
+  expect(journal(f.dir)).toEqual(before); expect(f.http.requested).toEqual([]);
+});
+
+test("admitted detached failures leave a minimal class-only receipt and actionable stderr", async () => {
+  for (const [failure, kind] of [[new Error("private https://example.invalid/?key=secret response-body"), "internal"],
+    [Object.assign(new Error("private secret"), { code: "ENOSPC" }), "filesystem"],
+    [new HttpError("rate", "api.openalex.org", 429), "rate"]] as const) {
+    const f = await fixture(); await ops.watchSet(f.dir, watch, f.ctx);
+    Object.defineProperty(f.http.http, "env", { get() { throw failure; } });
+    const lines: string[] = [], stderr = spyOn(console, "error").mockImplementation(message => { lines.push(String(message)); });
+    try {
+      const ack = await call(f.server, "ares_watch_run", { study: f.dir }) as { started: boolean; configSha256: string }; expect(ack.started).toBe(true);
+      await f.server.waitForIdle();
+      const events = readLedger(f.dir), receipt = events.filter(row => row.type === "watch.ran");
+      expect(receipt).toHaveLength(1);
+      expect(receipt[0]!.data).toEqual({ configSha256: ack.configSha256, queries: [], added: 0, addedIds: [], addedIdsTotal: 0, ok: false, cause: kind });
+      expect(receipt[0]!.actor).toEqual(actor); expect(events.some(row => row.type === "lit.search")).toBe(false);
+      expect(existsSync(join(f.dir, ".ares.lock"))).toBe(false);
+      expect((ops.watchShow(f.dir).runs[0]! as Record<string, unknown>).cause).toBe(kind);
+      expect(lines.join("\n")).toContain(`failed (${kind})`); expect(lines.join("\n")).toContain("inspect ares watch show");
+      expect(journal(f.dir).toString() + lines.join("\n")).not.toMatch(/private|secret|https:|response-body/);
+    } finally { stderr.mockRestore(); }
   }
 });
