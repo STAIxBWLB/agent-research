@@ -3,14 +3,14 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { assertManifest, assertPackageFiles, assertToolchain, distTagFor, identity, isolatedEnv, releaseNotes, releaseSection, validateRelease, verifyStaged } from "../scripts/release.ts";
+import { gateRelease, assertManifest, assertPackageFiles, assertToolchain, distTagFor, identity, isolatedEnv, releaseNotes, releaseSection, validateRelease, verifyStaged } from "../scripts/release.ts";
 import { tempDir } from "./helpers.ts";
 const files = ["package.json", "README.md", "CHANGELOG.md", "LICENSE", "bin/ares.js", "src/cli.ts", "src/ui/plugin.ts", "src/ui/panel.js", "src/ui/panel.css"];
 const dated = "# Changelog\n\n## Unreleased\n\n## [0.1.0] - 2026-11-05\n\n- Initial publication.\n\n## [0.0.1] - 2026-01-01\n\n- Older fixture.\n";
-function fixture() {
+function fixture(changelog = dated) {
   const root = tempDir(), work = tempDir(), dir = join(work, "stage"); mkdirSync(dir);
   const pkg = { name: "@staix/agent-research", version: "0.1.0", bin: { ares: "bin/ares.js" } };
-  const content = (file: string) => file === "package.json" ? JSON.stringify(pkg) : file === "CHANGELOG.md" ? dated : "synthetic fixture\n";
+  const content = (file: string) => file === "package.json" ? JSON.stringify(pkg) : file === "CHANGELOG.md" ? changelog : "synthetic fixture\n";
   for (const file of files) { mkdirSync(join(root, file, ".."), { recursive: true }); writeFileSync(join(root, file), content(file)); }
   const env = { ...isolatedEnv(work), GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
   const git = (args: string[]) => execFileSync("git", args, { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
@@ -55,4 +55,45 @@ test("publish toolchain and dist-tags are explicit, and notes use only the versi
   expect(distTagFor("0.1.0")).toBe("latest"); expect(distTagFor("0.2.0-rc.1")).toBe("next"); expect(distTagFor("0.1.0+build-with-dash")).toBe("latest");
   const f = fixture(), output = join(f.work, "notes.md"), result = releaseNotes(f.dir, output, f.root, {}), notes = readFileSync(output, "utf8");
   expect(result.prerelease).toBe(false); expect(notes).toContain("Initial publication."); expect(notes).not.toContain("Older fixture"); expect(notes).not.toContain("## Unreleased"); expect(notes).toContain(f.manifest.sha256);
+});
+
+test("release gate refuses wrong tag or off-main commit before GitHub lookup", async () => {
+  const f = fixture(), calls: string[][] = [], env = { RELEASE_TAG: f.expected.tag, RELEASE_SHA: f.expected.commit };
+  await expect(gateRelease(f.root, { ...env, RELEASE_TAG: "v0.2.0" }, async (_p, args) => { calls.push(args); return ""; })).rejects.toThrow("tag must equal");
+  expect(calls).toEqual([]);
+  await expect(gateRelease(f.root, env, async (p, args) => { expect(p).toBe("git"); calls.push(args); throw new Error("not ancestor"); })).rejects.toThrow("on origin/main");
+  expect(calls).toEqual([["merge-base", "--is-ancestor", f.expected.commit, "origin/main"]]);
+});
+
+test("workflow gate order, aggregate, checkout pins and release smoke remain enforced", () => {
+  const check = readFileSync(new URL("../.github/workflows/check.yml", import.meta.url), "utf8");
+  const release = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  const ci = Bun.YAML.parse(check) as { jobs: Record<string, { if?: string; needs?: string[]; steps: { run?: string }[] }> };
+  expect(ci.jobs["ci-ok"]!.if).toBe("always()"); expect(ci.jobs["ci-ok"]!.needs).toEqual(["check"]);
+  expect(check).toContain("all(.[]; .result == \"success\")");
+  expect(check).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}"); expect(check).not.toContain("paths-ignore");
+  const rel = Bun.YAML.parse(release) as { jobs: Record<string, { needs?: string; permissions?: Record<string,string> }> };
+  expect(rel.jobs.validate!.needs).toBe("gate"); expect(rel.jobs.gate!.permissions!.actions).toBe("read");
+  expect(release).not.toContain("bun run check"); expect(release).toContain("bun run release:smoke"); expect(release).toContain("bun scripts/release.ts gate");
+  for (const workflow of [check, release]) for (const match of workflow.matchAll(/uses: actions\/checkout@([^ ]+)/g)) expect(match[1]).toBe("d23441a48e516b6c34aea4fa41551a30e30af803");
+});
+
+test("gate sanitizes file and lookup failures without losing the cause or next step", async () => {
+  const f = fixture(), env = { RELEASE_TAG: f.expected.tag, RELEASE_SHA: f.expected.commit };
+  const runner = async (program: "git" | "gh") => { if (program === "gh") throw new Error("private https://example.invalid/token (HTTP 403)"); return ""; };
+  try { await gateRelease(f.root, env, runner); throw new Error("expected refusal"); }
+  catch (cause) { const message = String(cause); expect(message).toContain("release CI GitHub lookup: HTTP 403"); expect(message).toContain("GH_TOKEN actions:read"); expect(message).toContain("then rerun"); expect(message).not.toContain("private"); expect(message).not.toContain("https://"); }
+  unlinkSync(join(f.root, "CHANGELOG.md"));
+  await expect(gateRelease(f.root, env, runner)).rejects.toThrow("release CHANGELOG read: local file problem");
+  await expect(gateRelease(f.root, env, runner)).rejects.toThrow("check the release job inputs");
+});
+
+test("CRLF release notes pass shared tag validation and emit LF-only GitHub notes", () => {
+  const changelog = dated.replace("- Initial publication.", "- Initial publication.\n- Second synthetic note.").replaceAll("\n", "\r\n");
+  const f = fixture(changelog), env = { RELEASE_TAG: f.expected.tag, RELEASE_SHA: f.expected.commit };
+  expect(validateRelease(f.root, env)).toEqual(f.expected);
+  const output = join(f.work, "notes.md"); releaseNotes(f.dir, output, f.root, env);
+  const notes = readFileSync(output, "utf8");
+  expect(notes).toContain("- Initial publication.\n- Second synthetic note.");
+  expect(notes).not.toContain("\r"); expect(notes).not.toContain("Older fixture");
 });

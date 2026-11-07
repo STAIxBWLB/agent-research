@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- CI/release (#69): one fail-closed `ci-ok` aggregate, non-cancelling main checks, exact-main-commit CI admission before release staging, scripted release preparation and annotated tagging, rerun-safe GitHub Release notes/assets with bounded 429/5xx retry, and one pinned checkout version. Release reuses the full CI result while retaining Ubuntu/macOS clean-prefix artifact smoke checks.
+
 ## [0.1.0] - 2026-11-05
 
 - Phase A6 setup/console/watch (#51): dry-run client and API-1 console registration with receipts, conditional undo and versioned roots; an explicit private study registry; read panels and event-timed inboxes; and eight decision-level console actions with preview/fingerprint confirmation, person attribution and stale-input refusal. Read-only console mode blocks writes. Saved literature watches run one finite, study-locked pass, retain ordinary scope/screen rules and never score rubrics or screen automatically; recurrence is person-managed agent-hub task proposals or user cron. Malformed watch versions are repairable; safe-integer future versions remain unchanged. CLI/MCP share watch and registry operations; MCP watch runs always return detached admission {started:true,configSha256} after locked config/scope/year preflight and finish in the same responsive MCP process. Outcomes arrive in watch.ran/watch show; every-source failure is recorded as ok:false. A second start while locked refuses. CLI watch run and watch.run plan steps remain synchronous (exit 1/failed node on all-source failure). Manifest lists studyRegistry/watchConfig v1 and watch ledger events. Tests use synthetic records/fake HTTP/runners and pinned console conformance, with no live deployment/amem/vault claim. No resident watcher is included.

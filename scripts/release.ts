@@ -1,3 +1,4 @@
+import { defaultReleaseRunner, waitForCi, releaseFailure, ReleaseError, type ReleaseRunner } from "./release-ci.ts";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
@@ -10,7 +11,7 @@ export const METADATA_BYTES = 65_536, CHANGELOG_BYTES = 1024 * 1024, ARCHIVE_BYT
 export interface ReleaseManifest { name: string; version: string; tag: string; commit: string; sha256: string; distTag: "latest" | "next" }
 export interface ReleaseIdentity { name: string; version: string; tag: string; commit: string }
 const required = ["package.json", "README.md", "CHANGELOG.md", "LICENSE", "bin/ares.js", "src/cli.ts", "src/ui/plugin.ts", "src/ui/panel.js", "src/ui/panel.css"];
-function fail(message: string): never { throw new Error(`release: ${message}; correct the candidate and stage a new artifact before publishing`); }
+function fail(message: string): never { throw new ReleaseError(`release: ${message}; correct the candidate and stage a new artifact before publishing`); }
 function json(file: string, bound = METADATA_BYTES): unknown {
   try { return JSON.parse(readTextBounded(file, bound, { noFollow: true })); } catch { fail(`${file} is unreadable, oversized or invalid JSON`); }
 }
@@ -22,7 +23,7 @@ export function distTagFor(version: string): "latest" | "next" {
   return version.split("+")[0]!.includes("-") ? "next" : "latest";
 }
 export function releaseSection(text: string, version: string): string {
-  const prefix = `## [${version}] - `, lines = text.split("\n"), matches = lines.map((line, index) => line.startsWith(prefix) ? index : -1).filter(index => index >= 0);
+  const prefix = `## [${version}] - `, lines = text.replaceAll("\r\n", "\n").split("\n"), matches = lines.map((line, index) => line.startsWith(prefix) ? index : -1).filter(index => index >= 0);
   if (matches.length !== 1) fail("CHANGELOG needs exactly one dated section for this version; Unreleased is insufficient");
   const start = matches[0]!, date = lines[start]!.slice(prefix.length);
   if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date) || !Number.isFinite(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date) fail("CHANGELOG release date must be a valid YYYY-MM-DD");
@@ -41,7 +42,19 @@ export function identity(root = process.cwd(), env: NodeJS.ProcessEnv = process.
 }
 export function validateRelease(root = process.cwd(), env: NodeJS.ProcessEnv = process.env): ReleaseIdentity {
   if (!env.RELEASE_TAG || !env.RELEASE_SHA) fail("RELEASE_TAG and RELEASE_SHA are required for tag validation");
-  const result = identity(root, env); releaseSection(readTextBounded(join(root, "CHANGELOG.md"), CHANGELOG_BYTES), result.version); return result;
+  const result = identity(root, env);
+  let changelog: string;
+  try { changelog = readTextBounded(join(root, "CHANGELOG.md"), CHANGELOG_BYTES); }
+  catch (error) { throw releaseFailure("release CHANGELOG read", error, "check the release job inputs for a readable bounded CHANGELOG.md, then rerun", "local file problem"); }
+  releaseSection(changelog, result.version); return result;
+}
+export async function gateRelease(root = process.cwd(), env: NodeJS.ProcessEnv = process.env, runner: ReleaseRunner = defaultReleaseRunner(root)): Promise<void> {
+  try {
+    const candidate = validateRelease(root, env);
+    try { await runner("git", ["merge-base", "--is-ancestor", candidate.commit, "origin/main"]); }
+    catch (error) { throw releaseFailure("release gate main ancestry check (tag commit must be on origin/main)", error, "check git access and merge the candidate onto main, then rerun"); }
+    await waitForCi(candidate.commit, { runner });
+  } catch (error) { throw releaseFailure("release gate", error, "check the release job inputs and GH_TOKEN actions:read permission, then rerun"); }
 }
 export function assertPackageFiles(files: string[], expected?: string[]): void {
   if (!files.length || files.length > 4096 || new Set(files).size !== files.length) fail("archive file list is empty, duplicated or exceeds 4096 entries");
@@ -122,7 +135,10 @@ export function releaseNotes(dir: string, output: string, root = process.cwd(), 
 }
 async function main(args: string[]) {
   const [operation, directory, extra] = args;
-  if (operation === "validate" && args.length === 1) { validateRelease(); console.log("release tag validation: ok"); }
+  if (operation === "gate" && args.length === 1) {
+    await gateRelease(); console.log("release CI gate: ok");
+  }
+  else if (operation === "validate" && args.length === 1) { validateRelease(); console.log("release tag validation: ok"); }
   else if (operation === "stage" && directory && args.length === 2) { const result = stageRelease(directory); console.log(`release stage: ${result.name}@${result.version} ${result.sha256}`); }
   else if (operation === "verify" && directory && (args.length === 2 || args.length === 3 && extra === "--publish")) {
     const result = verifyStaged(directory);
@@ -130,8 +146,8 @@ async function main(args: string[]) {
     else console.log(`release artifact verification: ${result.sha256}`);
   } else if (operation === "notes" && directory && extra && args.length === 3) {
     const result = releaseNotes(directory, extra); console.log(`RELEASE_ASSETS=${result.assets}\nRELEASE_PRERELEASE=${result.prerelease}`);
-  } else fail("usage: release.ts validate | stage DIR | verify DIR [--publish] | notes DIR FILE");
+  } else fail("usage: release.ts gate | validate | stage DIR | verify DIR [--publish] | notes DIR FILE");
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { await main(process.argv.slice(2)); } catch (cause) { console.error(cause instanceof Error ? cause.message : "release failed; inspect the candidate before retrying"); process.exitCode = 1; }
+  try { await main(process.argv.slice(2)); } catch (cause) { console.error(releaseFailure("release operation", cause, "check the release job inputs, git access and GH_TOKEN permissions, then rerun").message); process.exitCode = 1; }
 }
