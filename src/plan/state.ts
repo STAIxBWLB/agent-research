@@ -7,7 +7,7 @@ export type NodeStatus = "pending" | "ready" | "dispatched" | "done" | "failed" 
 export interface NodeState { id: string; kind: PlanNode["kind"]; status: NodeStatus; dispatchId?: string; dispatchCount?: number; retryOf?: string; output?: unknown; attemptId?: string; taskId?: number; hubProject?: string; reason?: string; gate?: GateState; lastObserved?: { revision: number; dispatchId: string; status: NodeStatus; at: string; output?: unknown; reason?: string } }
 export interface ControlRequest { action: "pause" | "resume" | "retry" | "cancel" | "skip"; node?: string; commandId: string; expectedRevision: number }
 export interface ControlResult { commandId: string; revision: number; action: ControlRequest["action"]; node?: string; state: "paused" | "running" | "done"; status?: NodeStatus }
-export interface PlanState { definition: PlanDefinition; revision: number; state: "paused" | "running" | "done"; nodes: NodeState[]; uncertain: string[] }
+export interface PlanState { pauseReason?: "step"; definition: PlanDefinition; revision: number; state: "paused" | "running" | "done"; nodes: NodeState[]; uncertain: string[] }
 const statuses: readonly NodeStatus[] = ["pending", "ready", "dispatched", "done", "failed", "cancelled", "uncertain", "stale", "skipped"];
 const recovery = "; run ares plan show and retry with its revision and a new --command-id";
 function bad(message: string): never { throw new Error(`plan: ${message}${recovery}`); }
@@ -98,7 +98,7 @@ function refresh(state: PlanState, decisions: Map<string, LedgerEvent>): void {
 export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, event: LedgerEvent) => void): PlanState | undefined {
   let state: PlanState | undefined;
   const decisions = new Map<string, LedgerEvent>();
-  const dispatches = new Set<string>();
+  const dispatches = new Set<string>(), stepPauses = new Set<string>();
   for (const event of events) {
     const d = event.data;
     if (event.type === "gate.approve" || event.type === "gate.reject") {
@@ -127,13 +127,21 @@ export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, eve
     }
     if (!state) continue;
     if (!["plan.control", "plan.paused", "node.intent", "node.observed", "node.stale"].includes(event.type)) continue;
-    if (event.type !== "node.observed" && d.revision !== state.revision) continue;
-    if (event.type === "plan.paused") state.state = "paused";
+    const stepPause = event.type === "plan.paused" && d.reason === "step";
+    if (event.type !== "node.observed" && !stepPause && d.revision !== state.revision) continue;
+    if (event.type === "plan.paused") {
+      if (stepPause) {
+        const target = state.nodes.find(node => node.id === d.node), key = canonical([d.node, d.dispatchId]);
+        if (!target || target.status !== "done" || typeof d.dispatchId !== "string" || target.dispatchId !== d.dispatchId || target.lastObserved?.dispatchId !== d.dispatchId || target.lastObserved.revision !== d.revision || stepPauses.has(key)) continue;
+        stepPauses.add(key); state.pauseReason = "step";
+      } else delete state.pauseReason;
+      state.state = "paused";
+    }
     else if (event.type === "plan.control") {
       const request = validateControl(d.request);
       if (request.expectedRevision !== state.revision) bad("plan.control revision mismatch; restore the last valid ledger");
-      if (request.action === "pause") state.state = "paused";
-      else if (request.action === "resume") state.state = "running";
+      if (request.action === "pause") { state.state = "paused"; delete state.pauseReason; }
+      else if (request.action === "resume") { state.state = "running"; delete state.pauseReason; }
       else {
         const target = state.nodes.find(n => n.id === request.node);
         if (!target) bad(`control references missing node ${request.node}`);

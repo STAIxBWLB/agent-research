@@ -2,7 +2,7 @@ import { boundHubTask, type HubClient, type HubObservation } from "./hub.ts";
 import { assertPlanOwner, commit, openStudy, readLedger, requireGate, withLock, withPlanLock, StudyLockBusyError, type Actor, type PendingEvent, type PlanOwner } from "../study.ts";
 import { canonical, nextDispatchId, planGateBinding, readPlanState, type NodeState, type PlanState } from "./state.ts";
 import { guardedPlanPhase, type PlanNode } from "./definition.ts";
-import { resolveAutonomy } from "../autonomy.ts";
+import { resolveAutonomy, resolvePhaseAutonomy, type Autonomy } from "../autonomy.ts";
 
 export type StepNode = Extract<PlanNode, { kind: "step" }>;
 export type HubNode = Extract<PlanNode, { kind: "hub" }>;
@@ -60,7 +60,10 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
       const current = state(), target = current.nodes.find(n => n.id === node.id);
       if (!target || target.dispatchId !== node.dispatchId || !["dispatched", "uncertain"].includes(target.status)) return;
       if (observation.status === "dispatched" && target.status === "dispatched" && target.lastObserved && target.lastObserved.dispatchId === node.dispatchId && target.lastObserved.status === "dispatched" && target.reason === observation.reason && (observation.taskId === undefined || target.taskId === observation.taskId) && (observation.hubProject === undefined || target.hubProject === observation.hubProject)) return;
-      commit(dir, [], [{ actor: runtime.actor, type: "node.observed", data: { revision: current.revision, node: node.id, dispatchId: node.dispatchId, status: observation.status, ...(observation.output !== undefined ? { output: observation.output } : {}), ...(observation.reason !== undefined ? { reason: observation.reason } : {}), ...(observation.taskId !== undefined ? { taskId: observation.taskId } : {}), ...(observation.hubProject !== undefined ? { hubProject: observation.hubProject } : {}) } }]);
+      const events: PendingEvent[] = [{ actor: runtime.actor, type: "node.observed", data: { revision: current.revision, node: node.id, dispatchId: node.dispatchId, status: observation.status, ...(observation.output !== undefined ? { output: observation.output } : {}), ...(observation.reason !== undefined ? { reason: observation.reason } : {}), ...(observation.taskId !== undefined ? { taskId: observation.taskId } : {}), ...(observation.hubProject !== undefined ? { hubProject: observation.hubProject } : {}) } }];
+      const definition = current.definition.nodes.find(value => value.id === node.id)!;
+      if (observation.status === "done" && nodeMode(openStudy(dir).study.autonomy, definition) === "step") events.push({ actor: runtime.actor, type: "plan.paused", data: { revision: current.revision, reason: "step", node: node.id, dispatchId: node.dispatchId } });
+      commit(dir, [], events);
       });
     };
     const reconcile = async (node: NodeState): Promise<void> => {
@@ -111,7 +114,10 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
         if (current.state === "done") break;
         if (current.state === "running") {
           // Pending auto gates are approved only inside a successful controller transaction.
-          if (current.nodes.some(n => n.kind === "gate" && n.status === "pending" && n.gate?.state === "pending")) await tryTransaction(dir, () => {
+          const pendingGates = current.nodes.filter(n => n.kind === "gate" && n.status === "pending" && n.gate?.state === "pending");
+          // Advisory read avoids contending with manual approvals; the transaction still rechecks fresh policy.
+          const policy = pendingGates.length ? openStudy(dir).study.autonomy : undefined;
+          if (policy !== undefined && pendingGates.some(gate => resolveAutonomy(policy, `plan:${gate.id}`, guardedPlanPhase(current.definition, `plan:${gate.id}`)) === "auto")) await tryTransaction(dir, () => {
             assertPlanOwner(dir, owner);
             const events = readLedger(dir), value = readPlanState(dir, events), approvals: PendingEvent[] = [];
             const { study } = openStudy(dir);
@@ -127,6 +133,7 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
             if (runtime.signal?.aborted || current.state !== "running") break;
             const definition = current.definition.nodes.find(n => n.id === node.id)!;
             if (node.status !== "ready" || active.has(node.id)) continue;
+            if (!modeAllowsAdmission(current, openStudy(dir).study.autonomy, definition)) continue;
             if (definition.kind === "hub" && runtime.hub) {
               const binding = boundHubTask(readLedger(dir), current.revision, node.id);
               let result: HubObservation;
@@ -183,6 +190,7 @@ async function admit(dir: string, owner: PlanOwner, actor: Actor, snapshot: Plan
     assertPlanOwner(dir, owner);
     const current = readPlanState(dir, readLedger(dir)), target = current.nodes.find(n => n.id === node.id);
     if (current.state !== "running" || current.revision !== snapshot.revision || target?.status !== "ready" || canonical(current.definition.nodes.find(n => n.id === node.id)) !== canonical(definition) || (definition.kind === "step" && stepSlots(current) >= parallel)) return undefined;
+    if (!modeAllowsAdmission(current, openStudy(dir).study.autonomy, definition)) return undefined;
     const dispatchId = nextDispatchId(current, node.id);
     commit(dir, [], [{ actor, type: "node.intent", data: { revision: current.revision, node: node.id, dispatchId, ...prepared } }]);
     return readPlanState(dir, readLedger(dir)).nodes.find(n => n.id === node.id)!;
@@ -192,4 +200,14 @@ async function admit(dir: string, owner: PlanOwner, actor: Actor, snapshot: Plan
 
 function stepSlots(state: PlanState): number {
   return state.nodes.filter(n => n.kind === "step" && n.status === "dispatched").length;
+}
+
+function nodeMode(policy: Autonomy, node: PlanNode) {
+  return resolvePhaseAutonomy(policy, node.kind === "hub" ? undefined : node.phase);
+}
+/** Step effects are exclusive even when ordinary steps may run in parallel. */
+function modeAllowsAdmission(state: PlanState, policy: Autonomy, next: PlanNode): boolean {
+  const active = state.nodes.filter(node => node.status === "dispatched" && node.kind !== "gate");
+  if (active.some(node => nodeMode(policy, state.definition.nodes.find(value => value.id === node.id)!) === "step")) return false;
+  return nodeMode(policy, next) !== "step" || active.length === 0;
 }

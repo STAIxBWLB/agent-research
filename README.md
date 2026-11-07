@@ -448,7 +448,7 @@ ares autonomy set study auto --phase literature
 ares autonomy show study --json
 ```
 
-Phases are `scope`, `literature`, `hypotheses`, `design`, `investigate`, `ablate`, `final`, `posthoc`, `write`, `review` and `archive`. Only `auto` approves pending gates automatically; `gates`, `copilot` and `step` require recorded approval. This policy release stores all four modes but does not yet implement copilot draft acceptance or controller step-pausing (#52 T2/T3). Approval authority remains workspace policy, with no person-only restriction.
+Phases are `scope`, `literature`, `hypotheses`, `design`, `investigate`, `ablate`, `final`, `posthoc`, `write`, `review` and `archive`. Only `auto` approves pending gates automatically; `gates`, `copilot` and `step` require recorded approval. Step execution is described below; copilot draft acceptance remains a separate follow-up (#52 T3). Approval authority remains workspace policy, with no person-only restriction.
 
 | Gate | Phase |
 | --- | --- |
@@ -460,6 +460,10 @@ Phases are `scope`, `literature`, `hypotheses`, `design`, `investigate`, `ablate
 | `plan:<id>` | The declared phase shared by every guarded immediate downstream node; otherwise the study default |
 
 Plan nodes may declare `phase` from the same list. Dependencies through `needs` and explicit edges both identify guarded downstream nodes. Mixed phases, any undeclared target, no targets or a hub target use the study default; a gate's own `phase` is not a substitute, and command/run names are not inferred. Phase edits participate in node staleness; changing policy does not invalidate already-approved gates. The controller reloads policy inside each approval transaction.
+
+With an effective `step` policy, the CLI controller keeps step work exclusive even with `--parallel` greater than 1. A completed node and its `plan.paused` receipt (`reason: step`) are committed together. `ares plan show` exposes `pauseReason: step`; that pause survives controller restart, and unchanged observation polls do not append receipts. Detached attempt admission is not completion: the pause follows the observed terminal result. Gates in a step phase still require approval, with no automatic grant.
+
+Use `ares plan control <dir> resume --command-id <new-id> --expected-revision <revision>` to continue. A resume through CLI or MCP changes the same durable plan state; MCP does not start a controller. The controller must already be running via `ares run` to admit work. Mode and phase are read again inside admission and completion transactions, so pending work follows the current recorded policy. Manual-only pending gate polls do not take a study lock.
 
 Legacy `auto|gates` string studies retain study v1 and their existing JSON layout. Object policies (`{default, phases}`), `copilot` and `step` require study v2. Once a study is v2, later policy changes never downgrade it. This reader supports v1 and v2; the published 0.1.0 reader rejects v2 with its unsupported-version guidance and leaves the file untouched. Plan `phase` is an optional v1 field: phase-free plans keep their previous shape, while the older strict 0.1.0 plan reader rejects a declared phase without changing the file.
 
@@ -590,7 +594,7 @@ Keys are sent with requests only; they are never written to the study.
 
 ## Not implemented yet
 
-Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, binding agent-hub runner receipts (agent-hub#1018) to ares attempts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, exporting verified references as vault-mem reference notes (vault-mem 0.5.0 accepts reference metadata since vault-mem#73; the ares side is not built), copilot draft acceptance and controller step-pausing (#52 T2/T3).
+Automatic idea generation, parallel attempts, held-out evaluator data, significance tests, binding agent-hub runner receipts (agent-hub#1018) to ares attempts, automatic manuscript writing/reviewing, LaTeX/PDF builds and venue templates, claim-passage evidence pending agent-hub#931, exporting verified references as vault-mem reference notes (vault-mem 0.5.0 accepts reference metadata since vault-mem#73; the ares side is not built), copilot draft acceptance (#52 T3).
 
 ## Release
 

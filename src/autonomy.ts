@@ -36,9 +36,13 @@ export function validateAutonomy(raw: unknown): Autonomy {
   return { default: mode, phases };
 }
 
+export function resolvePhaseAutonomy(policy: Autonomy, phase?: Phase): AutonomyMode {
+  if (typeof policy === "string") return policy;
+  return phase === undefined ? policy.default : policy.phases[phase] ?? policy.default;
+}
+
 /** Unknown gate kinds and phase-ambiguous plan gates use the study default. */
 export function resolveAutonomy(policy: Autonomy, gate: string, guardedPhase?: Phase): AutonomyMode {
-  if (typeof policy === "string") return policy;
   const phase = gate.startsWith("plan:") ? guardedPhase : Object.hasOwn(GATE_PHASES, gate) ? GATE_PHASES[gate as keyof typeof GATE_PHASES] : undefined;
-  return phase === undefined ? policy.default : policy.phases[phase] ?? policy.default;
+  return resolvePhaseAutonomy(policy, phase);
 }
