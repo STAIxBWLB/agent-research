@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
-import { basename, dirname, join, relative, resolve, isAbsolute } from "node:path";
+import { basename, dirname, join, relative, resolve, isAbsolute, sep } from "node:path";
 import { readAttemptRecords, type Attempt, type AttemptStatus } from "./exp/attempts.ts";
 import { ablateResultPath, readClosedAblate } from "./exp/ablate.ts";
 import { finalResultPath, readClosedFinal } from "./exp/final.ts";
@@ -48,7 +48,7 @@ function reduceData(data: Record<string, unknown>, keys: readonly string[]): Rec
   return out;
 }
 /** Result keys that hold free text even when a value happens to be one token. */
-const FREE_TEXT_KEYS = new Set(["removes", "reason", "reasons", "description", "note", "notes", "label", "text", "message", "cause", "retryWhen", "method", "question"]);
+const FREE_TEXT_KEYS = new Set(["removes", "description", "note", "notes", "label", "text", "message", "cause", "retryWhen", "method", "question"]);
 /** Keep numbers, booleans, null, hashes and closed tokens recursively; drop free-text keys and every other string. */
 function project(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(project).filter(v => v !== undefined);
@@ -59,10 +59,17 @@ function reduceEvent(event: LedgerEvent) {
   const actor = { kind: event.actor.kind, ...(event.actor.id !== undefined ? { idSha256: sha256(event.actor.id) } : {}) };
   return { v: event.v, at: event.at, actor, type: event.type, data: reduceData(plain(event.data) ? event.data : {}, LEDGER_KEYS[event.type] ?? []) };
 }
-function reasonClass(reason: string | undefined): string | undefined {
+// Closed codes emitted by attempts.ts, metrics.ts and artifacts.ts; never derive a class from user prose.
+const ATTEMPT_REASON_CODES = new Set([
+  "executor-start", "executor-start-uncertain", "preparation", "lost", "wall-clock", "candidate-exit", "evaluator-exit",
+  "evidence-read", "invalid-metrics", "malformed-metrics", "undeclared-metric", "missing-metric", "invalid-metric-value",
+  "nonfinite-metric", "metrics-limit", "duplicate-metric", "missing-metrics", "missing-receipt", "changed-output",
+  "artifact-limit", "artifact-read", "invalid-artifact", "invalid-log-state", "missing-logs",
+]);
+function reasonClass(reason: string | undefined, status: AttemptStatus): string | undefined {
   if (reason === undefined) return undefined;
-  const head = reason.split(/[\s:;,]/, 1)[0] ?? "";
-  return TOKEN.test(head) ? head : "other";
+  if (status === "cancelled") return "cancel-reason";
+  return ATTEMPT_REASON_CODES.has(reason) ? reason : "other";
 }
 function duration(start: unknown, end: unknown): number | null {
   if (typeof start !== "string" || typeof end !== "string") return null;
@@ -79,7 +86,7 @@ function attemptRow(a: Attempt) {
     if (!stage) continue;
     stages[name] = { exitCode: Number.isSafeInteger(stage.exitCode) ? stage.exitCode : null, durationMs: duration(stage.startedAt, stage.endedAt), network: stage.network === "none" ? "none" : "other", limits: plain(stage.limits) ? reduceData(stage.limits, ["cpus", "memoryMb", "pidsLimit", "wallSeconds", "gpus"]) : null, imageDigest: digest(stage.image) };
   }
-  const reason = reasonClass(a.reason);
+  const reason = reasonClass(a.reason, a.status);
   return {
     id: a.id, run: a.run, studyIdSha256: sha256(String(a.studyId)), protocolHash: a.protocolHash ?? null, sealBinding: a.sealBinding ?? null, commit: a.commit, treeId: a.treeId ?? null,
     snapshotSha256: a.snapshotSha256 ?? null, seed: a.seed, labelSha256: sha256(String(a.label ?? "")), retryOf: a.retryOf ?? null, status: a.status, stage: a.stage, ...(reason ? { reasonClass: reason } : {}),
@@ -149,7 +156,7 @@ function realTarget(path: string): string {
 /** Build the content-free bundle from committed study files only; never reads the executor workdir. */
 export function exportBundle(dirArg: string, options: { bundle: string; list?: boolean }, maxFileBytes = BUNDLE_FILE_BYTES): BundleManifest | BundleListing {
   const { dir, study } = openStudy(dirArg), target = resolve(options.bundle), inside = relative(realpathSync(dir), realTarget(target));
-  if (inside === "" || (!inside.startsWith("..") && !isAbsolute(inside))) throw new Error("study export: --bundle is inside the study directory; choose a directory outside the study");
+  if (inside === "" || (!(inside === ".." || inside.startsWith(".." + sep)) && !isAbsolute(inside))) throw new Error("study export: --bundle is inside the study directory; choose a directory outside the study");
   if (options.list) return { bundle: options.bundle, files: [...BUNDLE_FILES], wouldWrite: true };
   const events = readLedger(dir);
   const zero = () => Object.fromEntries(STATUSES.map(s => [s, 0])) as Record<AttemptStatus, number>;
