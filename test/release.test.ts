@@ -69,7 +69,9 @@ test("workflow gate order, aggregate, checkout pins and release smoke remain enf
   const check = readFileSync(new URL("../.github/workflows/check.yml", import.meta.url), "utf8");
   const release = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   const ci = Bun.YAML.parse(check) as { jobs: Record<string, { if?: string; needs?: string[]; steps: { run?: string }[] }> };
-  expect(ci.jobs["ci-ok"]!.if).toBe("always()"); expect(ci.jobs["ci-ok"]!.needs).toEqual(["check"]);
+  expect(ci.jobs["ci-ok"]!.if).toBe("always()"); expect(ci.jobs["ci-ok"]!.needs).toEqual(["check", "n1"]);
+  expect(ci.jobs.n1!.steps.some(step => step.run === "bun scripts/n1-check.ts")).toBe(true);
+  expect(check.match(/bun scripts\/n1-check\.ts/g)).toHaveLength(1);
   expect(check).toContain("all(.[]; .result == \"success\")");
   expect(check).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}"); expect(check).not.toContain("paths-ignore");
   const rel = Bun.YAML.parse(release) as { jobs: Record<string, { needs?: string; permissions?: Record<string,string> }> };
