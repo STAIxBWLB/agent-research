@@ -2,7 +2,7 @@
 
 Research engine for the agent family ([agent-hub](https://github.com/STAIxBWLB/agent-hub), [agent-mem](https://github.com/STAIxBWLB/agent-mem), [vault-mem](https://github.com/STAIxBWLB/vault-mem), [agent-console](https://github.com/STAIxBWLB/agent-console)). The plan and phases are in [#1](https://github.com/STAIxBWLB/agent-research/issues/1).
 
-This checkout implements A1 literature studies, A2 container experiments and the A3 plan DAG: an append-only ledger, approval gates, verified reference identifiers, frozen candidate snapshots, separate evaluator containers, attempt records and a resumable controller with read-only hub task references. Investigation selection, idea decisions, winner/no-winner results, declared ablations, reserved-seed final evaluation and exploratory posthoc results are available. Paper check/build and build-bound review gates render evidence-backed Markdown. A5 adds amem lesson reads/archive and a reviewed skill proposal queue. A6 adds local client setup, registered-study console panels and confirmed decisions, and finite literature watch passes. Automatic idea generation/writing/reviewing remains later work.
+This checkout implements A1 literature studies, A2 container experiments and the A3 plan DAG: an append-only ledger, approval gates, verified reference identifiers, frozen candidate snapshots, separate evaluator containers, attempt records and a resumable controller with read-only hub task references. Investigation selection, idea decisions, winner/no-winner results, declared ablations, reserved-seed final evaluation and exploratory posthoc results are available. Paper check/build and build-bound review gates render evidence-backed Markdown. A5 adds amem lesson reads/archive and a reviewed skill proposal queue. A6 adds local client setup, registered-study console panels and confirmed decisions, and finite literature watch passes. Per-phase autonomy (`auto`, `gates`, `copilot`, `step`) sets how far each phase runs before a recorded approval, and `study export` writes a content-free dataset bundle. Automatic idea generation/writing/reviewing remains later work.
 
 ## Install
 
@@ -15,7 +15,7 @@ ares --help
 ```
 <!-- /facts:install -->
 
-Tagged releases are published to npm; 0.1.0 was the first.
+Tagged releases are published to npm; 0.1.0 was the first and 0.2.0 is the first minor release after it.
 
 Or run from a checkout:
 
@@ -421,6 +421,26 @@ The planner drafts that campaign and a person approves/activates it in agent-hub
 
 A ready hub node records its unit's child task id and waits for that task's approval. Pending campaign approval or activation waits without a manual retry. An initial read outage may leave the dispatch unbound until its first successful read; the task is then pinned for that plan revision, including across restarts and retries. Missing units/tasks, cancelled tasks and a different binding fail with the reason. A new plan revision can bind the unit's new task. Hub waits use the controller backoff, do not consume step slots, and do not redispatch agent work. Their completed output is an id/hash reference, so a downstream plan gate can bind to it.
 
+## Study export
+
+```sh
+ares study export study --bundle /absolute/path/to/new-bundle --list --json
+ares study export study --bundle /absolute/path/to/new-bundle --json
+```
+
+`study export` writes a dataset bundle from committed study files only; it never reads the executor workdir or logs. The target must be a new or empty directory outside the study (symlinks are resolved first); `--list` names the six files and writes nothing. Reads take the study lock once; files are written after it is released.
+
+| File | Content |
+| --- | --- |
+| `manifest.json` | `bundle: 1`, format versions, hashed study id, protocol hash, seal binding, ledger time window, counts by status and run, and each file's sha256 |
+| `ledger.jsonl` | event envelopes with hashed actor ids; `data` keeps only per-event-type allowlisted closed fields |
+| `attempts.jsonl` | one row per attempt: identity hashes, seed, `labelSha256`, status, stage, reason class, per-stage exit code, duration, network, limits and image digest, metrics with provenance, output hashes and sealing booleans |
+| `results.json` | receipt-verified closed investigate, ablate and final results reduced to numbers, booleans, hashes, closed tokens and metric identifiers |
+| `reviews.jsonl` | reviewer model family, build hash, finding kinds and counts, blocking count and resolutions |
+| `evidence.json` | placeholder ref hashes, families, attempt bindings and source hashes |
+
+Paths, mounts, container ids, argv, env, image names (digests are kept), free text and malformed identity fields are dropped. Metric names/units and the selection metric stay because the dataset needs them to read values. Every key and string value is then scanned; an absolute POSIX/Windows/UNC path, URL, `NAME=value` assignment or key-like token refuses the whole export, and nothing is written. Each file is bound-checked in memory first.
+
 ## What sealed means
 
 The `design` gate binds the exact protocol bytes and the sorted `task/` file tree hashes, plus the raw selection file hash when present. Editing any sealed input reopens the gate. A budget-only change also reopens it, while the comparable attempt protocol hash excludes budget. The executor configuration is outside the seal; the attempt records the executor it used.
@@ -601,7 +621,7 @@ Memory tools are `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_ski
 
 Watch tools are `ares_watch_set` (`{study, watch}`), `ares_watch_run` and `ares_watch_show` (`{study}`). `ares_watch_run` always returns the detached admission result `{started:true,configSha256}` after config/scope/year preflight under the study lock. Read the eventual completed result through `ares_watch_show`; `watch.ran` records an all-source failure as `ok:false`. The finite pass stays in the MCP process, which can still answer ping and `tools/list`; another start while locked refuses. CLI `watch run` and the `watch.run` plan step remain synchronous. Registry tools are `ares_console_add` and `ares_console_remove` (`{study}`), and `ares_console_list` (no arguments). These use the same shared operations as the CLI. Registry commands manage local registration only; they do not start a console.
 
-MCP uses shared command handlers; `ares_setup` exposes the same registration preview/apply/undo operations. `init`, the controller loop `run`, and the server entrypoint `mcp` are CLI-only. Investigation tools are `ares_selection_set`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show` and `ares_investigate_close`. Plan tools are `ares_plan_set`, `ares_plan_show` and `ares_plan_control`; `ares_gate` accepts `plan:<node-id>`. Setting, showing or controlling a plan never starts the controller loop. Start `ares run` in a separate terminal before resuming through MCP. Experiment tools are `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile` and `ares_attempt_logs`; `ares_gate` accepts `design`, `final` and `review`. Paper/review tools are `ares_paper_check`, `ares_paper_build`, `ares_review_add`, `ares_review_resolve` and `ares_review_show`. Phase tools include `ares_final_seeds`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_final_close` and `ares_posthoc_show`. Attempt run is always detached over MCP, and executor-reaching tools carry `openWorldHint`.
+MCP uses shared command handlers; `ares_setup` exposes the same registration preview/apply/undo operations. `init`, the controller loop `run`, and the server entrypoint `mcp` are CLI-only. Investigation tools are `ares_selection_set`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show` and `ares_investigate_close`. Plan tools are `ares_plan_set`, `ares_plan_show` and `ares_plan_control`; `ares_gate` accepts `plan:<node-id>`. Setting, showing or controlling a plan never starts the controller loop. Start `ares run` in a separate terminal before resuming through MCP. Autonomy tools are `ares_autonomy_show` and `ares_autonomy_set`; `ares_gate` also accepts `accept:<artifact>`. `ares_study_export` writes the same bundle as `study export` and needs an absolute `bundle`. Experiment tools are `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile` and `ares_attempt_logs`; `ares_gate` accepts `design`, `final` and `review`. Paper/review tools are `ares_paper_check`, `ares_paper_build`, `ares_review_add`, `ares_review_resolve` and `ares_review_show`. Phase tools include `ares_final_seeds`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_final_close` and `ares_posthoc_show`. Attempt run is always detached over MCP, and executor-reaching tools carry `openWorldHint`.
 
 ## Version and format discovery
 
@@ -635,7 +655,7 @@ The tag workflow first waits up to 30 minutes for the exact commit's main-push `
 
 Publication runs only when `NPM_PUBLISH_ENABLED` is `true` and a reviewer approves `npm-production`. It uses Node 24 and npm 11.5.1 or newer with [npm OIDC trusted publishing](https://docs.npmjs.com/trusted-publishers), without an npm token. The owner manages trusted-publisher settings, environment approval and branch protection requiring `ci-ok`; the scripts do not change those settings.
 
-Version 0.1.0 is the initial publication. There is no prior published minor line, so no N-1 compatibility claim is made yet for CLI, MCP tools or study/ledger formats. N-1 CI checks begin at the next minor release against the latest published patch of the preceding minor line.
+N-1 compatibility is stated per minor release in CHANGELOG.md, separately for CLI, MCP tools and study/ledger formats. For 0.2.0, N-1 is 0.1.0: every 0.1.0 CLI command and usage and every 0.1.0 MCP tool with its `readOnly` value remain, and this version reads 0.1.0 studies and ledgers without rewriting them. 0.1.0 refuses records only newer features write: study v2 (object, `copilot` or `step` autonomy policies) and plans with a node `phase`, each without changing the file. The `n1` CI job (`bun scripts/n1-check.ts`), required by `ci-ok`, checks these claims on every build against the latest published patch of the previous minor line.
 
 ## Development
 

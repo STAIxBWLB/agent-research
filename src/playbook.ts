@@ -1,7 +1,7 @@
 /** Standalone workflow for one agent session. Printed by `ares playbook` and the `ares_playbook` tool. */
-export const PLAYBOOK = `ares research playbook (A1 literature, A2 experiments, A3 plan DAG, investigate/final phases, A4 paper/review, A5 memory/evolution, A6 setup/console/watch)
+export const PLAYBOOK = `ares research playbook (A1 literature, A2 experiments, A3 plan DAG, investigate/final phases, A4 paper/review, A5 memory/evolution, A6 setup/console/watch, autonomy policy, study export)
 
-Before starting a phase, create its study once: ares init <dir> --question "..." [--mode experiment] [--autonomy gates]. Use --mode experiment for experiment phases; reuse the initialized study thereafter. Phase lessons and archive call the amem CLI on PATH (its output parser was written against amem 0.20.3; no amem version is tested live here); these keep the study cwd and agent attribution.
+Before starting a phase, create its study once: ares init <dir> --question "..." [--mode experiment] [--autonomy auto|gates|copilot|step]. Use --mode experiment for experiment phases; reuse the initialized study thereafter. Phase lessons and archive call the amem CLI on PATH (its output parser was written against amem 0.20.3; no amem version is tested live here); these keep the study cwd and agent attribution.
 
 Literature workflow
 
@@ -117,6 +117,18 @@ ares lessons <dir> --for "derive reusable skills from study evidence"
 2. Propose a procedure for review: ares skill propose <dir> --file proposal.json, with {name,summary,steps:[...],evidence:[...]}. Require at least one step and 1..64 refs (32-hex amem ids or ares:<study-id>/...). Names follow the run-name rule; at most 100 proposals and 16 KiB per Markdown file, bound to its receipt.
 3. List every state: ares skill list <dir>. Decide with ares skill decide <dir> <name> accept|reject|withdraw --reason TEXT [--pr URL]. Accept requires a reviewed HTTP(S) PR URL without credentials. Ares stores the actor's reference, never opens, checks or merges it. Every terminal state is final; withdraw is allowed only while proposed.
 4. Survey and experiment studies support lessons, archive and the skill queue. Survey archives can derive resolved review contradictions; experiment pivots/selection/results remain experiment-only. Open contradictions are never exported. Durable vault promotion stays in amem vault-candidates; ares never writes the vault.
+
+Autonomy policy
+
+1. Read ares autonomy show <dir> for the stored policy and each phase's effective mode; change it with ares autonomy set <dir> <auto|gates|copilot|step> [--phase PHASE]. Phases: scope, literature, hypotheses, design, investigate, ablate, final, posthoc, write, review, archive. Only auto approves pending gates automatically; gates, copilot and step need a recorded approval. Policy changes keep earlier gate decisions and record actor, from, to and phase.
+2. step: the CLI controller runs one effect node at a time and pauses (pauseReason step) after each terminal outcome while work remains; resume with ares plan control <dir> resume --command-id <new-id> --expected-revision <revision>. MCP resume changes the same plan state but starts no controller.
+3. copilot: a producing phase in copilot mode makes its drafts usable only after ares gate approve <dir> accept:hypotheses|accept:paper|accept:reviews binds their current content hash. Source edits or new relevant journal entries make the accept pending again. Drafting and own-draft checks stay usable before acceptance; acceptance is a checkpoint, not scientific verification.
+4. Plain auto|gates studies keep study v1; object policies, copilot and step write study v2, which 0.1.0 refuses without changing the file. A plan node may declare phase; 0.1.0 refuses such plans the same way.
+
+Study export
+
+1. ares study export <dir> --bundle <new-or-empty-dir-outside-the-study> [--list] writes manifest.json, ledger.jsonl, attempts.jsonl, results.json, reviews.jsonl and evidence.json from committed study files only, never the executor workdir. --list names the files and writes nothing.
+2. Identities are hashes; values are metrics, seeds, statuses, exit codes, durations, counts and closed enums. Paths, mounts, container ids, argv, env, image names (digests kept) and free text are dropped. A planted path, URL, NAME=value assignment or key-like token in any decoded key or string refuses the whole export and writes nothing; remove it from the study record and retry.
 
 Archive workflow
 
