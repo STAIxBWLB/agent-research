@@ -326,3 +326,13 @@ test("#83: a raw newline or tab before a path refuses the export and creates no 
   }
   expect(() => scanBundle({ x: JSON.stringify({ unit: "tokens/s", v: String.raw`a\nb`, w: "line\nbreak" }) })).not.toThrow();
 });
+
+test("#83 widened: a raw newline before a URL or key-like token refuses with its kind", async () => {
+  for (const [metric, kind] of [["score\nmailto:a@b", "url"], ["score\nxoxb-1234567890-abcdef", "key-like"], ["score\tA=secret", "env value"]] as const) {
+    const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", metric);
+    const out = join(tempDir(), "bundle");
+    await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow(kind);
+    expect(existsSync(out)).toBe(false);
+    expect(() => scanBundle({ x: JSON.stringify({ v: metric }) })).toThrow(kind);
+  }
+});

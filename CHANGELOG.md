@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Study export scan (#83): path rules now run on decoded JSON/JSONL keys and string values, so a raw newline or tab before `/Users/x` or `\Users\x` can no longer hide a path; URL, key-like and env rules and all refusal messages are unchanged.
+- Study export scan (#83): every rule (path, URL, key-like, env) now runs on decoded JSON/JSONL keys and string values, so a raw newline or tab before a path, URL, key or env assignment can no longer hide it; refusal messages are unchanged.
 
 - Study export (#78): `study export <dir> --bundle DIR [--list]` on CLI/MCP writes a content-free dataset bundle (`manifest.json` with `bundle: 1`, studyBundle format, hashed study id, protocol hash, seal binding, window and counts; reduced `ledger.jsonl`; `attempts.jsonl`; `results.json` reduced to numbers, booleans, hashes, closed tokens and metric identifiers; `reviews.jsonl` counts; hash-only `evidence.json`) from committed study files only, into a new or empty directory. Paths, mounts, container ids, argv, env, images (digests kept) and free text are dropped, protocol-declared metric names/units and the selection metric stay as identifiers the dataset needs, guarded by the scan; and a scan refuses the whole export on any path, URL, env value or key-like token. N-1 effect: additive command, tool and output format; no existing CLI, MCP or study/ledger format changes.
 

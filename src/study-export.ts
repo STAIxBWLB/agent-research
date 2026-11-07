@@ -147,7 +147,7 @@ const PATH_SCANS: RegExp[] = [
   // Windows root-relative (\Users\x), bare \ and UNC (\\server): any backslash not preceded by a word character or backslash.
   /(?<![\p{L}\p{N}_\\])\\/u,
 ];
-/** URL, key-like and env rules keep running over the serialized text. */
+/** URL, key-like and env rules, also run on decoded strings. */
 const SCANS: [string, RegExp][] = [
   ["url", /\b[a-z][a-z0-9+.-]*:\/\/|\b(?:mailto|urn|file|data):/i],
   ["key-like token", /\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{12,}|\b(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{12,}|\bxox[abprs]-[A-Za-z0-9-]{8,}|\bAKIA[0-9A-Z]{12,}|\beyJ[A-Za-z0-9_-]{16,}/],
@@ -173,8 +173,10 @@ function* decodedStrings(text: string): Generator<string> {
 export function scanBundle(files: Record<string, string>): void {
   const refuse = (name: string, kind: string): never => { throw new Error(`study export: refused; ${name} would contain a ${kind}. Remove it from the study record (for example an attempt label or ledger field) and retry; nothing was written`); };
   for (const [name, text] of Object.entries(files)) {
-    for (const value of decodedStrings(text)) if (PATH_SCANS.some(pattern => pattern.test(value))) refuse(name, "absolute path");
-    for (const [kind, pattern] of SCANS) if (pattern.test(text)) refuse(name, kind);
+    for (const value of decodedStrings(text)) {
+      if (PATH_SCANS.some(pattern => pattern.test(value))) refuse(name, "absolute path");
+      for (const [kind, pattern] of SCANS) if (pattern.test(value)) refuse(name, kind);
+    }
   }
 }
 
