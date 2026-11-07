@@ -184,3 +184,142 @@ test("manual-only pending gate polling does not repeatedly acquire the study loc
     expect(state.nodes[0]!.gate!.state).toBe("pending"); expect(executions).toBe(0); expect(sleeps).toBe(4);
   } finally { stop.abort(); spy.mockRestore(); }
 });
+
+const terminals = ["done", "failed", "cancelled", "uncertain"] as const;
+for (const path of ["direct", "reconcile"] as const) test(`every terminal ${path} step outcome pauses atomically when work remains`, async () => {
+  for (const status of terminals) {
+    const dir = await study(false, path === "reconcile"), stop = new AbortController();
+    const append = fs.appendFileSync, chunks: LedgerEvent[][] = [];
+    const spy = spyOn(fs, "appendFileSync").mockImplementation(((file, data, options) => {
+      if (String(file) === join(dir, "ledger.jsonl")) chunks.push(String(data).trim().split("\n").map(line => JSON.parse(line) as LedgerEvent));
+      return append(file, data, options);
+    }) as typeof fs.appendFileSync);
+    let resumed = false, executions = 0, reconciliations = 0, sleeps = 0, now = 0;
+    const terminal: Observation = { status, output: { sha256: "synthetic" }, ...(status === "done" ? {} : { reason: `Synthetic ${status}` }) };
+    try {
+      const state = await runPlan(dir, { parallel: 3 }, runtime({ signal: stop.signal, clock: () => now,
+        prepare: async () => path === "reconcile" ? { attemptId: "c".repeat(16) } : {},
+        execute: async () => { executions++; return path === "direct" ? terminal : { status: "dispatched" }; },
+        reconcile: async () => { reconciliations++; return terminal; },
+        sleep: async ms => {
+          if (++sleeps > 30) { stop.abort(); throw new Error(`missing ${path} ${status} step boundary`); }
+          if (!resumed) { resumed = true; await resume(dir, `resume-${path}-${status}`); }
+          else if (ops.planShow(dir).pauseReason === "step") stop.abort();
+          now += ms;
+        },
+      }));
+      expect(state.state).toBe("paused"); expect(state.pauseReason).toBe("step");
+      expect(state.nodes[0]!.status).toBe(status); expect(state.nodes.slice(1).every(node => node.status === "ready")).toBe(true);
+      expect(executions).toBe(1); expect(reconciliations).toBe(path === "direct" ? 0 : 1);
+      const events = readLedger(dir), pauses = events.filter(event => event.type === "plan.paused" && event.data.reason === "step");
+      expect(pauses).toHaveLength(1); expect(events.filter(event => event.type === "node.intent")).toHaveLength(1);
+      const chunk = chunks.find(chunk => chunk.some(event => event.type === "node.observed" && event.data.status === status));
+      expect(chunk?.map(event => event.type)).toEqual(["node.observed", "plan.paused"]);
+    } finally { stop.abort(); spy.mockRestore(); }
+  }
+});
+
+for (const path of ["direct", "reconcile"] as const) test(`last ${path} step outcome completes without a pause or acknowledgement`, async () => {
+  for (const status of terminals) {
+    const dir = await study(false, path === "reconcile"), first = ops.planShow(dir).definition.nodes[0]!;
+    await ops.planSet(dir, { v: 1, nodes: [first], edges: [] }, ctx);
+    const stop = new AbortController(); let resumed = false, calls = 0, sleeps = 0, now = 0;
+    try {
+      const state = await runPlan(dir, { parallel: 3 }, runtime({ signal: stop.signal, clock: () => now,
+        prepare: async () => path === "reconcile" ? { attemptId: "d".repeat(16) } : {},
+        execute: async () => { calls++; return path === "direct" ? { status } : { status: "dispatched" }; },
+        reconcile: async () => ({ status }),
+        sleep: async ms => {
+          if (++sleeps > 20) { stop.abort(); throw new Error(`last ${path} ${status} effect failed to complete`); }
+          if (!resumed) { resumed = true; await resume(dir, `final-${path}-${status}`); }
+          now += ms;
+        },
+      }));
+      expect(state.state).toBe(status === "done" ? "done" : "failed");
+      expect(state.pauseReason).toBeUndefined(); expect(calls).toBe(1);
+      expect(readLedger(dir).filter(event => event.type === "plan.paused")).toHaveLength(0);
+      const controls = readLedger(dir).filter(event => event.type === "plan.control");
+      expect(controls).toHaveLength(1);
+      expect(controls[0]).toMatchObject({ data: { request: { action: "resume" } } });
+    } finally { stop.abort(); }
+  }
+});
+
+test("hub effects use the study default despite a declared phase override", async () => {
+  for (const defaultStep of [false, true]) {
+    const dir = join(tempDir(), "study");
+    ops.init(dir, { question: "Synthetic hub step", autonomy: defaultStep ? "step" : "auto" }, ctx);
+    await ops.autonomySet(dir, defaultStep ? "auto" : "step", "literature", ctx);
+    await ops.planSet(dir, { v: 1, nodes: [
+      { id: "remote", kind: "hub", campaign: "synthetic", unit: "synthetic", phase: "literature" },
+      { ...step("remaining"), needs: ["remote"] },
+    ], edges: [] }, ctx);
+    const stop = new AbortController(); let resumed = false, sleeps = 0, reads = 0, executions = 0;
+    try {
+      const state = await runPlan(dir, { parallel: 3 }, runtime({ signal: stop.signal,
+        hub: { observe: async () => { reads++; return { status: "done", output: { sha256: "synthetic" } }; } },
+        execute: async () => { executions++; return observedDone; },
+        sleep: async () => {
+          if (++sleeps > 20) { stop.abort(); throw new Error("hub default step boundary missing"); }
+          if (!resumed) { resumed = true; await resume(dir, `hub-${defaultStep}`); }
+          else if (ops.planShow(dir).pauseReason === "step") stop.abort();
+        },
+      }));
+      expect(reads).toBe(1); expect(executions).toBe(defaultStep ? 0 : 1);
+      expect(state.state).toBe(defaultStep ? "paused" : "done");
+      expect(readLedger(dir).filter(event => event.type === "plan.paused" && event.data.reason === "step")).toHaveLength(defaultStep ? 1 : 0);
+    } finally { stop.abort(); }
+  }
+});
+
+test("approving a gate in step mode permits its effect without creating a gate pause", async () => {
+  const dir = await study();
+  await ops.planSet(dir, { v: 1, nodes: [
+    { id: "manual", kind: "gate", binds: [] },
+    { ...step("first"), needs: ["manual"] }, { ...step("remaining"), needs: ["first"] },
+  ], edges: [] }, ctx);
+  const stop = new AbortController(); let resumed = false, approved = false, executions = 0, sleeps = 0;
+  try {
+    const state = await runPlan(dir, {}, runtime({ signal: stop.signal,
+      execute: async () => { executions++; return observedDone; },
+      sleep: async () => {
+        if (++sleeps > 20) { stop.abort(); throw new Error("manual gate prevented first step effect"); }
+        if (!resumed) { resumed = true; await resume(dir, "gate-step-resume"); }
+        else if (!approved) {
+          approved = true;
+          expect(readLedger(dir).some(event => event.type === "plan.paused" && event.data.reason === "step")).toBe(false);
+          await ops.gateDecide(dir, "plan:manual", "approve", undefined, ctx);
+        } else if (ops.planShow(dir).pauseReason === "step") stop.abort();
+      },
+    }));
+    expect(executions).toBe(1); expect(state.nodes[0]!.status).toBe("done");
+    const events = readLedger(dir), pauses = events.filter(event => event.type === "plan.paused" && event.data.reason === "step");
+    expect(pauses).toHaveLength(1);
+    expect(events[events.indexOf(pauses[0]!) - 1]).toMatchObject({ type: "node.observed", data: { node: "first", status: "done" } });
+  } finally { stop.abort(); }
+});
+
+test("completion resolves the fresh policy when autonomy changes during an effect", async () => {
+  for (const switchToStep of [false, true]) {
+    const dir = join(tempDir(), "study");
+    ops.init(dir, { question: "Synthetic fresh completion policy", autonomy: switchToStep ? "auto" : "step" }, ctx);
+    await ops.planSet(dir, { v: 1, nodes: [step("first"), step("second"), step("third")], edges: [] }, ctx);
+    const stop = new AbortController(); let resumed = false, sleeps = 0, executions = 0;
+    try {
+      const state = await runPlan(dir, { parallel: 1 }, runtime({ signal: stop.signal,
+        execute: async () => {
+          if (++executions === 1) await ops.autonomySet(dir, switchToStep ? "step" : "auto", undefined, ctx);
+          return observedDone;
+        },
+        sleep: async () => {
+          if (++sleeps > 20) { stop.abort(); throw new Error("fresh policy completion boundary missing"); }
+          if (!resumed) { resumed = true; await resume(dir, `fresh-policy-${switchToStep}`); }
+          else if (ops.planShow(dir).pauseReason === "step") stop.abort();
+        },
+      }));
+      expect(executions).toBe(switchToStep ? 1 : 3);
+      expect(state.state).toBe(switchToStep ? "paused" : "done");
+      expect(readLedger(dir).filter(event => event.type === "plan.paused" && event.data.reason === "step")).toHaveLength(switchToStep ? 1 : 0);
+    } finally { stop.abort(); }
+  }
+});

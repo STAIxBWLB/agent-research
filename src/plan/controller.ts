@@ -1,6 +1,6 @@
 import { boundHubTask, type HubClient, type HubObservation } from "./hub.ts";
-import { assertPlanOwner, commit, openStudy, readLedger, requireGate, withLock, withPlanLock, StudyLockBusyError, type Actor, type PendingEvent, type PlanOwner } from "../study.ts";
-import { canonical, nextDispatchId, planGateBinding, readPlanState, type NodeState, type PlanState } from "./state.ts";
+import { assertPlanOwner, commit, openStudy, readLedger, prepareCommit, requireGate, withLock, withPlanLock, StudyLockBusyError, type Actor, type PendingEvent, type PlanOwner } from "../study.ts";
+import { canonical, foldPlan, hasRemainingWork, TERMINAL_NODE_STATUSES, nextDispatchId, planGateBinding, readPlanState, type NodeState, type PlanState } from "./state.ts";
 import { guardedPlanPhase, type PlanNode } from "./definition.ts";
 import { resolveAutonomy, resolvePhaseAutonomy, type Autonomy } from "../autonomy.ts";
 
@@ -57,12 +57,19 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
       if (!target || target.dispatchId !== node.dispatchId || !["dispatched", "uncertain"].includes(target.status)) return;
       if (observation.status === "dispatched" && target.lastObserved?.dispatchId === node.dispatchId && target.reason === observation.reason && (observation.taskId === undefined || target.taskId === observation.taskId) && (observation.hubProject === undefined || target.hubProject === observation.hubProject)) return;
       return locked(() => {
-      const current = state(), target = current.nodes.find(n => n.id === node.id);
+      const ledger = readLedger(dir), current = readPlanState(dir, ledger), target = current.nodes.find(n => n.id === node.id);
       if (!target || target.dispatchId !== node.dispatchId || !["dispatched", "uncertain"].includes(target.status)) return;
       if (observation.status === "dispatched" && target.status === "dispatched" && target.lastObserved && target.lastObserved.dispatchId === node.dispatchId && target.lastObserved.status === "dispatched" && target.reason === observation.reason && (observation.taskId === undefined || target.taskId === observation.taskId) && (observation.hubProject === undefined || target.hubProject === observation.hubProject)) return;
       const events: PendingEvent[] = [{ actor: runtime.actor, type: "node.observed", data: { revision: current.revision, node: node.id, dispatchId: node.dispatchId, status: observation.status, ...(observation.output !== undefined ? { output: observation.output } : {}), ...(observation.reason !== undefined ? { reason: observation.reason } : {}), ...(observation.taskId !== undefined ? { taskId: observation.taskId } : {}), ...(observation.hubProject !== undefined ? { hubProject: observation.hubProject } : {}) } }];
       const definition = current.definition.nodes.find(value => value.id === node.id)!;
-      if (observation.status === "done" && nodeMode(openStudy(dir).study.autonomy, definition) === "step") events.push({ actor: runtime.actor, type: "plan.paused", data: { revision: current.revision, reason: "step", node: node.id, dispatchId: node.dispatchId } });
+      if (definition.kind !== "gate" && nodeMode(openStudy(dir).study.autonomy, definition) === "step") {
+        const next = foldPlan([...ledger, ...prepareCommit(dir, [], events).events])!;
+        // A hub binding conflict can turn a dispatched observation into a terminal failure in the fold.
+        if (TERMINAL_NODE_STATUSES.includes(next.nodes.find(value => value.id === node.id)!.status)) {
+          events[0]!.data.step = true; // Preserve the completion-time policy when replaying terminal failure.
+          if (hasRemainingWork(next)) events.push({ actor: runtime.actor, type: "plan.paused", data: { revision: current.revision, reason: "step", node: node.id, dispatchId: node.dispatchId } });
+        }
+      }
       commit(dir, [], events);
       });
     };
@@ -111,7 +118,7 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
     try {
       while (!runtime.signal?.aborted) {
         let current = state();
-        if (current.state === "done") break;
+        if (current.state === "done" || current.state === "failed") break;
         if (current.state === "running") {
           // Pending auto gates are approved only inside a successful controller transaction.
           const pendingGates = current.nodes.filter(n => n.kind === "gate" && n.status === "pending" && n.gate?.state === "pending");
@@ -165,7 +172,7 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
         for (const node of state().nodes.filter(n => n.status === "dispatched" && !active.has(n.id))) {
           if (clock() >= (polls.get(node.dispatchId!)?.at ?? 0)) await reconcile(node);
         }
-        if (state().state === "done") break;
+        if (["done", "failed"].includes(state().state)) break;
         const next = canonical(state());
         wait = next === fingerprint ? Math.min(wait * 2, 30_000) : 1000; fingerprint = next;
         const live = new Set(state().nodes.filter(n => n.status === "dispatched").map(n => n.dispatchId));

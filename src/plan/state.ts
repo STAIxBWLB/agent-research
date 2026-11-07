@@ -4,10 +4,15 @@ import { PLAN_ID_BYTES, readPlan, validatePlan, type PlanDefinition, type PlanNo
 export const PLAN_GATE_BYTES = "plan:".length + PLAN_ID_BYTES;
 
 export type NodeStatus = "pending" | "ready" | "dispatched" | "done" | "failed" | "cancelled" | "uncertain" | "stale" | "skipped";
-export interface NodeState { id: string; kind: PlanNode["kind"]; status: NodeStatus; dispatchId?: string; dispatchCount?: number; retryOf?: string; output?: unknown; attemptId?: string; taskId?: number; hubProject?: string; reason?: string; gate?: GateState; lastObserved?: { revision: number; dispatchId: string; status: NodeStatus; at: string; output?: unknown; reason?: string } }
+export interface NodeState { id: string; kind: PlanNode["kind"]; status: NodeStatus; dispatchId?: string; dispatchCount?: number; retryOf?: string; output?: unknown; attemptId?: string; taskId?: number; hubProject?: string; reason?: string; gate?: GateState; lastObserved?: { revision: number; dispatchId: string; status: NodeStatus; at: string; output?: unknown; reason?: string; step?: true } }
 export interface ControlRequest { action: "pause" | "resume" | "retry" | "cancel" | "skip"; node?: string; commandId: string; expectedRevision: number }
-export interface ControlResult { commandId: string; revision: number; action: ControlRequest["action"]; node?: string; state: "paused" | "running" | "done"; status?: NodeStatus }
-export interface PlanState { pauseReason?: "step"; definition: PlanDefinition; revision: number; state: "paused" | "running" | "done"; nodes: NodeState[]; uncertain: string[] }
+export interface ControlResult { commandId: string; revision: number; action: ControlRequest["action"]; node?: string; state: "paused" | "running" | "done" | "failed"; status?: NodeStatus }
+export interface PlanState { pauseReason?: "step"; definition: PlanDefinition; revision: number; state: "paused" | "running" | "done" | "failed"; nodes: NodeState[]; uncertain: string[] }
+export const TERMINAL_NODE_STATUSES: readonly NodeStatus[] = ["done", "failed", "cancelled", "uncertain", "skipped"];
+export function hasRemainingWork(state: PlanState): boolean { return state.nodes.some(node => !TERMINAL_NODE_STATUSES.includes(node.status)); }
+function hasStepOutcome(node: NodeState): boolean {
+  return node.lastObserved?.step === true && node.lastObserved.dispatchId === node.dispatchId && node.lastObserved.status === node.status && TERMINAL_NODE_STATUSES.includes(node.status);
+}
 const statuses: readonly NodeStatus[] = ["pending", "ready", "dispatched", "done", "failed", "cancelled", "uncertain", "stale", "skipped"];
 const recovery = "; run ares plan show and retry with its revision and a new --command-id";
 function bad(message: string): never { throw new Error(`plan: ${message}${recovery}`); }
@@ -90,8 +95,10 @@ function refresh(state: PlanState, decisions: Map<string, LedgerEvent>): void {
   }
   for (const node of state.definition.nodes) visit(node.id);
   state.uncertain = state.nodes.filter(n => n.status === "uncertain").map(n => n.id);
-  if (state.nodes.length && state.nodes.every(n => n.status === "done" || n.status === "skipped")) state.state = "done";
-  else if (state.state === "done") state.state = "paused";
+  if (state.nodes.length && state.nodes.every(n => n.status === "done" || n.status === "skipped")) { state.state = "done"; delete state.pauseReason; }
+  // Only completed step-policy effects introduce terminal failure; legacy plans keep their prior recovery flow.
+  else if (state.nodes.length && !hasRemainingWork(state) && state.nodes.some(hasStepOutcome)) { state.state = "failed"; delete state.pauseReason; }
+  else if (state.state === "done" || state.state === "failed") state.state = "paused";
 }
 /** Sole state authority: replay ledger events; no cache or snapshot is written. */
 /** Optional observer sees each effective, refreshed event; it must not mutate the folded state. */
@@ -132,7 +139,7 @@ export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, eve
     if (event.type === "plan.paused") {
       if (stepPause) {
         const target = state.nodes.find(node => node.id === d.node), key = canonical([d.node, d.dispatchId]);
-        if (!target || target.status !== "done" || typeof d.dispatchId !== "string" || target.dispatchId !== d.dispatchId || target.lastObserved?.dispatchId !== d.dispatchId || target.lastObserved.revision !== d.revision || stepPauses.has(key)) continue;
+        if (!target || !hasStepOutcome(target) || typeof d.dispatchId !== "string" || target.dispatchId !== d.dispatchId || target.lastObserved?.dispatchId !== d.dispatchId || target.lastObserved.revision !== d.revision || stepPauses.has(key)) continue;
         stepPauses.add(key); state.pauseReason = "step";
       } else delete state.pauseReason;
       state.state = "paused";
@@ -176,7 +183,7 @@ export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, eve
           if (node.kind !== "hub" || !Number.isSafeInteger(d.taskId) || (d.taskId as number) < 1 || (node.taskId !== undefined && node.taskId !== d.taskId)) {
             node.status = "failed"; delete node.output;
             node.reason = "hub child task binding changed or invalid; inspect ahub study show and retry explicitly";
-            node.lastObserved = { revision: d.revision as number, dispatchId, status: "failed", at: event.at, reason: node.reason };
+            node.lastObserved = { revision: d.revision as number, dispatchId, status: "failed", at: event.at, reason: node.reason, ...(d.step === true ? { step: true as const } : {}) };
             refresh(state, decisions); onEvent?.(state, event); continue;
           }
           node.taskId = d.taskId as number;
@@ -186,7 +193,7 @@ export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, eve
         if (node.status === "done" && d.output !== undefined) node.output = d.output;
         delete node.reason;
         if (typeof d.reason === "string") node.reason = boundedText(d.reason, `node ${node.id} reason`, 500);
-        node.lastObserved = { revision: d.revision as number, dispatchId, status: node.status, at: event.at, ...(d.output !== undefined ? { output: d.output } : {}), ...(node.reason !== undefined ? { reason: node.reason } : {}) };
+        node.lastObserved = { revision: d.revision as number, dispatchId, status: node.status, at: event.at, ...(d.output !== undefined ? { output: d.output } : {}), ...(node.reason !== undefined ? { reason: node.reason } : {}), ...(d.step === true && TERMINAL_NODE_STATUSES.includes(node.status) ? { step: true as const } : {}) };
       }
     }
     refresh(state, decisions); onEvent?.(state, event);
