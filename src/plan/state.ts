@@ -1,13 +1,27 @@
+import { resolvePhaseAutonomy, type Autonomy } from "../autonomy.ts";
 import { gateState, plain, sha256, boundedText, onlyKeys, type Actor, type GateName, type GateState, type LedgerEvent, type PendingEvent } from "../study.ts";
 import { PLAN_ID_BYTES, readPlan, validatePlan, type PlanDefinition, type PlanNode } from "./definition.ts";
 
 export const PLAN_GATE_BYTES = "plan:".length + PLAN_ID_BYTES;
 
 export type NodeStatus = "pending" | "ready" | "dispatched" | "done" | "failed" | "cancelled" | "uncertain" | "stale" | "skipped";
-export interface NodeState { id: string; kind: PlanNode["kind"]; status: NodeStatus; dispatchId?: string; dispatchCount?: number; retryOf?: string; output?: unknown; attemptId?: string; taskId?: number; hubProject?: string; reason?: string; gate?: GateState; lastObserved?: { revision: number; dispatchId: string; status: NodeStatus; at: string; output?: unknown; reason?: string } }
+export interface NodeState { stepCancellation?: { revision: number; dispatchId: string; commandId: string }; id: string; kind: PlanNode["kind"]; status: NodeStatus; dispatchId?: string; dispatchCount?: number; retryOf?: string; output?: unknown; attemptId?: string; taskId?: number; hubProject?: string; reason?: string; gate?: GateState; lastObserved?: { revision: number; dispatchId: string; status: NodeStatus; at: string; output?: unknown; reason?: string; step?: true } }
 export interface ControlRequest { action: "pause" | "resume" | "retry" | "cancel" | "skip"; node?: string; commandId: string; expectedRevision: number }
-export interface ControlResult { commandId: string; revision: number; action: ControlRequest["action"]; node?: string; state: "paused" | "running" | "done"; status?: NodeStatus }
-export interface PlanState { definition: PlanDefinition; revision: number; state: "paused" | "running" | "done"; nodes: NodeState[]; uncertain: string[] }
+export interface ControlResult { commandId: string; revision: number; action: ControlRequest["action"]; node?: string; state: "paused" | "running" | "done" | "failed"; status?: NodeStatus }
+export interface PlanState { pauseReason?: "step"; definition: PlanDefinition; revision: number; state: "paused" | "running" | "done" | "failed"; nodes: NodeState[]; uncertain: string[] }
+export const TERMINAL_NODE_STATUSES: readonly NodeStatus[] = ["done", "failed", "cancelled", "uncertain", "skipped"];
+export function hasRemainingWork(state: PlanState): boolean { return state.nodes.some(node => !TERMINAL_NODE_STATUSES.includes(node.status)); }
+function hasStepOutcome(node: NodeState): boolean {
+  if (node.status === "cancelled" && node.dispatchId === undefined && node.stepCancellation) return true;
+  return node.lastObserved?.step === true && node.lastObserved.dispatchId === node.dispatchId && node.lastObserved.status === node.status && TERMINAL_NODE_STATUSES.includes(node.status);
+}
+function matchesStepPause(state: PlanState, node: NodeState, data: Record<string, unknown>): boolean {
+  if (typeof data.dispatchId !== "string" || !hasStepOutcome(node)) return false;
+  const cancelled = node.stepCancellation;
+  if (cancelled && node.status === "cancelled" && node.dispatchId === undefined) return data.revision === state.revision && cancelled.revision === data.revision && cancelled.dispatchId === data.dispatchId && cancelled.commandId === data.commandId;
+  const observed = node.lastObserved;
+  return !!observed && node.dispatchId === data.dispatchId && observed.dispatchId === data.dispatchId && observed.revision === data.revision;
+}
 const statuses: readonly NodeStatus[] = ["pending", "ready", "dispatched", "done", "failed", "cancelled", "uncertain", "stale", "skipped"];
 const recovery = "; run ares plan show and retry with its revision and a new --command-id";
 function bad(message: string): never { throw new Error(`plan: ${message}${recovery}`); }
@@ -35,7 +49,7 @@ function descendants(definition: PlanDefinition, roots: Set<string>): Set<string
 }
 function reset(node: NodeState, status: NodeStatus): void {
   node.status = status; delete node.output; delete node.reason; delete node.gate;
-  delete node.dispatchId;
+  delete node.dispatchId; delete node.stepCancellation;
   // A retry must create a child attempt, while hub task references stay read-only.
   if (status === "pending" && node.attemptId) { node.retryOf = node.attemptId; delete node.attemptId; }
 }
@@ -90,15 +104,17 @@ function refresh(state: PlanState, decisions: Map<string, LedgerEvent>): void {
   }
   for (const node of state.definition.nodes) visit(node.id);
   state.uncertain = state.nodes.filter(n => n.status === "uncertain").map(n => n.id);
-  if (state.nodes.length && state.nodes.every(n => n.status === "done" || n.status === "skipped")) state.state = "done";
-  else if (state.state === "done") state.state = "paused";
+  if (state.nodes.length && state.nodes.every(n => n.status === "done" || n.status === "skipped")) { state.state = "done"; delete state.pauseReason; }
+  // Only completed step-policy effects introduce terminal failure; legacy plans keep their prior recovery flow.
+  else if (state.nodes.length && !hasRemainingWork(state) && state.nodes.some(hasStepOutcome)) { state.state = "failed"; delete state.pauseReason; }
+  else if (state.state === "done" || state.state === "failed") state.state = "paused";
 }
 /** Sole state authority: replay ledger events; no cache or snapshot is written. */
 /** Optional observer sees each effective, refreshed event; it must not mutate the folded state. */
 export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, event: LedgerEvent) => void): PlanState | undefined {
   let state: PlanState | undefined;
   const decisions = new Map<string, LedgerEvent>();
-  const dispatches = new Set<string>();
+  const dispatches = new Set<string>(), stepPauses = new Set<string>();
   for (const event of events) {
     const d = event.data;
     if (event.type === "gate.approve" || event.type === "gate.reject") {
@@ -127,19 +143,34 @@ export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, eve
     }
     if (!state) continue;
     if (!["plan.control", "plan.paused", "node.intent", "node.observed", "node.stale"].includes(event.type)) continue;
-    if (event.type !== "node.observed" && d.revision !== state.revision) continue;
-    if (event.type === "plan.paused") state.state = "paused";
+    const stepPause = event.type === "plan.paused" && d.reason === "step";
+    if (event.type !== "node.observed" && !stepPause && d.revision !== state.revision) continue;
+    if (event.type === "plan.paused") {
+      if (stepPause) {
+        const target = state.nodes.find(node => node.id === d.node), key = canonical([d.node, d.dispatchId]);
+        if (!target || !matchesStepPause(state, target, d) || stepPauses.has(key)) continue;
+        stepPauses.add(key); state.pauseReason = "step";
+      } else delete state.pauseReason;
+      state.state = "paused";
+    }
     else if (event.type === "plan.control") {
       const request = validateControl(d.request);
       if (request.expectedRevision !== state.revision) bad("plan.control revision mismatch; restore the last valid ledger");
-      if (request.action === "pause") state.state = "paused";
-      else if (request.action === "resume") state.state = "running";
+      if (request.action === "pause") { state.state = "paused"; delete state.pauseReason; }
+      else if (request.action === "resume") { state.state = "running"; delete state.pauseReason; }
       else {
         const target = state.nodes.find(n => n.id === request.node);
         if (!target) bad(`control references missing node ${request.node}`);
         const affected = descendants(state.definition, new Set([target.id]));
         for (const node of state.nodes) if (affected.has(node.id) && node.id !== target.id && consumed(node)) reset(node, "stale");
+        let cancelled = request.action === "cancel" && hasStepOutcome(target)
+          ? { revision: state.revision, dispatchId: target.stepCancellation?.dispatchId ?? target.lastObserved!.dispatchId, commandId: request.commandId } : undefined;
+        if (d.stepCancel !== undefined) {
+          if (request.action !== "cancel" || target.kind === "gate" || target.status !== "dispatched" || typeof d.stepCancel !== "string" || target.dispatchId !== d.stepCancel) bad("step cancellation binding does not match the dispatched effect; restore the valid ledger or inspect ares plan show before retrying with a new command-id");
+          cancelled = { revision: state.revision, dispatchId: d.stepCancel, commandId: request.commandId };
+        }
         reset(target, request.action === "retry" ? "pending" : request.action === "skip" ? "skipped" : "cancelled");
+        if (cancelled) target.stepCancellation = cancelled;
       }
     } else {
       const node = state.nodes.find(n => n.id === d.node);
@@ -168,7 +199,7 @@ export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, eve
           if (node.kind !== "hub" || !Number.isSafeInteger(d.taskId) || (d.taskId as number) < 1 || (node.taskId !== undefined && node.taskId !== d.taskId)) {
             node.status = "failed"; delete node.output;
             node.reason = "hub child task binding changed or invalid; inspect ahub study show and retry explicitly";
-            node.lastObserved = { revision: d.revision as number, dispatchId, status: "failed", at: event.at, reason: node.reason };
+            node.lastObserved = { revision: d.revision as number, dispatchId, status: "failed", at: event.at, reason: node.reason, ...(d.step === true ? { step: true as const } : {}) };
             refresh(state, decisions); onEvent?.(state, event); continue;
           }
           node.taskId = d.taskId as number;
@@ -178,7 +209,7 @@ export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, eve
         if (node.status === "done" && d.output !== undefined) node.output = d.output;
         delete node.reason;
         if (typeof d.reason === "string") node.reason = boundedText(d.reason, `node ${node.id} reason`, 500);
-        node.lastObserved = { revision: d.revision as number, dispatchId, status: node.status, at: event.at, ...(d.output !== undefined ? { output: d.output } : {}), ...(node.reason !== undefined ? { reason: node.reason } : {}) };
+        node.lastObserved = { revision: d.revision as number, dispatchId, status: node.status, at: event.at, ...(d.output !== undefined ? { output: d.output } : {}), ...(node.reason !== undefined ? { reason: node.reason } : {}), ...(d.step === true && TERMINAL_NODE_STATUSES.includes(node.status) ? { step: true as const } : {}) };
       }
     }
     refresh(state, decisions); onEvent?.(state, event);
@@ -211,7 +242,7 @@ function controlRequest(raw: unknown): ControlRequest {
   if ((action === "pause" || action === "resume") ? node !== undefined : node === undefined) bad(`control ${action} ${node === undefined ? "requires a node" : "takes no node"}`);
   return { action, commandId, expectedRevision: raw.expectedRevision as number, ...(node !== undefined ? { node } : {}) };
 }
-export function prepareControl(state: PlanState, events: LedgerEvent[], raw: unknown, actor: Actor): { result: ControlResult; event?: PendingEvent } {
+export function prepareControl(state: PlanState, events: LedgerEvent[], raw: unknown, actor: Actor, policy?: Autonomy): { result: ControlResult; event?: PendingEvent; pause?: PendingEvent } {
   const request = validateControl(raw);
   for (const e of events) if (e.type === "plan.control" && plain(e.data.request) && e.data.request.commandId === request.commandId) {
     if (canonical(e.data.request) !== canonical(request)) bad(`command-id ${request.commandId} already has a different payload`);
@@ -226,9 +257,14 @@ export function prepareControl(state: PlanState, events: LedgerEvent[], raw: unk
     if (request.action === "skip" && (node.kind === "gate" || node.status === "dispatched" || node.status === "done")) bad(`cannot skip ${node.kind} node ${node.id} in ${node.status}; approve its gate or cancel running work first`);
     if (request.action === "retry" && (node.status === "dispatched" || node.status === "ready" || node.status === "pending")) bad(`cannot retry node ${node.id} in ${node.status}; wait for an outcome first`);
   }
-  const pending: PendingEvent = { actor, type: "plan.control", data: { revision: state.revision, request } };
-  const next = foldPlan([...events, { v: 1, at: new Date().toISOString(), ...pending }])!;
+  const target = state.nodes.find(node => node.id === request.node), definition = state.definition.nodes.find(node => node.id === request.node);
+  const stepCancel = policy !== undefined && request.action === "cancel" && target?.status === "dispatched" && definition && definition.kind !== "gate" && resolvePhaseAutonomy(policy, definition.kind === "hub" ? undefined : definition.phase) === "step";
+  if (stepCancel && !target?.dispatchId) bad("dispatched step has no cancellation binding; restore its intent before retrying plan control");
+  const pending: PendingEvent = { actor, type: "plan.control", data: { revision: state.revision, request, ...(stepCancel ? { stepCancel: target!.dispatchId } : {}) } };
+  const at = new Date().toISOString(), projected = foldPlan([...events, { v: 1, at, ...pending }])!;
+  const pause: PendingEvent | undefined = stepCancel && hasRemainingWork(projected) ? { actor, type: "plan.paused", data: { revision: state.revision, node: target!.id, dispatchId: target!.dispatchId, commandId: request.commandId, reason: "step" } } : undefined;
+  const next = pause ? foldPlan([...events, { v: 1, at, ...pending }, { v: 1, at, ...pause }])! : projected;
   const result: ControlResult = { commandId: request.commandId, revision: state.revision, action: request.action, ...(request.node ? { node: request.node, status: next.nodes.find(n => n.id === request.node)!.status } : {}), state: next.state };
   pending.data.result = result;
-  return { result, event: pending };
+  return { result, event: pending, ...(pause ? { pause } : {}) };
 }

@@ -97,7 +97,8 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     }
     case "run": {
       count(spec, positional, 1); const parallel = integer(flags["--parallel"], "--parallel");
-      result = await ops.planRun(positional[0]!, { ...(parallel !== undefined ? { parallel } : {}) }, ctx); break;
+      const completed = await ops.planRun(positional[0]!, { ...(parallel !== undefined ? { parallel } : {}) }, ctx);
+      result = completed; if (completed.state === "failed") code = 1; break;
     }
     case "manifest": count(spec, positional, 0); result = ops.manifest(); break;
     case "playbook": count(spec, positional, 0); return { text: PLAYBOOK.trimEnd(), code: 0 };

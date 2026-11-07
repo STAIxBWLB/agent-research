@@ -1,14 +1,15 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs";
 import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { autonomySet, init, gateDecide, gateList, planSet, planControl, planShow, planRun, finalSeeds, selection, investigateClose } from "../src/commands.ts";
-import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
+import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, CONTROL_FUTURE_SKEW_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
 import { finalGateBinding } from "../src/exp/final.ts";
 import { readLedger, sha256, withLock, appendEvent, openStudy } from "../src/study.ts";
-import { fakeHttp, tempDir } from "./helpers.ts";
+import { deferred, fakeHttp, tempDir } from "./helpers.ts";
 import { logCaptureFixtureRunner, metricLogTar, metricTar } from "./metric-fixtures.ts";
 import { collectStageEvidence, EvidenceError, LOG_COPY_BYTES } from "../src/exp/metrics.ts";
 
@@ -568,4 +569,59 @@ test("verified starts do not autoapprove a phase changed to gates after admissio
   expect(result.status).toBe("running");
   expect(readLedger(dir).some(event => event.type === "gate.approve")).toBe(false);
   expect(gateList(dir).find(gate => gate.gate === "design")!.state).toBe("pending");
+});
+
+test("overlapping identical plan cancels replay the first receipt after the dispatch is cleared", async () => {
+  const { dir, fake } = await setup(), firstAttempt = await runAttempt(dir, request, fake.ctx), entered = deferred(), release = deferred(), waiting = deferred();
+  const original = fake.ctx.runner!;
+  let kills = 0;
+  const ctx = { ...fake.ctx, http: fakeHttp([]).http, runner: async (req: ProcessRequest) => {
+    if (req.command === "docker" && req.args[0] === "kill" && ++kills === 1) { entered.resolve(); await release.promise; }
+    return original(req);
+  } };
+  await autonomySet(dir, "step", undefined, ctx);
+  await planSet(dir, { v: 1, nodes: [{ id: "work", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }, { id: "next", kind: "step", command: "lit.bib", args: {} }], edges: [] }, ctx);
+  await planControl(dir, { action: "resume", commandId: "start", expectedRevision: 1 }, ctx);
+  appendEvent(dir, actor, "node.intent", { revision: 1, node: "work", dispatchId: "work-overlap", attemptId: firstAttempt.id });
+  const input = { action: "cancel" as const, node: "work", commandId: "same-cancel", expectedRevision: 1 };
+  let opens = 0, one: ReturnType<typeof planControl> | undefined, two: ReturnType<typeof planControl> | undefined;
+  const open = fs.openSync;
+  const spy = spyOn(fs, "openSync").mockImplementation(((file, flags, mode) => {
+    if (String(file) === join(dir, ".ares.control.lock") && ++opens === 2) waiting.resolve();
+    return open(file, flags, mode);
+  }) as typeof fs.openSync);
+  try {
+    one = planControl(dir, input, ctx);
+    await Promise.race([entered.promise, one.then(() => { throw new Error("first cancel did not reach the synthetic kill barrier"); })]);
+    two = planControl(dir, input, ctx);
+    await Promise.race([waiting.promise, two.then(() => { throw new Error("second cancel did not overlap the first"); })]);
+    release.resolve();
+    const first = await one, second = await two;
+    expect(first).toEqual(second); expect(first.state).toBe("paused"); expect(first.status).toBe("cancelled");
+    expect(kills).toBe(1);
+    const events = readLedger(dir);
+    expect(events.filter(event => event.type === "plan.control" && (event.data.request as { commandId: string }).commandId === input.commandId)).toHaveLength(1);
+    expect(events.filter(event => event.type === "plan.paused" && event.data.reason === "step")).toHaveLength(1);
+    expect(events.filter(event => event.type === "attempt.cancelled")).toHaveLength(1);
+  } finally {
+    release.resolve(); await Promise.allSettled([one, two].filter((value): value is ReturnType<typeof planControl> => value !== undefined)); spy.mockRestore();
+  }
+});
+
+for (const [label, skew, reclaimed] of [["slightly future", 1000, false], ["far future", CONTROL_FUTURE_SKEW_MS + 1000, true]] as const) test(`attempt control ${reclaimed ? "reclaims" : "respects"} a ${label} lock`, async () => {
+  const { dir, fake } = await setup(), attempt = await runAttempt(dir, request, fake.ctx), lock = join(dir, ".ares.control.lock"), token = "synthetic-lock-owner";
+  writeFileSync(lock, token); const baseline = Date.now(), future = new Date(baseline + skew); utimesSync(lock, future, future);
+  const now = spyOn(Date, "now").mockReturnValue(baseline), calls = fake.requests.length;
+  let pending: ReturnType<typeof cancelAttempt> | undefined;
+  try {
+    pending = cancelAttempt(dir, attempt.id, "synthetic cancellation", fake.ctx);
+    expect(readFileSync(lock, "utf8") !== token).toBe(reclaimed);
+    expect(fake.requests.length > calls).toBe(reclaimed);
+    if (!reclaimed) fs.unlinkSync(lock); // The test owner releases it; the waiter must not do so.
+    expect((await pending).status).toBe("cancelled");
+    expect(existsSync(lock)).toBe(false);
+  } finally {
+    if (existsSync(lock) && readFileSync(lock, "utf8") === token) fs.unlinkSync(lock);
+    if (pending) await Promise.allSettled([pending]); now.mockRestore();
+  }
 });

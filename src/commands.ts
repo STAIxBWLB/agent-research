@@ -281,23 +281,26 @@ export async function planControl(dirArg: string, request: ControlRequest, ctx: 
   const { dir } = openStudy(dirArg);
   const prepared = await withLock(dir, () => {
     const events = readLedger(dir), state = readPlanState(dir, events);
-    const prepared = prepareControl(state, events, request, ctx.actor);
+    const prepared = prepareControl(state, events, request, ctx.actor, openStudy(dir).study.autonomy);
     if (!prepared.event) return { result: prepared.result };
     const node = state.nodes.find(n => n.id === request.node);
     const attempt = node?.attemptId ? listAttempts(dir).attempts.find(a => a.id === node.attemptId) : undefined;
-    if (request.action === "cancel" && attempt) return { attemptId: attempt.id };
+    if (request.action === "cancel" && attempt) return { attemptId: attempt.id, dispatchId: node?.dispatchId };
     // A missing record after a crash is uncertain, and explicit retry/cancel may release it.
     if ((request.action === "retry" || request.action === "skip") && attempt?.status === "running") throw new Error(`plan node ${node!.id}: attempt is still running; cancel it or run ares attempt reconcile before retry`);
-    commit(dir, [], [prepared.event]);
+    commit(dir, [], [prepared.event, ...(prepared.pause ? [prepared.pause] : [])]);
     return { result: prepared.result };
   });
   if (prepared.result) return prepared.result;
   let result: ControlResult | undefined;
   await cancelAttempt(dir, prepared.attemptId!, "plan cancellation", ctx, () => {
     const events = readLedger(dir), state = readPlanState(dir, events);
-    const prepared = prepareControl(state, events, request, ctx.actor);
-    result = prepared.result;
-    return prepared.event ? [prepared.event] : [];
+    // An identical cancel may have committed while this request waited for the attempt control lock.
+    const current = prepareControl(state, events, request, ctx.actor, openStudy(dir).study.autonomy);
+    if (!current.event) { result = current.result; return []; }
+    if (state.nodes.find(node => node.id === request.node)?.dispatchId !== prepared.dispatchId) throw new Error("plan cancel: dispatch changed while cancelling the attempt; inspect ares plan show and retry with a new command-id");
+    result = current.result;
+    return current.event ? [current.event, ...(current.pause ? [current.pause] : [])] : [];
   });
   return result!;
 }
