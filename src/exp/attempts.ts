@@ -1,3 +1,4 @@
+import { resolveAutonomy } from "../autonomy.ts";
 import { readFinalSeeds, authorizeFinalAttempt, finalGateBinding, requirePosthocClosed } from "./final.ts";
 import { closeSync, existsSync, lstatSync, openSync, opendirSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { hostname } from "node:os";
@@ -240,10 +241,12 @@ async function recordVerifiedStage(dir: string, attempt: Attempt, state: Observe
     if (current.stage === "candidate") {
       current.sealing.candidateHasNoEvaluator = true;
       if (approveDesign && current.pendingAutoApproval === current.sealBinding && designBinding(dir) === current.sealBinding) {
-        approvals.push(...requireGate(dir, { ...openStudy(dir).study, autonomy: "auto" }, "design", () => current.sealBinding));
+        const study = openStudy(dir).study;
+        if (resolveAutonomy(study.autonomy, "design") === "auto") approvals.push(...requireGate(dir, study, "design", () => current.sealBinding));
       }
       if (approveDesign && current.pendingFinalApproval === current.finalBinding && current.finalBinding && finalGateBinding(dir) === current.finalBinding) {
-        approvals.push(...requireGate(dir, { ...openStudy(dir).study, autonomy: "auto" }, "final", () => current.finalBinding));
+        const study = openStudy(dir).study;
+        if (resolveAutonomy(study.autonomy, "final") === "auto") approvals.push(...requireGate(dir, study, "final", () => current.finalBinding));
       }
       delete current.pendingAutoApproval; delete current.pendingFinalApproval;
     } else {
@@ -344,7 +347,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     if (designBinding(dir) !== initialBinding) throw new Error("design: changed while resolving the snapshot; approve the current design and retry attempt run");
     if (options.retry && !attempts.some(a => a.id === options.retry)) throw new Error("retry: attempt not found; choose an existing id from ares attempt list");
     if (attempts.some(a => a.status === "running")) throw new Error("attempt: another attempt is running; reconcile or cancel it before starting a new one");
-    const binding = designBinding(dir), approval = requireGate(dir, study, "design", () => binding);
+    const binding = designBinding(dir), approval = requireGate(dir, openStudy(dir).study, "design", () => binding);
     enforceBudget(protocol, attempts, now(ctx));
     const root = posix.join(executor.workdir, study.id, wanted);
     const record: Attempt = { v: 1, id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, protocol, paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };

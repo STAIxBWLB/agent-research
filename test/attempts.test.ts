@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { init, gateDecide, gateList, planSet, planControl, planShow, planRun, finalSeeds, selection, investigateClose } from "../src/commands.ts";
+import { autonomySet, init, gateDecide, gateList, planSet, planControl, planShow, planRun, finalSeeds, selection, investigateClose } from "../src/commands.ts";
 import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
@@ -545,4 +545,27 @@ test("changed final design during snapshot resolution refuses before final recor
   await expect(runAttempt(dir, { ...request, commit: winner, run: "final", seed: 5 }, fake.ctx)).rejects.toThrow("gate final is pending");
   expect(readLedger(dir).some(e => e.type === "attempt.started" && e.data.run === "final")).toBe(false);
   expect(fake.requests.some(r => r.command === "docker")).toBe(false);
+});
+
+test("an autonomy change during snapshot resolution cannot use a cached auto policy", async () => {
+  const { dir, fake } = await setup(protocol(), "auto", false);
+  fake.resolveHook(() => autonomySet(dir, "gates", undefined, { actor }).then(() => {}));
+  await expect(runAttempt(dir, request, fake.ctx)).rejects.toThrow("pending");
+  expect(listAttempts(dir).attempts).toEqual([]);
+  expect(readLedger(dir).some(event => event.type === "gate.approve")).toBe(false);
+});
+
+test("verified starts do not autoapprove a phase changed to gates after admission", async () => {
+  const { dir, fake } = await setup(protocol(), "gates", false);
+  await autonomySet(dir, "auto", "design", { actor });
+  const original = fake.ctx.runner!;
+  fake.ctx.runner = async req => {
+    const response = await original(req);
+    if (req.command === "docker" && req.args[0] === "run") await autonomySet(dir, "gates", "design", { actor });
+    return response;
+  };
+  const result = await runAttempt(dir, request, fake.ctx);
+  expect(result.status).toBe("running");
+  expect(readLedger(dir).some(event => event.type === "gate.approve")).toBe(false);
+  expect(gateList(dir).find(gate => gate.gate === "design")!.state).toBe("pending");
 });

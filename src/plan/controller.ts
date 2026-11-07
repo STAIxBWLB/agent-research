@@ -1,7 +1,8 @@
 import { boundHubTask, type HubClient, type HubObservation } from "./hub.ts";
 import { assertPlanOwner, commit, openStudy, readLedger, requireGate, withLock, withPlanLock, StudyLockBusyError, type Actor, type PendingEvent, type PlanOwner } from "../study.ts";
 import { canonical, nextDispatchId, planGateBinding, readPlanState, type NodeState, type PlanState } from "./state.ts";
-import type { PlanNode } from "./definition.ts";
+import { guardedPlanPhase, type PlanNode } from "./definition.ts";
+import { resolveAutonomy } from "../autonomy.ts";
 
 export type StepNode = Extract<PlanNode, { kind: "step" }>;
 export type HubNode = Extract<PlanNode, { kind: "hub" }>;
@@ -36,7 +37,7 @@ async function transaction<T>(dir: string, fn: () => T): Promise<T> {
 }
 /** One controller, short transactional study locks, and no replay of unobserved actions. */
 export async function runPlan(dirArg: string, options: ControllerOptions, runtime: ControllerRuntime): Promise<PlanState> {
-  const { dir, study } = openStudy(dirArg), parallel = options.parallel ?? 1;
+  const { dir } = openStudy(dirArg), parallel = options.parallel ?? 1;
   if (!Number.isSafeInteger(parallel) || parallel < 1 || parallel > 8) throw new Error("run --parallel: integer in 1..8 required; run ares run <dir> --parallel 1..8");
   return withPlanLock(dir, async owner => {
     const state = () => readPlanState(dir, readLedger(dir));
@@ -110,12 +111,14 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
         if (current.state === "done") break;
         if (current.state === "running") {
           // Pending auto gates are approved only inside a successful controller transaction.
-          if (study.autonomy === "auto" && current.nodes.some(n => n.kind === "gate" && n.status === "pending" && n.gate?.state === "pending")) await tryTransaction(dir, () => {
+          if (current.nodes.some(n => n.kind === "gate" && n.status === "pending" && n.gate?.state === "pending")) await tryTransaction(dir, () => {
             assertPlanOwner(dir, owner);
             const events = readLedger(dir), value = readPlanState(dir, events), approvals: PendingEvent[] = [];
+            const { study } = openStudy(dir);
             if (value.state !== "running") return;
             for (const gate of value.nodes.filter(n => n.kind === "gate" && n.status === "pending" && n.gate?.state === "pending")) {
-              if (study.autonomy === "auto") approvals.push(...requireGate(dir, study, `plan:${gate.id}`, name => planGateBinding(value, name)));
+              const name = `plan:${gate.id}` as const, phase = guardedPlanPhase(value.definition, name);
+              if (resolveAutonomy(study.autonomy, name, phase) === "auto") approvals.push(...requireGate(dir, study, name, gateName => planGateBinding(value, gateName), phase));
             }
             if (approvals.length) commit(dir, [], [...approvals, { actor: runtime.actor, type: "plan.gates", data: { revision: value.revision } }]);
           });

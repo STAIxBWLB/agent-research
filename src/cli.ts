@@ -102,6 +102,8 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "manifest": count(spec, positional, 0); result = ops.manifest(); break;
     case "playbook": count(spec, positional, 0); return { text: PLAYBOOK.trimEnd(), code: 0 };
     case "mcp": throw new Error("mcp: run `ares mcp` with no other arguments");
+    case "autonomy show": count(spec, positional, 1); result = ops.autonomyShow(positional[0]!); break;
+    case "autonomy set": count(spec, positional, 2); result = await ops.autonomySet(positional[0]!, positional[1]!, str("--phase"), ctx); break;
     case "init": {
       count(spec, positional, 1);
       const question = str("--question");
