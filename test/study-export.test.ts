@@ -246,3 +246,71 @@ test("review exports preserve normalized model families with spaces and sanitize
   const rows = readFileSync(join(out, "reviews.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
   expect(rows.map(row => row.modelFamily)).toEqual(["claude code", "gpt-6.1", "other"]);
 });
+
+test("#81 AC1: a Windows root-relative metric path refuses and creates no directory", async () => {
+  const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", String.raw`\Users\x`);
+  const out = join(tempDir(), "bundle");
+  await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("absolute path");
+  expect(existsSync(out)).toBe(false);
+});
+
+test("#81: token-boundary POSIX scan refuses score;/Users/x and keeps tokens/s", async () => {
+  const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", "score;/Users/x");
+  const out = join(tempDir(), "bundle");
+  await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("absolute path");
+  expect(existsSync(out)).toBe(false);
+  expect(() => scanBundle({ x: JSON.stringify({ unit: "tokens/s", name: "tokens/s" }) })).not.toThrow();
+  expect(() => scanBundle({ x: JSON.stringify({ v: String.raw`\Users\x` }) })).toThrow("absolute path");
+  expect(() => scanBundle({ x: JSON.stringify({ v: String.raw`a\nb` }) })).not.toThrow();
+});
+
+test("#81 AC2: hand-edited hash fields, non-finite metrics and unknown provenance are not copied", async () => {
+  const dir = await study(), id = attempt(dir, "posthoc", WIN, 1, 1), file = join(dir, "runs", "posthoc", "attempts", `${id}.json`);
+  const record = JSON.parse(readFileSync(file, "utf8")), planted = "secretfreetext";
+  for (const key of ["protocolHash", "sealBinding", "commit", "treeId", "snapshotSha256", "retryOf"]) record[key] = `${planted}${key}`;
+  record.metrics = [{ name: "score", unit: "points", value: "1e999x", provenance: `${planted}prov` }];
+  record.outputs = [{ sha256: `${planted}out`, bytes: "big", path: "x" }];
+  record.seed = `${planted}seed`; record.stages[`${planted}stage`] = record.stages.candidate;
+  writeFileSync(file, JSON.stringify(record));
+  const ledger = join(dir, "ledger.jsonl");
+  writeFileSync(ledger, readFileSync(ledger, "utf8") + JSON.stringify({ v: 1, at: `${planted}at`, actor: { kind: "person" }, type: `${planted} type`, data: {} }) + "\n");
+  const out = join(tempDir(), "bundle"); await ops.studyExport(dir, { bundle: out });
+  const all = readdirSync(out).map(f => readFileSync(join(out, f), "utf8")).join("\n");
+  expect(all).not.toContain(planted);
+  const row = readFileSync(join(out, "attempts.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l)).find(r => r.id === id);
+  expect(row).toMatchObject({ protocolHash: null, sealBinding: null, commit: null, treeId: null, snapshotSha256: null, retryOf: null });
+  expect(row.seed).toBeNull(); expect(Object.keys(row.stages).sort()).toEqual(["candidate", "evaluator"]);
+  const last = readFileSync(join(out, "ledger.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l)).at(-1);
+  expect(last).toMatchObject({ at: null, type: "other" });
+  expect(row.metrics[0]).toMatchObject({ value: null, provenance: "other" }); expect(row.outputs[0]).toEqual({ sha256: null, bytes: null });
+});
+
+test("#81 round 3: \\#private root path, 64-hex git ids and an inherited ledger type", async () => {
+  const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", String.raw`\#private\x`);
+  const out = join(tempDir(), "bundle");
+  await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("absolute path");
+  expect(existsSync(out)).toBe(false);
+  expect(() => scanBundle({ x: JSON.stringify({ v: String.raw`\#private\x` }) })).toThrow("absolute path");
+  expect(() => scanBundle({ x: JSON.stringify({ v: String.raw`a\nb`, w: "line\nbreak" }) })).not.toThrow();
+
+  const second = await study(), id = attempt(second, "posthoc", WIN, 1, 1), file = join(second, "runs", "posthoc", "attempts", `${id}.json`);
+  const record = JSON.parse(readFileSync(file, "utf8")); record.commit = "a".repeat(64); record.treeId = "b".repeat(64); writeFileSync(file, JSON.stringify(record));
+  const ledger = join(second, "ledger.jsonl");
+  writeFileSync(ledger, readFileSync(ledger, "utf8") + JSON.stringify({ v: 1, at: "2030-01-01T00:00:00Z", actor: { kind: "person" }, type: "constructor", data: { x: 1 } }) + "\n");
+  const out2 = join(tempDir(), "bundle"); await ops.studyExport(second, { bundle: out2 });
+  const row = readFileSync(join(out2, "attempts.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l)).find(r => r.id === id);
+  expect(row).toMatchObject({ commit: null, treeId: null });
+  const last = readFileSync(join(out2, "ledger.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l)).at(-1);
+  expect(last).toMatchObject({ type: "constructor", data: {} });
+});
+
+test("#81 round 4: a bare backslash and a backslash before whitespace refuse; escapes and newlines pass", async () => {
+  for (const metric of ["\\", "\\ Users\\x"]) {
+    const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", metric);
+    const out = join(tempDir(), "bundle");
+    await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("absolute path");
+    expect(existsSync(out)).toBe(false);
+    expect(() => scanBundle({ x: JSON.stringify({ v: metric }) })).toThrow("absolute path");
+  }
+  expect(() => scanBundle({ x: JSON.stringify({ v: String.raw`a\nb`, w: "line\nbreak" }) })).not.toThrow();
+});
