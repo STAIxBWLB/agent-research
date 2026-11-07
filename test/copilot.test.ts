@@ -202,3 +202,20 @@ test("paper diagnostics remain usable and review approval keeps the gate guidanc
   await expect(ops.gateDecide(f.dir, "review", "approve", undefined, f.ctx)).rejects.toThrow("ares gate approve <dir> accept:hypotheses");
   expect(bytes(f.dir)).toEqual(before);
 });
+
+
+test("negative-result diagnostics without placeholders preserve stale hypothesis acceptance guidance", async () => {
+  const f = await fixture(); await ops.autonomySet(f.dir, "copilot", "hypotheses", f.ctx);
+  writeFileSync(join(f.dir, "hypotheses.md"), "Synthetic accepted negative-result hypothesis\n");
+  await accept(f.dir, "hypotheses", f.ctx); await ops.investigateClose(f.dir, f.ctx);
+  expect(readClosedInvestigation(f.dir).result.winner).toBeNull();
+  mkdirSync(join(f.dir, "paper")); writeFileSync(join(f.dir, "paper", "manuscript.md"), "Nothing to report.\n");
+  writeFileSync(join(f.dir, "hypotheses.md"), "Changed synthetic negative-result hypothesis\n");
+  const before = bytes(f.dir), check = ops.paperCheck(f.dir), nextStep = "ares gate approve <dir> accept:hypotheses";
+  expect(check.placeholders).toEqual([]);
+  expect(check.findings.find(finding => finding.code === "unaccepted-draft")?.message).toContain(nextStep);
+  expect(check.findings.some(finding => finding.message.includes("run ares investigate close"))).toBe(false);
+  expect(ops.reviewShow(f.dir).unmet.find(item => item.code === "accept-source")?.message).toContain(nextStep);
+  await expect(ops.gateDecide(f.dir, "review", "approve", undefined, f.ctx)).rejects.toThrow(nextStep);
+  expect(bytes(f.dir)).toEqual(before); expect(f.fake.requests).toEqual([]); expect(f.http.requested).toEqual([]);
+});

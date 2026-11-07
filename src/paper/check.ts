@@ -1,3 +1,4 @@
+import { CopilotAcceptError } from "../copilot.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { openStudy, readTextBounded, sha256 } from "../study.ts";
@@ -169,9 +170,9 @@ export function checkPaper(dirArg: string) {
       const protocol = readProtocol(dir), rule = protocol ? readSelection(dir, protocol) : undefined;
       if (rule && existsSync(investigateResultPath(dir, rule.run))) {
         try { if (readClosedInvestigation(dir).result.winner === null) requireRef("investigate.reason"); }
-        catch { findings.push(finding("unresolved-ref", 0, 0, "investigate result is not current and closed; run ares investigate close before checking the paper")); }
+        catch (error) { findings.push(error instanceof CopilotAcceptError ? finding("unaccepted-draft", 0, 0, error.message) : finding("unresolved-ref", 0, 0, "investigate result is not current and closed; run ares investigate close before checking the paper")); }
       }
-    } catch { findings.push(finding("unresolved-ref", 0, 0, "experiment design or selection is invalid; restore the current validated inputs before paper check")); }
+    } catch (error) { findings.push(error instanceof CopilotAcceptError ? finding("unaccepted-draft", 0, 0, error.message) : finding("unresolved-ref", 0, 0, "experiment design or selection is invalid; restore the current validated inputs before paper check")); }
   }
   let rendered = "", cursor = 0;
   for (const entry of resolution.placeholders) { rendered += manuscript.slice(cursor, entry.placeholder.start) + entry.rendered; cursor = entry.placeholder.end; }
