@@ -284,3 +284,22 @@ test("#81 AC2: hand-edited hash fields, non-finite metrics and unknown provenanc
   expect(last).toMatchObject({ at: null, type: "other" });
   expect(row.metrics[0]).toMatchObject({ value: null, provenance: "other" }); expect(row.outputs[0]).toEqual({ sha256: null, bytes: null });
 });
+
+test("#81 round 3: \\#private root path, 64-hex git ids and an inherited ledger type", async () => {
+  const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", String.raw`\#private\x`);
+  const out = join(tempDir(), "bundle");
+  await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("absolute path");
+  expect(existsSync(out)).toBe(false);
+  expect(() => scanBundle({ x: JSON.stringify({ v: String.raw`\#private\x` }) })).toThrow("absolute path");
+  expect(() => scanBundle({ x: JSON.stringify({ v: String.raw`a\nb`, w: "line\nbreak" }) })).not.toThrow();
+
+  const second = await study(), id = attempt(second, "posthoc", WIN, 1, 1), file = join(second, "runs", "posthoc", "attempts", `${id}.json`);
+  const record = JSON.parse(readFileSync(file, "utf8")); record.commit = "a".repeat(64); record.treeId = "b".repeat(64); writeFileSync(file, JSON.stringify(record));
+  const ledger = join(second, "ledger.jsonl");
+  writeFileSync(ledger, readFileSync(ledger, "utf8") + JSON.stringify({ v: 1, at: "2030-01-01T00:00:00Z", actor: { kind: "person" }, type: "constructor", data: { x: 1 } }) + "\n");
+  const out2 = join(tempDir(), "bundle"); await ops.studyExport(second, { bundle: out2 });
+  const row = readFileSync(join(out2, "attempts.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l)).find(r => r.id === id);
+  expect(row).toMatchObject({ commit: null, treeId: null });
+  const last = readFileSync(join(out2, "ledger.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l)).at(-1);
+  expect(last).toMatchObject({ type: "constructor", data: {} });
+});

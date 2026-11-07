@@ -17,7 +17,7 @@ const STATUSES: AttemptStatus[] = ["running", "succeeded", "failed", "cancelled"
 const SHA256 = /^[a-f0-9]{64}$/;
 const HEX = /^[a-f0-9]{16,64}$/;
 const TOKEN = /^[a-z][a-z0-9_.:-]{0,47}$/;
-const GIT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/, ATTEMPT_ID = /^[a-f0-9]{16}$/;
+const GIT_ID = /^[a-f0-9]{40}$/, ATTEMPT_ID = /^[a-f0-9]{16}$/;
 const ACTOR_KINDS = new Set(["person", "agent", "auto"]), EVIDENCE_FAMILIES = new Set(["attempt", "posthoc", "investigate", "ablate", "final"]);
 /** Exact-shape field or null: hand-edited free text in an identity field is never copied. */
 const shaped = (value: unknown, pattern: RegExp): string | null => typeof value === "string" && pattern.test(value) ? value : null;
@@ -67,7 +67,7 @@ const isoAt = (value: unknown): string | null => typeof value === "string" && va
 function reduceEvent(event: LedgerEvent) {
   const actor = { kind: ACTOR_KINDS.has(event.actor?.kind as string) ? event.actor.kind : "other", ...(event.actor.id !== undefined ? { idSha256: sha256(event.actor.id) } : {}) };
   const at = isoAt(event.at);
-  return { v: event.v, at, actor, type: TOKEN.test(event.type) ? event.type : "other", data: reduceData(plain(event.data) ? event.data : {}, LEDGER_KEYS[event.type] ?? []) };
+  return { v: event.v, at, actor, type: TOKEN.test(event.type) ? event.type : "other", data: reduceData(plain(event.data) ? event.data : {}, (Object.hasOwn(LEDGER_KEYS, event.type) ? LEDGER_KEYS[event.type]! : [])) };
 }
 // Closed codes emitted by attempts.ts, metrics.ts and artifacts.ts; never derive a class from user prose.
 const ATTEMPT_REASON_CODES = new Set([
@@ -144,7 +144,7 @@ const SCANS: [string, RegExp][] = [
   ["absolute path", /(?<![\p{L}\p{N}_])(?:\/|~\/)/u],
   ["absolute path", /\b[A-Za-z]:\\/],
   // Windows root-relative (\Users\x) and UNC (\\server) paths: one or two leading backslashes, doubled in serialized JSON.
-  ["absolute path", /(?<![\p{L}\p{N}_\\])\\\\(?:\\\\)?[\p{L}\p{N}_.$-]/u],
+  ["absolute path", /(?<![\p{L}\p{N}_\\])\\\\(?:\\\\)?[^\\\s"]/u],
   ["url", /\b[a-z][a-z0-9+.-]*:\/\/|\b(?:mailto|urn|file|data):/i],
   ["key-like token", /\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{12,}|\b(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{12,}|\bxox[abprs]-[A-Za-z0-9-]{8,}|\bAKIA[0-9A-Z]{12,}|\beyJ[A-Za-z0-9_-]{16,}/],
   ["key-like token", /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])/],
