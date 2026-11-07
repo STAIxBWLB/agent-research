@@ -7,6 +7,7 @@ import type { ConsolePlugin } from "@staix/agent-console/contract";
 import { registerConsoleConformance } from "@staix/agent-console/conformance";
 import { scanPlugins } from "../node_modules/@staix/agent-console/src/plugins.ts";
 import plugin from "../src/ui/plugin.ts";
+import { investigateResultPath, readClosedInvestigation } from "../src/exp/investigate.ts";
 import * as ops from "../src/commands.ts";
 import { run } from "../src/cli.ts";
 import { addStudy, readRegistry } from "../src/console/registry.ts";
@@ -503,4 +504,37 @@ test("a final artifact or close receipt keeps strict final-reader failures visib
     expect((await provider.snapshot({ panel: "inbox", after: inbox.cursor as number })).changed).toBe(false);
     expect(fs.readFileSync(journal)).toEqual(before); expect(fs.existsSync(file) ? fs.readFileSync(file) : null).toEqual(artifact); expect(fs.existsSync(join(f.experiment, ".ares.lock"))).toBe(false);
   }
+});
+
+test("detail flags a missing receipted investigation as recalculated without restoring or weakening receipts", async () => {
+  const f = await fixtures(fs.realpathSync(tempDir())), provider = await typed.open(context(f.family)), file = investigateResultPath(f.experiment, "investigate");
+  const first = await provider.snapshot({ panel: "study", study: f.experiment, after: 0 });
+  expect((first.study as Record<string, unknown>).investigationArtifact).toBeNull();
+  const ledger = fs.readFileSync(join(f.experiment, "ledger.jsonl")), original = fs.readFileSync(file);
+  fs.unlinkSync(file);
+  const expected = ops.investigateShow(f.experiment), next = await provider.snapshot({ panel: "study", study: f.experiment, after: Number(first.cursor) });
+  const detail = next.study as Record<string, unknown>;
+  expect(next.changed).toBe(true); expect(next.cursor).toBe(first.cursor);
+  expect(detail.investigation).toEqual(expected);
+  expect(detail.investigationArtifact).toMatchObject({ state: "missing", recalculated: true });
+  expect((detail.investigationArtifact as { message: string }).message).toContain("runs/investigate/investigate.json");
+  expect((detail.investigationArtifact as { message: string }).message).toContain("recalculated");
+  expect((detail.investigationArtifact as { message: string }).message).toContain("ares investigate close");
+  expect(() => readClosedInvestigation(f.experiment)).toThrow("not closed");
+  expect(fs.existsSync(file)).toBe(false); expect(fs.readFileSync(join(f.experiment, "ledger.jsonl"))).toEqual(ledger);
+  fs.writeFileSync(file, original);
+  const restored = await provider.snapshot({ panel: "study", study: f.experiment, after: Number(next.cursor) });
+  expect((restored.study as Record<string, unknown>).investigationArtifact).toBeNull();
+  expect(fs.readFileSync(join(f.experiment, "ledger.jsonl"))).toEqual(ledger);
+});
+
+test("watch alerts distinguish cause-bearing failures from all-source failures without copying unknown text", async () => {
+  const home = fs.realpathSync(tempDir()), family = join(home, "family"), study = makeStudy(home, "watch-causes"); addStudy(family, study);
+  for (const cause of [undefined, "terminated", "filesystem", "internal", "rate", "private https://example.invalid/?key=secret"]) {
+    appendEvent(study, actor, "watch.ran", { ok: false, ...(cause === undefined ? {} : { cause }) });
+  }
+  const provider = await typed.open(context(family)), items = rows((await provider.snapshot({ panel: "inbox", after: 0 })).items).filter(row => row.kind === "watch");
+  expect(items.map(row => row.title).sort()).toEqual(["Every watch source failed", "Watch run failed (terminated)", "Watch run failed (filesystem)", "Watch run failed (internal)", "Watch run failed (rate)", "Watch run failed (unknown cause)"].sort());
+  for (const row of items) { expect(row.detail).toContain("ares watch show"); expect(row.verbs).toEqual([]); }
+  expect(items.map(row => `${String(row.title)} ${String(row.detail)}`).join("\n")).not.toMatch(/private|https:|secret/);
 });

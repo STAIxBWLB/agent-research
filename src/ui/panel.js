@@ -119,11 +119,13 @@ export default (host) => {
       rows(review.openBlocking).length ? ui.notice(`${review.openBlocking.length} blocking findings remain open.`, "warn") : null));
     if (typeof study.manuscript?.id === "string") sections.push(h("section", { class: "ares-card" }, h("h3", { text: "Built manuscript" }),
       ui.link({ asset: study.manuscript.id }, "Open manuscript text")));
+    const investigationArtifact = record(study.investigationArtifact);
+    if (investigationArtifact.state === "missing") sections.push(ui.notice(text(investigationArtifact.message, "Investigation artifact missing; displayed result is recalculated. Restore the artifact or run ares investigate close."), "warn"));
     sections.push(block("Investigation", study.investigation), block("Posthoc exploration", study.posthoc));
     const watch = record(study.watch), watchConfig = record(watch.config);
     sections.push(h("section", { class: "ares-card" }, h("h3", { text: "Watch" }),
       typeof watchConfig.rubric === "string" ? h("div", {}, h("strong", { text: "Display-only rubric" }), h("p", { class: "ares-prose", text: watchConfig.rubric })) : null,
-      ui.rows(rows(watch.runs), (run) => ui.row({ title: run.ok ? "Source answered" : "All sources failed", sub: `${at(run.at)} | ${number(run.added)} added | ${number(run.addedIdsTotal)} recorded ids`, chip: { text: run.ok ? "answered" : "failed", tone: run.ok ? "ok" : "err" } })) ?? ui.empty("No watch runs")));
+      ui.rows(rows(watch.runs), (run) => ui.row({ title: run.ok ? "Source answered" : run.cause === undefined ? "All sources failed" : ["terminated", "filesystem", "internal", "network", "rate", "server", "client", "format"].includes(run.cause) ? `Watch run failed (${run.cause})` : "Watch run failed (unknown cause)", sub: `${at(run.at)} | ${number(run.added)} added | ${number(run.addedIdsTotal)} recorded ids`, chip: { text: run.ok ? "answered" : "failed", tone: run.ok ? "ok" : "err" } })) ?? ui.empty("No watch runs")));
     const candidates = rows(record(watch.newCandidates).candidates).filter((candidate) => candidate.status === "new" && typeof candidate.id === "string");
     sections.push(h("section", { class: "ares-card" }, h("h3", { text: "New candidates" }),
       ui.rows(candidates, (candidate) => ui.row({ title: line(candidate.title) || candidate.id, sub: `${candidate.id}${typeof candidate.year === "number" ? ` | ${candidate.year}` : ""}`, verbs: typeof study.dir === "string" ? [

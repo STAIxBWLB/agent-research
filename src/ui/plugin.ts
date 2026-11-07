@@ -12,6 +12,7 @@ import { previewArchive, ARCHIVE_NOTES, ArchivePartialError } from "../memory/ar
 import { spawnRunner, type ProcessRunner } from "../exp/executor.ts";
 import { readProtocol } from "../exp/protocol.ts";
 import { readSelection, selectionPath } from "../exp/selection.ts";
+import { investigateResultPath } from "../exp/investigate.ts";
 import { readClosedFinal, finalResultPath } from "../exp/final.ts";
 import { readCurrentBuild, paperBuildPaths } from "../paper/build.ts";
 import { loadCandidates } from "../lit/candidates.ts";
@@ -39,12 +40,13 @@ const stamp = (value: unknown, fallback = EPOCH) => typeof value === "string" &&
 function readCall<T>(name: string, fn: () => T, errors: Record<string, string>): T | null {
   try { return fn(); } catch (cause) { errors[name] = error(cause); return null; }
 }
-interface GateInputs { selectionRun?: string; review?: { manuscriptSha256: string; evidenceSha256: string; ids: ReadonlySet<string> } }
+export interface GateInputs { selectionRun?: string; review?: { manuscriptSha256: string; evidenceSha256: string; ids: ReadonlySet<string> } }
 /** Every gate advances only when an input consumed by its binder changes, never merely on an event kind. */
-function gateWaitingTimes(events: LedgerEvent[], inputs: GateInputs): Map<string, string> {
+export function gateWaitingTimes(events: LedgerEvent[], inputs: GateInputs, observeSignature?: (gate: string, signature: string | undefined) => void): Map<string, string> {
   const waiting = new Map<string, string>(), previous = new Map<string, string | undefined>();
   const observe = (gate: string, input: unknown, at: string) => {
     const signature = input === undefined ? undefined : canonical(input);
+    observeSignature?.(gate, signature);
     if (previous.get(gate) === signature) return;
     previous.set(gate, signature);
     if (signature === undefined) waiting.delete(gate); else waiting.set(gate, at);
@@ -85,8 +87,8 @@ function gateWaitingTimes(events: LedgerEvent[], inputs: GateInputs): Map<string
         experiment(event.at); break;
       case "selection.set": if (typeof data.sha256 === "string") selection = data.sha256; experiment(event.at); break;
       case "final.seeds.set": if (typeof data.sha256 === "string") reserved = data.sha256; experiment(event.at); break;
-      case "investigate.closed": if (data.run === inputs.selectionRun && typeof data.sha256 === "string") investigate = data.sha256; experiment(event.at); break;
-      case "ablate.added": hasAblations = true; experiment(event.at); break;
+      case "investigate.closed": if (data.run === inputs.selectionRun && typeof data.sha256 === "string") investigate = typeof data.winner === "string" && /^[a-f0-9]{40}$/.test(data.winner) ? data.sha256 : undefined; experiment(event.at); break;
+      case "ablation.added": hasAblations = true; experiment(event.at); break;
       case "ablate.closed": if (typeof data.sha256 === "string") ablate = data.sha256; experiment(event.at); break;
       case "paper.built":
         if (typeof data.manuscriptSha256 === "string" && typeof data.evidenceSha256 === "string") paper = [data.manuscriptSha256, data.evidenceSha256];
@@ -124,9 +126,16 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
   };
   const status = ops.status(dir), gates = ops.gateList(dir);
   const attempt = study.mode === "experiment" ? readCall("attempts", () => attempts(dir, inbox), errors) : null;
+  let investigationArtifact: { state: "missing"; recalculated: true; message: string } | undefined;
   const investigation = detailed && study.mode === "experiment" ? readCall("investigation", () => {
     const configured = recordPresent(selectionPath(dir)) || events.some(event => event.type === "selection.set" || event.type === "investigate.closed");
-    return configured ? ops.investigateShow(dir) : null;
+    if (!configured) return null;
+    const result = ops.investigateShow(dir);
+    if (events.some(event => event.type === "investigate.closed" && event.data.run === result.run) && !recordPresent(investigateResultPath(dir, result.run))) {
+      investigationArtifact = { state: "missing", recalculated: true,
+        message: `Missing receipted artifact runs/${result.run}/investigate.json; this investigation result is recalculated from current inputs. Restore the artifact or run ares investigate close before using a closed result.` };
+    }
+    return result;
   }, errors) : null;
   const final = study.mode === "experiment" ? readCall("final", () => {
     const recorded = recordPresent(finalResultPath(dir)) || events.some(event => event.type === "final.closed");
@@ -169,7 +178,12 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
     const event = attemptEvents.get(`${row.id}:${row.status}`);
     add("attempt", row.id, "alert", `${row.status} attempt ${row.id}`, event?.at ?? at, row.reason ?? "Inspect ares attempt show before retrying");
   }
-  for (const [index, event] of events.entries()) if (event.type === "watch.ran" && event.data.ok === false) add("watch", event.at + index, "alert", "Every watch source failed", event.at, "Inspect ares watch show and retry after restoring source access");
+  for (const [index, event] of events.entries()) if (event.type === "watch.ran" && event.data.ok === false) {
+    const cause = event.data.cause, known = typeof cause === "string" && ["terminated", "filesystem", "internal", "network", "rate", "server", "client", "format"].includes(cause);
+    const title = cause === undefined ? "Every watch source failed" : known ? `Watch run failed (${cause})` : "Watch run failed (unknown cause)";
+    const detail = cause === undefined ? "Inspect ares watch show and retry after restoring source access" : "Inspect ares watch show and lit list; restore study storage or source access as needed, then rerun ares watch run";
+    add("watch", event.at + index, "alert", title, event.at, detail);
+  }
   }
   const archive = detailed ? readCall("archive", () => { const preview = previewArchive(dir); return { pendingCount: preview.notes.length, fingerprint: preview.fingerprint }; }, errors) : null;
   const manuscript = detailed && readCall("manuscript", () => {
@@ -186,7 +200,7 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
     attempts: attempt ? { total: attempt.total, byStatus: attempt.byStatus } : study.mode === "experiment" ? { available: false, reason: errors.attempts ?? "Attempt records could not be read; inspect ares attempt list and restore readable records, then refresh" } : { total: 0, byStatus: {} },
     final: final ? { status: final.status, ...(final.reason ? { reason: final.reason } : {}) } : null,
     review: review ? { ready: review.ready, unmet: review.unmet } : null, lastWatch };
-  return { summary, targets, detail: detailed ? { ...summary, investigation, final, posthoc, review, skills, watch, archive, manuscript, errors } : null, items, at };
+  return { summary, targets, detail: detailed ? { ...summary, investigation, investigationArtifact: investigationArtifact ?? null, final, posthoc, review, skills, watch, archive, manuscript, errors } : null, items, at };
 }
 interface Selection { wireAction: string; action: "gate" | "screen" | "skill.decide" | "archive.confirm"; study: string; gate?: string; ids?: string[]; name?: string; decision?: string; reason?: string; pr?: string }
 const ACTIONS: Record<string, { action: Selection["action"]; decision?: string; fields: readonly string[] }> = {
