@@ -1,3 +1,4 @@
+import { requireCopilotAccept } from "../copilot.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { assertWritable, commit, openStudy, plain, readLedger, readTextBounded, sha256, type Actor } from "../study.ts";
@@ -50,7 +51,9 @@ function calculatePaper(dir: string) {
 }
 /** Caller holds the study lock. Refusals precede the single output-and-receipt commit. */
 export function buildPaper(dirArg: string, actor: Actor) {
-  const { dir } = openStudy(dirArg), paths = paperBuildPaths(dir), oldEvidence = evidenceBytes(dir);
+  const { dir } = openStudy(dirArg);
+  requireCopilotAccept(dir, "hypotheses");
+  const paths = paperBuildPaths(dir), oldEvidence = evidenceBytes(dir);
   const { report, text, manuscriptSha256, evidenceSha256 } = calculatePaper(dir), oldManuscript = previous(paths.manuscript, MANUSCRIPT_BYTES);
   const receipt = readLedger(dir).findLast(event => event.type === "paper.built");
   const changed = oldManuscript !== report.rendered || oldEvidence !== text || receipt?.data.manuscriptSha256 !== manuscriptSha256 || receipt.data.evidenceSha256 !== evidenceSha256;

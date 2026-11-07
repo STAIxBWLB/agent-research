@@ -1,3 +1,4 @@
+import { CopilotAcceptError } from "../copilot.ts";
 import { boundHubTask, type HubClient, type HubObservation } from "./hub.ts";
 import { assertPlanOwner, commit, openStudy, readLedger, prepareCommit, requireGate, withLock, withPlanLock, StudyLockBusyError, type Actor, type PendingEvent, type PlanOwner } from "../study.ts";
 import { canonical, foldPlan, hasRemainingWork, TERMINAL_NODE_STATUSES, nextDispatchId, planGateBinding, readPlanState, type NodeState, type PlanState } from "./state.ts";
@@ -104,6 +105,7 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
           try { observation = await runtime.execute(definition, node); break; }
           catch (error) {
             if (error instanceof StudyLockBusyError) { await sleep(wait); wait = Math.min(wait * 2, 30_000); continue; }
+            if (error instanceof CopilotAcceptError) { observation = { status: "failed", reason: error.message }; break; }
             if (definition.command === "attempt.run") { await reconcile(node); return; }
             observation = { status: "uncertain", reason: "step execution interrupted or failed without an observable result; inspect inputs, then retry or skip this node" }; break;
           }
@@ -157,10 +159,10 @@ export async function runPlan(dirArg: string, options: ControllerOptions, runtim
             if (definition.command === "attempt.run" && current.nodes.some(n => n.status === "dispatched" && current.definition.nodes.find(d => d.id === n.id)?.kind === "step" && (current.definition.nodes.find(d => d.id === n.id) as StepNode).command === "attempt.run")) continue;
             let prepared: { attemptId?: string };
             try { prepared = await runtime.prepare(definition, node); }
-            catch { // Preparation is read-only; still record a correlated failed dispatch for visibility.
+            catch (error) { // Preparation is read-only; still record a correlated failed dispatch for visibility.
               prepared = {};
               const intent = await admit(dir, owner, runtime.actor, current, node, definition, prepared, parallel);
-              if (intent) await observe(intent, { status: "failed", reason: "step preparation failed; check command inputs and retry this node" });
+              if (intent) await observe(intent, { status: "failed", reason: error instanceof CopilotAcceptError ? error.message : "step preparation failed; check command inputs and retry this node" });
               current = state(); continue;
             }
             const intent = await admit(dir, owner, runtime.actor, current, node, definition, prepared, parallel);

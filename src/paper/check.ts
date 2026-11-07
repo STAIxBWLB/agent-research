@@ -1,3 +1,4 @@
+import { CopilotAcceptError } from "../copilot.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { openStudy, readTextBounded, sha256 } from "../study.ts";
@@ -10,7 +11,7 @@ import { finalResultPath } from "../exp/final.ts";
 import { MANUSCRIPT_BYTES, parsePlaceholders, resolvePlaceholders } from "./placeholders.ts";
 
 export const MAX_CODE_NUMBERS = 500;
-export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result"; start: number; end: number; line: number; column: number; message: string }
+export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "unaccepted-draft" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result"; start: number; end: number; line: number; column: number; message: string }
 function blank(text: string, mask: Uint8Array): string { return text.split("").map((char, index) => mask[index] && char !== "\n" && char !== "\r" ? " " : char).join(""); }
 function mark(mask: Uint8Array, start: number, end: number) { mask.fill(1, start, end); }
 function escaped(text: string, index: number): boolean { let slashes = 0; while (index > 0 && text[--index] === "\\") slashes++; return slashes % 2 === 1; }
@@ -169,9 +170,9 @@ export function checkPaper(dirArg: string) {
       const protocol = readProtocol(dir), rule = protocol ? readSelection(dir, protocol) : undefined;
       if (rule && existsSync(investigateResultPath(dir, rule.run))) {
         try { if (readClosedInvestigation(dir).result.winner === null) requireRef("investigate.reason"); }
-        catch { findings.push(finding("unresolved-ref", 0, 0, "investigate result is not current and closed; run ares investigate close before checking the paper")); }
+        catch (error) { findings.push(error instanceof CopilotAcceptError ? finding("unaccepted-draft", 0, 0, error.message) : finding("unresolved-ref", 0, 0, "investigate result is not current and closed; run ares investigate close before checking the paper")); }
       }
-    } catch { findings.push(finding("unresolved-ref", 0, 0, "experiment design or selection is invalid; restore the current validated inputs before paper check")); }
+    } catch (error) { findings.push(error instanceof CopilotAcceptError ? finding("unaccepted-draft", 0, 0, error.message) : finding("unresolved-ref", 0, 0, "experiment design or selection is invalid; restore the current validated inputs before paper check")); }
   }
   let rendered = "", cursor = 0;
   for (const entry of resolution.placeholders) { rendered += manuscript.slice(cursor, entry.placeholder.start) + entry.rendered; cursor = entry.placeholder.end; }

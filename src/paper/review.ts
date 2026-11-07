@@ -1,3 +1,4 @@
+import { requireCopilotAccept, CopilotAcceptError } from "../copilot.ts";
 import { boundedText, commit, onlyKeys, openStudy, plain, readLedger, sha256, type Actor, type LedgerEvent } from "../study.ts";
 import { readCurrentBuild } from "./build.ts";
 import { checkPaper } from "./check.ts";
@@ -63,7 +64,9 @@ export function foldReviews(events: LedgerEvent[]): ReviewRecord[] {
 }
 /** Caller holds the study lock; report ids are generated, findings never disappear by vote. */
 export function addReview(dirArg: string, raw: unknown, actor: Actor) {
-  const { dir } = openStudy(dirArg), report = validateReview(raw), current = readCurrentBuild(dir), events = readLedger(dir), rows = foldReviews(events);
+  const { dir } = openStudy(dirArg);
+  requireCopilotAccept(dir, "paper");
+  const report = validateReview(raw), current = readCurrentBuild(dir), events = readLedger(dir), rows = foldReviews(events);
   if (report.buildSha256 !== current.evidenceSha256) bad("stale buildSha256; use the evidenceSha256 from the current ares paper build output");
   if (rows.filter(row => row.report.buildSha256 === report.buildSha256).length >= 100) bad("100 reviews already recorded for this build; resolve existing findings or build a revised manuscript");
   const id = sha256(JSON.stringify([report, events.length])).slice(0, 16);
@@ -73,7 +76,9 @@ export function addReview(dirArg: string, raw: unknown, actor: Actor) {
   commit(dir, [], [{ actor, type: "review.added", data: { id, review: report } }]); return { id, ...report };
 }
 export function resolveReview(dirArg: string, target: string, reason: string, actor: Actor) {
-  const { dir } = openStudy(dirArg), parts = target.split("/");
+  const { dir } = openStudy(dirArg);
+  requireCopilotAccept(dir, "paper");
+  const parts = target.split("/");
   if (parts.length !== 2) bad("resolution target must be <review-id>/<finding-id>; use ids from ares review show");
   const reviewId = identifier(parts[0], "review id"), findingId = identifier(parts[1], "finding id"), why = text(reason, "resolution reason"), row = foldReviews(readLedger(dir)).find(row => row.id === reviewId);
   if (!row) bad(`unknown review ${reviewId}`);
@@ -98,9 +103,14 @@ export function reviewBinding(dirArg: string): string | undefined {
 }
 export function reviewReadiness(dirArg: string) {
   const { dir } = openStudy(dirArg), events = readLedger(dir), unmet: { code: string; message: string }[] = [];
+  for (const artifact of ["paper", "reviews"] as const) {
+    try { requireCopilotAccept(dir, artifact); }
+    catch (error) { unmet.push({ code: `accept:${artifact}`, message: error instanceof Error ? error.message : `copilot ${artifact} acceptance unavailable; inspect ares gate list` }); }
+  }
   let current: ReturnType<typeof readCurrentBuild> | undefined, check: ReturnType<typeof checkPaper> | undefined;
   try { current = readCurrentBuild(dir); check = current.check; } catch (error) { unmet.push({ code: "build", message: error instanceof Error ? error.message : "current build unavailable; run ares paper build" }); }
   if (!check) { try { check = checkPaper(dir); } catch (error) { unmet.push({ code: "paper-check", message: error instanceof Error ? error.message : "paper check unavailable; restore paper/manuscript.md" }); } }
+  for (const finding of check?.findings ?? []) if (finding.code === "unaccepted-draft" && !unmet.some(item => item.code === "accept-source" && item.message === finding.message)) unmet.unshift({ code: "accept-source", message: finding.message });
   if (check && !check.ok) unmet.push({ code: "paper-check", message: `paper check has ${check.findings.length} finding(s); run ares paper check --json and fix every finding` });
   let rows: ReviewRecord[] = [];
   try { rows = foldReviews(events); } catch (error) { unmet.push({ code: "review-journal", message: error instanceof Error ? error.message : "review journal invalid; restore its valid events" }); }
@@ -111,5 +121,7 @@ export function reviewReadiness(dirArg: string) {
   return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, checklists: reviews.map(row => ({ reviewId: row.id, ...row.report.checklist })), claims: "unavailable (STAIxBWLB/agent-hub#931)", unmet };
 }
 export function requireReviewReady(dir: string): void {
-  const report = reviewReadiness(dir); if (!report.ready) throw new Error(`gate review: ${report.unmet.map(item => `${item.code}: ${item.message}`).join("; ")}; inspect ares review show before approval`);
+  const report = reviewReadiness(dir), accept = report.unmet.find(item => item.code.startsWith("accept:") || item.code === "accept-source");
+  if (accept) throw new CopilotAcceptError(accept.message);
+  if (!report.ready) throw new Error(`gate review: ${report.unmet.map(item => `${item.code}: ${item.message}`).join("; ")}; inspect ares review show before approval`);
 }

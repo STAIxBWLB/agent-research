@@ -2,10 +2,12 @@ export const AUTONOMY_MODES = ["auto", "gates", "copilot", "step"] as const;
 export const PHASES = ["scope", "literature", "hypotheses", "design", "investigate", "ablate", "final", "posthoc", "write", "review", "archive"] as const;
 export type AutonomyMode = typeof AUTONOMY_MODES[number];
 export type Phase = typeof PHASES[number];
+export const ACCEPT_ARTIFACTS = ["hypotheses", "paper", "reviews"] as const;
+export type AcceptArtifact = typeof ACCEPT_ARTIFACTS[number];
 export type Autonomy = AutonomyMode | { default: AutonomyMode; phases: Partial<Record<Phase, AutonomyMode>> };
 
 /** Direct gate mappings are explicit; plan gates receive their declared guarded phase. */
-export const GATE_PHASES = { scope: "scope", screen: "literature", design: "design", final: "final", review: "review" } as const satisfies Record<string, Phase>;
+export const GATE_PHASES = { scope: "scope", screen: "literature", design: "design", final: "final", review: "review", "accept:hypotheses": "hypotheses", "accept:paper": "write", "accept:reviews": "review" } as const satisfies Record<string, Phase>;
 
 function refuse(field: string, reason: string): never {
   throw new Error(`${field}: ${reason}; correct the policy and retry ares autonomy set with a supported mode and phase`);

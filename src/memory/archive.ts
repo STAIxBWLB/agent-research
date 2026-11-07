@@ -1,3 +1,5 @@
+import { ACCEPT_ARTIFACTS } from "../autonomy.ts";
+import { requireCopilotAccept } from "../copilot.ts";
 import { commit, prepareCommit, openStudy, plain, sha256, type Actor, type LedgerEvent } from "../study.ts";
 import { canonical } from "../plan/state.ts";
 import { createAmemClient, type AmemNote } from "./amem.ts";
@@ -35,6 +37,7 @@ function exported(events: LedgerEvent[]): Set<string> {
 }
 /** No lock, subprocess or write: confirmation binds the full list, receipts only narrow pending writes. */
 export function previewArchive(dir: string): ArchivePreview {
+  for (const artifact of ACCEPT_ARTIFACTS) requireCopilotAccept(dir, artifact);
   const sources = readLessonSources(dir), notes = deriveLessons(sources), known = exported(sources.events);
   const unique = new Map(notes.map(note => [sha256(canonical(note)), note]));
   const pending = [...unique].filter(([hash]) => !known.has(hash)).map(([sha256, note]) => ({ sha256, note }));
