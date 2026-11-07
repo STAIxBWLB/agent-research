@@ -44,7 +44,7 @@ test("failed S2 starts consume their slot, including network, status and JSON fa
     return new Response(outcome === "format" ? "bad JSON" : "{}");
   };
   const http = createHttp({}, fetcher, pacing);
-  for (const kind of ["network", "rate", "server", "client", "format"]) {
+  for (const kind of ["network", "rate", "server", "client", "format"] as const) {
     try { await http.json(`${s2}/graph/v1/paper/private`); throw new Error("expected refusal"); }
     catch (error) {
       expect(error).toBeInstanceOf(HttpError);
