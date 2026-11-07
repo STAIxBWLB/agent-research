@@ -17,6 +17,7 @@ const STATUSES: AttemptStatus[] = ["running", "succeeded", "failed", "cancelled"
 const SHA256 = /^[a-f0-9]{64}$/;
 const HEX = /^[a-f0-9]{16,64}$/;
 const TOKEN = /^[a-z][a-z0-9_.:-]{0,47}$/;
+const METRIC_KEYS = new Set(["name", "unit", "metric"]);
 /** Closed data keys per ledger event type; unlisted types keep the envelope with empty data. Never host, containerId or hubProject. */
 const LEDGER_KEYS: Record<string, readonly string[]> = {
   "scope.set": ["sha256"], "autonomy.set": ["from", "to", "phase"], "gate.approve": ["gate", "binding"], "gate.reject": ["gate", "binding"],
@@ -45,7 +46,7 @@ function closed(value: unknown): value is number | boolean | string | null {
 }
 function reduceData(data: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const key of keys) { const value = Object.hasOwn(data, key) ? data[key] : undefined; if (closed(value)) out[key] = value; else if (Array.isArray(value) && value.every(closed)) out[key] = value; }
+  for (const key of keys) { const value = Object.hasOwn(data, key) ? data[key] : undefined; if (closed(value) || (METRIC_KEYS.has(key) && typeof value === "string")) out[key] = value; else if (Array.isArray(value) && value.every(closed)) out[key] = value; }
   return out;
 }
 /** Result keys that hold free text even when a value happens to be one token. */
@@ -53,7 +54,7 @@ const FREE_TEXT_KEYS = new Set(["removes", "description", "note", "notes", "labe
 /** Keep numbers, booleans, null, hashes and closed tokens recursively; drop free-text keys and every other string. */
 function project(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(project).filter(v => v !== undefined);
-  if (plain(value)) { const out: Record<string, unknown> = {}; for (const [k, v] of Object.entries(value)) { if (FREE_TEXT_KEYS.has(k)) continue; const p = project(v); if (p !== undefined) out[k] = p; } return out; }
+  if (plain(value)) { const out: Record<string, unknown> = {}; for (const [k, v] of Object.entries(value)) { if (FREE_TEXT_KEYS.has(k)) continue; const p = METRIC_KEYS.has(k) && typeof v === "string" ? v : project(v); if (p !== undefined) out[k] = p; } return out; }
   return closed(value) ? value : undefined;
 }
 function reduceEvent(event: LedgerEvent) {
@@ -109,7 +110,8 @@ function reviews(events: LedgerEvent[]) {
     const reviewer = plain(review.reviewer) ? review.reviewer : {}, kinds: Record<string, number> = {};
     for (const f of findings) { const kind = typeof f.kind === "string" && TOKEN.test(f.kind) ? f.kind : "other"; kinds[kind] = (kinds[kind] ?? 0) + 1; }
     const id = typeof e.data.id === "string" ? e.data.id : "";
-    return { idSha256: sha256(id), at: e.at, modelFamily: typeof reviewer.modelFamily === "string" && TOKEN.test(reviewer.modelFamily.toLowerCase()) ? reviewer.modelFamily.toLowerCase() : "other", buildSha256: typeof review.buildSha256 === "string" && HEX.test(review.buildSha256) ? review.buildSha256 : null, findings: findings.length, blocking: findings.filter(f => f.blocking === true).length, kinds, resolved: resolved.get(id) ?? 0 };
+    const family = typeof reviewer.modelFamily === "string" ? reviewer.modelFamily.trim().toLowerCase() : "";
+    return { idSha256: sha256(id), at: e.at, modelFamily: /^[a-z0-9][a-z0-9 ._-]{0,47}$/.test(family) ? family : "other", buildSha256: typeof review.buildSha256 === "string" && HEX.test(review.buildSha256) ? review.buildSha256 : null, findings: findings.length, blocking: findings.filter(f => f.blocking === true).length, kinds, resolved: resolved.get(id) ?? 0 };
   });
 }
 function evidence(dir: string) {
@@ -131,6 +133,8 @@ function evidence(dir: string) {
 const SCANS: [string, RegExp][] = [
   ["absolute path", /(^|[\s"'=:(,[{])(\/|~\/)/u],
   ["absolute path", /\b[A-Za-z]:\\/],
+  // UNC starts with two backslashes, represented by four in serialized JSON.
+  ["absolute path", /(^|[\s"'=:(,[{])\\\\\\\\/],
   ["url", /\b[a-z][a-z0-9+.-]*:\/\/|\b(?:mailto|urn|file|data):/i],
   ["key-like token", /\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{12,}|\b(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{12,}|\bxox[abprs]-[A-Za-z0-9-]{8,}|\bAKIA[0-9A-Z]{12,}|\beyJ[A-Za-z0-9_-]{16,}/],
   ["key-like token", /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])/],

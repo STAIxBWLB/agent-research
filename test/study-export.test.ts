@@ -19,21 +19,21 @@ function attempt(dir: string, runName: string, commit: string, seed: number, val
   writeFileSync(join(folder, `${id}.json`), JSON.stringify({
     v: 1, id, studyId: openStudy(dir).study.id, run: runName, commit, treeId: "e".repeat(40), seed, label, protocolHash: protocolHash(protocol), sealBinding: "9".repeat(64), protocol,
     executor: { v: 1, kind: "ssh", host: "gpu-box", workdir: "/srv/exec" }, paths: { snapshot: "/srv/exec/snap.tar" }, stages: { candidate: stage, evaluator: { ...stage, exitCode: 0 } }, stage: "evaluator", status,
-    startedAt: "2030-01-01T00:00:00Z", endedAt: "2030-01-01T00:00:10Z", metrics: [{ name: metric, value, unit: "points", provenance: "ares-observed" }], outputs: [{ path: "/srv/exec/out.json", sha256: "c".repeat(64), bytes: 9 }],
+    startedAt: "2030-01-01T00:00:00Z", endedAt: "2030-01-01T00:00:10Z", metrics: [{ name: metric, value, unit: protocol.metrics.find(m => m.name === metric)?.unit ?? "points", provenance: "ares-observed" }], outputs: [{ path: "/srv/exec/out.json", sha256: "c".repeat(64), bytes: 9 }],
     sealing: { separateContainers: true, evaluatorReadOnly: true, candidateHasNoEvaluator: true, verifiedBy: "ares-observed" },
   }));
   appendEvent(dir, actor, "attempt.started", { id, run: runName, commit, seed }); return id;
 }
-async function study() {
+async function study(metric = "score", unit = "points") {
   const dir = tempDir(); ops.init(dir, { question: "synthetic", mode: "experiment" }, ctx);
   mkdirSync(join(dir, "task", "evaluator"), { recursive: true }); writeFileSync(join(dir, "task", "task.md"), "synthetic"); writeFileSync(join(dir, "task", "evaluator", "run"), "synthetic");
-  await ops.protocol(dir, { v: 1, method: "synthetic", candidate: { image: IMAGE, command: ["candidate"] }, evaluator: { image: IMAGE, command: ["evaluator"] }, metrics: [{ name: "score", unit: "points", direction: "max" }], seeds: [1, 2], limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts: 100, maxWallHours: 1, maxGpuHours: 0 } }, ctx);
-  await ops.finalSeeds(dir, { v: 1, seeds: [2] }, ctx); await ops.selection(dir, { v: 1, run: "investigate", metric: "score", baseline: { commit: BASE }, minSeeds: 1, minDelta: 1 }, ctx);
-  attempt(dir, "investigate", BASE, 1, 10); attempt(dir, "investigate", WIN, 1, 12); attempt(dir, "investigate", ABL, 1, 3, "failed");
+  await ops.protocol(dir, { v: 1, method: "synthetic", candidate: { image: IMAGE, command: ["candidate"] }, evaluator: { image: IMAGE, command: ["evaluator"] }, metrics: [{ name: metric, unit, direction: "max" }], seeds: [1, 2], limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts: 100, maxWallHours: 1, maxGpuHours: 0 } }, ctx);
+  await ops.finalSeeds(dir, { v: 1, seeds: [2] }, ctx); await ops.selection(dir, { v: 1, run: "investigate", metric, baseline: { commit: BASE }, minSeeds: 1, minDelta: 1 }, ctx);
+  attempt(dir, "investigate", BASE, 1, 10, "succeeded", "synthetic", metric); attempt(dir, "investigate", WIN, 1, 12, "succeeded", "synthetic", metric); attempt(dir, "investigate", ABL, 1, 3, "failed", "synthetic", metric);
   await ops.investigateClose(dir, ctx); await ops.ablateAdd(dir, { id: "without", commit: ABL, removes: "confidential" }, ctx);
-  attempt(dir, "ablate", WIN, 1, 12); attempt(dir, "ablate", ABL, 1, 11); await ops.ablateClose(dir, ctx);
+  attempt(dir, "ablate", WIN, 1, 12, "succeeded", "synthetic", metric); attempt(dir, "ablate", ABL, 1, 11, "succeeded", "synthetic", metric); await ops.ablateClose(dir, ctx);
   await ops.gateDecide(dir, "final", "approve", undefined, ctx);
-  attempt(dir, "final", BASE, 2, 10); attempt(dir, "final", WIN, 2, 12); await ops.finalClose(dir, ctx);
+  attempt(dir, "final", BASE, 2, 10, "succeeded", "synthetic", metric); attempt(dir, "final", WIN, 2, 12, "succeeded", "synthetic", metric); await ops.finalClose(dir, ctx);
   return dir;
 }
 function numericStatusAndReasons(value: unknown, path = "", out: Record<string, unknown> = {}): Record<string, unknown> {
@@ -214,4 +214,35 @@ test("an existing regular-file target gives the named directory recovery step", 
   const dir = await study(), out = join(tempDir(), "bundle"); writeFileSync(out, "keep");
   await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("study export: --bundle exists and is not a directory; choose a new or empty directory");
   expect(readFileSync(out, "utf8")).toBe("keep");
+});
+
+test("UNC metric paths refuse the entire serialized bundle", async () => {
+  const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", String.raw`\\server\share\x`);
+  const out = join(tempDir(), "bundle");
+  await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("absolute path");
+  expect(existsSync(out)).toBe(false);
+});
+
+test("protocol metric identifiers retain spaces and unit slashes in results and selection events", async () => {
+  const dir = await study("Validation Loss", "tokens/s"), out = join(tempDir(), "bundle");
+  await ops.studyExport(dir, { bundle: out });
+  const results = JSON.parse(readFileSync(join(out, "results.json"), "utf8"));
+  for (const result of [results.investigate.investigate, results.ablate]) expect(result.metric).toEqual({ name: "Validation Loss", unit: "tokens/s", direction: "max" });
+  const events = readFileSync(join(out, "ledger.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+  expect(events.find(event => event.type === "selection.set").data.metric).toBe("Validation Loss");
+  const rows = readFileSync(join(out, "attempts.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+  expect(rows.every(row => row.metrics[0].name === "Validation Loss" && row.metrics[0].unit === "tokens/s")).toBe(true);
+});
+
+test("review exports preserve normalized model families with spaces and sanitize invalid families", async () => {
+  const dir = tempDir(); ops.init(dir, { question: "Synthetic family normalization" }, ctx);
+  mkdirSync(join(dir, "paper")); writeFileSync(join(dir, "paper", "manuscript.md"), "Synthetic manuscript.\n");
+  const built = await ops.paperBuild(dir, ctx);
+  for (const family of [" Claude Code ", "gpt-6.1", "claude/code"]) await ops.reviewAdd(dir, {
+    v: 1, reviewer: { id: "synthetic", modelFamily: family }, buildSha256: built.evidenceSha256,
+    checklist: { negativeResults: true, denominators: true, limitations: true, reproducibility: true }, findings: [],
+  }, ctx);
+  const out = join(tempDir(), "bundle"); await ops.studyExport(dir, { bundle: out });
+  const rows = readFileSync(join(out, "reviews.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+  expect(rows.map(row => row.modelFamily)).toEqual(["claude code", "gpt-6.1", "other"]);
 });
