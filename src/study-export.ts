@@ -17,6 +17,11 @@ const STATUSES: AttemptStatus[] = ["running", "succeeded", "failed", "cancelled"
 const SHA256 = /^[a-f0-9]{64}$/;
 const HEX = /^[a-f0-9]{16,64}$/;
 const TOKEN = /^[a-z][a-z0-9_.:-]{0,47}$/;
+const GIT_ID = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/, ATTEMPT_ID = /^[a-f0-9]{16}$/;
+const ACTOR_KINDS = new Set(["person", "agent", "auto"]), EVIDENCE_FAMILIES = new Set(["attempt", "posthoc", "investigate", "ablate", "final"]);
+/** Exact-shape field or null: hand-edited free text in an identity field is never copied. */
+const shaped = (value: unknown, pattern: RegExp): string | null => typeof value === "string" && pattern.test(value) ? value : null;
+const finite = (value: unknown): number | null => typeof value === "number" && Number.isFinite(value) ? value : null;
 const METRIC_KEYS = new Set(["name", "unit", "metric"]);
 /** Closed data keys per ledger event type; unlisted types keep the envelope with empty data. Never host, containerId or hubProject. */
 const LEDGER_KEYS: Record<string, readonly string[]> = {
@@ -58,7 +63,7 @@ function project(value: unknown): unknown {
   return closed(value) ? value : undefined;
 }
 function reduceEvent(event: LedgerEvent) {
-  const actor = { kind: event.actor.kind, ...(event.actor.id !== undefined ? { idSha256: sha256(event.actor.id) } : {}) };
+  const actor = { kind: ACTOR_KINDS.has(event.actor?.kind as string) ? event.actor.kind : "other", ...(event.actor.id !== undefined ? { idSha256: sha256(event.actor.id) } : {}) };
   return { v: event.v, at: event.at, actor, type: event.type, data: reduceData(plain(event.data) ? event.data : {}, LEDGER_KEYS[event.type] ?? []) };
 }
 // Closed codes emitted by attempts.ts, metrics.ts and artifacts.ts; never derive a class from user prose.
@@ -90,11 +95,11 @@ function attemptRow(a: Attempt) {
   }
   const reason = reasonClass(a.reason, a.status);
   return {
-    id: a.id, run: a.run, studyIdSha256: sha256(String(a.studyId)), protocolHash: a.protocolHash ?? null, sealBinding: a.sealBinding ?? null, commit: a.commit, treeId: a.treeId ?? null,
-    snapshotSha256: a.snapshotSha256 ?? null, seed: a.seed, labelSha256: sha256(String(a.label ?? "")), retryOf: a.retryOf ?? null, status: a.status, stage: a.stage, ...(reason ? { reasonClass: reason } : {}),
+    id: a.id, run: a.run, studyIdSha256: sha256(String(a.studyId)), protocolHash: shaped(a.protocolHash, SHA256), sealBinding: shaped(a.sealBinding, SHA256), commit: shaped(a.commit, GIT_ID), treeId: shaped(a.treeId, GIT_ID),
+    snapshotSha256: shaped(a.snapshotSha256, SHA256), seed: a.seed, labelSha256: sha256(String(a.label ?? "")), retryOf: shaped(a.retryOf, ATTEMPT_ID), status: a.status, stage: a.stage, ...(reason ? { reasonClass: reason } : {}),
     durationMs: duration(a.startedAt, a.endedAt), stages,
-    metrics: (Array.isArray(a.metrics) ? a.metrics : []).map(m => ({ name: m.name, unit: m.unit, value: m.value, provenance: m.provenance })),
-    outputs: (Array.isArray(a.outputs) ? a.outputs : []).map(o => ({ sha256: o.sha256, bytes: o.bytes })),
+    metrics: (Array.isArray(a.metrics) ? a.metrics : []).map(m => ({ name: m.name, unit: m.unit, value: finite(m.value), provenance: m.provenance === "ares-observed" ? "ares-observed" : "other" })),
+    outputs: (Array.isArray(a.outputs) ? a.outputs : []).map(o => ({ sha256: shaped(o.sha256, SHA256), bytes: finite(o.bytes) })),
     sealing: plain(a.sealing) ? { separateContainers: a.sealing.separateContainers === true, evaluatorReadOnly: a.sealing.evaluatorReadOnly === true, candidateHasNoEvaluator: a.sealing.candidateHasNoEvaluator === true } : null,
   };
 }
@@ -125,16 +130,17 @@ function evidence(dir: string) {
     placeholders: (raw.placeholders as Record<string, unknown>[]).filter(p => p.kind === "number").map(p => {
       const ref = typeof p.ref === "string" ? p.ref : "", attempt = /^(?:attempt|posthoc):([a-f0-9]{16})\./.exec(ref)?.[1];
       const source = plain(p.source) ? p.source : {};
-      return { refSha256: sha256(ref), family: /^[a-z]+/.exec(ref)?.[0] ?? "other", ...(attempt ? { attempt } : {}), sourceSha256: typeof source.sha256 === "string" && SHA256.test(source.sha256) ? source.sha256 : null };
+      return { refSha256: sha256(ref), family: ((f: string | undefined) => f && EVIDENCE_FAMILIES.has(f) ? f : "other")(/^[a-z]+/.exec(ref)?.[0]), ...(attempt ? { attempt } : {}), sourceSha256: typeof source.sha256 === "string" && SHA256.test(source.sha256) ? source.sha256 : null };
     }),
   };
 }
 
 const SCANS: [string, RegExp][] = [
-  ["absolute path", /(^|[\s"'=:(,[{])(\/|~\/)/u],
+  // A true token boundary: any non-word character (or start) before `/`; units such as tokens/s keep a word character there.
+  ["absolute path", /(?<![\p{L}\p{N}_])(?:\/|~\/)/u],
   ["absolute path", /\b[A-Za-z]:\\/],
-  // UNC starts with two backslashes, represented by four in serialized JSON.
-  ["absolute path", /(^|[\s"'=:(,[{])\\\\\\\\/],
+  // Windows root-relative (\Users\x) and UNC (\\server) paths: one or two leading backslashes, doubled in serialized JSON.
+  ["absolute path", /(?<![\p{L}\p{N}_\\])\\\\(?:\\\\)?[\p{L}\p{N}_.$-]/u],
   ["url", /\b[a-z][a-z0-9+.-]*:\/\/|\b(?:mailto|urn|file|data):/i],
   ["key-like token", /\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{12,}|\b(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{12,}|\bxox[abprs]-[A-Za-z0-9-]{8,}|\bAKIA[0-9A-Z]{12,}|\beyJ[A-Za-z0-9_-]{16,}/],
   ["key-like token", /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])/],

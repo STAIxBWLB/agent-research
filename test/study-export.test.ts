@@ -246,3 +246,35 @@ test("review exports preserve normalized model families with spaces and sanitize
   const rows = readFileSync(join(out, "reviews.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
   expect(rows.map(row => row.modelFamily)).toEqual(["claude code", "gpt-6.1", "other"]);
 });
+
+test("#81 AC1: a Windows root-relative metric path refuses and creates no directory", async () => {
+  const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", String.raw`\Users\x`);
+  const out = join(tempDir(), "bundle");
+  await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("absolute path");
+  expect(existsSync(out)).toBe(false);
+});
+
+test("#81: token-boundary POSIX scan refuses score;/Users/x and keeps tokens/s", async () => {
+  const dir = await study(); attempt(dir, "posthoc", WIN, 1, 1, "succeeded", "synthetic", "score;/Users/x");
+  const out = join(tempDir(), "bundle");
+  await expect(ops.studyExport(dir, { bundle: out })).rejects.toThrow("absolute path");
+  expect(existsSync(out)).toBe(false);
+  expect(() => scanBundle({ x: JSON.stringify({ unit: "tokens/s", name: "tokens/s" }) })).not.toThrow();
+  expect(() => scanBundle({ x: JSON.stringify({ v: String.raw`\Users\x` }) })).toThrow("absolute path");
+  expect(() => scanBundle({ x: JSON.stringify({ v: String.raw`a\nb` }) })).not.toThrow();
+});
+
+test("#81 AC2: hand-edited hash fields, non-finite metrics and unknown provenance are not copied", async () => {
+  const dir = await study(), id = attempt(dir, "posthoc", WIN, 1, 1), file = join(dir, "runs", "posthoc", "attempts", `${id}.json`);
+  const record = JSON.parse(readFileSync(file, "utf8")), planted = "secretfreetext";
+  for (const key of ["protocolHash", "sealBinding", "commit", "treeId", "snapshotSha256", "retryOf"]) record[key] = `${planted}${key}`;
+  record.metrics = [{ name: "score", unit: "points", value: "1e999x", provenance: `${planted}prov` }];
+  record.outputs = [{ sha256: `${planted}out`, bytes: "big", path: "x" }];
+  writeFileSync(file, JSON.stringify(record));
+  const out = join(tempDir(), "bundle"); await ops.studyExport(dir, { bundle: out });
+  const all = readdirSync(out).map(f => readFileSync(join(out, f), "utf8")).join("\n");
+  expect(all).not.toContain(planted);
+  const row = readFileSync(join(out, "attempts.jsonl"), "utf8").trim().split("\n").map(l => JSON.parse(l)).find(r => r.id === id);
+  expect(row).toMatchObject({ protocolHash: null, sealBinding: null, commit: null, treeId: null, snapshotSha256: null, retryOf: null });
+  expect(row.metrics[0]).toMatchObject({ value: null, provenance: "other" }); expect(row.outputs[0]).toEqual({ sha256: null, bytes: null });
+});
