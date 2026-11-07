@@ -7,7 +7,7 @@ import { ARES_TOOLS } from "../src/mcp-tools.ts";
 import { protocolHash, readProtocol } from "../src/exp/protocol.ts";
 import { exportBundle, scanBundle } from "../src/study-export.ts";
 import { appendEvent, openStudy } from "../src/study.ts";
-import { fakeHttp, tempDir } from "./helpers.ts";
+import { fakeHttp, fakeRunner, tempDir } from "./helpers.ts";
 
 const actor = { kind: "person" as const }, ctx = { actor, http: fakeHttp([]).http }, BASE = "a".repeat(40), WIN = "b".repeat(40), ABL = "c".repeat(40);
 const IMAGE = `fixture@sha256:${"a".repeat(64)}`;
@@ -17,7 +17,7 @@ function attempt(dir: string, runName: string, commit: string, seed: number, val
   const stage = { image: IMAGE, argv: ["docker", "run", "--mount", "src=/Users/someone/work,dst=/work", "--env", "ARES_SEED=1"], mounts: [{ target: "/work/candidate", readOnly: true }], network: "none", limits: protocol.limits, user: "1001", containerId: "f".repeat(64), startedAt: "2030-01-01T00:00:00Z", endedAt: "2030-01-01T00:00:05Z", exitCode: 0, evidence: { logs: { stdout: { path: "/srv/exec/logs/candidate.stdout.log", sha256: "d".repeat(64), bytes: 3, truncated: false } } } };
   writeFileSync(join(folder, `${id}.json`), JSON.stringify({
     v: 1, id, studyId: openStudy(dir).study.id, run: runName, commit, treeId: "e".repeat(40), seed, label, protocolHash: protocolHash(protocol), sealBinding: "9".repeat(64), protocol,
-    executor: { kind: "ssh", host: "gpu-box", workdir: "/srv/exec" }, paths: { snapshot: "/srv/exec/snap.tar" }, stages: { candidate: stage, evaluator: { ...stage, exitCode: 0 } }, stage: "evaluator", status,
+    executor: { v: 1, kind: "ssh", host: "gpu-box", workdir: "/srv/exec" }, paths: { snapshot: "/srv/exec/snap.tar" }, stages: { candidate: stage, evaluator: { ...stage, exitCode: 0 } }, stage: "evaluator", status,
     startedAt: "2030-01-01T00:00:00Z", endedAt: "2030-01-01T00:00:10Z", metrics: [{ name: metric, value, unit: "points", provenance: "ares-observed" }], outputs: [{ path: "/srv/exec/out.json", sha256: "c".repeat(64), bytes: 9 }],
     sealing: { separateContainers: true, evaluatorReadOnly: true, candidateHasNoEvaluator: true, verifiedBy: "ares-observed" },
   }));
@@ -35,10 +35,10 @@ async function study() {
   attempt(dir, "final", BASE, 2, 10); attempt(dir, "final", WIN, 2, 12); await ops.finalClose(dir, ctx);
   return dir;
 }
-function numericAndStatus(value: unknown, path = "", out: Record<string, unknown> = {}): Record<string, unknown> {
-  if (Array.isArray(value)) value.forEach((v, i) => numericAndStatus(v, `${path}[${i}]`, out));
-  else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) numericAndStatus(v, `${path}.${k}`, out);
-  else if (typeof value === "number" || /status$/i.test(path)) out[path] = value;
+function numericStatusAndReasons(value: unknown, path = "", out: Record<string, unknown> = {}): Record<string, unknown> {
+  if (Array.isArray(value)) value.forEach((v, i) => numericStatusAndReasons(v, `${path}[${i}]`, out));
+  else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) numericStatusAndReasons(v, `${path}.${k}`, out);
+  else if (typeof value === "number" || /(?:status|reasons?)(?:\[|$)/i.test(path)) out[path] = value;
   return out;
 }
 
@@ -58,9 +58,9 @@ test("AC1/AC3: bundle counts equal attempt list, rows carry identity, results ma
   }
   const results = JSON.parse(readFileSync(join(out, "results.json"), "utf8"));
   const read = (...p: string[]) => JSON.parse(readFileSync(join(dir, ...p), "utf8"));
-  expect(numericAndStatus(results.investigate.investigate)).toEqual(numericAndStatus(read("runs", "investigate", "investigate.json")));
-  expect(numericAndStatus(results.ablate)).toEqual(numericAndStatus(read("runs", "ablate", "ablate.json")));
-  expect(numericAndStatus(results.final)).toEqual(numericAndStatus(read("runs", "final", "final.json")));
+  expect(numericStatusAndReasons(results.investigate.investigate)).toEqual(numericStatusAndReasons(read("runs", "investigate", "investigate.json")));
+  expect(numericStatusAndReasons(results.ablate)).toEqual(numericStatusAndReasons(read("runs", "ablate", "ablate.json")));
+  expect(numericStatusAndReasons(results.final)).toEqual(numericStatusAndReasons(read("runs", "final", "final.json")));
   expect(results.final.status).toBe("qualified");
 });
 
@@ -136,4 +136,28 @@ test("round 2: one-token free text, broader path scan, symlinked target, early a
   const o2 = join(tempDir(), "bundle");
   expect(() => exportBundle(base, { bundle: o2 }, 600)).toThrow("attempts.jsonl would exceed 600 bytes");
   expect(existsSync(o2)).toBe(false);
+});
+
+
+test("round 3: cancellation prose is classified, generated codes retained, and dot-prefixed child refused", async () => {
+  const dir = await study(), id = attempt(dir, "posthoc", WIN, 1, 1, "running");
+  const fake = fakeRunner([{ exitCode: 1, stdout: "", stderr: "" }, { exitCode: 0, stdout: "", stderr: "" }]);
+  await ops.attemptCancel(dir, id, "confidential cancellation details", { ...ctx, runner: fake.runner });
+  const known = attempt(dir, "posthoc", WIN, 1, 1, "failed"), unknown = attempt(dir, "posthoc", WIN, 1, 1, "failed");
+  for (const [attemptId, reason] of [[known, "candidate-exit"], [unknown, "confidential failure"]]) {
+    const file = join(dir, "runs", "posthoc", "attempts", `${attemptId}.json`);
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), reason }));
+  }
+  const out = join(tempDir(), "bundle"); ops.studyExport(dir, { bundle: out });
+  const text = readFileSync(join(out, "attempts.jsonl"), "utf8"), rows = text.trim().split("\n").map(line => JSON.parse(line));
+  expect(rows.find(row => row.id === id).reasonClass).toBe("cancel-reason");
+  expect(rows.find(row => row.id === known).reasonClass).toBe("candidate-exit");
+  expect(rows.find(row => row.id === unknown).reasonClass).toBe("other");
+  expect(text).not.toContain("confidential"); expect(fake.requests).toHaveLength(2);
+  const inside = join(dir, "..cache", "bundle");
+  expect(() => ops.studyExport(dir, { bundle: inside })).toThrow("inside the study directory");
+  expect(existsSync(join(dir, "..cache"))).toBe(false);
+  // An actual sibling is still outside; '..'-prefixed names must not decide containment.
+  const sibling = join(tempDir(), "..cache", "bundle");
+  expect(() => ops.studyExport(dir, { bundle: sibling })).not.toThrow();
 });
