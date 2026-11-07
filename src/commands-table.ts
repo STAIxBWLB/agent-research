@@ -23,6 +23,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "plan control", usage: "plan control <dir> <pause|resume|retry|cancel|skip> [node] --command-id ID --expected-revision N [--json]", mutates: "network", options: { "--command-id": "value", "--expected-revision": "value", ...json } },
   { name: "plan show", usage: "plan show <dir> [--json]", mutates: false, options: json },
   { name: "status", usage: "status <dir> [--json]", mutates: false, options: json },
+  { name: "study export", usage: "study export <dir> --bundle DIR [--list] [--json]", mutates: true, options: { "--bundle": "value", "--list": "flag", ...json } },
   { name: "scope", usage: "scope <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "idea add", usage: "idea add <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "idea decide", usage: "idea decide <dir> <id> <refine|pivot> --reason TEXT [--attempts ID[,ID...]] [--commit SHA] [--cause TEXT] [--retry-when TEXT] [--json]", mutates: true, options: { "--cause": "value", "--retry-when": "value", "--reason": "value", "--attempts": "value", "--commit": "value", ...json } },
