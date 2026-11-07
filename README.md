@@ -551,6 +551,7 @@ ares plan set <dir> --file PATH|- [--json]
 ares plan control <dir> <pause|resume|retry|cancel|skip> [node] --command-id ID --expected-revision N [--json]
 ares plan show <dir> [--json]
 ares status <dir> [--json]
+ares study export <dir> --bundle DIR [--list] [--json]
 ares scope <dir> --file PATH|- [--json]
 ares idea add <dir> --file PATH|- [--json]
 ares idea decide <dir> <id> <refine|pivot> --reason TEXT [--attempts ID[,ID...]] [--commit SHA] [--cause TEXT] [--retry-when TEXT] [--json]
@@ -593,7 +594,7 @@ ares mcp
 <!-- /facts:commands -->
 
 <!-- facts:mcp-tools -->
-The MCP server publishes 54 tools: `ares_autonomy_show`, `ares_autonomy_set`, `ares_watch_set`, `ares_watch_run`, `ares_watch_show`, `ares_console_add`, `ares_console_remove`, `ares_console_list`, `ares_setup`, `ares_manifest`, `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide`, `ares_skill_list`, `ares_plan_set`, `ares_plan_control`, `ares_plan_show`, `ares_status`, `ares_scope_set`, `ares_gate`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show`, `ares_investigate_close`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_posthoc_show`, `ares_final_close`, `ares_final_seeds`, `ares_selection_set`, `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile`, `ares_attempt_logs`, `ares_lit_search`, `ares_lit_list`, `ares_lit_screen`, `ares_lit_card`, `ares_lit_verify`, `ares_lit_bib`, `ares_review_add`, `ares_review_resolve`, `ares_review_show`, `ares_paper_build`, `ares_paper_check`, `ares_cite_check`, `ares_playbook`.
+The MCP server publishes 55 tools: `ares_autonomy_show`, `ares_autonomy_set`, `ares_watch_set`, `ares_watch_run`, `ares_watch_show`, `ares_console_add`, `ares_console_remove`, `ares_console_list`, `ares_setup`, `ares_manifest`, `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide`, `ares_skill_list`, `ares_plan_set`, `ares_plan_control`, `ares_plan_show`, `ares_status`, `ares_study_export`, `ares_scope_set`, `ares_gate`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show`, `ares_investigate_close`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_posthoc_show`, `ares_final_close`, `ares_final_seeds`, `ares_selection_set`, `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile`, `ares_attempt_logs`, `ares_lit_search`, `ares_lit_list`, `ares_lit_screen`, `ares_lit_card`, `ares_lit_verify`, `ares_lit_bib`, `ares_review_add`, `ares_review_resolve`, `ares_review_show`, `ares_paper_build`, `ares_paper_check`, `ares_cite_check`, `ares_playbook`.
 <!-- /facts:mcp-tools -->
 
 Memory tools are `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide` and `ares_skill_list`; `ares_idea_decide` accepts pivot cause/retryWhen. Archive may write external amem notes; lessons reads external amem. Both carry `openWorldHint`; skill operations stay local. MCP calls preserve agent attribution even without a native shell marker.
