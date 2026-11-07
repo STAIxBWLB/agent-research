@@ -135,6 +135,30 @@ test("plan adapters keep accept guidance and perform no backend preparation for 
   expect(readFileSync(join(f.dir, "ledger.jsonl"), "utf8")).not.toMatch(/private content|https:\/\/example|secret/);
 });
 
+test("step admission pauses on a copilot refusal before the next effect or backend call", async () => {
+  const f = await fixture("step"); await ops.autonomySet(f.dir, "copilot", "hypotheses", f.ctx);
+  writeFileSync(join(f.dir, "hypotheses.md"), "Synthetic step-mode draft\n");
+  await ops.planSet(f.dir, { v: 1, nodes: [
+    { id: "attempt", kind: "step", command: "attempt.run", args: { repo: "/synthetic-repo", commit: candidate } },
+    { id: "paper", kind: "step", command: "paper.build", args: {} },
+  ], edges: [] }, f.ctx);
+  const stop = new AbortController(); let resumed = false, sleeps = 0;
+  const result = await ops.planRun(f.dir, { parallel: 2 }, { ...f.ctx, signal: stop.signal, sleep: async () => {
+    if (++sleeps > 30) { stop.abort(); throw new Error("synthetic copilot step did not pause"); }
+    if (!resumed) { resumed = true; await ops.planControl(f.dir, { action: "resume", commandId: "start", expectedRevision: 1 }, f.ctx); }
+    else if (ops.planShow(f.dir).pauseReason === "step") stop.abort();
+    await new Promise<void>(resolve => setImmediate(resolve));
+  } });
+  expect(result.state).toBe("paused"); expect(result.pauseReason).toBe("step");
+  expect(result.nodes[0]).toMatchObject({ status: "failed" });
+  expect(result.nodes[0]!.reason).toContain("ares gate approve <dir> accept:hypotheses");
+  expect(result.nodes[1]!.status).toBe("ready");
+  const events = readLedger(f.dir), index = events.findIndex(event => event.type === "node.observed" && event.data.node === "attempt");
+  expect(events[index + 1]).toMatchObject({ type: "plan.paused", data: { reason: "step" } });
+  expect(events.filter(event => event.type === "node.intent")).toHaveLength(1);
+  expect(f.fake.requests).toEqual([]); expect(f.http.requested).toEqual([]);
+});
+
 test("copilot on the consuming archive phase alone does not activate producer acceptance", async () => {
   const f = await fixture(); writeFileSync(join(f.dir, "hypotheses.md"), "Unaccepted non-copilot hypotheses\n");
   mkdirSync(join(f.dir, "paper")); writeFileSync(join(f.dir, "paper", "manuscript.md"), "Unaccepted non-copilot paper\n");
