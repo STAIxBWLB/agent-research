@@ -73,8 +73,10 @@ try {
       if (files.status !== 0 || matches.length === 0 || matches.some((file) => !existsSync(join(root, file)))) { errors.push(`${doc}: covered path no longer exists: ${path}`); valid = false; }
     }
     if (!valid) continue;
-    const count = git("rev-list", "--count", `${stamp}..HEAD`, "--", ...entry.paths);
-    const dirty = dirtiness(entry.paths);
+    // Stamped documents are prose, not described source: src/playbook.ts lives under src/, and its own repair must not keep any stamp stale.
+    const scope = [...entry.paths, ...Object.keys(manifest.documents).filter(safePath).map((path) => `:(exclude)${path}`)];
+    const count = git("rev-list", "--count", `${stamp}..HEAD`, "--", ...scope);
+    const dirty = dirtiness(scope);
     if (count.status !== 0 || dirty.status !== 0) { errors.push(`${doc}: cannot compute source drift`); continue; }
     const commits = Number(count.stdout.trim());
     if (!Number.isSafeInteger(commits) || commits < 0) { errors.push(`${doc}: invalid source commit count`); continue; }
