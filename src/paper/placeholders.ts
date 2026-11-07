@@ -1,3 +1,4 @@
+import { CopilotAcceptError } from "../copilot.ts";
 import { join, relative } from "node:path";
 import { openStudy, plain, readLedger, readTextBounded, sha256 } from "../study.ts";
 import { ATTEMPT_BYTES, listAttempts, type Attempt, type AttemptStatus } from "../exp/attempts.ts";
@@ -9,7 +10,7 @@ import { FINAL_RESULT_BYTES, finalResultPath, readClosedFinal, requirePosthocClo
 export const MANUSCRIPT_BYTES = 2 * 1024 * 1024, MAX_PLACEHOLDERS = 5000;
 interface Position { start: number; end: number; line: number; column: number; raw: string }
 export type Placeholder = Position & ({ kind: "number"; ref: string; format?: number } | { kind: "literal"; text: string });
-export interface PlaceholderFinding extends Position { code: "bad-format" | "unresolved-ref"; message: string }
+export interface PlaceholderFinding extends Position { code: "bad-format" | "unresolved-ref" | "unaccepted-draft"; message: string }
 export interface ResolvedPlaceholder { placeholder: Placeholder; value: number | string; rendered: string; source?: { file: string; sha256: string } }
 /** Offsets are UTF-16 string indices; line and column are 1-based, as used by the Markdown checker. */
 export function parsePlaceholders(text: string): { placeholders: Placeholder[]; findings: PlaceholderFinding[] } {
@@ -59,7 +60,7 @@ export function resolvePlaceholders(dirArg: string, text: string) {
   const { dir, study } = openStudy(dirArg), parsed = parsePlaceholders(text), findings = [...parsed.findings], resolved: ResolvedPlaceholder[] = [], literals: Placeholder[] = [];
   const cache = new Map<string, Source<unknown> | Error>();
   const cached = <T>(key: string, read: () => Source<T>): Source<T> => {
-    if (!cache.has(key)) { try { cache.set(key, read()); } catch { cache.set(key, new Error("absent, unclosed, stale or invalid source")); } }
+    if (!cache.has(key)) { try { cache.set(key, read()); } catch (error) { cache.set(key, error instanceof CopilotAcceptError ? error : new Error("absent, unclosed, stale or invalid source")); } }
     const value = cache.get(key)!; if (value instanceof Error) throw value; return value as Source<T>;
   };
   const investigate = () => cached("investigate", () => { const closed = readClosedInvestigation(dir); return source(dir, investigateResultPath(dir, closed.result.run), INVESTIGATE_BYTES, closed.result, closed.sha256); });
@@ -104,7 +105,8 @@ export function resolvePlaceholders(dirArg: string, text: string) {
       }
       const rendered = (typeof value === "number" && placeholder.format !== undefined ? value.toFixed(placeholder.format) : String(value)) + (exploratory ? " (exploratory)" : "");
       resolved.push({ placeholder, value, rendered, source: provenance.source });
-    } catch {
+    } catch (error) {
+      if (error instanceof CopilotAcceptError) { findings.push({ ...placeholder, code: "unaccepted-draft", message: error.message }); continue; }
       findings.push({ ...placeholder, code: "unresolved-ref", message: `placeholder ${ref}: unknown ref or absent, unclosed, stale or invalid source; inspect the attempt and close the current phase results before retrying` });
     }
   }

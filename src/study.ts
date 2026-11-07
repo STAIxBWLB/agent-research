@@ -1,4 +1,4 @@
-import { validateAutonomy, validateAutonomyMode, resolveAutonomy, type Autonomy, type Phase } from "./autonomy.ts";
+import { validateAutonomy, validateAutonomyMode, resolveAutonomy, ACCEPT_ARTIFACTS, type Autonomy, type Phase, type AcceptArtifact } from "./autonomy.ts";
 export type { Autonomy } from "./autonomy.ts";
 import { hostname } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -7,7 +7,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 
 export type Mode = "survey" | "experiment";
-export type GateName = "scope" | "screen" | "design" | "final" | "review" | `plan:${string}`;
+export type GateName = "scope" | "screen" | "design" | "final" | "review" | `plan:${string}` | `accept:${AcceptArtifact}`;
 export const GATES: readonly GateName[] = ["scope", "screen", "design", "final", "review"];
 export interface Study { v: 1 | 2; id: string; question: string; mode: Mode; autonomy: Autonomy; createdAt: string }
 export interface Actor { kind: "person" | "agent" | "auto"; id?: string }
@@ -243,8 +243,9 @@ export function gateState(gate: GateName, events: LedgerEvent[], binder: Binder)
 }
 
 export function decideGate(dir: string, gate: GateName, decision: "approve" | "reject", actor: Actor, binder: Binder, reason?: string): GateState {
-  if (!GATES.includes(gate) && !gate.startsWith("plan:")) throw new Error(`unknown gate: ${gate}; run ares gate list to select a gate`);
+  if (!GATES.includes(gate) && !ACCEPT_ARTIFACTS.some(artifact => gate === `accept:${artifact}`) && !gate.startsWith("plan:")) throw new Error(`unknown gate: ${gate}; run ares gate list to select a gate`);
   const before = gateState(gate, readLedger(dir), binder);
+  if (before.state === "none" && gate.startsWith("accept:")) throw new Error(`gate ${gate}: no current copilot draft; inspect ares autonomy show, create the phase artifact, then use ares gate list and ares gate approve <dir> ${gate}`);
   if (before.state === "none") throw new Error(`gate ${gate}: nothing to decide yet${gate.startsWith("plan:") ? "; finish every upstream node with output references, then run ares gate list" : ""}`);
   if (decision === "reject" && !reason) throw new Error(`gate ${gate}: a rejection needs --reason`);
   appendEvent(dir, actor, decision === "approve" ? "gate.approve" : "gate.reject", { gate, binding: before.current!, ...(reason ? { reason } : {}) });
@@ -260,7 +261,8 @@ export function requireGate(dir: string, study: Study, gate: GateName, binder: B
   if (gate === "design" || gate === "final") requireExperiment(study);
   const state = gateState(gate, readLedger(dir), binder);
   if (state.state === "approved") return [];
-  if (state.state === "pending" && resolveAutonomy(study.autonomy, gate, guardedPhase) === "auto") return [{ actor: { kind: "auto" }, type: "gate.approve", data: { gate, binding: state.current! } }];
+  if (state.state === "pending" && !gate.startsWith("accept:") && resolveAutonomy(study.autonomy, gate, guardedPhase) === "auto") return [{ actor: { kind: "auto" }, type: "gate.approve", data: { gate, binding: state.current! } }];
+  if (state.state === "none" && gate.startsWith("accept:")) throw new Error(`gate ${gate}: no current copilot draft; create the phase artifact, then run ares gate list and ares gate approve <dir> ${gate}`);
   if (state.state === "none" && gate === "final") throw new Error("gate final: complete reserved seeds and close investigate/required ablate inputs before final approval");
   if (state.state === "none" && gate.startsWith("plan:")) throw new Error(`gate ${gate}: upstream outputs are not complete; finish every upstream node and run ares gate list again`);
   if (state.state === "none") throw new Error(gate === "scope" ? "gate scope: no scope yet (run ares scope)" : gate === "design" ? "gate design: no protocol yet (run ares protocol)" : "gate screen: no included candidates yet");

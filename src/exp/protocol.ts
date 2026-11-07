@@ -1,3 +1,4 @@
+import { requireCopilotAccept } from "../copilot.ts";
 import { finalSeedsHash } from "./final.ts";
 import { selectionHash } from "./selection.ts";
 import { existsSync, lstatSync, opendirSync } from "node:fs";
@@ -136,7 +137,9 @@ export function readDesign(dir: string): { protocol: Protocol; treeHash: string;
 /** Caller holds the study lock, as with setScope. Validate everything before any write. */
 export function setProtocol(dir: string, raw: unknown, actor: Actor): Protocol {
   requireExperiment(openStudy(dir).study);
-  const protocol = validateProtocol(raw), treeHash = taskTreeHash(dir), text = JSON.stringify(protocol, null, 2) + "\n";
+  const protocol = validateProtocol(raw);
+  requireCopilotAccept(dir, "hypotheses");
+  const treeHash = taskTreeHash(dir), text = JSON.stringify(protocol, null, 2) + "\n";
   // Never commit a protocol that makes its existing selection unreadable.
   selectionHash(dir, protocol);
   finalSeedsHash(dir, protocol);
