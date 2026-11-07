@@ -139,7 +139,7 @@ export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, eve
     if (event.type === "plan.paused") {
       if (stepPause) {
         const target = state.nodes.find(node => node.id === d.node), key = canonical([d.node, d.dispatchId]);
-        if (!target || !hasStepOutcome(target) || typeof d.dispatchId !== "string" || target.dispatchId !== d.dispatchId || target.lastObserved?.dispatchId !== d.dispatchId || target.lastObserved.revision !== d.revision || stepPauses.has(key)) continue;
+        if (!target || !hasStepOutcome(target) || !target.lastObserved || typeof d.dispatchId !== "string" || target.dispatchId !== d.dispatchId || target.lastObserved.dispatchId !== d.dispatchId || target.lastObserved.revision !== d.revision || stepPauses.has(key)) continue;
         stepPauses.add(key); state.pauseReason = "step";
       } else delete state.pauseReason;
       state.state = "paused";
