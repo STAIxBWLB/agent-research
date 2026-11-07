@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { assertManifest, assertPackageFiles, assertToolchain, distTagFor, identity, isolatedEnv, releaseNotes, releaseSection, validateRelease, verifyStaged } from "../scripts/release.ts";
+import { gateRelease, assertManifest, assertPackageFiles, assertToolchain, distTagFor, identity, isolatedEnv, releaseNotes, releaseSection, validateRelease, verifyStaged } from "../scripts/release.ts";
 import { tempDir } from "./helpers.ts";
 const files = ["package.json", "README.md", "CHANGELOG.md", "LICENSE", "bin/ares.js", "src/cli.ts", "src/ui/plugin.ts", "src/ui/panel.js", "src/ui/panel.css"];
 const dated = "# Changelog\n\n## Unreleased\n\n## [0.1.0] - 2026-11-05\n\n- Initial publication.\n\n## [0.0.1] - 2026-01-01\n\n- Older fixture.\n";
@@ -55,4 +55,25 @@ test("publish toolchain and dist-tags are explicit, and notes use only the versi
   expect(distTagFor("0.1.0")).toBe("latest"); expect(distTagFor("0.2.0-rc.1")).toBe("next"); expect(distTagFor("0.1.0+build-with-dash")).toBe("latest");
   const f = fixture(), output = join(f.work, "notes.md"), result = releaseNotes(f.dir, output, f.root, {}), notes = readFileSync(output, "utf8");
   expect(result.prerelease).toBe(false); expect(notes).toContain("Initial publication."); expect(notes).not.toContain("Older fixture"); expect(notes).not.toContain("## Unreleased"); expect(notes).toContain(f.manifest.sha256);
+});
+
+test("release gate refuses wrong tag or off-main commit before GitHub lookup", async () => {
+  const f = fixture(), calls: string[][] = [], env = { RELEASE_TAG: f.expected.tag, RELEASE_SHA: f.expected.commit };
+  await expect(gateRelease(f.root, { ...env, RELEASE_TAG: "v0.2.0" }, async (_p, args) => { calls.push(args); return ""; })).rejects.toThrow("tag must equal");
+  expect(calls).toEqual([]);
+  await expect(gateRelease(f.root, env, async (p, args) => { expect(p).toBe("git"); calls.push(args); throw new Error("not ancestor"); })).rejects.toThrow("on origin/main");
+  expect(calls).toEqual([["merge-base", "--is-ancestor", f.expected.commit, "origin/main"]]);
+});
+
+test("workflow gate order, aggregate, checkout pins and release smoke remain enforced", () => {
+  const check = readFileSync(new URL("../.github/workflows/check.yml", import.meta.url), "utf8");
+  const release = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+  const ci = Bun.YAML.parse(check) as { jobs: Record<string, { if?: string; needs?: string[]; steps: { run?: string }[] }> };
+  expect(ci.jobs["ci-ok"]!.if).toBe("always()"); expect(ci.jobs["ci-ok"]!.needs).toEqual(["check"]);
+  expect(check).toContain("all(.[]; .result == \"success\")");
+  expect(check).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}"); expect(check).not.toContain("paths-ignore");
+  const rel = Bun.YAML.parse(release) as { jobs: Record<string, { needs?: string; permissions?: Record<string,string> }> };
+  expect(rel.jobs.validate!.needs).toBe("gate"); expect(rel.jobs.gate!.permissions!.actions).toBe("read");
+  expect(release).not.toContain("bun run check"); expect(release).toContain("bun run release:smoke"); expect(release).toContain("bun scripts/release.ts gate");
+  for (const workflow of [check, release]) for (const match of workflow.matchAll(/uses: actions\/checkout@([^ ]+)/g)) expect(match[1]).toBe("d23441a48e516b6c34aea4fa41551a30e30af803");
 });

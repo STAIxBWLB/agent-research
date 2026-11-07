@@ -1,3 +1,4 @@
+import { defaultReleaseRunner, waitForCi, type ReleaseRunner } from "./release-ci.ts";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "node:fs";
@@ -42,6 +43,12 @@ export function identity(root = process.cwd(), env: NodeJS.ProcessEnv = process.
 export function validateRelease(root = process.cwd(), env: NodeJS.ProcessEnv = process.env): ReleaseIdentity {
   if (!env.RELEASE_TAG || !env.RELEASE_SHA) fail("RELEASE_TAG and RELEASE_SHA are required for tag validation");
   const result = identity(root, env); releaseSection(readTextBounded(join(root, "CHANGELOG.md"), CHANGELOG_BYTES), result.version); return result;
+}
+export async function gateRelease(root = process.cwd(), env: NodeJS.ProcessEnv = process.env, runner: ReleaseRunner = defaultReleaseRunner(root)): Promise<void> {
+  const candidate = validateRelease(root, env);
+  try { await runner("git", ["merge-base", "--is-ancestor", candidate.commit, "origin/main"]); }
+  catch { fail("tag commit must be on origin/main; merge the candidate before tagging"); }
+  await waitForCi(candidate.commit, { runner });
 }
 export function assertPackageFiles(files: string[], expected?: string[]): void {
   if (!files.length || files.length > 4096 || new Set(files).size !== files.length) fail("archive file list is empty, duplicated or exceeds 4096 entries");
@@ -122,7 +129,10 @@ export function releaseNotes(dir: string, output: string, root = process.cwd(), 
 }
 async function main(args: string[]) {
   const [operation, directory, extra] = args;
-  if (operation === "validate" && args.length === 1) { validateRelease(); console.log("release tag validation: ok"); }
+  if (operation === "gate" && args.length === 1) {
+    await gateRelease(); console.log("release CI gate: ok");
+  }
+  else if (operation === "validate" && args.length === 1) { validateRelease(); console.log("release tag validation: ok"); }
   else if (operation === "stage" && directory && args.length === 2) { const result = stageRelease(directory); console.log(`release stage: ${result.name}@${result.version} ${result.sha256}`); }
   else if (operation === "verify" && directory && (args.length === 2 || args.length === 3 && extra === "--publish")) {
     const result = verifyStaged(directory);
@@ -130,7 +140,7 @@ async function main(args: string[]) {
     else console.log(`release artifact verification: ${result.sha256}`);
   } else if (operation === "notes" && directory && extra && args.length === 3) {
     const result = releaseNotes(directory, extra); console.log(`RELEASE_ASSETS=${result.assets}\nRELEASE_PRERELEASE=${result.prerelease}`);
-  } else fail("usage: release.ts validate | stage DIR | verify DIR [--publish] | notes DIR FILE");
+  } else fail("usage: release.ts gate | validate | stage DIR | verify DIR [--publish] | notes DIR FILE");
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { await main(process.argv.slice(2)); } catch (cause) { console.error(cause instanceof Error ? cause.message : "release failed; inspect the candidate before retrying"); process.exitCode = 1; }
