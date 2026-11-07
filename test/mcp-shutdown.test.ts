@@ -59,3 +59,13 @@ test("study lock cleanup does not unlink a replacement lock", async () => {
   await withLock(dir, () => { unlinkSync(lock); writeFileSync(lock, "different owner\n"); });
   expect(readFileSync(lock, "utf8")).toBe("different owner\n");
 });
+
+
+test("failed lock-owner fstat removes its just-created lock before rethrowing", async () => {
+  const dir = tempDir(), lock = join(dir, ".ares.lock"), failure = new Error("synthetic fstat failure");
+  let entered = false;
+  await expect(withLock(dir, () => { entered = true; }, () => { throw failure; })).rejects.toBe(failure);
+  expect(entered).toBe(false); expect(existsSync(lock)).toBe(false);
+  await withLock(dir, () => { entered = true; });
+  expect(entered).toBe(true); expect(existsSync(lock)).toBe(false);
+});
