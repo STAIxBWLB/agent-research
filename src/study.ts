@@ -133,10 +133,15 @@ export function initStudy(dir: string, options: { question: string; mode?: strin
 
 /**
  * Exclusive write lock for one study. A lock older than 10 minutes is treated as abandoned and replaced.
- * ponytail: mtime-based staleness, no owner liveness check; add a pid probe if two hosts share a study.
+ * ponytail: mtime-based staleness, no owner liveness check. The inode check before unlink is best-effort:
+ * a replacement between lstat and unlink can still be removed, after stale takeover of a live owner has
+ * already broken exclusion. Upgrade path: an owner liveness probe, including shared-host ownership.
  */
+const ownedStudyLocks = new Set<() => void>();
+/** MCP termination only: call immediately before process exit, never while continuing async work. */
+export function releaseStudyLocksForExit(): void { for (const release of [...ownedStudyLocks]) release(); }
 export class StudyLockBusyError extends Error {}
-export async function withLock<T>(dir: string, fn: () => Promise<T> | T): Promise<T> {
+export async function withLock<T>(dir: string, fn: () => Promise<T> | T, inspectOwner: (fd: number) => ReturnType<typeof fstatSync> = fstatSync): Promise<T> {
   const path = join(dir, ".ares.lock");
   let fd: number;
   try { fd = openSync(path, "wx", 0o600); }
@@ -148,8 +153,25 @@ export async function withLock<T>(dir: string, fn: () => Promise<T> | T): Promis
     try { unlinkSync(path); } catch { /* raced with another cleaner */ }
     fd = openSync(path, "wx", 0o600);
   }
-  try { writeSync(fd, `${process.pid} ${new Date().toISOString()}\n`); } finally { closeSync(fd); }
-  try { return await fn(); } finally { try { unlinkSync(path); } catch { /* already removed */ } }
+  let owner: ReturnType<typeof fstatSync>;
+  try { owner = inspectOwner(fd); }
+  catch (error) {
+    try { unlinkSync(path); } catch { /* the just-created lock may already be absent */ }
+    finally { try { closeSync(fd); } catch { /* preserve the original probe failure */ } }
+    throw error;
+  }
+  let released = false;
+  const release = () => {
+    if (released) return; released = true;
+    try { const current = lstatSync(path); if (current.dev === owner.dev && current.ino === owner.ino) unlinkSync(path); }
+    catch { /* absent or replaced; never remove a different owner's lock */ }
+    finally { try { closeSync(fd); } catch { /* process exit also closes owned descriptors */ } ownedStudyLocks.delete(release); }
+  };
+  ownedStudyLocks.add(release);
+  try { writeSync(fd, `${process.pid} ${new Date().toISOString()}\n`); }
+  catch (error) { release(); throw error; }
+  // Keep the descriptor open until release so an unlinked inode cannot be reused by a replacement lock.
+  try { return await fn(); } finally { release(); }
 }
 
 export interface PendingEvent { actor: Actor; type: string; data: Record<string, unknown> }

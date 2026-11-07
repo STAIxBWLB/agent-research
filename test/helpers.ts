@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach } from "bun:test";
-import { createHttp, type FetchLike } from "../src/http.ts";
+import { createHttp, createHttpPacing, type HttpPacing, type FetchLike } from "../src/http.ts";
 import type { ProcessRequest, ProcessResult, ProcessRunner } from "../src/exp/executor.ts";
 
 /** Scripted process boundary. Unexpected calls fail loudly; no child process is started. */
@@ -29,7 +29,10 @@ export function tempDir(): string { const dir = mkdtempSync(join(tmpdir(), "ares
 
 export type Route = { status: number; body?: string } | "network";
 /** A fetch that answers by URL prefix and records every requested URL. Unrouted URLs fail the test loudly. */
-export function fakeHttp(routes: [string, Route][], env: NodeJS.ProcessEnv = {}) {
+export function fakeHttp(routes: [string, Route][], env: NodeJS.ProcessEnv = {}, pacing?: HttpPacing) {
+  // Each fixture owns virtual time; tests can explicitly share an injected limiter.
+  let now = 0;
+  pacing ??= createHttpPacing({ now: () => now, sleep: async ms => { now += ms; } });
   const requested: { url: string; headers: Record<string, string> }[] = [];
   const fetchImpl: FetchLike = async (url, init) => {
     requested.push({ url, headers: init?.headers ?? {} });
@@ -39,7 +42,7 @@ export function fakeHttp(routes: [string, Route][], env: NodeJS.ProcessEnv = {})
     if (route === "network") throw new TypeError("connection refused");
     return new Response(route.body ?? "", { status: route.status });
   };
-  return { http: createHttp(env, fetchImpl), requested };
+  return { http: createHttp(env, fetchImpl, pacing), requested };
 }
 export const ok = (body: string): Route => ({ status: 200, body });
 export const status = (code: number): Route => ({ status: code, body: "" });

@@ -15,6 +15,47 @@ export interface Http {
 const TIMEOUT_MS = 20_000, MAX_BYTES = 5 * 1024 * 1024;
 const EMAIL = /^[^\s@<>()]{1,64}@[^\s@<>()]{1,190}$/;
 
+export const S2_START_INTERVAL_MS = 1_100;
+export interface HttpPacingClock {
+  now(): number;
+  sleep(ms: number): Promise<void>;
+}
+export interface HttpPacing {
+  start<T>(request: () => Promise<T>): Promise<T>;
+}
+
+/** Serialize admissions only: an in-flight response never holds the next start. */
+export function createHttpPacing(clock: HttpPacingClock = {
+  now: () => performance.now(),
+  sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+}): HttpPacing {
+  let tail = Promise.resolve(), lastStart: number | undefined;
+  return {
+    start<T>(request: () => Promise<T>): Promise<T> {
+      const admitted = tail.then(async () => {
+        if (lastStart !== undefined) {
+          let remaining = S2_START_INTERVAL_MS - (clock.now() - lastStart);
+          while (remaining > 0) {
+            await clock.sleep(remaining);
+            remaining = S2_START_INTERVAL_MS - (clock.now() - lastStart);
+          }
+        }
+        // Measure after invocation, conservatively spacing actual fetch starts.
+        let response: Promise<T>;
+        try { response = request(); } finally { lastStart = clock.now(); }
+        // Box the promise so admission releases without waiting for the response.
+        // A later admission must not delay handling a rejected response.
+        void response.catch(() => {});
+        return { response };
+      });
+      tail = admitted.then(() => {}, () => {});
+      return admitted.then(({ response }) => response);
+    },
+  };
+}
+
+const processS2Pacing = createHttpPacing();
+
 /** Read the body while counting bytes; past the limit the stream is cancelled, never buffered whole. */
 async function readBounded(response: Response, host: string): Promise<string> {
   if (!response.body) return "";
@@ -38,11 +79,14 @@ export function userAgent(env: NodeJS.ProcessEnv): string {
 }
 
 /** 200 returns the body, 404 returns `body: undefined`; 429, 5xx, other statuses and network failures throw HttpError. */
-export function createHttp(env: NodeJS.ProcessEnv = process.env, fetchImpl: FetchLike = fetch as FetchLike): Http {
+export function createHttp(env: NodeJS.ProcessEnv = process.env, fetchImpl: FetchLike = fetch as FetchLike, pacing: HttpPacing = processS2Pacing): Http {
   async function get(url: string, headers: Record<string, string> = {}): Promise<HttpResult<string>> {
     const host = new URL(url).host;
     let response: Response;
-    try { response = await fetchImpl(url, { headers: { "user-agent": userAgent(env), ...headers }, signal: AbortSignal.timeout(TIMEOUT_MS) }); }
+    try {
+      const request = () => fetchImpl(url, { headers: { "user-agent": userAgent(env), ...headers }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      response = await (new URL(url).hostname === "api.semanticscholar.org" ? pacing.start(request) : request());
+    }
     catch { throw new HttpError("network", host); }
     if (response.status === 404) return { status: 404, body: undefined };
     if (response.status === 429) throw new HttpError("rate", host, 429);
