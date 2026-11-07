@@ -20,6 +20,7 @@ export const FORMAT_VERSIONS = {
   investigateResult: 1,
   executor: 1,
   experimentAttempt: 1,
+  studyBundle: 1,
 } as const;
 export const MEMORY_LEDGER_EVENTS = ["archive.exported", "skill.proposed", "skill.decided"] as const;
 export const WATCH_LEDGER_EVENTS = ["watch.set", "watch.ran"] as const;

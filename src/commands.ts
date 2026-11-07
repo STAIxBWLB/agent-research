@@ -22,6 +22,7 @@ import { spawnRunner } from "./exp/executor.ts";
 import { foldPlan, readPlanState, planGateBinding, prepareControl, type ControlRequest, type ControlResult } from "./plan/state.ts";
 import { setPlan } from "./plan/definition.ts";
 export { manifest } from "./manifest.ts";
+import { exportBundle } from "./study-export.ts";
 import { existsSync, readdirSync, utimesSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Http } from "./http.ts";
@@ -121,6 +122,8 @@ export function status(dirArg: string) {
     events: events.length,
   };
 }
+
+export const studyExport = (dir: string, options: { bundle: string; list?: boolean }) => exportBundle(dir, options);
 
 export async function scope(dirArg: string, raw: unknown, ctx: Ctx) {
   const { dir } = openStudy(dirArg);
