@@ -1,13 +1,14 @@
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative, resolve, isAbsolute } from "node:path";
 import { readAttemptRecords, type Attempt, type AttemptStatus } from "./exp/attempts.ts";
-import { ABLATE_BYTES, ablateResultPath } from "./exp/ablate.ts";
-import { FINAL_RESULT_BYTES, finalResultPath } from "./exp/final.ts";
-import { INVESTIGATE_BYTES, investigateResultPath } from "./exp/investigate.ts";
+import { ablateResultPath, readClosedAblate } from "./exp/ablate.ts";
+import { finalResultPath, readClosedFinal } from "./exp/final.ts";
+import { readClosedInvestigation } from "./exp/investigate.ts";
+import { readSelection } from "./exp/selection.ts";
 import { designBinding, protocolHash, readProtocol } from "./exp/protocol.ts";
 import { FORMAT_VERSIONS } from "./manifest.ts";
 import { PAPER_EVIDENCE_BYTES, paperBuildPaths } from "./paper/build.ts";
-import { openStudy, plain, readLedger, readTextBounded, sha256, writeAtomic, type LedgerEvent } from "./study.ts";
+import { assertWritable, openStudy, plain, readLedger, readTextBounded, sha256, writeAtomic, type LedgerEvent } from "./study.ts";
 
 /** Reader bound for every bundle file; writeAtomic refuses anything larger. */
 export const BUNDLE_FILE_BYTES = 64 * 1024 * 1024;
@@ -15,7 +16,18 @@ export const BUNDLE_FILES = ["manifest.json", "ledger.jsonl", "attempts.jsonl", 
 const STATUSES: AttemptStatus[] = ["running", "succeeded", "failed", "cancelled", "unknown"];
 const HEX = /^[a-f0-9]{16,64}$/;
 const TOKEN = /^[a-z][a-z0-9_.:-]{0,47}$/;
-const RUN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+/** Closed data keys per ledger event type; unlisted types keep the envelope with empty data. Never host, containerId or hubProject. */
+const LEDGER_KEYS: Record<string, readonly string[]> = {
+  "scope.set": ["sha256"], "autonomy.set": ["from", "to", "phase"], "gate.approve": ["gate", "binding"], "gate.reject": ["gate", "binding"],
+  "lit.search": ["sources", "added", "merged", "total"], "lit.screen": ["decision"], "lit.card": ["id", "sha256"], "lit.bib": ["entries", "sha256"], "lit.verify": ["verified", "failed"],
+  "archive.exported": ["fingerprint"], "skill.proposed": ["skillProposal", "sha256"], "skill.decided": ["skillProposal", "decision"], "watch.set": ["sha256"],
+  "plan.set": ["revision", "state", "sha256"], "plan.gates": ["revision"], "plan.paused": ["revision"], "plan.control": ["revision"], "node.observed": ["revision", "status"], "node.intent": ["revision"],
+  "executor.set": ["kind"], "protocol.set": ["sha256", "protocolHash", "treeHash"], "selection.set": ["sha256", "metric"], "final.seeds.set": ["sha256"],
+  "investigate.closed": ["run", "sha256", "ruleSha256", "winner"], "ablate.closed": ["sha256", "investigateSha256"], "final.closed": ["sha256", "status", "investigateSha256"],
+  "idea.decided": ["decision"], "paper.built": ["manuscriptSha256", "evidenceSha256", "sourceManuscriptSha256"], "review.added": [], "review.resolved": ["buildSha256"],
+  "attempt.started": ["id", "run", "seed", "commit", "treeId"],
+};
+for (const t of ["attempt.run", "attempt.snapshot", "attempt.stage.changed", "attempt.stage.evidence", "attempt.stage.recovered", "attempt.stage.started", "attempt.succeeded", "attempt.failed", "attempt.cancelled", "attempt.unknown"]) LEDGER_KEYS[t] = ["id", "run", "stage", "status"];
 
 export interface BundleManifest {
   bundle: 1; formats: typeof FORMAT_VERSIONS; studyIdSha256: string; mode: string; protocolHash: string | null; sealBinding: string | null;
@@ -30,14 +42,20 @@ function closed(value: unknown): value is number | boolean | string | null {
   if (typeof value === "number") return Number.isFinite(value);
   return typeof value === "string" && (HEX.test(value) || TOKEN.test(value));
 }
-function reduceData(data: Record<string, unknown>): Record<string, unknown> {
+function reduceData(data: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(data)) if (closed(value)) out[key] = value;
+  for (const key of keys) { const value = Object.hasOwn(data, key) ? data[key] : undefined; if (closed(value)) out[key] = value; else if (Array.isArray(value) && value.every(closed)) out[key] = value; }
   return out;
+}
+/** Keep numbers, booleans, null, hashes and closed tokens recursively; drop every other string. */
+function project(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(project).filter(v => v !== undefined);
+  if (plain(value)) { const out: Record<string, unknown> = {}; for (const [k, v] of Object.entries(value)) { const p = project(v); if (p !== undefined) out[k] = p; } return out; }
+  return closed(value) ? value : undefined;
 }
 function reduceEvent(event: LedgerEvent) {
   const actor = { kind: event.actor.kind, ...(event.actor.id !== undefined ? { idSha256: sha256(event.actor.id) } : {}) };
-  return { v: event.v, at: event.at, actor, type: event.type, data: reduceData(plain(event.data) ? event.data : {}) };
+  return { v: event.v, at: event.at, actor, type: event.type, data: reduceData(plain(event.data) ? event.data : {}, LEDGER_KEYS[event.type] ?? []) };
 }
 function reasonClass(reason: string | undefined): string | undefined {
   if (reason === undefined) return undefined;
@@ -57,30 +75,21 @@ function attemptRow(a: Attempt) {
   const stages: Record<string, unknown> = {};
   for (const [name, stage] of Object.entries(a.stages ?? {})) {
     if (!stage) continue;
-    stages[name] = { exitCode: Number.isSafeInteger(stage.exitCode) ? stage.exitCode : null, durationMs: duration(stage.startedAt, stage.endedAt), network: stage.network === "none" ? "none" : "other", limits: plain(stage.limits) ? reduceData(stage.limits) : null, imageDigest: digest(stage.image) };
+    stages[name] = { exitCode: Number.isSafeInteger(stage.exitCode) ? stage.exitCode : null, durationMs: duration(stage.startedAt, stage.endedAt), network: stage.network === "none" ? "none" : "other", limits: plain(stage.limits) ? reduceData(stage.limits, ["cpus", "memoryMb", "pidsLimit", "wallSeconds", "gpus"]) : null, imageDigest: digest(stage.image) };
   }
   const reason = reasonClass(a.reason);
   return {
     id: a.id, run: a.run, studyIdSha256: sha256(String(a.studyId)), protocolHash: a.protocolHash ?? null, sealBinding: a.sealBinding ?? null, commit: a.commit, treeId: a.treeId ?? null,
-    snapshotSha256: a.snapshotSha256 ?? null, seed: a.seed, label: a.label ?? "", retryOf: a.retryOf ?? null, status: a.status, stage: a.stage, ...(reason ? { reasonClass: reason } : {}),
+    snapshotSha256: a.snapshotSha256 ?? null, seed: a.seed, labelSha256: sha256(String(a.label ?? "")), retryOf: a.retryOf ?? null, status: a.status, stage: a.stage, ...(reason ? { reasonClass: reason } : {}),
     durationMs: duration(a.startedAt, a.endedAt), stages,
     metrics: (Array.isArray(a.metrics) ? a.metrics : []).map(m => ({ name: m.name, unit: m.unit, value: m.value, provenance: m.provenance })),
     outputs: (Array.isArray(a.outputs) ? a.outputs : []).map(o => ({ sha256: o.sha256, bytes: o.bytes })),
     sealing: plain(a.sealing) ? { separateContainers: a.sealing.separateContainers === true, evaluatorReadOnly: a.sealing.evaluatorReadOnly === true, candidateHasNoEvaluator: a.sealing.candidateHasNoEvaluator === true } : null,
   };
 }
-const PATH_KEYS = new Set(["path", "paths", "file", "files", "workdir", "mounts", "mount", "argv", "env", "containerId", "host", "image"]);
-/** Results stay verbatim except path-like keys and absolute-path strings. */
-function stripPaths(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripPaths);
-  if (plain(value)) return Object.fromEntries(Object.entries(value).filter(([k]) => !PATH_KEYS.has(k)).map(([k, v]) => [k, stripPaths(v)]));
-  if (typeof value === "string" && /^(\/|[A-Za-z]:\\)/.test(value)) return null;
-  return value;
-}
-function readResult(path: string, bound: number): unknown {
-  if (!existsSync(path)) return null;
-  try { return stripPaths(JSON.parse(readTextBounded(path, bound))); }
-  catch { throw new Error("study export: a closed result file is unreadable, invalid JSON or oversized; restore it before exporting"); }
+function closedResult<T>(name: string, read: () => { result: T }): unknown {
+  try { return project(read().result); }
+  catch (error) { throw new Error(`study export: ${name} result is not a verified closed result (${(error as Error).message}); fix it as that message says, then export again`); }
 }
 function reviews(events: LedgerEvent[]) {
   const resolved = new Map<string, number>();
@@ -110,12 +119,12 @@ function evidence(dir: string) {
 }
 
 const SCANS: [string, RegExp][] = [
-  ["absolute path", /(^|[\s"'=:(,[])(\/(?:Users|home|root|tmp|var|etc|opt|mnt|srv|workspace|private|Volumes|data)\b|~\/|\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)/],
+  ["absolute path", /(^|[\s"'=:(,[{])(\/[A-Za-z0-9._~-]|~\/)/],
   ["absolute path", /\b[A-Za-z]:\\/],
-  ["url", /\b[a-z][a-z0-9+.-]*:\/\//i],
+  ["url", /\b[a-z][a-z0-9+.-]*:\/\/|\b(?:mailto|urn|file|data):/i],
   ["key-like token", /\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{12,}|\b(?:ghp|gho|ghs|ghu|github_pat)_[A-Za-z0-9_]{12,}|\bxox[abprs]-[A-Za-z0-9-]{8,}|\bAKIA[0-9A-Z]{12,}|\beyJ[A-Za-z0-9_-]{16,}/],
   ["key-like token", /(?<![A-Za-z0-9_-])(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_-])/],
-  ["env value", /\b[A-Z][A-Z0-9_]{2,}=[^\s"]/],
+  ["env value", /(?<![A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*=[^\s"]/],
 ];
 /** Refuse the whole bundle if any file carries a path, URL, env assignment or key-like token. */
 export function scanBundle(files: Record<string, string>): void {
@@ -129,22 +138,33 @@ function emptyDir(path: string): void {
 }
 
 /** Build the content-free bundle from committed study files only; never reads the executor workdir. */
-export function exportBundle(dirArg: string, options: { bundle: string; list?: boolean }): BundleManifest | BundleListing {
-  if (options.list) { openStudy(dirArg); return { bundle: options.bundle, files: [...BUNDLE_FILES], wouldWrite: true }; }
-  const { dir, study } = openStudy(dirArg), events = readLedger(dir);
+export function exportBundle(dirArg: string, options: { bundle: string; list?: boolean }, maxFileBytes = BUNDLE_FILE_BYTES): BundleManifest | BundleListing {
+  const { dir, study } = openStudy(dirArg), target = resolve(options.bundle), inside = relative(resolve(dir), target);
+  if (inside === "" || (!inside.startsWith("..") && !isAbsolute(inside))) throw new Error("study export: --bundle is inside the study directory; choose a directory outside the study");
+  if (options.list) return { bundle: options.bundle, files: [...BUNDLE_FILES], wouldWrite: true };
+  const events = readLedger(dir);
   const attempts = study.mode === "experiment" ? [...readAttemptRecords(dir)] : [];
   const zero = () => Object.fromEntries(STATUSES.map(s => [s, 0])) as Record<AttemptStatus, number>;
-  const byStatus = zero(), byRun: Record<string, Record<AttemptStatus, number>> = {};
-  for (const a of attempts) { byStatus[a.status]++; (byRun[a.run] ??= zero())[a.status]++; }
-  const runs = study.mode === "experiment" && existsSync(join(dir, "runs")) ? readdirSync(join(dir, "runs")).filter(r => RUN.test(r)).sort() : [];
+  const byStatus = zero(), runCounts = new Map<string, Record<AttemptStatus, number>>();
+  for (const a of attempts) {
+    byStatus[a.status]++;
+    let row = runCounts.get(a.run); if (!row) runCounts.set(a.run, row = zero()); row[a.status]++;
+  }
+  const byRun: Record<string, Record<AttemptStatus, number>> = Object.create(null);
+  for (const [run, row] of [...runCounts].sort(([x], [y]) => x < y ? -1 : 1)) byRun[run] = row;
+  const experiment = study.mode === "experiment", current = experiment ? readProtocol(dir) : undefined, rule = current ? readSelection(dir, current) : undefined;
   const investigate: Record<string, unknown> = {};
-  for (const run of runs) { const result = readResult(investigateResultPath(dir, run), INVESTIGATE_BYTES); if (result !== null) investigate[run] = result; }
+  if (rule && existsSync(join(dir, "runs", rule.run, "investigate.json"))) investigate[rule.run] = closedResult("investigate", () => readClosedInvestigation(dir));
   const reviewRows = reviews(events), protocol = study.mode === "experiment" ? readProtocol(dir) : undefined;
   const lines = (rows: unknown[]) => rows.map(r => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : "");
   const files: Record<string, string> = {
     "ledger.jsonl": lines(events.map(reduceEvent)),
     "attempts.jsonl": lines(attempts.map(attemptRow)),
-    "results.json": JSON.stringify({ investigate, ablate: readResult(ablateResultPath(dir), ABLATE_BYTES), final: readResult(finalResultPath(dir), FINAL_RESULT_BYTES) }, null, 2) + "\n",
+    "results.json": JSON.stringify({
+      investigate,
+      ablate: experiment && existsSync(ablateResultPath(dir)) ? closedResult("ablate", () => readClosedAblate(dir)) : null,
+      final: experiment && existsSync(finalResultPath(dir)) ? closedResult("final", () => readClosedFinal(dir)) : null,
+    }, null, 2) + "\n",
     "reviews.jsonl": lines(reviewRows),
     "evidence.json": JSON.stringify(evidence(dir), null, 2) + "\n",
   };
@@ -157,7 +177,8 @@ export function exportBundle(dirArg: string, options: { bundle: string; list?: b
   };
   files["manifest.json"] = JSON.stringify(manifest, null, 2) + "\n";
   scanBundle(files);
-  emptyDir(options.bundle);
-  for (const name of BUNDLE_FILES) writeAtomic(join(options.bundle, name), files[name]!, BUNDLE_FILE_BYTES);
+  for (const name of BUNDLE_FILES) assertWritable(files[name]!, maxFileBytes, `study export: ${name}; nothing was written`);
+  emptyDir(target);
+  for (const name of BUNDLE_FILES) writeAtomic(join(target, name), files[name]!, maxFileBytes);
   return manifest;
 }
