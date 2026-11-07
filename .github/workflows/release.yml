@@ -36,6 +36,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bun scripts/release.ts gate
+      - name: Require fresh documentation stamps
+        run: bun scripts/check-docs.mjs --require-fresh
 
   validate:
     needs: gate
@@ -136,3 +138,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bun scripts/release-github.ts "$RUNNER_TEMP/release-notes.md"
+
+  # Lets the family portal re-sync after a release. A separate job keeps the token away from the release-writing steps;
+  # it is skipped without the secret and never fails the release.
+  notify-site:
+    needs: github-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    env:
+      # Job level so the step's `if` can read it (a step's own env is not visible to its `if`).
+      SITE_DISPATCH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+    steps:
+      - name: Dispatch product-release to STAIxBWLB/agent-hub-site
+        if: env.SITE_DISPATCH_TOKEN != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.SITE_DISPATCH_TOKEN }}
+        run: gh api repos/STAIxBWLB/agent-hub-site/dispatches -f event_type=product-release -f "client_payload[product]=ares" -f "client_payload[tag]=$RELEASE_TAG"

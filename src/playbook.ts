@@ -1,7 +1,7 @@
 /** Standalone workflow for one agent session. Printed by `ares playbook` and the `ares_playbook` tool. */
 export const PLAYBOOK = `ares research playbook (A1 literature, A2 experiments, A3 plan DAG, investigate/final phases, A4 paper/review, A5 memory/evolution, A6 setup/console/watch)
 
-Before starting a phase, create its study once: ares init <dir> --question "..." [--mode experiment] [--autonomy gates]. Use --mode experiment for experiment phases; reuse the initialized study thereafter. Install amem 0.20.3 or a compatible CLI for phase lessons and archive; these keep the study cwd and agent attribution.
+Before starting a phase, create its study once: ares init <dir> --question "..." [--mode experiment] [--autonomy gates]. Use --mode experiment for experiment phases; reuse the initialized study thereafter. Phase lessons and archive call the amem CLI on PATH (its output parser was written against amem 0.20.3; no amem version is tested live here); these keep the study cwd and agent attribution.
 
 Literature workflow
 
