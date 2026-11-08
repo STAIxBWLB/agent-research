@@ -196,3 +196,44 @@ test("CLI receipt read failures name the cause and a recovery step without raw f
   const control = f.cli("controls", directory); expect(control.status).toBe(1); expect(control.stderr).toContain("control receipt is missing, unreadable or over-bound"); expect(control.stderr).toContain("restore the original control receipt"); expect(control.stderr).not.toContain("EISDIR");
   expect(() => verifyControlReceipt(f.root, missing)).toThrow("control receipt is missing, unreadable or over-bound");
 });
+
+test("checked-in evidence stays bound to its historical main code and registration", () => {
+  const receipt = read(sourceRoot, "docs/verification/harness-eval-controls.json", 8 * 1024 * 1024), raw = JSON.stringify(receipt), {receiptSha256, ...body} = receipt, home = tempDir();
+  expect(receiptSha256).toBe(sha256(canonical(body))); expect(receipt.code.commit).toBe("f9f2934fa37d9fee7d55858d8b725fdb4a0638d9");
+  const env = {PATH: "/usr/bin:/bin", HOME: home, XDG_CONFIG_HOME: home, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_SYSTEM: "/dev/null", GIT_CONFIG_GLOBAL: "/dev/null", GIT_NO_LAZY_FETCH: "1", GIT_NO_REPLACE_OBJECTS: "1", GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", LC_ALL: "C"};
+  const git = (args: string[], maxBuffer = 1024 * 1024, input?: string) => {
+    const result = spawnSync("git", ["--no-pager", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "credential.helper=", "-c", "core.attributesFile=/dev/null", "-c", "protocol.allow=never", ...args], {cwd: sourceRoot, env, timeout: 5000, maxBuffer, ...(input === undefined ? {} : {input})});
+    if (result.error || result.status !== 0 || result.stdout.length > maxBuffer) throw new Error("historical evidence Git read failed"); return result.stdout;
+  };
+  const commit = receipt.code.commit as string, frozenPath = "docs/verification/harness-eval-frozen.json", protocolPath = "docs/verification/harness-eval-preregistration.json";
+  expect(git(["rev-parse", "--verify", `${commit}^{commit}`]).toString().trim()).toBe(commit); expect(git(["rev-parse", "--verify", `${commit}^{tree}`]).toString().trim()).toBe(receipt.code.tree); git(["merge-base", "--is-ancestor", commit, "HEAD"]);
+  const seal = JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(git(["show", `${commit}:${frozenPath}`], 65_536))), {receiptSha256: sealSha, ...sealBody} = seal;
+  expect(sealSha).toBe(sha256(canonical(sealBody))); expect(sealSha).toBe(receipt.preregistrationSha256); expect(receipt.bindings).toEqual(seal.bindings);
+  const tree = new Map<string, {mode: string; oid: string}>();
+  for (const entry of git(["ls-tree", "-r", "-z", commit]).toString("utf8").split("\0").filter(Boolean)) {const match = /^([0-7]{6}) blob ([a-f0-9]{40,64})\t(.+)$/.exec(entry); if (match) tree.set(match[3]!, {mode: match[1]!, oid: match[2]!});}
+  const roots = ["bin/ares.js", "package.json", "bun.lock", "scripts", "src"], sourceNames = [...tree.keys()].filter(name => roots.some(root => name === root || name.startsWith(root + "/"))).sort();
+  expect(receipt.code.files.map((file: {path: string}) => file.path)).toEqual(sourceNames); expect(receipt.code.codeSha256).toBe(sha256(JSON.stringify(receipt.code.files))); expect(tree.get("bin/ares.js")?.mode).toBe("100755");
+  const files = [...receipt.code.files, ...seal.files] as {path: string; sha256: string; bytes: number}[]; expect(files.length).toBeLessThanOrEqual(416);
+  const batch = git(["cat-file", "--batch"], 17 * 1024 * 1024 + 416 * 160, files.map(file => {const entry = tree.get(file.path); expect(entry).toBeDefined(); expect(["100644", "100755"]).toContain(entry!.mode); return entry!.oid;}).join("\n") + "\n"), contents = new Map<string, Buffer>(); let offset = 0;
+  for (const file of files) {
+    const end = batch.indexOf(10, offset); expect(end).toBeGreaterThanOrEqual(offset); const match = /^([a-f0-9]{40,64}) blob ([0-9]+)$/.exec(batch.subarray(offset, end).toString("ascii")); expect(match).not.toBeNull();
+    const bytes = Number(match![2]), start = end + 1, content = batch.subarray(start, start + bytes); expect(match![1]).toBe(tree.get(file.path)!.oid); expect(bytes).toBe(file.bytes); expect(content.length).toBe(bytes); expect(sha256(content)).toBe(file.sha256); expect(batch[start + bytes]).toBe(10); contents.set(file.path, content); offset = start + bytes + 1;
+  }
+  expect(offset).toBe(batch.length);
+  const json = (path: string) => JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(contents.get(path)!)), protocol = json(protocolPath), index = json(protocol.corpus.index), fields = Object.keys(protocol.costs.fields).sort();
+  const cost = (value: Record<string, unknown>) => {expect(Object.keys(value).sort()).toEqual(fields); for (const field of fields) expect(value[field]).toBe(field === "providerRequests" ? 0 : "unknown");};
+  expect(receipt.rows).toHaveLength(180); expect(receipt.conclusion).toBe("insufficient-evidence"); expect(receipt.resultAuthorityLinks).toEqual([]); expect(receipt.live.map((arm: {condition: string}) => arm.condition)).toEqual(protocol.conditions.map((row: {id: string}) => row.id)); expect(receipt.live.every((arm: {status: string}) => arm.status === "unavailable")).toBe(true); cost(receipt.endToEndCosts);
+  const tuples = new Set<string>();
+  for (const row of receipt.rows) {
+    const order = protocol.orders.find((value: {id: string}) => value.id === row.order), task = index.cases.find((value: {id: string}) => value.id === row.taskId), plan = protocol.conditions.find((value: {id: string}) => value.id === row.condition); expect(order).toBeDefined(); expect(task).toBeDefined(); expect(plan).toBeDefined();
+    const tuple = `${row.order}:${row.condition}:${row.taskId}`; expect(tuples.has(tuple)).toBe(false); tuples.add(tuple); expect(row.inputSha256).toBe(sha256(contents.get(task.input)!)); expect(row.streamSha256).toBe(sha256(canonical(order))); expect(row.judge).toBe("unavailable"); expect(row.quality).toBe("unknown");
+    const past = order.taskIds.slice(0, order.taskIds.indexOf(row.taskId)).filter((id: string) => protocol.corpus.learningSourceIds.includes(id)), admitted = ["retrieval-only", "contrastive-prior"].includes(row.condition) ? past.map((id: string) => {const source = index.cases.find((entry: {id: string}) => entry.id === id), text = json(source.control).reflection.text; return {sourceTaskId: id, text, sha256: sha256(text)};}) : [];
+    expect(row.library).toEqual(admitted); expect(row.librarySha256).toBe(sha256(canonical(admitted))); for (const role of Object.keys(protocol.authority.roleDtoAllowlist)) {expect(row.preparedRoleLibrarySha256[role]).toBe(row.librarySha256); expect(row.preparedRoleInputSha256[role]).toMatch(/^[a-f0-9]{64}$/);}
+    expect(Object.keys(row.costStages)).toEqual(protocol.costs.stages); for (const profile of Object.values(row.costStages)) cost(receipt.costProfiles[profile as string]); cost(row.endToEndCosts);
+    expect(receipt.conditionProfiles[row.conditionProfile].stageCalls).toEqual(plan.stageCalls); expect(receipt.conditionProfiles[row.conditionProfile].ceiling).toEqual(protocol.budgets);
+    if (task.split === "heldout") {const reflection = json(task.control).reflection.text; expect(raw).not.toContain(reflection); expect(row.deferredReflection).toEqual({sha256: sha256(reflection), bytes: Buffer.byteLength(reflection), status: "deferred-until-all-heldout-outputs-and-judgments-frozen"});} else expect(row.deferredReflection).toBeNull();
+  }
+  expect(tuples.size).toBe(180); expect(receipt.faults).toHaveLength(json(index.faults).cases.length); expect(receipt.faults.every((fault: {outcome: string}) => ["blocked", "insufficient-evidence"].includes(fault.outcome))).toBe(true);
+  for (const counts of Object.values(receipt.denominators)) expect(Object.keys(counts as object)).toEqual(protocol.denominators);
+  expect(receipt.denominators.fixture).toMatchObject({planned: 180, executed: 180, "judge-unavailable": 180, succeeded: 0}); expect(receipt.denominators.live).toMatchObject({planned: 180, executed: 0, unavailable: 180}); expect(receipt.denominators.faults).toMatchObject({planned: 18, executed: 18, denied: 16, "judge-unavailable": 1, unknown: 1});
+});
