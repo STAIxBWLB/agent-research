@@ -1,26 +1,26 @@
-# Guidance experiment deterministic controls
+# Guidance experiment control evidence
 
-This is issue #68 T1/T2 fixture evidence only. No model, account, admitted worker, native probe or container Attempt ran. The five live arms remain unavailable. No quality, efficiency, transfer benefit or adoption result follows from these data-only replays. Existing ares selection/final records remain the only result authority; this fixture corpus has no such records and the receipt's resultAuthorityLinks is empty.
+This PR provides issue #68 T1/T2 code, registration and temporary-root tests only. The checked-in evidence receipt is intentionally absent. It will be recorded after this code is squash-merged, against the resulting main commit, and submitted with this report in a separate evidence PR. No model, account, admitted worker, native probe or container Attempt is authorized here. All five live arms stay unavailable; no quality, efficiency, transfer or adoption result follows from data-only replay.
 
-The frozen registration is `harness-eval-frozen.json`, seal `f5be7358c626ffcbd8faad5e948534b4e10a4bbf04a270306462abcfa8277f24`. It binds method, corpus, expected/control fixtures, ordered streams, learning sources, budgets, thresholds and denominators. It excludes runtime code. The original #63 registration and results are unchanged; its seal still verifies as `72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20`.
+The corrected registration seal is `a1f2593d3f4fa60c3227e9103e4a41e17e2089555c7c0af332f59de31fb5dea0`. Its one-time replacement corrects the method document's code-binding sentence before any measured run; corpus, orders, budgets, thresholds and expected/control inputs are unchanged. The previous seal remains in Git history. The #63 registration and results are untouched, and its seal still verifies as `72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20`.
 
-`harness-eval-controls.json` binds the code actually used for replay, commit `83bfa03773a1e618fec835431484b201793d008b`, including the adapter, existing #63 helper, bootstrap, runtime source, package and lockfile. Subsequent report-only commits do not change those executed source bytes. Prepared role input hashes are evidence of DTO construction, not evidence that a model role executed. Each role's library hash agrees within its round. Frozen prior learning fixtures supply the library; no held-out reflection is fed back.
+# Exact source identity
 
-# Recorded denominators
+The preregistration excludes code. Each control receipt separately binds the exact committed runtime source, including `bin/ares.js`, both harnesses, package and lockfile. Verification checks the stored commit exists, its tree agrees, it is an ancestor of HEAD, and every source blob matches the stored SHA-256 and byte count. It also requires current source bytes to agree before resume. A self-hash alone cannot establish source identity.
 
-The twelve tasks, three orders and five conditions produce 180 planned fixture presentations. All 180 replay the prerecorded pipeline; all have judge-unavailable quality outcomes, not successful measured outcomes. Their quality remains unknown. The live denominator has 180 planned, zero executed and 180 unavailable presentations. Every denominator field is emitted, including zero failed/cancelled/denied/unknown/excluded categories; absence of measured successes is not a measured zero success rate.
+Generating evidence from a pre-merge branch commit would make that commit unreachable after squash merge. Recording against main after merge avoids this: the execution commit remains in main history when the evidence-only PR is squash-merged. No merge commit or weakened ancestry rule is used.
 
-The fourteen fault cases are separate from task quality: twelve are refused by role, policy, resume or within-round-library checks; one retains an unavailable judge and one retains unknown telemetry. They are not live confinement or model-behavior tests. The complete receipt keeps all fourteen outcomes.
+# Planned denominators and accounting
 
-# Costs and opportunity budgets
+The twelve cases, three orders and five conditions define 180 fixture presentations. Completion of the prerecorded pipeline is not a successful measured outcome: judging and quality remain unavailable/unknown. Live records are unavailable and unexecuted. Fourteen fault fixtures have separate denominators. Every failed/cancelled/denied/unknown/excluded field remains present; missing judging cannot be interpreted as a measured zero success rate.
 
-Every row names all eight cost stages. Each stage refers to the shared `fixture-no-model-costs` profile, which contains every independent #63 cost dimension. Observed provider requests are zero because no provider boundary is invoked; all unmeasured CPU/device/wall/storage/transfer/verification/retention/materialization/failure/idle/person/token/monetary dimensions stay unknown. Profile references only remove duplicate JSON; they do not combine stages, clocks or units.
+Each row names all eight cost stages, using shared complete cost profiles, plus an independent end-to-end cost record. The receipt also has its own end-to-end record. All records use the same 22-dimensional schema. Unmeasured compute, wall, storage, transfer, verification, retention/materialization, failure, idle, person, tokens and monetary costs stay unknown. Observed provider requests are zero because the fixture adapter never invokes a provider. Stage/subset costs are not added to end-to-end totals or combined across incomparable clocks.
 
-Declared opportunity slots are 1/8/1/7/7 for frozen base, repeated base, retrieval-only, contrastive without library and contrastive with prior experience. Remaining simulated allowances are recorded as 7/0/7/1/1. These are prerecorded pipeline plans, not billed calls or measurements. Live unused budget is unavailable. No call, token or wait is forced to consume an allowance.
+Shared per-condition profiles hold the equal aggregate ceiling and declared opportunity/unused allowances. This removes duplicate JSON without hiding stages or altering budgets. No call, token or wait is forced to consume an allowance. Prepared role hashes describe DTO construction, not model execution or OS confinement. Held-out reflections never enter an active library, and live role-lane trust boundaries remain untested.
 
-# Repeatable commands
+# After-merge recording
 
-From a clean committed checkout with Bun and Git available:
+From a clean checkout of the merged main code, with Bun and Git available:
 
 ```sh
 bun scripts/harness-eval.ts verify
@@ -28,8 +28,6 @@ bun scripts/harness-eval.ts live-status
 bun scripts/harness-eval.ts controls /absolute/path/to/new-controls.json
 ```
 
-The control command verifies registration before code admission or replay. A new output records its current code identity. Repeating an existing output verifies it; changed inputs, code or receipt bytes refuse without rewriting it. New receipt files are 0600. A checked-in synthetic seal/report may have ordinary Git file permissions and contains no real task or account data.
+The first command verifies the corrected registration. The control command binds the main commit and verifies registration before replay. A new output is published privately as 0600; an existing output is verified without rewriting. Changed inputs, source code, stored commit/tree or receipt bytes refuse. Commit only the generated receipt and completed report in the follow-up evidence PR.
 
-The fixture adapter is in-process and sequential, with no child worker or GPU. The protocol declares future equal 8-call/8000-token/60000-ms aggregate per-task ceilings, one active attempt per study, two CPU workers and zero GPUs for this pilot. These declarations do not admit a live run. Separate authorization, the required producer implementations and the confined G2 role lane are prerequisites for T3.
-
-All proposed benefit gates remain unmeasured. The only conclusion is `insufficient-evidence`. Same-user/provider trust limits and actual role confinement remain untested.
+The fixture adapter is in-process and sequential; it launches no child worker or GPU. The future live ceiling is 8 provider calls, 8000 tokens and 60000 ms per task, with equal tool/data/environment constraints. T3 needs separate budgeted authorization, required producers and the confined G2 lane. T4 adoption also needs separate authorization. The conclusion remains `insufficient-evidence`.

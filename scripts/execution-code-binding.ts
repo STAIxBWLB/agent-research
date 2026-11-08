@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdtempSync, opendirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { readBytesBounded, sha256 } from "../src/study.ts";
+import { plain, readBytesBounded, sha256 } from "../src/study.ts";
 
 export const RUN_CODE_FILES = 256, RUN_CODE_FILE_BYTES = 1024 * 1024, RUN_CODE_TOTAL_BYTES = 16 * 1024 * 1024;
 const GIT_BYTES = 1024 * 1024, GIT_TIMEOUT_MS = 5000, CODE_DIRECTORIES = 256, CODE_DEPTH = 64;
@@ -13,25 +13,25 @@ export interface RunCodeBinding { commit: string; tree: string; codeSha256: stri
 class CodeBindingError extends Error {}
 function fail(reason: string): never { throw new CodeBindingError(`execution code binding: ${reason}; restore and commit a clean bounded source checkout, then retry baseline admission`); }
 interface GitEntry { mode: string; hash: string }
-function names(output: string, tree: boolean): Map<string, GitEntry> {
+function names(output: string, tree: boolean, refusal: (cause: string) => never = fail): Map<string, GitEntry> {
   const entries = new Map<string, GitEntry>();
   for (const line of output.split("\0")) {
     if (!line) continue;
     const match = tree ? /^([0-7]{6}) blob ([a-f0-9]{40,64})\t(.+)$/.exec(line) : /^([0-7]{6}) ([a-f0-9]{40,64}) 0\t(.+)$/.exec(line);
-    if (!match || !["100644", "100755"].includes(match[1]!)) fail("non-regular, unmerged or malformed tracked source");
+    if (!match || !["100644", "100755"].includes(match[1]!)) refusal("non-regular, unmerged or malformed tracked source");
     const name = match[3]!;
-    if (isAbsolute(name) || name.includes("\\") || name.length > 4096 || name.split("/").some(part => !part || part === "." || part === "..") || entries.has(name)) fail("invalid or duplicate source path");
+    if (isAbsolute(name) || name.includes("\\") || name.length > 4096 || name.split("/").some(part => !part || part === "." || part === "..") || entries.has(name)) refusal("invalid or duplicate source path");
     entries.set(name, { mode: match[1]!, hash: match[2]! });
-    if (entries.size > RUN_CODE_FILES) fail("tracked source file count exceeds the bound");
+    if (entries.size > RUN_CODE_FILES) refusal("tracked source file count exceeds the bound");
   }
   return entries;
 }
-/** Bind only committed checked-out source; no accounts, remote Git operations, effects or result authority. */
-export function bindRunCode(root: string): RunCodeBinding {
+type GitRead = (args: string[], maxBytes?: number, input?: string) => Buffer;
+function withReadGit<T>(root: string, run: (dir: string, git: GitRead) => T, refusal: (cause: string) => never = fail): T {
   let home: string | undefined;
   try {
     const requested = resolve(root);
-    if (lstatSync(requested).isSymbolicLink()) fail("source root links are refused");
+    if (lstatSync(requested).isSymbolicLink()) refusal("source root links are refused");
     const dir = realpathSync(requested);
     home = mkdtempSync(join(tmpdir(), "ares-code-binding-home-"));
     const env: NodeJS.ProcessEnv = {
@@ -39,14 +39,20 @@ export function bindRunCode(root: string): RunCodeBinding {
       GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_SYSTEM: "/dev/null", GIT_CONFIG_GLOBAL: "/dev/null",
       GIT_NO_LAZY_FETCH: "1", GIT_CEILING_DIRECTORIES: dirname(dir), GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", GIT_NO_REPLACE_OBJECTS: "1", GIT_ATTR_NOSYSTEM: "1", GIT_PAGER: "cat", PAGER: "cat",
     };
-    const git = (...args: string[]): string => {
-      const result = spawnSync("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=", "-c", "core.attributesFile=/dev/null", "-c", "core.excludesFile=/dev/null", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", "protocol.allow=never", ...args], {
-        cwd: dir, env, encoding: "utf8", maxBuffer: GIT_BYTES, timeout: GIT_TIMEOUT_MS,
-      });
-      if (result.error || result.status !== 0 || Buffer.byteLength(result.stdout) > GIT_BYTES) fail("Git read failed, timed out or exceeded its output bound");
+    const git: GitRead = (args, maxBytes = GIT_BYTES, input) => {
+      const result = spawnSync("git", ["--no-pager", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=", "-c", "core.attributesFile=/dev/null", "-c", "core.excludesFile=/dev/null", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "-c", "protocol.allow=never", ...args], {cwd: dir, env, maxBuffer: maxBytes, timeout: GIT_TIMEOUT_MS, ...(input === undefined ? {} : {input})});
+      if (result.error || result.status !== 0 || result.stdout.length > maxBytes) refusal("Git read failed, timed out or exceeded its output bound");
       return result.stdout;
     };
-    if (realpathSync(git("rev-parse", "--show-toplevel").trim()) !== dir) fail("root must be the repository top level");
+    if (realpathSync(git(["rev-parse", "--show-toplevel"]).toString("utf8").trim()) !== dir) refusal("root must be the repository top level");
+    return run(dir, git);
+  } catch (error) {if (error instanceof CodeBindingError) throw error; return refusal("source is missing, unreadable, linked or over-bound");}
+  finally {if (home !== undefined) rmSync(home, {recursive: true, force: true});}
+}
+/** Bind only committed checked-out source; no accounts, remote Git operations, effects or result authority. */
+export function bindRunCode(root: string): RunCodeBinding {
+  return withReadGit(root, (dir, readGit) => {
+    const git = (...args: string[]) => readGit(args).toString("utf8");
     const commit = git("rev-parse", "--verify", "HEAD").trim(), tree = git("rev-parse", "--verify", "HEAD^{tree}").trim();
     if (!/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(commit) || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(tree)) fail("missing committed source identity");
     const treeText = git("ls-tree", "-r", "-z", "HEAD", "--", ...ROOTS), indexText = git("ls-files", "--stage", "-z", "--", ...ROOTS);
@@ -88,8 +94,34 @@ export function bindRunCode(root: string): RunCodeBinding {
     if (git("rev-parse", "--verify", "HEAD").trim() !== commit || git("ls-files", "--stage", "-z", "--", ...ROOTS) !== indexText) fail("source identity changed during admission");
     files.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
     return { commit, tree, files, codeSha256: sha256(JSON.stringify(files)) };
-  } catch (error) {
-    if (error instanceof CodeBindingError) throw error;
-    return fail("source is missing, unreadable, linked or over-bound");
-  } finally { if (home !== undefined) rmSync(home, { recursive: true, force: true }); }
+  });
+}
+function historyFail(cause: string): never {throw new CodeBindingError(`execution code binding: ${cause}; restore the original run receipt and committed source history, then retry receipt verification`);}
+/** Validate historical source identity against the local object database, never a self-hash alone. */
+export function verifyRunCodeCommit(root: string, binding: RunCodeBinding): void {
+  const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/, digest = /^[a-f0-9]{64}$/;
+  if (!plain(binding as unknown) || Object.keys(binding).some(key => !["commit", "tree", "codeSha256", "files"].includes(key)) || !oid.test(binding.commit) || !oid.test(binding.tree) || !digest.test(binding.codeSha256) || !Array.isArray(binding.files) || !binding.files.length || binding.files.length > RUN_CODE_FILES) historyFail("malformed stored run identity");
+  let total = 0;
+  const seen = new Set<string>(), files = binding.files.map(file => {
+    if (!plain(file as unknown) || Object.keys(file).some(key => !["path", "sha256", "bytes"].includes(key)) || typeof file.path !== "string" || file.path.length > 4096 || isAbsolute(file.path) || file.path.includes("\\") || file.path.includes("\0") || !ROOTS.some(root => file.path === root || file.path.startsWith(root + "/")) || file.path.split("/").some(part => !part || part === "." || part === "..") || seen.has(file.path) || typeof file.sha256 !== "string" || !digest.test(file.sha256) || !Number.isSafeInteger(file.bytes) || file.bytes < 0 || file.bytes > RUN_CODE_FILE_BYTES || (total += file.bytes) > RUN_CODE_TOTAL_BYTES) historyFail("malformed stored source inventory");
+    seen.add(file.path); return {path: file.path, sha256: file.sha256, bytes: file.bytes};
+  });
+  if (sha256(JSON.stringify(files)) !== binding.codeSha256) historyFail("stored code inventory hash mismatch");
+  withReadGit(root, (_dir, git) => {
+    const text = (...args: string[]) => git(args).toString("utf8").trim(), head = text("rev-parse", "--verify", "HEAD");
+    if (text("rev-parse", "--verify", `${binding.commit}^{commit}`) !== binding.commit) historyFail("stored run commit mismatch");
+    if (text("rev-parse", "--verify", `${binding.commit}^{tree}`) !== binding.tree) historyFail("stored run tree mismatch");
+    if (text("merge-base", binding.commit, head) !== binding.commit) historyFail("stored run commit is not an ancestor of HEAD");
+    const tracked = names(git(["ls-tree", "-r", "-z", binding.commit, "--", ...ROOTS]).toString("utf8"), true, historyFail);
+    if (tracked.size !== files.length || files.some(file => !tracked.has(file.path)) || REQUIRED.some(name => !tracked.has(name))) historyFail("stored commit source inventory mismatch");
+    const hashes = files.map(file => tracked.get(file.path)!.hash), bytes = git(["cat-file", "--batch"], RUN_CODE_TOTAL_BYTES + RUN_CODE_FILES * 160, hashes.join("\n") + "\n");
+    let offset = 0;
+    for (const [index, file] of files.entries()) {
+      const end = bytes.indexOf(10, offset); if (end < 0 || end - offset > 159) historyFail("stored source blob header mismatch");
+      const header = bytes.subarray(offset, end).toString("ascii"), match = /^([a-f0-9]{40,64}) blob ([0-9]+)$/.exec(header), size = match ? Number(match[2]) : NaN, start = end + 1;
+      if (!match || match[1] !== hashes[index] || size !== file.bytes || bytes[start + size] !== 10 || sha256(bytes.subarray(start, start + size)) !== file.sha256) historyFail("stored commit file hash mismatch");
+      offset = start + size + 1;
+    }
+    if (offset !== bytes.length || text("rev-parse", "--verify", "HEAD") !== head) historyFail("source history changed during verification");
+  }, historyFail);
 }

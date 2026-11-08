@@ -3,7 +3,7 @@
   "status": "preregistered-not-measured",
   "bindings": {
     "protocolSha256": "85564a5254995724305c14eb36515a0e139360b669460a7bc7dc64bb0db03e6f",
-    "methodSha256": "27a09cb3a2f5bfd4dfb64dfa161c9c06298b80ed48394d68f9d451dd8f5eb504",
+    "methodSha256": "079d949e7020eb38e404ddc93ad35ff4e16880df3767a3e6e3b85a15e6338024",
     "corpusSha256": "9f40153fd6ce6a3c25b76f2ecc5dc0a09becd19260d4f5dc46589f9a2009c02b",
     "inputSha256": "51b17775b478c1fd487cadefb17130da1a39afdfaa036c198c7e394e6830e699",
     "expectedSha256": "e8ca1945ddb264bceef413a1b5cce9763655ccec92458e3bf235154033061f64",
@@ -211,9 +211,9 @@
     },
     {
       "path": "docs/verification/harness-eval-protocol.md",
-      "sha256": "27a09cb3a2f5bfd4dfb64dfa161c9c06298b80ed48394d68f9d451dd8f5eb504",
-      "bytes": 14977
+      "sha256": "079d949e7020eb38e404ddc93ad35ff4e16880df3767a3e6e3b85a15e6338024",
+      "bytes": 15192
     }
   ],
-  "receiptSha256": "f5be7358c626ffcbd8faad5e948534b4e10a4bbf04a270306462abcfa8277f24"
+  "receiptSha256": "a1f2593d3f4fa60c3227e9103e4a41e17e2089555c7c0af332f59de31fb5dea0"
 }

@@ -1,8 +1,9 @@
 import {expect, spyOn, test} from "bun:test";
 import {dirname, join} from "node:path";
 import * as fs from "node:fs";
+import {spawnSync} from "node:child_process";
 import {fileURLToPath} from "node:url";
-import {freezeHarnessPreregistration, verifyHarnessPreregistration, buildRoleInputs, librarySnapshot, validateRolePayload, validateRoundInputs, requireFixturePolicy, requireResumeBinding, runHarnessFaults, runHarnessControls, liveArms, ROLES, CONDITIONS, HARNESS_PROTOCOL, HARNESS_FROZEN, HARNESS_METHOD, type HarnessCase} from "../scripts/harness-eval.ts";
+import {freezeHarnessPreregistration, verifyHarnessPreregistration, buildRoleInputs, librarySnapshot, validateRolePayload, validateRoundInputs, requireFixturePolicy, requireResumeBinding, runHarnessFaults, runHarnessControls, verifyControlReceipt, liveArms, ROLES, CONDITIONS, HARNESS_PROTOCOL, HARNESS_FROZEN, HARNESS_METHOD, type HarnessCase} from "../scripts/harness-eval.ts";
 import {COST_FIELDS, validateCostRecord, canonical} from "../scripts/execution-eval.ts";
 import {readTextBounded, writeAtomic, sha256} from "../src/study.ts";
 import {tempDir} from "./helpers.ts";
@@ -112,17 +113,38 @@ test("all five deterministic conditions prepare the declared blinded opportunity
   }
 });
 
-test("committed fixture receipt preserves all streams, fault outcomes and unknown costs without result authority", () => {
-  const receipt = read(sourceRoot, "docs/verification/harness-eval-controls.json", 8 * 1024 * 1024), {receiptSha256, ...body} = receipt;
-  expect(receiptSha256).toBe(sha256(canonical(body))); expect(receipt.preregistrationSha256).toBe(verifyHarnessPreregistration(sourceRoot).receiptSha256);
+function committedCliFixture() {
+  const f = fixture(), home = join(f.root, "isolated-home"); fs.mkdirSync(home);
+  const env = {PATH: "/usr/bin:/bin", HOME: home, XDG_CONFIG_HOME: home, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0"};
+  const git = (root: string, ...args: string[]) => {
+    const value = spawnSync("git", ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", "-c", "user.name=Synthetic Fixture", "-c", "user.email=fixture@example.invalid", ...args], {cwd: root, env, encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 5000});
+    if (value.error || value.status !== 0) throw new Error("synthetic Git fixture setup failed"); return value.stdout;
+  };
+  const paths = git(sourceRoot, "ls-files", "-z", "--", "bin/ares.js", "package.json", "bun.lock", "src", "scripts").split("\0").filter(Boolean); let total = 0;
+  expect(paths.length).toBeLessThanOrEqual(256);
+  for (const path of paths) {const value = readTextBounded(join(sourceRoot, path), 1024 * 1024, {noFollow: true}); total += Buffer.byteLength(value); expect(total).toBeLessThanOrEqual(16 * 1024 * 1024); fs.mkdirSync(dirname(join(f.root, path)), {recursive: true}); writeAtomic(join(f.root, path), value, 1024 * 1024);}
+  freezeHarnessPreregistration(f.root, join(f.root, HARNESS_FROZEN)); git(f.root, "init", "--quiet"); git(f.root, "add", "--all"); git(f.root, "commit", "--quiet", "-m", "Synthetic code binding fixture");
+  const cli = (...args: string[]) => {const value = spawnSync(process.execPath, [join(f.root, "scripts/harness-eval.ts"), ...args], {cwd: f.root, env, encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 10000}); if (value.error) throw value.error; return value;};
+  return {...f, cli};
+}
+
+test("temporary committed CLI controls have complete independent end-to-end costs and refuse forged history", () => {
+  const f = committedCliFixture(), output = join(f.root, "controls.json"), first = f.cli("controls", output); expect(first.status).toBe(0);
+  const receipt = read(f.root, "controls.json", 8 * 1024 * 1024), before = readTextBounded(output, 8 * 1024 * 1024), {receiptSha256, ...body} = receipt;
+  expect(receiptSha256).toBe(sha256(canonical(body))); expect(receipt.preregistrationSha256).toBe(verifyHarnessPreregistration(f.root, join(f.root, HARNESS_FROZEN)).receiptSha256);
   expect(receipt.kind).toBe("guidance-fixture-observations"); expect(receipt.evidence).toBe("prerecorded-fixture-only"); expect(receipt.rows).toHaveLength(180); expect(receipt.live).toHaveLength(5); expect(receipt.faults).toHaveLength(14); expect(receipt.resultAuthorityLinks).toEqual([]); expect(receipt.conclusion).toBe("insufficient-evidence");
-  expect(receipt.code.codeSha256).toBe(sha256(JSON.stringify(receipt.code.files)));
-  for (const path of ["bin/ares.js", "scripts/harness-eval.ts", "scripts/execution-eval.ts", "package.json", "bun.lock"]) expect(receipt.code.files.some((file: {path: string}) => file.path === path)).toBe(true);
-  const {protocol} = corpus();
+  const whole = validateCostRecord(receipt.endToEndCosts); expect(whole.wallElapsedMs).toBe("unknown"); expect(whole.cpuSeconds).toBe("unknown"); expect(whole.providerRequests).toBe(0);
   for (const row of receipt.rows) {
-    expect(Object.keys(row.costStages)).toEqual(Object.keys(protocol.conditions[0].stageCalls));
+    expect(Object.keys(row.costStages)).toEqual(Object.keys(f.protocol.conditions[0].stageCalls));
     for (const profile of Object.values(row.costStages)) {const cost = validateCostRecord(receipt.costProfiles[profile as string]); expect(cost.providerRequests).toBe(0); expect(cost.providerTokens).toBe("unknown"); expect(cost.wallElapsedMs).toBe("unknown"); expect(cost.personMinutes).toBe("unknown");}
-    expect(row.judge).toBe("unavailable"); expect(row.quality).toBe("unknown"); expect(new Set(Object.values(row.preparedRoleLibrarySha256)).size).toBe(1);
+    const end = validateCostRecord(row.endToEndCosts); expect(end.wallElapsedMs).toBe("unknown"); expect(end.cpuSeconds).toBe("unknown"); expect(end.personMinutes).toBe("unknown");
+    expect(new Set(Object.values(row.preparedRoleLibrarySha256)).size).toBe(1); expect(receipt.conditionProfiles[row.conditionProfile].ceiling.calls).toBe(8);
   }
-  expect(receipt.denominators.fixture.executed).toBe(180); expect(receipt.denominators.fixture["judge-unavailable"]).toBe(180); expect(receipt.denominators.live.executed).toBe(0); expect(receipt.denominators.live.unavailable).toBe(180); expect(receipt.denominators.faults.executed).toBe(14);
+  expect(receipt.denominators.fixture.executed).toBe(180); expect(receipt.denominators.fixture["judge-unavailable"]).toBe(180); expect(receipt.denominators.live.executed).toBe(0); expect(receipt.denominators.live.unavailable).toBe(180);
+  expect(f.cli("controls", output).status).toBe(0); expect(readTextBounded(output, 8 * 1024 * 1024)).toBe(before);
+  for (const field of ["commit", "tree"]) {
+    const forged = structuredClone(receipt); forged.code[field] = (field === "commit" ? "f" : "e").repeat(40); const {receiptSha256: _old, ...changed} = forged; forged.receiptSha256 = sha256(canonical(changed));
+    const file = join(f.root, `forged-${field}.json`); writeAtomic(file, JSON.stringify(forged), 8 * 1024 * 1024);
+    const result = f.cli("controls", file); expect(result.status).toBe(1); expect(result.stderr).toContain("execution code binding"); expect(result.stderr).toContain("restore the original run receipt");
+  }
 });
