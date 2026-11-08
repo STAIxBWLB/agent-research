@@ -62,7 +62,13 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       const kind = str("--root"), id = str("--id"), revision = str("--revision"), hash = str("--sha256"), cursor = str("--cursor");
       const hasRoot = [kind, id, revision, hash].some(value => value !== undefined);
       if (hasRoot && (kind === undefined || id === undefined)) throw new Error("lineage show: partial root reference; pass --root KIND and --id ID together, with optional --revision/--sha256");
-      const root = hasRoot ? validateExecutionReference({ v: 1, tool: "ares", projectKey: openStudy(positional[0]!).study.id, kind, id, ...(revision === undefined ? {} : { revision }), ...(hash === undefined ? {} : { sha256: hash }) }) : undefined;
+      let root = hasRoot ? validateExecutionReference({ v: 1, tool: "ares", projectKey: "pending-study-identity", kind, id, ...(revision === undefined ? {} : { revision }), ...(hash === undefined ? {} : { sha256: hash }) }) : undefined;
+      if (root) {
+        let projectKey: string;
+        try { projectKey = openStudy(positional[0]!).study.id; }
+        catch { result = ops.lineageShow(positional[0]!, cursor === undefined ? {} : {cursor}); break; }
+        root = {...root, projectKey};
+      }
       result = ops.lineageShow(positional[0]!, { ...(root === undefined ? {} : { root }), ...(cursor === undefined ? {} : { cursor }) }); break;
     }
     case "lineage compare": {

@@ -119,3 +119,12 @@ test("standalone old survey studies remain readable without attempts, hub or exe
   const provider = await createPlugin({env: {HOME: home, AGENTHUB_HOME: home}}).open({home, log: () => {}}), result = await provider.snapshot({panel: "lineage", study: dir, after: 0});
   expect(result.lineage).toEqual(ops.lineageShow(dir)); expect((result.lineage as {status: string}).status).toBe("ok");
 });
+
+for (const damage of ["missing", "malformed"] as const) test(`#107 rooted CLI/MCP/console parity with ${damage} study.json`, async () => {
+  const {f, provider} = await fixture(), file = join(f.dir, "study.json"), root = {v: 1 as const, tool: "ares" as const, projectKey: f.studyId, kind: "attempt" as const, id: f.ids.retryAttempt}, mcp = createAresMcp({HOME: f.dir, AGENTHUB_HOME: f.dir}, f.ctx.http);
+  if (damage === "missing") fs.unlinkSync(file); else writeAtomic(file, "{ malformed JSON", 65_536);
+  const expected = await mcp.handlers.ares_lineage_show!({study: f.dir, root}), cli = await run(["lineage", "show", f.dir, "--root", root.kind, "--id", root.id, "--json"], {}, {http: f.ctx.http});
+  expect(JSON.parse(cli.text)).toEqual(expected); expect((expected as {status: string}).status).toBe("unavailable"); expect((expected as {issues: {code: string}[]}).issues[0]?.code).toBe(damage === "missing" ? "missing-study" : "malformed-study");
+  expect((await provider.snapshot({panel: "lineage", study: f.dir, rootKind: root.kind, rootId: root.id, after: 0})).lineage).toEqual(expected);
+  if (damage === "missing") expect(fs.existsSync(file)).toBe(false); else expect(readTextBounded(file, 65_536)).toBe("{ malformed JSON");
+});
