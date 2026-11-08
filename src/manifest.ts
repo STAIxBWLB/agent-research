@@ -7,7 +7,7 @@ export const FORMAT_VERSIONS = {
   manifest: 1,
   study: 2,
   paperEvidence: 1,
-  skillProposal: 1,
+  skillProposal: 2,
   studyRegistry: 1,
   watchConfig: 1,
   studyPlan: 1,

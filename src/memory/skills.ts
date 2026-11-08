@@ -1,14 +1,17 @@
+import {skillMarkdownV2, validateSkillProposalV2, type SkillProposalV2} from "./skill-format.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { assertWritable, boundedText, commit, onlyKeys, openStudy, plain, readLedger, readTextBounded, sha256, type Actor, type LedgerEvent } from "../study.ts";
 
-export const SKILL_PROPOSAL_VERSION = 1, SKILL_PROPOSALS = 100, SKILL_BYTES = 16 * 1024, SKILL_EVIDENCE = 64;
+export const SKILL_PROPOSAL_VERSION = 2, SKILL_PROPOSALS = 100, SKILL_BYTES = 16 * 1024, SKILL_EVIDENCE = 64;
 export interface SkillProposal { name: string; summary: string; steps: string[]; evidence: string[] }
 export type SkillDecision = "accept" | "reject" | "withdraw";
-export interface SkillRecord extends SkillProposal {
-  skillProposal: 1; state: "proposed" | "accepted" | "rejected" | "withdrawn"; sha256: string; actor: Actor; at: string;
-  decision?: { action: SkillDecision; reason: string; pr?: string; actor: Actor; at: string };
+interface SkillRecordState {
+  state: "proposed" | "accepted" | "rejected" | "withdrawn"; sha256: string; actor: Actor; at: string;
+  decision?: { action: SkillDecision; reason: string; pr?: string; actor: Actor; at: string; evidenceFingerprint?: string };
 }
+export type SkillRecord = SkillRecordState & (SkillProposal & {skillProposal: 1; evidenceStatus: "legacy-unresolved"} | SkillProposalV2 & {skillProposal: 2; evidenceStatus: "inspection-required"});
+
 function bad(message: string): never { throw new Error(`skill: ${message}; inspect ares skill list, correct the input or restore the last valid proposal and retry`); }
 function nameOf(value: unknown): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(value)) bad("name must follow the run-name rule (1..64 letters, digits, underscores or hyphens)");
@@ -47,22 +50,24 @@ function prOf(value: unknown, action: SkillDecision): string | undefined {
   catch { bad("PR must be an HTTP(S) URL without credentials"); }
   return result;
 }
-function version(event: LedgerEvent): void {
-  if (event.data.skillProposal !== 1) throw new Error("skill proposal: unsupported version; use an ares version supporting this journal and keep its files unchanged");
+function version(event: LedgerEvent): 1 | 2 {
+  if (event.data.skillProposal !== 1 && event.data.skillProposal !== 2) throw new Error("skill proposal: unsupported version; use an ares version supporting this journal and keep its files unchanged");
+  return event.data.skillProposal;
 }
 export function foldSkills(events: LedgerEvent[]): SkillRecord[] {
   const rows = new Map<string, SkillRecord>();
   for (const event of events) {
     if (event.type === "skill.proposed") {
-      version(event); const proposal = validateSkillProposal(event.data.proposal, false), hash = sha256(markdown(proposal));
+      const v = version(event), proposal = v === 1 ? validateSkillProposal(event.data.proposal, false) : validateSkillProposalV2(event.data.proposal), hash = sha256(v === 1 ? markdown(proposal as SkillProposal) : skillMarkdownV2(proposal as SkillProposalV2));
       if (event.data.sha256 !== hash || rows.has(proposal.name) || rows.size >= SKILL_PROPOSALS) bad("journal has a mismatched hash, duplicate name or more than 100 proposals");
-      rows.set(proposal.name, { ...proposal, skillProposal: 1, state: "proposed", sha256: hash, actor: event.actor, at: event.at });
+      rows.set(proposal.name, { ...proposal, skillProposal: v, evidenceStatus: v === 1 ? "legacy-unresolved" : "inspection-required", state: "proposed", sha256: hash, actor: event.actor, at: event.at } as SkillRecord);
     } else if (event.type === "skill.decided") {
-      version(event); const name = nameOf(event.data.name), row = rows.get(name), action = decisionOf(event.data.decision);
-      if (!row || row.state !== "proposed") bad("decision references a missing or already decided proposal");
+      const v = version(event), name = nameOf(event.data.name), row = rows.get(name), action = decisionOf(event.data.decision);
+      if (!row || row.state !== "proposed" || row.skillProposal !== v) bad("decision references a missing, mismatched-version or already decided proposal");
       const reason = text(event.data.reason, "reason"), pr = prOf(event.data.pr, action);
+      if (v === 2 && action === "accept" && (typeof event.data.evidenceFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(event.data.evidenceFingerprint))) bad("v2 acceptance lacks its evidence fingerprint; restore the original decision event");
       row.state = action === "accept" ? "accepted" : action === "reject" ? "rejected" : "withdrawn";
-      row.decision = { action, reason, ...(pr === undefined ? {} : { pr }), actor: event.actor, at: event.at };
+      row.decision = { action, reason, ...(pr === undefined ? {} : { pr }), actor: event.actor, at: event.at, ...(v === 2 && action === "accept" ? {evidenceFingerprint: event.data.evidenceFingerprint as string} : {}) };
     }
   }
   return [...rows.values()];
@@ -74,7 +79,7 @@ function readSkills(dirArg: string) {
   for (const row of rows) {
     let content: string;
     try { content = readTextBounded(file(dir, row.name), SKILL_BYTES); } catch { bad("proposal file missing, unreadable or larger than 16 KiB; restore its committed Markdown"); }
-    if (!content.startsWith("---\nskillProposal: 1\n")) throw new Error("skill proposal file: unsupported version; use an ares version supporting this file and keep it unchanged");
+    if (!content.startsWith(`---\nskillProposal: ${row.skillProposal}\n`)) throw new Error("skill proposal file: unsupported version; use an ares version supporting this file and keep it unchanged");
     if (sha256(content) !== row.sha256) bad("proposal file differs from its receipt; restore the original Markdown");
   }
   return { dir, events, rows };
@@ -94,6 +99,7 @@ export function decideSkill(dirArg: string, name: string, decision: string, reas
   const target = nameOf(name), action = decisionOf(decision), why = text(reason, "reason"), reference = prOf(pr, action), { dir, events, rows } = readSkills(dirArg);
   const row = rows.find(row => row.name === target);
   if (!row || row.state !== "proposed") bad("proposal is missing or already decided; decisions including withdrawal are final");
+  if (row.skillProposal !== 1) bad("v2 decisions require the evidence-bound preflight from T2; keep the proposal unchanged until that support is implemented");
   const added = commit(dir, [], [{ actor, type: "skill.decided", data: { skillProposal: 1, name: target, decision: action, reason: why, ...(reference === undefined ? {} : { pr: reference }) } }]);
   return foldSkills([...events, ...added]).find(row => row.name === target)!;
 }

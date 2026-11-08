@@ -105,7 +105,7 @@ test("replay preserves additive v1 fields and refuses unsupported versions or in
   const dir = study(); await ops.skillPropose(dir, proposal(), ctx); const events = readLedger(dir), proposed = events.at(-1)!;
   const additive = { ...proposed, data: { ...proposed.data, future: true, proposal: { ...proposal(), future: true } } };
   expect(foldSkills([...events.slice(0, -1), additive])[0]!.state).toBe("proposed");
-  expect(() => foldSkills([{ ...proposed, data: { ...proposed.data, skillProposal: 2 } }])).toThrow("unsupported version");
+  expect(() => foldSkills([{ ...proposed, data: { ...proposed.data, skillProposal: 3 } }])).toThrow("unsupported version");
   const missing = { ...proposed, type: "skill.decided", data: { skillProposal: 1, name: "missing", decision: "withdraw", reason: "why" } };
   expect(() => foldSkills([missing])).toThrow("missing");
 });

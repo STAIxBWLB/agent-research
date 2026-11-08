@@ -89,15 +89,15 @@ test("experiment MCP pivot preserves cause/retryWhen and refuses them on refine"
 });
 
 test("manifest advertises A5 formats/events and unsupported versions refuse without rewriting bytes", async () => {
-  expect(ops.manifest().formats.skillProposal).toBe(1);
+  expect(ops.manifest().formats.skillProposal).toBe(2);
   expect(ops.manifest().ledgerEvents).toEqual(["archive.exported", "skill.proposed", "skill.decided", "watch.set", "watch.ran", "autonomy.set"]);
   const snapshot = ops.manifest(); snapshot.ledgerEvents.pop(); expect(ops.manifest().ledgerEvents).toHaveLength(6);
   for (const kind of ["ledger", "proposal-event", "proposal-file"]) {
     const dir = study(); await ops.skillPropose(dir, proposal, { actor });
     const journal = join(dir, "ledger.jsonl"), proposalFile = join(dir, "proposals", "skills", `${proposal.name}.md`);
-    if (kind === "proposal-file") writeFileSync(proposalFile, readFileSync(proposalFile, "utf8").replace("skillProposal: 1", "skillProposal: 2"));
+    if (kind === "proposal-file") writeFileSync(proposalFile, readFileSync(proposalFile, "utf8").replace("skillProposal: 1", "skillProposal: 3"));
     else {
-      const events = readLedger(dir); if (kind === "ledger") events.at(-1)!.v = 2 as 1; else events.at(-1)!.data.skillProposal = 2;
+      const events = readLedger(dir); if (kind === "ledger") events.at(-1)!.v = 2 as 1; else events.at(-1)!.data.skillProposal = 3;
       writeFileSync(journal, events.map(event => JSON.stringify(event)).join("\n") + "\n");
     }
     const bytes = readFileSync(journal), fileBytes = readFileSync(proposalFile), fake = fakeRunner([]), server = createAresMcp({}, fakeHttp([]).http, { runner: fake.runner });
