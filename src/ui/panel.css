@@ -9,3 +9,7 @@
 .ares-list { margin: 0; padding-left: 1.5em; overflow-wrap: anywhere; }
 .ares-list li + li { margin-top: var(--acon-space-1); }
 @media (max-width: 600px) { .ares-bar { align-items: flex-start; } .ares-bar h2 { flex-basis: 100%; } }
+
+.ares-identifiers { min-width: 0; overflow-wrap: anywhere; word-break: break-word; font-variant-numeric: tabular-nums; }
+.ares-identifiers td, .ares-identifiers th { max-width: 28rem; white-space: normal; overflow-wrap: anywhere; }
+.ares-identifiers table { font-size: var(--acon-text-sm); font-variant-numeric: tabular-nums; }
