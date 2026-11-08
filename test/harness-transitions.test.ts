@@ -266,3 +266,36 @@ test("a near-limit successor import refuses before any gate/ledger write and lea
   await expect(ops.harnessImport(f.dir, raw.id, {...source("candidate"), id: "near-cap-successor".padEnd(256, "x"), arm: "successor", guidanceHash: "9".repeat(64)}, f.ctx)).rejects.toThrow("evidence view would exceed its 1 MiB bound");
   expect(bytes(f.dir)).toEqual(before); expect(ops.harnessShow(f.dir, raw.id)).toEqual(selected);
 });
+
+test("unexecuted successor adoption refuses before preview or writes, then accepts its exact imported execution", async () => {
+  const f = await fixture(); await ops.harnessContrast(f.dir, "round-one", contrast(f.dir), f.ctx); await ops.harnessCompose(f.dir, "round-one", composition(f.dir), f.ctx);
+  const make = () => ({v: 1, id: "adopt-successor", fingerprint: view(f.dir).transitions.fingerprint, decision: "adopt", arm: "successor", reason: "Synthetic experimental adoption", checks: [] as ReturnType<typeof ref>[], independentCheck: {state: "unavailable", source: {kind: "unavailable", refs: []}}});
+  const before = bytes(f.dir); expect(view(f.dir).transitions.successor?.execution).toBe("unexecuted");
+  for (const checks of [[], [ref(f.dir, "candidate")]]) for (const confirm of [undefined, "f".repeat(64)]) {
+    await expect(ops.harnessAdopt(f.dir, "round-one", {...make(), checks}, confirm, f.ctx)).rejects.toThrow("import the exact successor fixture with ares harness import"); expect(bytes(f.dir)).toEqual(before);
+  }
+  expect(view(f.dir).transitions.closure).toBeNull();
+  await ops.harnessImport(f.dir, "round-one", {...source("candidate"), id: "executed-successor", arm: "successor", guidanceHash: "9".repeat(64)}, f.ctx);
+  const raw = {...make(), checks: [ref(f.dir, "successor")]}, preview = await ops.harnessAdopt(f.dir, "round-one", raw, undefined, f.ctx); if (!("needsConfirm" in preview)) throw new Error();
+  await ops.harnessAdopt(f.dir, "round-one", raw, preview.fingerprint, f.ctx); expect(view(f.dir).transitions.closure?.outcome).toBe("adopted-experimental");
+});
+
+test("declared candidate with no current probe cannot be adopted and an existing candidate must be cited in checks", async () => {
+  const f = await fixture("auto"); await ops.harnessSet(f.dir, {...definition(), candidates: [...definition().candidates, {id: "unexecuted-candidate", guidanceSha256: "8".repeat(64)}]}, f.ctx);
+  const raw = {v: 1, id: "adopt-missing", fingerprint: view(f.dir).transitions.fingerprint, decision: "adopt", arm: "unexecuted-candidate", reason: "Synthetic experimental adoption", checks: [], independentCheck: {state: "unavailable", source: {kind: "unavailable", refs: []}}}, before = bytes(f.dir);
+  expect(ops.gateList(f.dir).find(gate => gate.gate === "harness:round-one")?.state).toBe("pending");
+  await expect(ops.harnessAdopt(f.dir, "round-one", raw, undefined, f.ctx)).rejects.toThrow("import the exact unexecuted-candidate fixture with ares harness import"); expect(bytes(f.dir)).toEqual(before);
+  expect(ops.gateList(f.dir).find(gate => gate.gate === "harness:round-one")?.state).toBe("pending");
+  const g = await fixture(), existing = {...raw, id: "uncited-candidate", fingerprint: view(g.dir).transitions.fingerprint, arm: "candidate", checks: [ref(g.dir, "baseline")]}, saved = bytes(g.dir);
+  await expect(ops.harnessAdopt(g.dir, "round-one", existing, undefined, g.ctx)).rejects.toThrow("import the exact candidate fixture with ares harness import"); expect(bytes(g.dir)).toEqual(saved);
+});
+
+test("identical-byte successor adoption cites the reused candidate execution without creating another sample", async () => {
+  const f = await fixture(); await ops.harnessContrast(f.dir, "round-one", contrast(f.dir), f.ctx); await ops.harnessCompose(f.dir, "round-one", composition(f.dir, source("candidate").guidanceHash), f.ctx);
+  const before = view(f.dir), raw = {v: 1, id: "adopt-identical-successor", fingerprint: before.transitions.fingerprint, decision: "adopt", arm: "successor", reason: "Synthetic reuse of identical executed guidance", checks: [ref(f.dir, "candidate")], independentCheck: {state: "unavailable", source: {kind: "unavailable", refs: []}}};
+  expect(before.transitions.successor).toMatchObject({execution: "fixture-declared", probeId: source("candidate").id});
+  const preview = await ops.harnessAdopt(f.dir, "round-one", raw, undefined, f.ctx); if (!("needsConfirm" in preview)) throw new Error();
+  await ops.harnessAdopt(f.dir, "round-one", raw, preview.fingerprint, f.ctx);
+  const after = view(f.dir); expect(after.transitions.closure?.outcome).toBe("adopted-experimental"); expect(after.probes).toEqual(before.probes);
+  expect(after.transitions.adoption?.form.checks[0]?.probe).toBe(source("candidate").id); expect(after.transitions.readiness).toMatchObject({correctness: "unavailable", transfer: "not-demonstrated"});
+});

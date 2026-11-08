@@ -140,6 +140,8 @@ export function applyTransition(state: TransitionState, event: LedgerEvent, roun
     const known = adoption.arm === "baseline" || round.candidates.some(candidate => candidate.id === adoption.arm) || adoption.arm === "successor" && !!bucket.composition?.form.successorSha256;
     if (!known || adoption.arm === "baseline") transitionFail("decision arm differs from its declared candidate/baseline");
     admitted(adoption.checks, probes); admitted(adoption.independentCheck.source.refs, probes);
+    const checked = new Set(adoption.checks.map(ref => ref.probe)), successor = adoption.arm === "successor" ? successorView(probes, bucket) : null;
+    if (!probes.some(probe => checked.has(probe.projection.id) && (probe.projection.arm === adoption.arm || adoption.arm === "successor" && successor?.execution === "fixture-declared" && probe.projection.id === successor.probeId))) transitionFail(`adoption needs its selected arm's admitted execution in checks; import the exact ${adoption.arm} fixture with ares harness import, then cite its current probe in checks`);
     if (adoption.independentCheck.state !== "unavailable") transitionFail("independent deterministic check is unavailable for fixture-only sources; never turn a judgment or fixture into passed/failed correctness");
     if (bucket.closed?.form.fingerprint === form.fingerprint) transitionFail("current evidence already has an immutable closure");
     bucket.adoption = record as Recorded<HarnessAdoption>;
