@@ -12,7 +12,7 @@ import {createAresMcp} from "../src/mcp-tools.ts";
 import {addStudy} from "../src/console/registry.ts";
 import {commit, readTextBounded, writeAtomic} from "../src/study.ts";
 import {provenanceFixture} from "./provenance-fixtures.ts";
-import {tempDir, fakeHttp} from "./helpers.ts";
+import {tempDir} from "./helpers.ts";
 const persistent = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "ares-console-lineage-"))), fixedHome = join(persistent, "family"), fixed = await provenanceFixture(join(persistent, "study")); addStudy(fixedHome, fixed.dir);
 afterAll(() => fs.rmSync(persistent, {recursive: true, force: true}));
 const plugin = createPlugin({env: {HOME: fixedHome, AGENTHUB_HOME: fixedHome}, runner: async () => { throw new Error("no console executor or hub"); }}) as unknown as ConsolePlugin;
@@ -115,7 +115,7 @@ test("same-cursor polls expose record corruption and repair without stale or fal
 });
 
 test("standalone old survey studies remain readable without attempts, hub or executor", async () => {
-  const home = fs.realpathSync(tempDir()), dir = join(home, "legacy-study"); ops.init(dir, {question: "Synthetic legacy survey", autonomy: "gates"}, {actor: {kind: "person"}, http: fakeHttp([]).http}); addStudy(home, dir);
+  const home = fs.realpathSync(tempDir()), dir = join(home, "legacy-study"); ops.init(dir, {question: "Synthetic legacy survey", autonomy: "gates"}, {actor: {kind: "person"}}); addStudy(home, dir);
   const provider = await createPlugin({env: {HOME: home, AGENTHUB_HOME: home}}).open({home, log: () => {}}), result = await provider.snapshot({panel: "lineage", study: dir, after: 0});
   expect(result.lineage).toEqual(ops.lineageShow(dir)); expect((result.lineage as {status: string}).status).toBe("ok");
 });

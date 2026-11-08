@@ -75,7 +75,8 @@ test("changed, capped and unavailable graphs retain explicit recovery notices", 
 test("comparison selector requires exactly one distinct bounded list before read-only navigation", async () => {
   const f = await mount(); f.panel.show("compare", { study: study.dir }); f.emit({ study, comparison: null });
   const form = descendants(f.root).find(node => node.tag === "form")!, submit = form.props.onSubmit as (values: Record<string, string>) => void;
-  for (const values of [{}, { attempts: "a".repeat(16), candidates: "b".repeat(40) }, { attempts: Array(9).fill("a".repeat(16)).join(",") }, { attempts: `${"a".repeat(16)},${"a".repeat(16)}` }, { candidates: "short" }]) submit(values);
+  const invalid: Record<string, string>[] = [{}, { attempts: "a".repeat(16), candidates: "b".repeat(40) }, { attempts: Array(9).fill("a".repeat(16)).join(",") }, { attempts: `${"a".repeat(16)},${"a".repeat(16)}` }, { candidates: "short" }];
+  for (const values of invalid) submit(values);
   expect(f.navigations).toEqual([]); expect(content(f.root)).toContain("one to eight distinct");
   submit({ attempts: ` ${"a".repeat(16)}, ${"b".repeat(16)} ` });
   expect(f.navigations.at(-1)?.params).toEqual({ study: study.dir, attempts: `${"a".repeat(16)},${"b".repeat(16)}` });
