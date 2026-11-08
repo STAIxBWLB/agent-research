@@ -121,3 +121,17 @@ test("candidate summaries preserve recorded eligibility and numbers without reco
   expect(content(f.root)).toContain("Per-seed display shortened to the first 128 records");
   expect(content(f.root)).toContain("Aggregation unavailable; performed: false"); expect(f.actions()).toBe(0);
 });
+
+for (const kind of ["lineage", "compare"] as const) test(`${kind} retains status guidance at issue65 and counts omitted issues/reasons`, async () => {
+  const f = await mount(), critical = kind === "lineage" ? "traversal-capped" : "comparison-selection-unavailable", issues = [...Array.from({length: 64}, (_, i) => ({code: `source-${i}`, message: `Synthetic issue ${i}`})), {code: critical, message: "Critical final guidance"}];
+  f.panel.show(kind, {study: study.dir});
+  if (kind === "lineage") f.emit({study, lineage: page({status: "capped", issues})});
+  else f.emit({study, comparison: {status: "unavailable", issues, aggregation: {compatible: false, reasons: Array.from({length: 65}, (_, i) => `compatibility-${i}`)}, rows: [{kind: "attempt", id: "a".repeat(16), state: "unavailable", attempts: [], reasons: Array.from({length: 65}, (_, i) => `selection-${i}`)}]}});
+  const body = content(f.root); expect(body).toContain("Critical final guidance"); expect(body).toContain(critical); expect(body).toContain(`1 more; inspect with ares lineage ${kind === "lineage" ? "show" : "compare"} <dir> --json`);
+  if (kind === "compare") { const notices = descendants(f.root).filter(node => node.tag === "notice" && String(node.props.text).startsWith("1 more;")); expect(notices).toHaveLength(3); }
+});
+
+test("comparison source changes request a retry without pagination wording", async () => {
+  const f = await mount(); f.panel.show("compare", {study: study.dir}); f.emit({study, comparison: {status: "changed", issues: [{code: "source-changed", message: "Source changed"}], rows: [], aggregation: {compatible: false, reasons: []}}});
+  expect(content(f.root)).toContain("Sources changed or a write is in progress; retry the comparison."); expect(content(f.root)).not.toContain("first page");
+});

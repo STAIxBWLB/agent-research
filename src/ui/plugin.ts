@@ -312,6 +312,10 @@ export function createPlugin(runtime: Runtime = {}) { return {
     return {
       assets,
       async snapshot(input) {
+        if (input.panel === "lineage" || input.panel === "compare") {
+          const allowed = ["panel", "study", "after", ...LINEAGE_PARAMS], extra = Object.keys(input).find(name => !allowed.includes(name));
+          if (extra !== undefined) return {cursor: 0, changed: true, study: null, lineage: null, comparison: null, error: `console read snapshot: unknown field ${line(extra, 80)}; allowed fields: ${allowed.join(", ")}; correct the view parameters and retry`};
+        }
         const registry = readRegistry(ctx.home);
         const cursor = registry.studies.reduce((sum, dir) => {
           try { const info = statSync(join(dir, "ledger.jsonl")); return sum + (info.isFile() ? info.size : 0); } catch { return sum; }

@@ -174,12 +174,20 @@ export default (host) => {
     if (snapshot.error) sections.push(ui.notice(String(snapshot.error), "err"));
     return sections;
   };
-  const readNotices = (value) => {
+  const moreNotice = (count, command) => count > 0 ? ui.notice(`${count} more; inspect with ares lineage ${command} <dir> --json`, "warn") : null;
+  const reasonRows = (value, command = "compare") => {
+    const values = rows(value), shown = values.slice(0, 64);
+    return h("div", {}, ui.rows(shown, reason => ui.row({ title: String(reason) })), moreNotice(values.length - shown.length, command));
+  };
+  const readNotices = (value, command = "show") => {
     const data = record(value), notices = [];
-    if (data.status === "changed") notices.push(ui.notice("Sources or the root selection changed. Restart from the first page before continuing.", "warn"));
-    else if (data.status === "capped" || data.truncated === true) notices.push(ui.notice(data.status === "capped" ? "Traversal capped: this is a partial graph, not complete provenance." : "This page is partial. Continue to read the remaining source-proven records.", "warn"));
+    if (data.status === "changed") notices.push(ui.notice(command === "compare" ? "Sources changed or a write is in progress; retry the comparison." : "Sources or the root selection changed. Restart from the first page before continuing.", "warn"));
+    else if (data.status === "capped" || data.truncated === true) notices.push(ui.notice(data.status === "capped" ? command === "compare" ? "Traversal capped: this is a partial comparison, not complete evidence." : "Traversal capped: this is a partial graph, not complete provenance." : "This page is partial. Continue to read the remaining source-proven records.", "warn"));
     if (data.status === "unavailable") notices.push(ui.notice("Some source records are unavailable or corrupt. Retained receipts do not establish current readable results.", "warn"));
-    notices.push(...rows(data.issues).slice(0, 64).map(issue => ui.notice(`${text(issue.code, "Source issue")}: ${text(issue.message, "Inspect and restore the source record.")}`, "warn")));
+    const issues = rows(data.issues), critical = issue => /capped|changed/.test(text(issue.code, "")) || issue.code === "comparison-selection-unavailable";
+    const important = issues.filter(critical), shown = [...important, ...issues.filter(issue => !critical(issue)).slice(0, Math.max(0, 64 - important.length))];
+    notices.push(...shown.map(issue => ui.notice(`${text(issue.code, "Source issue")}: ${text(issue.message, "Inspect and restore the source record.")}`, "warn")));
+    const omitted = moreNotice(issues.length - shown.length, command); if (omitted) notices.push(omitted);
     return notices;
   };
   const lineageView = (snapshot) => {
@@ -214,11 +222,11 @@ export default (host) => {
       }), errors);
     const comparison = snapshot.comparison;
     if (!comparison) return [...sections, ui.empty("Choose records to compare", "Failed and unknown attempts remain visible; retries are not independent samples.")];
-    sections.push(...readNotices(comparison), h("p", { class: "ares-sub ares-identifiers", text: `Source sha256: ${text(comparison.sourceSha256)} | ledger bytes: ${number(comparison.ledgerPosition)}` }), ui.notice("Aggregation unavailable; performed: false. These descriptive rows do not pool retries or create a verdict. Existing closed investigation and fresh final remain the result authorities.", "neutral"));
+    sections.push(...readNotices(comparison, "compare"), h("p", { class: "ares-sub ares-identifiers", text: `Source sha256: ${text(comparison.sourceSha256)} | ledger bytes: ${number(comparison.ledgerPosition)}` }), ui.notice("Aggregation unavailable; performed: false. These descriptive rows do not pool retries or create a verdict. Existing closed investigation and fresh final remain the result authorities.", "neutral"));
     const aggregation = record(comparison.aggregation);
     sections.push(h("section", { class: "ares-card" }, h("h3", { text: "Input compatibility" }),
       ui.chip(aggregation.compatible === true ? "compatible inputs" : "compatibility unavailable or restricted", aggregation.compatible === true ? "neutral" : "warn"),
-      ui.rows(rows(aggregation.reasons).slice(0, 64), reason => ui.row({ title: String(reason) }))));
+      reasonRows(aggregation.reasons)));
     for (const row of rows(comparison.rows).slice(0, 8)) {
       const attempts = rows(row.attempts).slice(0, 128), columns = [
         ["id", "Attempt"], ["code", "Code commit / tree / snapshot"], ["protocol", "Protocol hash"], ["seed", "Seed"], ["status", "Status"], ["retry", "Retry ancestry / sample group"], ["metrics", "Metrics and units"], ["digests", "Artifact digests (not read)"], ["wall", "Wall ms (recorded)"], ["bytes", "Output bytes"], ["other", "Other costs"],
@@ -243,7 +251,7 @@ export default (host) => {
           rows: perSeed.map(sample => ({ seed: recorded(sample.seed), attempt: text(sample.attempt), value: recorded(sample.value) })) }),
         rows(candidate.perSeed).length > perSeed.length ? ui.notice("Per-seed display shortened to the first 128 records. Inspect the complete closed investigation with the ares CLI.", "warn") : null) : null;
       sections.push(h("section", { class: "ares-card ares-identifiers" }, h("h3", { text: `${text(row.kind)}: ${text(row.id)}` }), ui.chip(text(row.state), tone(row.state)), candidateSummary,
-        ui.rows(rows(row.reasons).slice(0, 64), reason => ui.row({ title: String(reason) })),
+        reasonRows(row.reasons),
         ui.table({ caption: "Recorded attempt comparison", columns, rows: tableRows }),
         ui.rows(attempts, attempt => ui.row({ title: `Trace attempt ${text(attempt.id)}`, sub: rows(attempt.comparabilityReasons).join("; "), onOpen: () => trace(study.dir, { kind: "attempt", id: attempt.id }) })),
         rows(row.attempts).length > attempts.length || attempts.some(attempt => rows(attempt.metrics).length > 32 || rows(attempt.artifactDigests).length > 64) ? ui.notice("Display shortened to bounded rows or inventories. Inspect the full read-only comparison with the ares CLI.", "warn") : null));

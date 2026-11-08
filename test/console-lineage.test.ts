@@ -128,3 +128,11 @@ for (const damage of ["missing", "malformed"] as const) test(`#107 rooted CLI/MC
   expect((await provider.snapshot({panel: "lineage", study: f.dir, rootKind: root.kind, rootId: root.id, after: 0})).lineage).toEqual(expected);
   if (damage === "missing") expect(fs.existsSync(file)).toBe(false); else expect(readTextBounded(file, 65_536)).toBe("{ malformed JSON");
 });
+
+for (const input of [{panel: "lineage", rootRevisionTypo: "1"}, {panel: "compare", attemptTypo: "1234567890abcdef"}]) test(`${input.panel} rejects unknown snapshot fields before any reads`, async () => {
+  const {f, provider} = await fixture(), original = fs.openSync, opened: string[] = [], spy = spyOn(fs, "openSync").mockImplementation(((file, flags, mode) => { opened.push(String(file)); return original(file, flags, mode); }) as typeof fs.openSync);
+  try {
+    const response = await provider.snapshot({...input, study: f.dir, after: 0});
+    expect(response.error).toContain("unknown field"); expect(response.error).toContain("allowed fields: panel, study, after, rootKind, rootId, rootRevision, rootSha256, graphCursor, attempts, candidates"); expect(response.lineage).toBeNull(); expect(response.comparison).toBeNull(); expect(opened).toEqual([]);
+  } finally { spy.mockRestore(); }
+});
