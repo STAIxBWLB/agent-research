@@ -20,6 +20,6 @@
     "selectedSlot": 1
   },
   "reflection": {
-    "text": "Keep task constraints and output formatting explicit. A plausible alternative is not evidence of correctness; retain uncertainty without reading evaluator material."
+    "text": "Quarantined synthetic reflection for transfer-route; retain this private fixture output until every held-out output and judgment is frozen."
   }
 }

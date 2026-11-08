@@ -7,7 +7,7 @@
     "corpusSha256": "9f40153fd6ce6a3c25b76f2ecc5dc0a09becd19260d4f5dc46589f9a2009c02b",
     "inputSha256": "51b17775b478c1fd487cadefb17130da1a39afdfaa036c198c7e394e6830e699",
     "expectedSha256": "e8ca1945ddb264bceef413a1b5cce9763655ccec92458e3bf235154033061f64",
-    "controlSha256": "952b7dc2c117b5b8fed76b2265bf532d8959e79130e0a2536beb0252e24625c2",
+    "controlSha256": "e00c792eb07a264d4af20c91d8a01c23db86aa00c20d1d0eb5883795ba647762",
     "orderedStreamSha256": "3712cf4b2654599f22ba310e724348ab78354342d397bbd2bb3cae8f66db2065",
     "learningSourceSha256": "c06c4033757d40ee905a40d7951b97c3dae789f8b7982499d7405f66cd887da6",
     "thresholdsSha256": "1e344091474fde2b179bc5cf3b40baef8954d67615297472e68b2b11e7578bbd",
@@ -156,8 +156,8 @@
     },
     {
       "path": "test/fixtures/harness/transfer-weighted.control.json",
-      "sha256": "6c25bf36b4ea7ba222364fc64dee26a082fae5abd5df049fcc34023600e80bda",
-      "bytes": 740
+      "sha256": "c5e53db4469924601e5d1c30a53e03f2f32dc6668c82ddef89658dadc59d160e",
+      "bytes": 718
     },
     {
       "path": "test/fixtures/harness/transfer-route.input.json",
@@ -171,8 +171,8 @@
     },
     {
       "path": "test/fixtures/harness/transfer-route.control.json",
-      "sha256": "29b0a3969da9ae562ac8de4934abcc041c7ece8f0e66e7fe62c16cf38193e6fc",
-      "bytes": 759
+      "sha256": "22aba87ffbe6439161265085b9885f96c4e852a1f7dc9d35dca20a389f145f4f",
+      "bytes": 734
     },
     {
       "path": "test/fixtures/harness/transfer-grid.input.json",
@@ -186,8 +186,8 @@
     },
     {
       "path": "test/fixtures/harness/transfer-grid.control.json",
-      "sha256": "c46cd245301f48e16c9d686c0784e716744d275e14dd757ed12cc57dba442f22",
-      "bytes": 727
+      "sha256": "75377687292d6fc37aa8ae37e8de7aa5241fb83fd07b8ca0c12e57bc9df156a4",
+      "bytes": 701
     },
     {
       "path": "test/fixtures/harness/transfer-cycle.input.json",
@@ -201,13 +201,13 @@
     },
     {
       "path": "test/fixtures/harness/transfer-cycle.control.json",
-      "sha256": "fd07e4428d00e76113e5560f0b5f5d479b3878eb2de86c8afd026132b9c54ddf",
-      "bytes": 755
+      "sha256": "ad4f47a546b7b9068e0420fca18cb8f4ae0a8e5e286208ed2eab51bd8ee26302",
+      "bytes": 730
     },
     {
       "path": "test/fixtures/harness/faults.json",
-      "sha256": "62d4aedb8efee3a0d818f0f38a827f771c1e57fc71bb2a4924a698582584ffd1",
-      "bytes": 4441
+      "sha256": "7a0c80796270bbcba33bcb9ee6495903dfd47723a543c68959235ef75219f50f",
+      "bytes": 5997
     },
     {
       "path": "docs/verification/harness-eval-protocol.md",
@@ -215,5 +215,5 @@
       "bytes": 15192
     }
   ],
-  "receiptSha256": "a1f2593d3f4fa60c3227e9103e4a41e17e2089555c7c0af332f59de31fb5dea0"
+  "receiptSha256": "45a3c21fc5f1280ce0e7433fe5461825547ee417fb56190a2d7080c596afec8d"
 }

@@ -171,6 +171,63 @@
         "referenceLibrarySha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "compositionLibrarySha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
       }
+    },
+    {
+      "id": "nested-heldout-library",
+      "kind": "heldout-library-entry",
+      "role": "proposer",
+      "payload": {
+        "library": [
+          {
+            "sourceTaskId": "transfer-weighted",
+            "text": "Synthetic held-out experience",
+            "sha256": "173df42a65bd072eadfd6bbe8213d4839f3fd340abf148639e72ff89351b3d71"
+          }
+        ],
+        "librarySha256": "dd2c2bb80a31bfe1289d7334c9a9e2af60e61b635c18853ed689bfd4a48ffcd1"
+      }
+    },
+    {
+      "id": "nested-library-digest",
+      "kind": "library-digest-mismatch",
+      "role": "worker",
+      "payload": {
+        "library": [
+          {
+            "sourceTaskId": "table-amber",
+            "text": "Synthetic prior experience",
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+          }
+        ],
+        "librarySha256": "c47d256ea9c5b66db3303b55420857e1482a39cfa38afb33ca3a46e26ee107b8"
+      }
+    },
+    {
+      "id": "labelled-selector-id",
+      "kind": "labelled-candidate-id",
+      "role": "selector",
+      "payload": {
+        "candidates": [
+          {
+            "id": "contrastive-prior",
+            "output": "Synthetic output"
+          }
+        ]
+      }
+    },
+    {
+      "id": "selector-origin-field",
+      "kind": "candidate-origin-field",
+      "role": "selector",
+      "payload": {
+        "candidates": [
+          {
+            "id": "0123456789abcdef",
+            "output": "Synthetic output",
+            "origin": "contrastive-prior"
+          }
+        ]
+      }
     }
   ]
 }

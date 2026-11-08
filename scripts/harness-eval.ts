@@ -112,29 +112,56 @@ export function librarySnapshot(cases: HarnessCase[], order: Order, targetId: st
   const entries = order.taskIds.slice(0, position).filter(id => learning.includes(id)).map(id => {const source = cases.find(row => row.id === id); if (!source || source.split !== "learning") return fail("non-learning library source denied"); return {sourceTaskId: id, text: source.control.reflection.text, sha256: sha256(source.control.reflection.text)};});
   const frozen = Object.freeze(entries.map(entry => Object.freeze(entry))); LIBRARIES.set(frozen, {targetId, hash: sha256(canonical(frozen))}); return frozen;
 }
+export interface RoleValidationContext {targetId: string; taskIds: readonly string[]; learningSourceIds: readonly string[]; input: {prompt: string; data: Record<string, unknown>}; learningTextSha256: Readonly<Record<string, string>>}
+/** Only the outer fixture adapter gets this context; it never enters a role DTO. */
+export function makeRoleValidationContext(cases: HarnessCase[], order: Order, targetId: string, learning: readonly string[]): RoleValidationContext {
+  const task = cases.find(row => row.id === targetId); if (!task || !order.taskIds.includes(targetId)) fail("role target absent from frozen stream");
+  const hashes = Object.fromEntries(learning.map(id => {const source = cases.find(row => row.id === id); if (!source || source.split !== "learning") fail("role learning-source set contains a non-learning task"); return [id, sha256(source.control.reflection.text)];}));
+  return Object.freeze({targetId, taskIds: Object.freeze([...order.taskIds]), learningSourceIds: Object.freeze([...learning]), input: JSON.parse(canonical({prompt: task.input.prompt, data: task.input.data})) as RoleValidationContext["input"], learningTextSha256: Object.freeze(hashes)});
+}
 const ROLE_FIELDS: Record<Role, readonly string[]> = {proposer: ["guidance", "outputs"], worker: ["guidance"], composer: ["proposal", "outputs"], selector: ["candidates"], reflector: ["guidance", "selectedOutput"]};
-export function validateRolePayload(role: Role, raw: unknown): void {
+export function validateRolePayload(role: Role, raw: unknown, context: RoleValidationContext): void {
+  if (!(ROLES as readonly unknown[]).includes(role)) fail("unknown role");
   const value = object(raw, ["v", "role", "taskId", "prompt", "data", "library", "librarySha256", ...ROLE_FIELDS[role]], "role payload");
-  if (value.v !== 1 || value.role !== role || !Array.isArray(value.library) || value.librarySha256 !== sha256(canonical(value.library))) fail("role payload identity or library mismatch");
+  if (!context || !Array.isArray(context.taskIds) || !Array.isArray(context.learningSourceIds)) fail("frozen role validation context required");
+  const position = context.taskIds.indexOf(context.targetId);
+  if (position < 0 || value.v !== 1 || value.role !== role || value.taskId !== context.targetId || value.prompt !== context.input.prompt || !same(value.data, context.input.data) || !Array.isArray(value.library) || value.library.length > context.learningSourceIds.length || value.librarySha256 !== sha256(canonical(value.library))) fail("role payload identity, public input or library mismatch");
+  const sources = new Set<string>();
+  for (const rawEntry of value.library) {
+    const entry = object(rawEntry, ["sourceTaskId", "text", "sha256"], "library entry"), sourceId = text(entry.sourceTaskId, 64), content = text(entry.text);
+    if (typeof entry.sha256 !== "string" || entry.sha256 !== sha256(content)) fail("library entry text hash mismatch");
+    const before = context.taskIds.indexOf(sourceId);
+    if (!context.learningSourceIds.includes(sourceId) || before < 0 || before >= position || sources.has(sourceId)) fail("library source is not unique past learning experience");
+    if (!Object.hasOwn(context.learningTextSha256, sourceId) || context.learningTextSha256[sourceId] !== entry.sha256) fail("library source content changed from frozen experience");
+    sources.add(sourceId);
+  }
+  const outputs = (rawOutputs: unknown, name: string) => {
+    if (!Array.isArray(rawOutputs) || !rawOutputs.length || rawOutputs.length > 7) fail(`${name}: bounded output list required`);
+    const ids = new Set<string>();
+    for (const rawOutput of rawOutputs) {const output = object(rawOutput, ["id", "output"], name); if (typeof output.id !== "string" || !/^[a-f0-9]{16}$/.test(output.id) || ids.has(output.id)) fail(`${name}: opaque unique blinded id required`); text(output.output); ids.add(output.id);}
+  };
+  if (role === "selector") outputs(value.candidates, "selector candidate");
+  else if (role === "composer") {text(value.proposal); outputs(value.outputs, "composer output");}
+  else {text(value.guidance); if (role === "proposer") outputs(value.outputs, "proposer output"); if (role === "reflector") text(value.selectedOutput);}
   publicValue(value); if (Buffer.byteLength(canonical(value)) > DOCUMENT_BYTES) fail("role payload byte bound");
 }
-export function buildRoleInputs(task: HarnessCase, condition: Condition, library: readonly Experience[]): Record<Role, Record<string, unknown>> {
+export function buildRoleInputs(task: HarnessCase, condition: Condition, library: readonly Experience[], context: RoleValidationContext): Record<Role, Record<string, unknown>> {
   const registration = LIBRARIES.get(library); if (!registration || registration.targetId !== task.id || registration.hash !== sha256(canonical(library))) fail("unregistered or changed round library");
   const active = ["retrieval-only", "contrastive-prior"].includes(condition) ? library : [], frozen = JSON.parse(canonical(active)) as Experience[], librarySha256 = sha256(canonical(frozen));
   const outputs = task.control.baseOutputs.map((output, index) => ({id: sha256(canonical([task.inputSha256, index])).slice(0, 16), output}));
   const common = {v: 1, taskId: task.id, prompt: task.input.prompt, data: task.input.data, library: frozen, librarySha256};
-  const role = (name: Role, fields: Record<string, unknown>) => {const value = JSON.parse(canonical({...common, role: name, ...fields})) as Record<string, unknown>; validateRolePayload(name, value); return value;};
+  const role = (name: Role, fields: Record<string, unknown>) => {const value = JSON.parse(canonical({...common, role: name, ...fields})) as Record<string, unknown>; validateRolePayload(name, value, context); return value;};
   return {proposer: role("proposer", {guidance: "Frozen synthetic advisory base", outputs: [outputs[0]]}), worker: role("worker", {guidance: condition.startsWith("contrastive-") ? task.control.editor.composedGuidance : "Frozen synthetic advisory base"}), composer: role("composer", {proposal: task.control.editor.proposal, outputs: [{id: sha256("probe" + task.inputSha256).slice(0, 16), output: task.control.editor.probeOutput}]}), selector: role("selector", {candidates: condition === "repeated-base" ? outputs : condition.startsWith("contrastive-") ? [outputs[0], {id: sha256("successor" + task.inputSha256).slice(0, 16), output: task.control.editor.successorOutput}] : [outputs[0]]}), reflector: role("reflector", {guidance: "Frozen synthetic advisory base", selectedOutput: condition.startsWith("contrastive-") && task.control.selection.selectedSlot === 1 ? task.control.editor.successorOutput : task.control.baseOutputs[condition === "repeated-base" ? task.control.selection.selectedSlot : 0]})};
 }
-export function validateRoundInputs(inputs: Record<Role, Record<string, unknown>>): void {
-  for (const role of ROLES) validateRolePayload(role, inputs[role]);
+export function validateRoundInputs(inputs: Record<Role, Record<string, unknown>>, context: RoleValidationContext): void {
+  for (const role of ROLES) validateRolePayload(role, inputs[role], context);
   if (new Set(ROLES.map(role => canonical(inputs[role].library))).size !== 1 || new Set(ROLES.map(role => inputs[role].librarySha256)).size !== 1) fail("within-round library changed");
 }
 export function requireFixturePolicy(status: unknown): void {if (status !== "allowed") fail("condition invalidated: policy denied or revoked; no replacement");}
 export function requireResumeBinding(registered: unknown, resumed: unknown): void {if (typeof registered !== "string" || !/^[a-f0-9]{64}$/.test(registered) || registered !== resumed) fail("resume input hash changed");}
 interface FaultObservation {id: string; kind: string; role: Role; outcome: "blocked" | "insufficient-evidence"; cause: string}
 function faultControls(source: Snapshot): FaultObservation[] {
-  const task = source.cases[0]!, order = source.orders[0]!, library = librarySnapshot(source.cases, order, task.id, source.learning), prepared = buildRoleInputs(task, "contrastive-prior", library);
+  const task = source.cases.at(-1)!, order = source.orders[0]!, library = librarySnapshot(source.cases, order, task.id, source.learning), context = makeRoleValidationContext(source.cases, order, task.id, source.learning), prepared = buildRoleInputs(task, "contrastive-prior", library, context);
   return source.faults.map(fault => {
     const row = object(fault, ["id", "kind", "role", "payload"], "fault case"), id = text(row.id, 64), kind = text(row.kind, 64), role = row.role as Role;
     if (!(ROLES as readonly unknown[]).includes(role) || !plain(row.payload)) fail("invalid fault role or payload");
@@ -143,8 +170,8 @@ function faultControls(source: Snapshot): FaultObservation[] {
     try {
       if (["denied", "policy-revocation"].includes(kind)) requireFixturePolicy(plain(row.payload.policy) ? row.payload.policy.status : undefined);
       else if (kind === "changed-resume") requireResumeBinding(row.payload.registeredInputSha256, row.payload.resumedInputSha256);
-      else if (kind === "within-round-library-change") {const changed = JSON.parse(canonical(prepared)) as typeof prepared; changed.composer.librarySha256 = row.payload.compositionLibrarySha256; validateRoundInputs(changed);}
-      else validateRolePayload(role, {...prepared[role], ...row.payload});
+      else if (kind === "within-round-library-change") {const changed = JSON.parse(canonical(prepared)) as typeof prepared; changed.composer.librarySha256 = row.payload.compositionLibrarySha256; validateRoundInputs(changed, context);}
+      else validateRolePayload(role, {...prepared[role], ...row.payload}, context);
     } catch {blocked = true;}
     if (!blocked) fail("fault fixture unexpectedly allowed private input or invalid state");
     return {id, kind, role, outcome: "blocked", cause: ["denied", "policy-revocation"].includes(kind) ? "condition-invalidated" : kind === "changed-resume" ? "resume-binding-refusal" : kind === "within-round-library-change" ? "library-mismatch" : "role-boundary-refusal"};
@@ -161,11 +188,11 @@ function controls(root: string, code: RunCodeBinding): HarnessControlReceipt {
   if (!["bin/ares.js", "scripts/harness-eval.ts", "scripts/execution-eval.ts", "package.json", "bun.lock"].every(name => code.files.some(file => file.path === name))) fail("run code binding lacks required bootstrap or harness");
   const rows: Record<string, unknown>[] = [];
   for (const order of source.orders) for (const plan of source.conditions) for (const taskId of order.taskIds) {
-    const task = source.cases.find(row => row.id === taskId)!, library = librarySnapshot(source.cases, order, task.id, source.learning), inputs = buildRoleInputs(task, plan.id, library), candidates = inputs.selector.candidates as {id: string; output: string}[];
-    validateRoundInputs(inputs);
+    const task = source.cases.find(row => row.id === taskId)!, library = librarySnapshot(source.cases, order, task.id, source.learning), context = makeRoleValidationContext(source.cases, order, task.id, source.learning), inputs = buildRoleInputs(task, plan.id, library, context), candidates = inputs.selector.candidates as {id: string; output: string}[];
+    validateRoundInputs(inputs, context);
     const slot = plan.stageCalls.selection ? task.control.selection.selectedSlot : 0;
     if (!candidates[slot]) fail("prerecorded selection outside blinded slots");
-    rows.push({kind: "prerecorded-control", order: order.id, repetition: order.repetition, condition: plan.id, taskId, split: task.split, streamSha256: sha256(canonical(order)), inputSha256: task.inputSha256, library: inputs.worker.library, librarySha256: inputs.worker.librarySha256, preparedRoleInputSha256: Object.fromEntries(ROLES.map(role => [role, sha256(canonical(inputs[role]))])), preparedRoleLibrarySha256: Object.fromEntries(ROLES.map(role => [role, inputs[role].librarySha256])), policySha256: sha256(canonical({learningSourceIds: source.learning, revoked: [], mode: "fixture-only"})), selected: candidates[slot], status: "fixture-complete", judge: "unavailable", quality: "unknown", costStages: Object.fromEntries(STAGES.map(stage => [stage, "fixture-no-model-costs"])), endToEndCosts: unknownCost(), conditionProfile: plan.id, budget: {providerCallsObserved: 0, liveUnusedBudget: "unavailable"}, deferredReflection: task.split === "heldout" ? {text: task.control.reflection.text, export: "deferred-until-all-heldout-outputs-and-judgments-frozen"} : null});
+    rows.push({kind: "prerecorded-control", order: order.id, repetition: order.repetition, condition: plan.id, taskId, split: task.split, streamSha256: sha256(canonical(order)), inputSha256: task.inputSha256, library: inputs.worker.library, librarySha256: inputs.worker.librarySha256, preparedRoleInputSha256: Object.fromEntries(ROLES.map(role => [role, sha256(canonical(inputs[role]))])), preparedRoleLibrarySha256: Object.fromEntries(ROLES.map(role => [role, inputs[role].librarySha256])), policySha256: sha256(canonical({learningSourceIds: source.learning, revoked: [], mode: "fixture-only"})), selected: candidates[slot], status: "fixture-complete", judge: "unavailable", quality: "unknown", costStages: Object.fromEntries(STAGES.map(stage => [stage, "fixture-no-model-costs"])), endToEndCosts: unknownCost(), conditionProfile: plan.id, budget: {providerCallsObserved: 0, liveUnusedBudget: "unavailable"}, deferredReflection: task.split === "heldout" ? {sha256: sha256(task.control.reflection.text), bytes: Buffer.byteLength(task.control.reflection.text), status: "deferred-until-all-heldout-outputs-and-judgments-frozen"} : null});
   }
   const after = snapshot(resolve(root)); if (!same(after.seal, seal)) fail("preregistration changed during controls");
   const faults = faultControls(source);
