@@ -206,8 +206,8 @@
     },
     {
       "path": "test/fixtures/harness/faults.json",
-      "sha256": "7a0c80796270bbcba33bcb9ee6495903dfd47723a543c68959235ef75219f50f",
-      "bytes": 5997
+      "sha256": "47e3271ad1128d582371579ac36e56741138497a3138ffd08121307340ee96d5",
+      "bytes": 6409
     },
     {
       "path": "docs/verification/harness-eval-protocol.md",
@@ -215,5 +215,5 @@
       "bytes": 15192
     }
   ],
-  "receiptSha256": "45a3c21fc5f1280ce0e7433fe5461825547ee417fb56190a2d7080c596afec8d"
+  "receiptSha256": "c43edb283f40de7537cf9da969dc643678fd16612348fd730ce974ff54c1841c"
 }

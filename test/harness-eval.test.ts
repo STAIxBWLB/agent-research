@@ -48,8 +48,8 @@ test("each round has one immutable past-only library, and held-out reflections n
   for (const order of protocol.orders) {
     let heldoutHash: string | undefined;
     for (const id of order.taskIds) {
-      const task = cases.find(row => row.id === id)!, library = librarySnapshot(cases, order, id, protocol.corpus.learningSourceIds), inputs = buildRoleInputs(task, "contrastive-prior", library, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds));
-      validateRoundInputs(inputs, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds)); const hash = inputs.worker.librarySha256 as string;
+      const task = cases.find(row => row.id === id)!, library = librarySnapshot(cases, order, id, protocol.corpus.learningSourceIds), inputs = buildRoleInputs(task, "contrastive-prior", library, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, "contrastive-prior"));
+      validateRoundInputs(inputs, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, "contrastive-prior")); const hash = inputs.worker.librarySha256 as string;
       for (const entry of library) {expect(protocol.corpus.learningSourceIds).toContain(entry.sourceTaskId); expect(order.taskIds.indexOf(entry.sourceTaskId)).toBeLessThan(order.taskIds.indexOf(id)); expect(entry.sourceTaskId).not.toBe(id);}
       expect(new Set(ROLES.map(role => canonical(inputs[role].library))).size).toBe(1);
       if (task.split === "heldout") {if (heldoutHash) expect(hash).toBe(heldoutHash); heldoutHash = hash; expect(library).toHaveLength(8); expect(library.some(entry => protocol.corpus.heldoutIds.includes(entry.sourceTaskId))).toBe(false);}
@@ -63,13 +63,13 @@ test("private evaluator keys, rubrics, control paths and future-task ids never e
   for (const task of cases) {
     const library = librarySnapshot(cases, order, task.id, protocol.corpus.learningSourceIds);
     for (const condition of CONDITIONS) {
-      const inputs = buildRoleInputs(task, condition, library, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds));
+      const inputs = buildRoleInputs(task, condition, library, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, condition));
       for (const role of ROLES) {
         const view = canonical(inputs[role]); expect(view).not.toContain("evaluatorKey"); expect(view).not.toContain("rubric"); expect(view).not.toContain("selectedSlot"); expect(view).not.toContain("test/fixtures/");
         for (const row of index.cases) expect(view).not.toContain(read(sourceRoot, row.expected, 16_384).evaluatorKey);
         for (const future of order.taskIds.slice(order.taskIds.indexOf(task.id) + 1)) expect(view).not.toContain(future);
-        expect(() => validateRolePayload(role, {...inputs[role], rubric: "private"}, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds))).toThrow();
-        expect(() => validateRolePayload(role, {...inputs[role], data: {nested: {futureTaskData: "private"}}}, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds))).toThrow();
+        expect(() => validateRolePayload(role, {...inputs[role], rubric: "private"}, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, condition))).toThrow();
+        expect(() => validateRolePayload(role, {...inputs[role], data: {nested: {futureTaskData: "private"}}}, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, condition))).toThrow();
       }
       expect(canonical(inputs.selector)).not.toContain(condition);
     }
@@ -77,15 +77,15 @@ test("private evaluator keys, rubrics, control paths and future-task ids never e
 });
 
 test("library mutation, unregistered source replacement and revoked policy invalidate rather than refresh", () => {
-  const {protocol, cases} = corpus(), order = protocol.orders[0], task = cases.at(-1)!, library = librarySnapshot(cases, order, task.id, protocol.corpus.learningSourceIds), inputs = buildRoleInputs(task, "contrastive-prior", library, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds));
-  expect(() => buildRoleInputs(task, "contrastive-prior", [...library, {sourceTaskId: "future", text: "future", sha256: "a".repeat(64)}], makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds))).toThrow("unregistered");
-  const altered = structuredClone(inputs); (altered.composer.library as unknown[]).pop(); expect(() => validateRoundInputs(altered, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds))).toThrow();
+  const {protocol, cases} = corpus(), order = protocol.orders[0], task = cases.at(-1)!, library = librarySnapshot(cases, order, task.id, protocol.corpus.learningSourceIds), inputs = buildRoleInputs(task, "contrastive-prior", library, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, "contrastive-prior"));
+  expect(() => buildRoleInputs(task, "contrastive-prior", [...library, {sourceTaskId: "future", text: "future", sha256: "a".repeat(64)}], makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, "contrastive-prior"))).toThrow("unregistered");
+  const altered = structuredClone(inputs); (altered.composer.library as unknown[]).pop(); expect(() => validateRoundInputs(altered, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, "contrastive-prior"))).toThrow();
   expect(() => librarySnapshot(cases, order, task.id, protocol.corpus.learningSourceIds, [library[0]!.sourceTaskId])).toThrow("condition invalidated");
   expect(() => requireFixturePolicy("revoked")).toThrow("no replacement"); expect(() => requireFixturePolicy("denied")).toThrow();
 });
 
 test("fault suite is deterministic, all live arms unavailable, and unknown costs remain unknown", () => {
-  const faults = runHarnessFaults(sourceRoot); expect(faults).toHaveLength(18); expect(faults.every(row => ["blocked", "insufficient-evidence"].includes(row.outcome))).toBe(true); expect(runHarnessFaults(sourceRoot)).toEqual(faults);
+  const faults = runHarnessFaults(sourceRoot); expect(faults).toHaveLength(21); expect(faults.every(row => ["blocked", "insufficient-evidence"].includes(row.outcome))).toBe(true); expect(runHarnessFaults(sourceRoot)).toEqual(faults);
   expect(liveArms()).toHaveLength(5); expect(liveArms().every(arm => arm.status === "unavailable")).toBe(true);
   const costs = Object.fromEntries(COST_FIELDS.map(field => [field, "unknown"])); expect(validateCostRecord(costs).providerTokens).toBe("unknown"); expect(validateCostRecord(costs).personMinutes).toBe("unknown");
 });
@@ -99,14 +99,14 @@ test("resume refuses changed input before code admission or outward effects", ()
 test("fixture faults and role preparation call no provider/model/network boundary", () => {
   const forbidden = (): never => {throw new Error("no live boundary in fixture controls");};
   const preconnect = spyOn(globalThis.fetch, "preconnect").mockImplementation(forbidden), fetch = spyOn(globalThis, "fetch").mockImplementation(Object.assign(forbidden, {preconnect})), spawn = spyOn(Bun, "spawn").mockImplementation(forbidden), spawnSync = spyOn(Bun, "spawnSync").mockImplementation(forbidden);
-  try {expect(runHarnessFaults(sourceRoot)).toHaveLength(18); expect(liveArms().every(arm => arm.status === "unavailable")).toBe(true); for (const spy of [preconnect, fetch, spawn, spawnSync]) expect(spy).not.toHaveBeenCalled();}
+  try {expect(runHarnessFaults(sourceRoot)).toHaveLength(21); expect(liveArms().every(arm => arm.status === "unavailable")).toBe(true); for (const spy of [preconnect, fetch, spawn, spawnSync]) expect(spy).not.toHaveBeenCalled();}
   finally {fetch.mockRestore(); preconnect.mockRestore(); spawn.mockRestore(); spawnSync.mockRestore();}
 });
 
 test("all five deterministic conditions prepare the declared blinded opportunity controls", () => {
   const {protocol, cases} = corpus(), order = protocol.orders[0], task = cases[2]!, library = librarySnapshot(cases, order, task.id, protocol.corpus.learningSourceIds);
   for (const condition of CONDITIONS) {
-    const inputs = buildRoleInputs(task, condition, library, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds)), candidates = inputs.selector.candidates as {id: string; output: string}[];
+    const inputs = buildRoleInputs(task, condition, library, makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, condition)), candidates = inputs.selector.candidates as {id: string; output: string}[];
     expect(candidates).toHaveLength(condition === "repeated-base" ? 7 : condition.startsWith("contrastive-") ? 2 : 1);
     expect(canonical(inputs.selector)).not.toContain("selectedSlot"); expect(canonical(inputs.selector)).not.toContain(condition);
     const plan = protocol.conditions.find((row: {id: string}) => row.id === condition); expect(Object.values(plan.stageCalls).reduce((sum: number, value) => sum + Number(value), 0)).toBeLessThanOrEqual(8);
@@ -132,7 +132,7 @@ test("temporary committed CLI controls have complete independent end-to-end cost
   const f = committedCliFixture(), output = join(f.root, "controls.json"), first = f.cli("controls", output); expect(first.status).toBe(0);
   const receipt = read(f.root, "controls.json", 8 * 1024 * 1024), before = readTextBounded(output, 8 * 1024 * 1024), {receiptSha256, ...body} = receipt;
   expect(receiptSha256).toBe(sha256(canonical(body))); expect(receipt.preregistrationSha256).toBe(verifyHarnessPreregistration(f.root, join(f.root, HARNESS_FROZEN)).receiptSha256);
-  expect(receipt.kind).toBe("guidance-fixture-observations"); expect(receipt.evidence).toBe("prerecorded-fixture-only"); expect(receipt.rows).toHaveLength(180); expect(receipt.live).toHaveLength(5); expect(receipt.faults).toHaveLength(18); expect(receipt.resultAuthorityLinks).toEqual([]); expect(receipt.conclusion).toBe("insufficient-evidence");
+  expect(receipt.kind).toBe("guidance-fixture-observations"); expect(receipt.evidence).toBe("prerecorded-fixture-only"); expect(receipt.rows).toHaveLength(180); expect(receipt.live).toHaveLength(5); expect(receipt.faults).toHaveLength(21); expect(receipt.resultAuthorityLinks).toEqual([]); expect(receipt.conclusion).toBe("insufficient-evidence");
   const whole = validateCostRecord(receipt.endToEndCosts); expect(whole.wallElapsedMs).toBe("unknown"); expect(whole.cpuSeconds).toBe("unknown"); expect(whole.providerRequests).toBe(0);
   for (const row of receipt.rows) {
     expect(Object.keys(row.costStages)).toEqual(Object.keys(f.protocol.conditions[0].stageCalls));
@@ -146,6 +146,9 @@ test("temporary committed CLI controls have complete independent end-to-end cost
     const task = f.cases.find(task => task.id === row.taskId)!; expect(row.deferredReflection).toEqual({sha256: sha256(task.control.reflection.text), bytes: Buffer.byteLength(task.control.reflection.text), status: "deferred-until-all-heldout-outputs-and-judgments-frozen"});
   }
   expect(f.cli("controls", output).status).toBe(0); expect(readTextBounded(output, 8 * 1024 * 1024)).toBe(before);
+  const compact = JSON.stringify(receipt);
+  expect(compact).not.toBe(before); writeAtomic(output, compact, 8 * 1024 * 1024);
+  expect(f.cli("controls", output).status).toBe(0); expect(readTextBounded(output, 8 * 1024 * 1024)).toBe(compact);
   for (const field of ["commit", "tree"]) {
     const forged = structuredClone(receipt); forged.code[field] = (field === "commit" ? "f" : "e").repeat(40); const {receiptSha256: _old, ...changed} = forged; forged.receiptSha256 = sha256(canonical(changed));
     const file = join(f.root, `forged-${field}.json`); writeAtomic(file, JSON.stringify(forged), 8 * 1024 * 1024);
@@ -154,7 +157,7 @@ test("temporary committed CLI controls have complete independent end-to-end cost
 });
 
 test("nested role DTOs reject held-out/future libraries, mismatched text hashes and method-labelled candidates", () => {
-  const {protocol, cases} = corpus(), order = protocol.orders[0], task = cases.at(-1)!, context = makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds), library = librarySnapshot(cases, order, task.id, protocol.corpus.learningSourceIds), valid = buildRoleInputs(task, "contrastive-prior", library, context);
+  const {protocol, cases} = corpus(), order = protocol.orders[0], task = cases.at(-1)!, context = makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, "contrastive-prior"), library = librarySnapshot(cases, order, task.id, protocol.corpus.learningSourceIds), valid = buildRoleInputs(task, "contrastive-prior", library, context);
   const libraryPayload = (role: typeof ROLES[number], entries: unknown[]) => ({...valid[role], library: entries, librarySha256: sha256(canonical(entries))});
   const heldout = cases.find(row => row.id === "transfer-weighted")!, held = {sourceTaskId: heldout.id, text: heldout.control.reflection.text, sha256: sha256(heldout.control.reflection.text)};
   expect(order.taskIds.indexOf(heldout.id)).toBeLessThan(order.taskIds.indexOf(task.id));
@@ -166,7 +169,7 @@ test("nested role DTOs reject held-out/future libraries, mismatched text hashes 
     expect(() => validateRolePayload(role, libraryPayload(role, [library[0], library[0]]), context)).toThrow("unique past");
     expect(() => validateRolePayload(role, valid[role], context)).not.toThrow();
   }
-  const early = cases.find(row => row.id === order.taskIds[0])!, later = cases.find(row => row.id === order.taskIds[1])!, earlyContext = makeRoleValidationContext(cases, order, early.id, protocol.corpus.learningSourceIds), empty = librarySnapshot(cases, order, early.id, protocol.corpus.learningSourceIds), prepared = buildRoleInputs(early, "contrastive-prior", empty, earlyContext), future = {sourceTaskId: later.id, text: later.control.reflection.text, sha256: sha256(later.control.reflection.text)};
+  const early = cases.find(row => row.id === order.taskIds[0])!, later = cases.find(row => row.id === order.taskIds[1])!, earlyContext = makeRoleValidationContext(cases, order, early.id, protocol.corpus.learningSourceIds, "contrastive-prior"), empty = librarySnapshot(cases, order, early.id, protocol.corpus.learningSourceIds), prepared = buildRoleInputs(early, "contrastive-prior", empty, earlyContext), future = {sourceTaskId: later.id, text: later.control.reflection.text, sha256: sha256(later.control.reflection.text)};
   expect(() => validateRolePayload("worker", {...prepared.worker, library: [future], librarySha256: sha256(canonical([future]))}, earlyContext)).toThrow("past learning experience");
   for (const role of ["proposer", "composer", "selector"] as const) {
     const key = role === "selector" ? "candidates" : "outputs";
@@ -191,10 +194,10 @@ test("a committed executable-mode change refuses control receipt resume without 
 test("CLI receipt read failures name the cause and a recovery step without raw fs errors", () => {
   const f = committedCliFixture(), missing = join(f.root, "missing-receipt.json"), directory = join(f.root, "directory-receipt"); fs.mkdirSync(directory);
   for (const file of [missing, directory]) {
-    const result = f.cli("verify", file); expect(result.status).toBe(1); expect(result.stderr).toContain("frozen receipt is missing, unreadable or over-bound"); expect(result.stderr).toContain("restore the registered receipt or run bun scripts/harness-eval.ts freeze"); expect(result.stderr).not.toContain("ENOENT"); expect(result.stderr).not.toContain("EISDIR");
+    const result = f.cli("verify", file); expect(result.status).toBe(1); expect(result.stderr).toContain("frozen receipt"); expect(result.stderr).toContain("restore the registered receipt bytes or re-register"); expect(result.stderr).not.toContain("ENOENT"); expect(result.stderr).not.toContain("EISDIR");
   }
-  const control = f.cli("controls", directory); expect(control.status).toBe(1); expect(control.stderr).toContain("control receipt is missing, unreadable or over-bound"); expect(control.stderr).toContain("restore the original control receipt"); expect(control.stderr).not.toContain("EISDIR");
-  expect(() => verifyControlReceipt(f.root, missing)).toThrow("control receipt is missing, unreadable or over-bound");
+  const control = f.cli("controls", directory); expect(control.status).toBe(1); expect(control.stderr).toContain("control receipt"); expect(control.stderr).toContain("restore the registered control receipt bytes"); expect(control.stderr).not.toContain("EISDIR");
+  expect(() => verifyControlReceipt(f.root, missing)).toThrow("control receipt");
 });
 
 test("checked-in evidence stays bound to its historical main code and registration", () => {
@@ -236,4 +239,36 @@ test("checked-in evidence stays bound to its historical main code and registrati
   expect(tuples.size).toBe(180); expect(receipt.faults).toHaveLength(json(index.faults).cases.length); expect(receipt.faults.every((fault: {outcome: string}) => ["blocked", "insufficient-evidence"].includes(fault.outcome))).toBe(true);
   for (const counts of Object.values(receipt.denominators)) expect(Object.keys(counts as object)).toEqual(protocol.denominators);
   expect(receipt.denominators.fixture).toMatchObject({planned: 180, executed: 180, "judge-unavailable": 180, succeeded: 0}); expect(receipt.denominators.live).toMatchObject({planned: 180, executed: 0, unavailable: 180}); expect(receipt.denominators.faults).toMatchObject({planned: 18, executed: 18, denied: 16, "judge-unavailable": 1, unknown: 1});
+});
+
+for (const condition of ["retrieval-only", "contrastive-prior"] as const) for (const mutation of ["empty", "subset", "reordered"] as const) test(`registered ${condition} snapshot refuses consistent ${mutation} replacements`, () => {
+  const {protocol, cases} = corpus();
+  for (const order of protocol.orders) {
+    const task = cases.at(-1)!, context = makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, condition), library = librarySnapshot(cases, order, task.id, protocol.corpus.learningSourceIds);
+    expect(library.length).toBeGreaterThan(1);
+    const inputs = buildRoleInputs(task, condition, library, context), changed = structuredClone(inputs);
+    const replacement = mutation === "empty" ? [] : mutation === "subset" ? library.slice(1) : [...library].reverse();
+    for (const role of ROLES) {changed[role].library = replacement; changed[role].librarySha256 = sha256(canonical(replacement));}
+    expect(new Set(ROLES.map(role => canonical(changed[role].library))).size).toBe(1);
+    expect(new Set(ROLES.map(role => changed[role].librarySha256)).size).toBe(1);
+    for (const role of ROLES) expect(() => validateRolePayload(role, changed[role], context)).toThrow("registered snapshot");
+    expect(() => validateRoundInputs(changed, context)).toThrow("registered snapshot");
+  }
+});
+test("snapshot binding is canonical and condition-specific without exposing condition labels", () => {
+  const {protocol, cases} = corpus(), order = protocol.orders[0], task = cases.at(-1)!, library = librarySnapshot(cases, order, task.id, protocol.corpus.learningSourceIds);
+  for (const condition of CONDITIONS) {
+    const context = makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, condition), inputs = buildRoleInputs(task, condition, library, context);
+    for (const role of ROLES) {
+      const entries = inputs[role].library as {sourceTaskId: string; text: string; sha256: string}[];
+      const reorderedKeys = entries.map(entry => ({sha256: entry.sha256, text: entry.text, sourceTaskId: entry.sourceTaskId}));
+      validateRolePayload(role, {...inputs[role], library: reorderedKeys, librarySha256: sha256(canonical(reorderedKeys))}, context);
+      expect(canonical(inputs[role])).not.toContain(condition);
+    }
+  }
+  const context = makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, "contrastive-prior");
+  expect(() => buildRoleInputs(task, "frozen-base", library, context)).toThrow("condition");
+  const faults = runHarnessFaults(sourceRoot).filter(row => row.kind.startsWith("registered-library-"));
+  expect(faults.map(row => row.kind)).toEqual(["registered-library-empty", "registered-library-subset", "registered-library-reordered"]);
+  expect(faults.every(row => row.outcome === "blocked" && row.cause === "registered-snapshot-refusal")).toBe(true);
 });
