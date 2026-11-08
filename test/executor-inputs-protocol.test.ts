@@ -168,3 +168,27 @@ test("trailing separators are canonicalized before stage-private source checks",
   expect(() => buildContainerArgs({ protocol: p, stage: "candidate", studyId: "synthetic", attemptId: "a".repeat(16), user: "1000:1000", paths: { snapshot: "/work/snapshot/", output: "/work/output/", evaluator: "/work/evaluator/", result: "/work/result/" } })).toThrow("stage-private");
   expect(validateProtocolInputs({ root: { ...input(), path: "/" } }).root!.path).toBe("/");
 });
+
+test("pure input preflight and builder preserve named configuration errors without reclassifying base mounts", async () => {
+  const { buildContainerArgs, validateContainerInputSources, InputConfigurationError, InputVerificationError } = await import("../src/exp/executor.ts");
+  const paths = { snapshot: "/synthetic/work/snapshot", output: "/synthetic/work/output", evaluator: "/synthetic/work/evaluator", result: "/synthetic/work/result" };
+  const options = { studyId: "synthetic", attemptId: "a".repeat(16), user: "1000:1000", paths, stage: "candidate" as const };
+  const capture = (fn: () => unknown) => { try { fn(); } catch (error) { return error; } throw new Error("expected source-isolation refusal"); };
+  const workspace = validateProtocol({ ...protocol(), inputs: { base: { ...input(), path: paths.output + "/staged" } } });
+  const stagePrivate = validateProtocol({ ...protocol(), inputs: {
+    public_data: { ...input(), path: "/synthetic/private", mount: { candidate: "/in/public" } },
+    heldout: { ...input(), path: "/synthetic/private/heldout", mount: { evaluator: "/in/heldout" } },
+  } });
+  for (const p of [workspace, stagePrivate]) {
+    for (const fn of [() => validateContainerInputSources(p, paths), () => buildContainerArgs({ ...options, protocol: p })]) {
+      const error = capture(fn);
+      expect(error).toBeInstanceOf(InputConfigurationError); expect(error).toBeInstanceOf(InputVerificationError);
+      expect((error as Error).message).toContain(p === workspace ? "source overlaps the attempt workspace" : "stage-private input");
+      expect((error as Error).message).toContain("before retrying"); expect((error as Error).message).not.toContain("/synthetic/private");
+    }
+  }
+  const legacy = validateProtocol(protocol());
+  expect(() => validateContainerInputSources(legacy, paths)).not.toThrow();
+  const generic = capture(() => buildContainerArgs({ ...options, protocol: legacy, paths: { ...paths, output: paths.snapshot } }));
+  expect(generic).not.toBeInstanceOf(InputConfigurationError); expect((generic as Error).message).toContain("container mounts: overlapping sources");
+});

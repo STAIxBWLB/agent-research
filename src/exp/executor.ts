@@ -126,6 +126,9 @@ export async function runOnExecutor(executorArg: Executor, command: string, args
   catch { throw failed(executor, "process start"); }
 }
 export class InputVerificationError extends Error {}
+export class InputConfigurationError extends InputVerificationError {
+  constructor(message: string) { super(message); this.name = "InputConfigurationError"; }
+}
 export interface InputManifest { sha256: string; files: number; bytes: number }
 export const INPUT_MANIFEST_FILES = 100_000, INPUT_MANIFEST_TIMEOUT_MS = 300_000, INPUT_MANIFEST_OUTPUT_BYTES = 4096;
 // ponytail: ceiling 100,000 files/directories, depth 64 and 5 minutes; bytes stream in 1 MiB chunks, never into the study.
@@ -267,6 +270,17 @@ export function containerName(attemptId: string, stage: Stage): string {
   if (!/^[a-f0-9]{16}$/.test(attemptId) || !["candidate", "evaluator"].includes(stage)) throw new Error("container identity: invalid attempt or stage; use a 16-hex attempt id and candidate or evaluator stage");
   return `ares-${attemptId}-${stage}`;
 }
+/** Pure preflight for host input isolation; no hashing, transport or attempt side effects. */
+export function validateContainerInputSources(protocol: Protocol, pathsArg: ContainerPaths): void {
+  const p = validateProtocol(protocol);
+  const paths = Object.fromEntries(Object.entries(pathsArg).map(([key, value]) => [key, directory(value, `container.paths.${key}`)])) as unknown as ContainerPaths;
+  const sources = [paths.snapshot, paths.output, paths.evaluator, paths.result], inputs = Object.values(p.inputs ?? {});
+  for (const input of inputs) if (sources.some(source => executionPathsOverlap(source, input.path!))) throw new InputConfigurationError("container inputs: source overlaps the attempt workspace; stage inputs in a separate executor directory before retrying");
+  for (let a = 0; a < inputs.length; a++) for (let b = a + 1; b < inputs.length; b++) {
+    const x = inputs[a]!, y = inputs[b]!;
+    if (executionPathsOverlap(x.path!, y.path!) && (!!x.mount.candidate !== !!y.mount.candidate || !!x.mount.evaluator !== !!y.mount.evaluator)) throw new InputConfigurationError("container inputs: overlapping sources expose a stage-private input; stage private inputs in separate directories before retrying");
+  }
+}
 /** Mounts are fixed by stage, never supplied as free-form Docker options. */
 export function buildContainerArgs(options: ContainerOptions): string[] {
   const p = validateProtocol(options.protocol), name = containerName(options.attemptId, options.stage);
@@ -281,13 +295,8 @@ export function buildContainerArgs(options: ContainerOptions): string[] {
     const x = sources[a]!, y = sources[b]!;
     if (!x || !y || x === y || x.startsWith(y === "/" ? y : `${y}/`) || y.startsWith(x === "/" ? x : `${x}/`)) throw new Error("container mounts: overlapping sources; use separate snapshot, output, evaluator and result directories");
   }
+  validateContainerInputSources(p, paths);
   const inputs = Object.values(p.inputs ?? {});
-  const overlaps = executionPathsOverlap;
-  for (const input of inputs) if (sources.some(source => overlaps(source, input.path!))) throw new Error("container inputs: source overlaps the attempt workspace; stage inputs in a separate executor directory before retrying");
-  for (let a = 0; a < inputs.length; a++) for (let b = a + 1; b < inputs.length; b++) {
-    const x = inputs[a]!, y = inputs[b]!;
-    if (overlaps(x.path!, y.path!) && (!!x.mount.candidate !== !!y.mount.candidate || !!x.mount.evaluator !== !!y.mount.evaluator)) throw new Error("container inputs: overlapping sources expose a stage-private input; stage private inputs in separate directories before retrying");
-  }
   const argv = ["run", "--detach", "--pull", "missing", "--name", name, "--label", `ares.study=${options.studyId}`, "--label", `ares.attempt=${options.attemptId}`, "--label", `ares.stage=${options.stage}`,
     "--network", "none", "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", options.user,
     "--cpus", String(p.limits.cpus), "--memory", `${p.limits.memoryMb}m`, "--pids-limit", String(p.limits.pidsLimit), "--env", `ARES_SEED=${seed}`];

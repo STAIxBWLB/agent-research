@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, requireExperiment, requireGate, sha256, withLock, type Actor, type PendingEvent } from "../study.ts";
 import { designBinding, sameProtocolInputs, frozenProtocol, validateStoredProtocol, protocolHash, readProtocol, readDesign, type Protocol } from "./protocol.ts";
-import { buildContainerArgs, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
+import { buildContainerArgs, validateContainerInputSources, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
 import { resolveSnapshot, transferSnapshot, transferTask } from "./snapshot.ts";
 import { collectEvaluation as defaultEvaluationCollector, collectStageEvidence as defaultStageCollector, EvidenceError, MetricsError, outputBudget, type StageEvidence } from "./metrics.ts";
 
@@ -231,10 +231,16 @@ function stageRecord(attempt: Attempt, stage: Stage, user: string, ctx: AttemptC
 }
 
 /** Validate observed container settings before describing its sealing as ares-observed. */
-function observed(raw: unknown, attempt: Attempt, protocol: Protocol): { id: string; running: boolean; exitCode: number; finishedAt?: string; startedAt?: string } {
+function observed(raw: unknown, attempt: Attempt, protocol: Protocol, ownershipOnly = false): { id: string; running: boolean; exitCode: number; finishedAt?: string; startedAt?: string } {
   const value = Array.isArray(raw) && raw.length === 1 ? raw[0] : undefined;
   if (!plain(value) || typeof value.Id !== "string" || !/^[a-f0-9]{64}$/.test(value.Id) || !plain(value.State) || typeof value.State.Running !== "boolean" || !Number.isSafeInteger(value.State.ExitCode) || !plain(value.Config) || !plain(value.HostConfig) || !Array.isArray(value.Mounts)) throw hostError(attempt, "container inspection");
   const expected = attempt.stages[attempt.stage]!, config = value.Config, settings = value.HostConfig;
+  if (ownershipOnly) {
+    if (!plain(config.Labels) || config.Labels["ares.study"] !== attempt.studyId || config.Labels["ares.attempt"] !== attempt.id || config.Labels["ares.stage"] !== attempt.stage || (expected.containerId && value.Id !== expected.containerId)) throw hostError(attempt, "container ownership verification");
+    const finishedAt = typeof value.State.FinishedAt === "string" && Number.isFinite(Date.parse(value.State.FinishedAt)) ? value.State.FinishedAt : undefined;
+    const startedAt = typeof value.State.StartedAt === "string" && Number.isFinite(Date.parse(value.State.StartedAt)) ? value.State.StartedAt : undefined;
+    return { id: value.Id, running: value.State.Running, exitCode: value.State.ExitCode as number, ...(finishedAt ? { finishedAt } : {}), ...(startedAt ? { startedAt } : {}) };
+  }
   const mounts = attempt.stage === "candidate" ? [[attempt.paths.snapshot, "/workspace", false], [attempt.paths.output, "/out", true]] : [[attempt.paths.evaluator, "/eval", false], [attempt.paths.output, "/candidate", false], [attempt.paths.result, "/result", true]];
   const bindMounts = value.Mounts.filter(m => !(plain(m) && m.Type === "tmpfs" && m.Destination === "/tmp"));
   // Input content was verified at launch. A locator relocation must not invalidate an in-flight mount.
@@ -289,8 +295,8 @@ async function recordVerifiedStage(dir: string, attempt: Attempt, state: Observe
     return event;
   }, approvals);
 }
-async function inspect(dir: string, attempt: Attempt, ctx: AttemptContext) {
-  const protocol = executionProtocol(dir, attempt);
+async function inspect(dir: string, attempt: Attempt, ctx: AttemptContext, ownershipOnly = false) {
+  const protocol = ownershipOnly ? attempt.protocol : executionProtocol(dir, attempt);
   let result;
   try { result = await runOnExecutor(attempt.executor, "docker", ["inspect", "--format", INSPECT_FORMAT, containerName(attempt.id, attempt.stage)], ctx.runner ?? spawnRunner, { maxOutputBytes: ATTEMPT_BYTES }); }
   catch { throw hostError(attempt, "container inspection"); }
@@ -303,30 +309,28 @@ async function inspect(dir: string, attempt: Attempt, ctx: AttemptContext) {
   }
   if (result.exitCode !== 0) throw hostError(attempt, "container inspection");
   let raw: unknown; try { raw = JSON.parse(result.stdout); } catch { throw hostError(attempt, "container inspection"); }
-  return observed(raw, attempt, protocol);
+  return observed(raw, attempt, protocol, ownershipOnly);
 }
-async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptContext): Promise<Attempt> {
-  let protocol: Protocol;
+/** Caller holds a fresh control fence; potentially long input hashing has already completed. */
+async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptContext, verifiedProtocol?: Protocol): Promise<Attempt> {
+  let args: string[];
   try {
-    protocol = executionProtocol(dir, attempt);
-    await verifyExecutorInputs(attempt.executor, protocol, ctx.runner ?? spawnRunner);
+    const currentProtocol = executionProtocol(dir, attempt), protocol = verifiedProtocol ?? currentProtocol;
+    if (!sameProtocolInputs(currentProtocol, protocol)) throw new InputVerificationError("attempt inputs: identities changed after verification; restore the frozen input identities and retry ares attempt reconcile <dir>");
+    // Keep configuration refusals outside the uncertain container-start catch.
+    args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths });
   } catch (error) {
-    if (error instanceof InputVerificationError && attempt.stage === "evaluator" && !attempt.stages.evaluator?.containerId) {
-      await update(dir, attempt.id, ctx, current => {
-        if (current.status !== "running" || current.stage !== "evaluator" || current.stages.evaluator?.containerId) return undefined;
-        current.stages.evaluator!.launchPending = true; delete current.launching;
-        return "attempt.input-unavailable";
-      });
-    }
+    if (error instanceof InputVerificationError) await update(dir, attempt.id, ctx, current => {
+      if (current.status !== "running" || current.stage !== attempt.stage || current.stages[current.stage]?.containerId || current.launching?.token !== attempt.launching?.token) return undefined;
+      const stage = current.stages[current.stage]!;
+      if (stage.launchPending && !current.launching) return undefined;
+      stage.launchPending = true; delete current.launching;
+      return "attempt.input-unavailable";
+    });
     throw error;
   }
-  if (attempt.stages[attempt.stage]?.launchPending) attempt = await update(dir, attempt.id, ctx, current => {
-    delete current.stages[current.stage]!.launchPending; current.launching = owner(ctx);
-    return "attempt.stage.retry-intent";
-  });
   let startedId: string | undefined;
   try {
-    const args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths });
     const result = await command(attempt, "container start", "docker", args, ctx), cid = result.stdout.trim();
     if (!/^[a-f0-9]{64}$/.test(cid)) throw hostError(attempt, "container start");
     startedId = cid;
@@ -392,6 +396,8 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   const snapshot = await resolveSnapshot(options.repo, options.commit, ctx.runner ?? spawnRunner), hash = protocolHash(protocol);
   const wanted = attemptId(hash, snapshot.commit, snapshot.treeId, seed, run, options.retry);
   if (options.expectedId !== undefined && wanted !== options.expectedId) throw new Error("attempt identity: changed since plan intent; reconcile the plan node before retrying");
+  const inputRoot = posix.join(executor.workdir, study.id, wanted);
+  validateContainerInputSources(protocol, { snapshot: posix.join(inputRoot, "snapshot"), output: posix.join(inputRoot, "output"), evaluator: posix.join(inputRoot, "task", "evaluator"), result: posix.join(inputRoot, "result") });
   const existing = await withLock(dir, () => load(dir).some(a => a.id === wanted));
   const verifiedInputs = !existing && protocol.inputs !== undefined ? await verifyExecutorInputs(executor, protocol, ctx.runner ?? spawnRunner) : undefined;
   let created = false;
@@ -434,11 +440,11 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
       attempt = await withControl(dir, async () => {
         const current = showAttempt(dir, attempt.id);
         if (current.status !== "running" || current.launching?.token !== claim) return current;
-        return launch(dir, current, checked.user, ctx);
+        return launch(dir, current, checked.user, ctx, protocol);
       });
     } catch (error) {
-      attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = startupError(current, preparationStep); finish(current, "failed", "preparation", ctx); return "attempt.failed"; });
       if (error instanceof InputVerificationError) throw error;
+      attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = startupError(current, preparationStep); finish(current, "failed", "preparation", ctx); return "attempt.failed"; });
     }
   }
   if (!options.detach) {
@@ -453,16 +459,33 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   return attempt;
 }
 
+async function verifyAndLaunchPending(dir: string, pending: Attempt, ctx: AttemptContext): Promise<Attempt | undefined> {
+  const protocol = executionProtocol(dir, pending);
+  validateContainerInputSources(protocol, pending.paths);
+  await verifyExecutorInputs(pending.executor, protocol, ctx.runner ?? spawnRunner);
+  return withControl(dir, async () => {
+    const current = showAttempt(dir, pending.id);
+    if (current.status !== "running" || current.stage !== pending.stage || !current.stages[current.stage]?.launchPending || alive(current, ctx)) return undefined;
+    executionProtocol(dir, current); // Recheck the frozen identities after hashing, under the fresh launch fence.
+    const claimed = await update(dir, current.id, ctx, value => {
+      delete value.stages[value.stage]!.launchPending; value.launching = owner(ctx);
+      return "attempt.stage.retry-intent";
+    });
+    return launch(dir, claimed, claimed.stages[claimed.stage]!.user, ctx, protocol);
+  });
+}
+
 export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Promise<Attempt[]> {
   const dir = studyDir(dirArg);
-  return withControl(dir, async () => {
+  const pending: Attempt[] = [];
+  const changed = await withControl(dir, async () => {
   const changed: Attempt[] = [];
   for (let attempt of load(dir).filter(a => a.status === "running")) {
     if (alive(attempt, ctx)) continue;
     try {
       let state = await inspect(dir, attempt, ctx);
       if (!state) {
-        if (attempt.stage === "evaluator" && attempt.stages.evaluator?.launchPending) changed.push(await launch(dir, attempt, attempt.stages.evaluator.user, ctx));
+        if (attempt.stages[attempt.stage]?.launchPending) pending.push(attempt);
         else changed.push(await update(dir, attempt.id, ctx, current => { finish(current, "unknown", "lost", ctx); return "attempt.unknown"; }));
         continue;
       }
@@ -492,8 +515,15 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
         })); continue;
       }
       if (attempt.stage === "candidate") {
-        const next = await update(dir, attempt.id, ctx, current => { current.stages.candidate!.exitCode = 0; current.stages.candidate!.endedAt = state.finishedAt ?? at(ctx); current.stage = "evaluator"; current.stages.evaluator = stageRecord(current, "evaluator", stage.user, ctx); current.launching = owner(ctx); return "attempt.stage.changed"; });
-        changed.push(await launch(dir, next, stage.user, ctx));
+        const next = await update(dir, attempt.id, ctx, current => {
+          current.stages.candidate!.exitCode = 0; current.stages.candidate!.endedAt = state.finishedAt ?? at(ctx); current.stage = "evaluator";
+          current.stages.evaluator = stageRecord(current, "evaluator", stage.user, ctx);
+          if (Object.keys(current.protocol.inputs ?? {}).length) { current.stages.evaluator.launchPending = true; delete current.launching; }
+          else current.launching = owner(ctx);
+          return "attempt.stage.changed";
+        });
+        if (next.stages.evaluator?.launchPending) pending.push(next);
+        else changed.push(await launch(dir, next, stage.user, ctx));
       } else {
         let evaluation: Evaluation | undefined, failure: EvidenceError | undefined;
         try { evaluation = await (ctx.collectEvaluation ?? defaultEvaluationCollector)(attempt, ctx.runner ?? spawnRunner); }
@@ -506,13 +536,19 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
         }));
       }
     } catch (error) {
-      await update(dir, attempt.id, ctx, current => { delete current.launching; return "attempt.executor-error"; });
       if (error instanceof InputVerificationError) throw error;
+      await update(dir, attempt.id, ctx, current => { delete current.launching; return "attempt.executor-error"; });
       throw hostError(attempt, "reconcile");
     }
   }
   return changed;
   });
+  // No control lock or launch claim is held across a potentially 40-minute manifest pass.
+  for (const attempt of pending) {
+    const launched = await verifyAndLaunchPending(dir, attempt, ctx);
+    if (launched) changed.push(launched);
+  }
+  return changed;
 }
 export async function cancelAttempt(dirArg: string, wanted: string, reason: string | undefined, ctx: AttemptContext, completion?: (attempt: Attempt) => PendingEvent[]): Promise<Attempt> {
   const dir = studyDir(dirArg), why = reason === undefined ? undefined : boundedText(reason, "reason", 500);
@@ -526,9 +562,18 @@ export async function cancelAttempt(dirArg: string, wanted: string, reason: stri
   });
   if (alive(attempt, ctx)) throw new Error("attempt: another startup operation is active; retry cancel when it finishes (abandoned claims expire after 30 minutes)");
   try {
-    let state = await inspect(dir, attempt, ctx);
-    if (state && needsReceipt(attempt, state)) attempt = await recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered", false);
-    if (state?.running) { await command(attempt, "cancel kill", "docker", ["kill", state.id], ctx); state = await inspect(dir, attempt, ctx); }
+    let state = await inspect(dir, attempt, ctx, true);
+    if (state && needsReceipt(attempt, state)) {
+      const owned = state;
+      attempt = await update(dir, attempt.id, ctx, current => {
+        current.stages[current.stage]!.containerId = owned.id;
+        if (owned.startedAt) current.stages[current.stage]!.startedAt = owned.startedAt;
+        delete current.launching;
+        // Ownership permits cancellation; it does not establish isolation or approve any gate.
+        return "attempt.stage.recovered";
+      });
+    }
+    if (state?.running) { await command(attempt, "cancel kill", "docker", ["kill", state.id], ctx); state = await inspect(dir, attempt, ctx, true); }
     if (state) attempt = await captureStage(dir, attempt, ctx, true);
     const ended = state;
     return update(dir, attempt.id, ctx, current => { if (ended && !ended.running) { current.stages[current.stage]!.exitCode = ended.exitCode; if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; } finish(current, "cancelled", why ?? "cancelled", ctx); return "attempt.cancelled"; }, [], completion);
