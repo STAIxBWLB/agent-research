@@ -101,3 +101,28 @@ test("fixture faults and role preparation call no provider/model/network boundar
   try {expect(runHarnessFaults(sourceRoot)).toHaveLength(14); expect(liveArms().every(arm => arm.status === "unavailable")).toBe(true); for (const spy of [preconnect, fetch, spawn, spawnSync]) expect(spy).not.toHaveBeenCalled();}
   finally {fetch.mockRestore(); preconnect.mockRestore(); spawn.mockRestore(); spawnSync.mockRestore();}
 });
+
+test("all five deterministic conditions prepare the declared blinded opportunity controls", () => {
+  const {protocol, cases} = corpus(), task = cases[2]!, library = librarySnapshot(cases, protocol.orders[0], task.id, protocol.corpus.learningSourceIds);
+  for (const condition of CONDITIONS) {
+    const inputs = buildRoleInputs(task, condition, library), candidates = inputs.selector.candidates as {id: string; output: string}[];
+    expect(candidates).toHaveLength(condition === "repeated-base" ? 7 : condition.startsWith("contrastive-") ? 2 : 1);
+    expect(canonical(inputs.selector)).not.toContain("selectedSlot"); expect(canonical(inputs.selector)).not.toContain(condition);
+    const plan = protocol.conditions.find((row: {id: string}) => row.id === condition); expect(Object.values(plan.stageCalls).reduce((sum: number, value) => sum + Number(value), 0)).toBeLessThanOrEqual(8);
+  }
+});
+
+test("committed fixture receipt preserves all streams, fault outcomes and unknown costs without result authority", () => {
+  const receipt = read(sourceRoot, "docs/verification/harness-eval-controls.json", 8 * 1024 * 1024), {receiptSha256, ...body} = receipt;
+  expect(receiptSha256).toBe(sha256(canonical(body))); expect(receipt.preregistrationSha256).toBe(verifyHarnessPreregistration(sourceRoot).receiptSha256);
+  expect(receipt.kind).toBe("guidance-fixture-observations"); expect(receipt.evidence).toBe("prerecorded-fixture-only"); expect(receipt.rows).toHaveLength(180); expect(receipt.live).toHaveLength(5); expect(receipt.faults).toHaveLength(14); expect(receipt.resultAuthorityLinks).toEqual([]); expect(receipt.conclusion).toBe("insufficient-evidence");
+  expect(receipt.code.codeSha256).toBe(sha256(JSON.stringify(receipt.code.files)));
+  for (const path of ["bin/ares.js", "scripts/harness-eval.ts", "scripts/execution-eval.ts", "package.json", "bun.lock"]) expect(receipt.code.files.some((file: {path: string}) => file.path === path)).toBe(true);
+  const {protocol} = corpus();
+  for (const row of receipt.rows) {
+    expect(Object.keys(row.costStages)).toEqual(Object.keys(protocol.conditions[0].stageCalls));
+    for (const profile of Object.values(row.costStages)) {const cost = validateCostRecord(receipt.costProfiles[profile as string]); expect(cost.providerRequests).toBe(0); expect(cost.providerTokens).toBe("unknown"); expect(cost.wallElapsedMs).toBe("unknown"); expect(cost.personMinutes).toBe("unknown");}
+    expect(row.judge).toBe("unavailable"); expect(row.quality).toBe("unknown"); expect(new Set(Object.values(row.preparedRoleLibrarySha256)).size).toBe(1);
+  }
+  expect(receipt.denominators.fixture.executed).toBe(180); expect(receipt.denominators.fixture["judge-unavailable"]).toBe(180); expect(receipt.denominators.live.executed).toBe(0); expect(receipt.denominators.live.unavailable).toBe(180); expect(receipt.denominators.faults.executed).toBe(14);
+});
