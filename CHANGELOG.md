@@ -2,7 +2,11 @@
 
 ## Unreleased
 
+## [0.2.1] - 2026-11-08
+
 - Fix release clean-install smoke to compare installed schema versions with the checkout's FORMAT_VERSIONS, including study v2; an offline regression runs in the ordinary check (#88).
+
+- v0.2.0 was tagged but never published because its release smoke failed. This patch ships the fix without moving that tag.
 
 ## [0.2.0] - 2026-11-07
 

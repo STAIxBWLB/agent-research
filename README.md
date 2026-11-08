@@ -15,7 +15,7 @@ ares --help
 ```
 <!-- /facts:install -->
 
-Tagged releases are published to npm; 0.1.0 was the first and 0.2.0 is the first minor release after it.
+0.1.0 was the first npm release. v0.2.0 was tagged but never published because its release smoke failed; 0.2.1 carries the fix without moving that tag.
 
 Or run from a checkout:
 
