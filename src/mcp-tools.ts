@@ -1,3 +1,4 @@
+import { PROVENANCE_KINDS, type ExecutionReferenceV1 } from "./provenance.ts";
 import { PHASES, AUTONOMY_MODES } from "./autonomy.ts";
 import { SETUP_TARGETS, type SetupMode } from "./setup.ts";
 import { isAbsolute } from "node:path";
@@ -21,6 +22,9 @@ const obj = (properties: Record<string, unknown>, required: string[]) => ({ type
 const text = (max: number) => ({ type: "string", minLength: 1, maxLength: max });
 const texts = (items: number, max: number) => ({ type: "array", items: text(max), maxItems: items });
 const year = { type: "integer", minimum: 1000, maximum: 2100 };
+const EXECUTION_REFERENCE = obj({ v: { type: "integer", enum: [1] }, tool: { type: "string", enum: ["ares"] }, projectKey: text(256), kind: { type: "string", enum: [...PROVENANCE_KINDS] }, id: text(256), revision: text(128), sha256: { type: "string", minLength: 64, maxLength: 64 } }, ["v", "tool", "projectKey", "kind", "id"]);
+const LINEAGE_ATTEMPTS = { type: "array", minItems: 1, maxItems: 8, items: { ...text(16), minLength: 16 } };
+const LINEAGE_CANDIDATES = { type: "array", minItems: 1, maxItems: 8, items: { ...text(40), minLength: 40 } };
 const REVIEW = obj({
   v: { type: "integer", enum: [1] }, reviewer: obj({ id: text(128), modelFamily: text(128) }, ["id", "modelFamily"]), buildSha256: { type: "string", minLength: 64, maxLength: 64 },
   checklist: obj({ negativeResults: { type: "boolean" }, denominators: { type: "boolean" }, limitations: { type: "boolean" }, reproducibility: { type: "boolean" } }, ["negativeResults", "denominators", "limitations", "reproducibility"]),
@@ -73,6 +77,8 @@ const SELECTION = obj({
 const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), parent: text(64), commit: { type: "string", minLength: 40, maxLength: 40 } }, ["id", "title", "hypothesis"]);
 
 export const ARES_TOOLS: readonly McpTool[] = [
+  { name: "ares_lineage_show", description: "Read bounded local source-proven lineage, optionally rooted at a local ExecutionReferenceV1 and continued with an opaque cursor. No executor, hub, network, repair, gate decision or result authority.", inputSchema: obj({ study, root: EXECUTION_REFERENCE, cursor: text(4096) }, ["study"]), annotations: read },
+  { name: "ares_lineage_compare", description: "Compare existing source-derived attempt or closed-candidate rows. Select either 1..8 attempts or 1..8 full candidate commits. Failed/unknown outcomes remain visible; retries are not independent samples. No new arithmetic aggregation, winner or verdict.", inputSchema: obj({ study, attempts: LINEAGE_ATTEMPTS, candidates: LINEAGE_CANDIDATES }, ["study"]), annotations: read },
   { name: "ares_autonomy_show", description: "Read the study autonomy policy and effective mode for each phase; no writes.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_autonomy_set", description: `Set the default or one phase autonomy mode (${AUTONOMY_MODES.join("|")}) and record from/to/phase. Only auto approves pending gates; existing gate decisions remain unchanged. Copilot draft acceptance and step pausing are separate features.`, inputSchema: obj({ study, mode: text(16), phase: text(32) }, ["study", "mode"]), annotations: write },
   { name: "ares_watch_set", description: "Set bounded v1 literature queries and an optional display-only rubric. At most 20 queries; identical config is a no-op. Does not search, screen or start a timer. Survey and experiment studies.", inputSchema: obj({ study, watch: WATCH }, ["study", "watch"]), annotations: { ...write, idempotentHint: true } },
@@ -143,6 +149,8 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
   const background = new Map<Promise<void>, () => void>();
   const track = (completion: Promise<void>, terminate: () => void) => { background.set(completion, terminate); void completion.then(() => { background.delete(completion); }); };
   const handlers: Record<string, McpHandler> = {
+    ares_lineage_show: a => ops.lineageShow(dir(a), { ...(a.root === undefined ? {} : { root: a.root as ExecutionReferenceV1 }), ...(a.cursor === undefined ? {} : { cursor: a.cursor as string }) }),
+    ares_lineage_compare: a => ops.lineageCompare(dir(a), { ...(a.attempts === undefined ? {} : { attempts: a.attempts as string[] }), ...(a.candidates === undefined ? {} : { candidates: a.candidates as string[] }) }),
     ares_autonomy_show: a => ops.autonomyShow(dir(a)),
     ares_autonomy_set: a => ops.autonomySet(dir(a), a.mode as string, a.phase as string | undefined, ctx),
     ares_watch_set: a => ops.watchSet(dir(a), a.watch, ctx),

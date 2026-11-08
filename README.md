@@ -421,6 +421,14 @@ The planner drafts that campaign and a person approves/activates it in agent-hub
 
 A ready hub node records its unit's child task id and waits for that task's approval. Pending campaign approval or activation waits without a manual retry. An initial read outage may leave the dispatch unbound until its first successful read; the task is then pinned for that plan revision, including across restarts and retries. Missing units/tasks, cancelled tasks and a different binding fail with the reason. A new plan revision can bind the unit's new task. Hub waits use the controller backoff, do not consume step slots, and do not redispatch agent work. Their completed output is an id/hash reference, so a downstream plan gate can bind to it.
 
+## Execution lineage
+
+Read local execution references and their recorded relationships with `ares lineage show <dir> --json`. Focus the read with `--root KIND --id ID`; optional `--revision REV` and `--sha256 HASH` preserve the exact source address. The CLI supplies the current study's project key. `--cursor CURSOR` continues the same source snapshot; restart from the first page after source bytes change. Pages contain at most 100 nodes, 200 edges and 256 KiB, with explicit unavailable, changed or capped results instead of a claim of complete provenance.
+
+`ares lineage compare <dir> --attempts ID,... --json` selects up to eight existing attempts. Alternatively, `--candidates COMMIT,...` selects up to eight full commits from the closed investigation. The flags are mutually exclusive. Rows retain failed and unknown outcomes, retry relationships, original metrics and source hashes. Retries are not independent samples. Comparison performs no new arithmetic aggregation and supplies no new winner or verdict; current closed investigation, selection and fresh final results remain the authorities.
+
+MCP exposes the same reads as `ares_lineage_show({study, root?, cursor?})` and `ares_lineage_compare({study, attempts?, candidates?})`. An MCP root is a local `ExecutionReferenceV1` with `v: 1`, `tool: "ares"`, `projectKey`, `kind`, native `id`, and optional `revision`/`sha256`. Both tools are read-only and closed-world. Reads do not acquire study locks, repair files, read executor output bodies, contact a hub or executor, or start network requests. Source receipts can remain historical or unavailable; an artifact digest is not proof that its bytes are retained. Synthetic fixture checks establish surface parity only, with no measured diagnosis or usability benefit claimed.
+
 ## Study export
 
 ```sh
@@ -550,6 +558,8 @@ The implemented CLI surface below comes from `src/commands-table.ts`; `ares --he
 
 <!-- facts:commands -->
 ```text
+ares lineage show <dir> [--root KIND --id ID --revision REV --sha256 HASH] [--cursor CURSOR] [--json]
+ares lineage compare <dir> (--attempts ID,... | --candidates COMMIT,...) [--json]
 ares autonomy show <dir> [--json]
 ares autonomy set <dir> <auto|gates|copilot|step> [--phase PHASE] [--json]
 ares skill propose <dir> --file PATH|- [--json]
@@ -614,7 +624,7 @@ ares mcp
 <!-- /facts:commands -->
 
 <!-- facts:mcp-tools -->
-The MCP server publishes 55 tools: `ares_autonomy_show`, `ares_autonomy_set`, `ares_watch_set`, `ares_watch_run`, `ares_watch_show`, `ares_console_add`, `ares_console_remove`, `ares_console_list`, `ares_setup`, `ares_manifest`, `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide`, `ares_skill_list`, `ares_plan_set`, `ares_plan_control`, `ares_plan_show`, `ares_status`, `ares_study_export`, `ares_scope_set`, `ares_gate`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show`, `ares_investigate_close`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_posthoc_show`, `ares_final_close`, `ares_final_seeds`, `ares_selection_set`, `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile`, `ares_attempt_logs`, `ares_lit_search`, `ares_lit_list`, `ares_lit_screen`, `ares_lit_card`, `ares_lit_verify`, `ares_lit_bib`, `ares_review_add`, `ares_review_resolve`, `ares_review_show`, `ares_paper_build`, `ares_paper_check`, `ares_cite_check`, `ares_playbook`.
+The MCP server publishes 57 tools: `ares_lineage_show`, `ares_lineage_compare`, `ares_autonomy_show`, `ares_autonomy_set`, `ares_watch_set`, `ares_watch_run`, `ares_watch_show`, `ares_console_add`, `ares_console_remove`, `ares_console_list`, `ares_setup`, `ares_manifest`, `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide`, `ares_skill_list`, `ares_plan_set`, `ares_plan_control`, `ares_plan_show`, `ares_status`, `ares_study_export`, `ares_scope_set`, `ares_gate`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show`, `ares_investigate_close`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_posthoc_show`, `ares_final_close`, `ares_final_seeds`, `ares_selection_set`, `ares_protocol_set`, `ares_executor_set`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile`, `ares_attempt_logs`, `ares_lit_search`, `ares_lit_list`, `ares_lit_screen`, `ares_lit_card`, `ares_lit_verify`, `ares_lit_bib`, `ares_review_add`, `ares_review_resolve`, `ares_review_show`, `ares_paper_build`, `ares_paper_check`, `ares_cite_check`, `ares_playbook`.
 <!-- /facts:mcp-tools -->
 
 Memory tools are `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide` and `ares_skill_list`; `ares_idea_decide` accepts pivot cause/retryWhen. Archive may write external amem notes; lessons reads external amem. Both carry `openWorldHint`; skill operations stay local. MCP calls preserve agent attribution even without a native shell marker.

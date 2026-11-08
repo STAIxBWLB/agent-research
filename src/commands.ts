@@ -1,3 +1,4 @@
+import { readProvenance, compareLineage, type ProvenanceOptions, type ProvenancePage, type LineageComparison } from "./provenance.ts";
 import { validateAutonomyMode, validatePhase, PHASES, ACCEPT_ARTIFACTS, resolveAutonomy, type AcceptArtifact, type Autonomy } from "./autonomy.ts";
 import { copilotBinding, requireCopilotAccept } from "./copilot.ts";
 import { homedir } from "node:os";
@@ -559,3 +560,11 @@ function consoleHome(env: NodeJS.ProcessEnv): string {
 export const consoleAdd = (dir: string, env: NodeJS.ProcessEnv) => addStudy(consoleHome(env), dir);
 export const consoleRemove = (dir: string, env: NodeJS.ProcessEnv) => removeStudy(consoleHome(env), dir);
 export const consoleList = (env: NodeJS.ProcessEnv) => readRegistry(consoleHome(env));
+
+/** Local source-derived reads; comparison adds no verdict, winner or result authority. */
+export function lineageShow(dir: string, options: ProvenanceOptions = {}): ProvenancePage {
+  return readProvenance(dir, options);
+}
+export function lineageCompare(dir: string, options: Parameters<typeof compareLineage>[1] = {}): LineageComparison {
+  return compareLineage(dir, options);
+}
