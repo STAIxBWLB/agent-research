@@ -205,6 +205,11 @@ export function foldPlan(events: LedgerEvent[], onEvent?: (state: PlanState, eve
           node.taskId = d.taskId as number;
         }
         if (typeof d.hubProject === "string") node.hubProject = boundedText(d.hubProject, `node ${node.id} hub project`, 4096);
+        // Admission refusals carry no Attempt; retain the ordinary failed/step outcome semantics.
+        if (d.status === "failed" && typeof d.reason === "string" && /^deferred:(devices|load|probe);/.test(d.reason)) {
+          const definition = state.definition.nodes.find(value => value.id === node.id);
+          if (definition?.kind === "step" && definition.command === "attempt.run") delete node.attemptId;
+        }
         node.status = d.status as NodeStatus;
         if (node.status === "done" && d.output !== undefined) node.output = d.output;
         delete node.reason;

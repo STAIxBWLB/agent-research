@@ -366,7 +366,7 @@ export async function planRun(dirArg: string, options: { parallel?: number }, ct
       if (node.command === "attempt.run") {
         try { return observed(await runAttempt(dir, { ...attemptOptions(node, state.retryOf), expectedId: state.attemptId! }, ctx)); }
         catch (error) {
-          if (error instanceof GpuAdmissionDeferred) return { status: "failed", reason: error.result.message };
+          if (error instanceof GpuAdmissionDeferred) return { status: "failed", reason: `deferred:${error.result.reason}; ${error.result.message}; run ares plan control <dir> retry ${node.id} --command-id ID --expected-revision N` };
           throw error;
         }
       }

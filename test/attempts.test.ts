@@ -870,7 +870,7 @@ test("GPU-free executor preserves numeric GPU argv and does not probe", async ()
   const args = running(fake, "candidate").args; expect(args[args.indexOf("--gpus") + 1]).toBe("1");
   expect(fake.requests.some(r => r.args.some(arg => arg.includes("ARES_GPU_INVENTORY")))).toBe(false);
 });
-test("a deferred plan attempt stops without queueing or creating an Attempt", async () => {
+for (const mode of ["gates", "step"] as const) test(`a deferred ${mode} plan attempt leaves no attempt id or parallel slot`, async () => {
   const { dir, fake } = await setupGpu(), stop = new AbortController(); let resumed = false;
   const ctx = { ...fake.ctx, http: fakeHttp([]).http, signal: stop.signal, sleep: async () => {
     if (!resumed) { resumed = true; await planControl(dir, { action: "resume", commandId: "run", expectedRevision: 1 }, { ...fake.ctx, http: fakeHttp([]).http }); }
@@ -878,11 +878,21 @@ test("a deferred plan attempt stops without queueing or creating an Attempt", as
     await Bun.sleep(1);
   } };
   fake.gpuProbe({ exitCode: 0, stdout: gpuProbeText("8.0"), stderr: "" });
-  await planSet(dir, { v: 1, nodes: [{ id: "gpu", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }], edges: [] }, ctx);
+  if (mode === "step") await autonomySet(dir, "step", undefined, ctx);
+  await planSet(dir, { v: 1, nodes: [{ id: "gpu", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }, { id: "next", kind: "step", command: "lit.bib", args: {}, needs: ["gpu"] }], edges: [] }, ctx);
   const timer = setTimeout(() => stop.abort(), 4000);
   const result = await planRun(dir, {}, ctx); clearTimeout(timer);
   expect(result.nodes.find(node => node.id === "gpu")?.status).toBe("failed");
-  expect(result.nodes.find(node => node.id === "gpu")?.reason).toContain("GPU admission deferred");
+  expect(result.nodes.find(node => node.id === "gpu")?.reason).toContain("deferred:load");
+  expect(result.nodes.find(node => node.id === "gpu")?.reason).toContain("ares plan control <dir> retry gpu");
+  expect(result.nodes.find(node => node.id === "gpu")?.attemptId).toBeUndefined();
+  expect(result.nodes.filter(node => node.status === "dispatched")).toHaveLength(0);
+  if (mode === "step") {
+    expect(result.state).toBe("paused"); expect(result.pauseReason).toBe("step");
+    expect(result.nodes.find(node => node.id === "gpu")?.lastObserved?.step).toBe(true);
+    expect(readLedger(dir).filter(event => event.type === "plan.paused" && event.data.reason === "step")).toHaveLength(1);
+  }
+  expect(budgetUsage(listAttempts(dir).attempts, fake.clock.value)).toEqual({ attempts: 0, wallHours: 0, gpuHours: 0 });
   expect(listAttempts(dir).attempts).toHaveLength(0);
   expect(fake.requests.filter(r => r.args.some(arg => arg.includes("ARES_GPU_INVENTORY")))).toHaveLength(1);
 });

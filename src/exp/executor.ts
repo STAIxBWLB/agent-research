@@ -166,7 +166,7 @@ nvidia-smi --query-gpu=index,uuid,memory.free --format=csv,noheader,nounits
 printf 'ARES_GPU_LOAD\n'
 cat /proc/loadavg
 printf 'ARES_GPU_CPUS\n'
-getconf _NPROCESSORS_ONLN
+if command -v nproc >/dev/null 2>&1; then nproc; else getconf _NPROCESSORS_ONLN; fi
 printf 'ARES_GPU_END\n'
 `;
 function gpuDeferred(reason: GpuDeferred["reason"]): GpuDeferred {
