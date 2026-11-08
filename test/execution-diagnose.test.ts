@@ -2,13 +2,14 @@ import { expect, spyOn, test } from "bun:test";
 import * as fs from "node:fs";
 import { join, resolve } from "node:path";
 import { resolveDiagnosticFixture, DIAGNOSTIC_BYTES } from "../scripts/execution-diagnose.ts";
+import { readTextBounded } from "../src/study.ts";
 import { tempDir } from "./helpers.ts";
 
-const root = resolve(import.meta.dir, ".."), corpus = JSON.parse(fs.readFileSync(join(root, "test/fixtures/execution-eval/corpus.json"), "utf8")) as { cases: { trial: string; input: string; expected: string }[] };
+const root = resolve(import.meta.dir, ".."), corpus = JSON.parse(readTextBounded(join(root, "test/fixtures/execution-eval/corpus.json"), 65_536)) as { cases: { trial: string; input: string; expected: string }[] };
 const cases = corpus.cases.filter(row => row.trial === "diagnose");
 function fixture(row = cases[0]!) {
-  const wrapper = JSON.parse(fs.readFileSync(join(root, row.input), "utf8"));
-  const expected = JSON.parse(fs.readFileSync(join(root, row.expected), "utf8"));
+  const wrapper = JSON.parse(readTextBounded(join(root, row.input), DIAGNOSTIC_BYTES));
+  const expected = JSON.parse(readTextBounded(join(root, row.expected), DIAGNOSTIC_BYTES));
   return { payload: wrapper.input as Record<string, any>, expected };
 }
 function projection(expected: Record<string, unknown>) {
@@ -62,7 +63,7 @@ test("bounded CLI reads only its supplied payload and writes explicitly labeled 
   const dir = tempDir(), input = join(dir, "input.json"), output = join(dir, "output.json"), { payload, expected } = fixture();
   fs.writeFileSync(input, JSON.stringify(payload));
   const result = cli(input, output, dir); expect(result.exitCode).toBe(0);
-  const observation = JSON.parse(fs.readFileSync(output, "utf8"));
+  const observation = JSON.parse(readTextBounded(output, DIAGNOSTIC_BYTES));
   expect(observation).toMatchObject({ v: 1, kind: "automated-source-resolution", authority: "harness-observed", ...projection(expected) });
   expect(fs.statSync(output).mode & 0o777).toBe(0o600); expect(new TextDecoder().decode(result.stdout)).toBe("");
 });

@@ -10,7 +10,9 @@ export const RESULT_AUTHORITY_DEVIATION = {
   resultAuthorityLinksReason: "synthetic corpus, no ares study; harness-observed only",
   resultAuthorityDecision: { issue: 63, date: "2026-11-08", scope: "observation-only T2a adapter" },
 };
-const BYTES = 65_536, INPUT_BYTES = 16_384, LOG_BYTES = 65_536, BUNDLE_BYTES = 2 * 1024 * 1024;
+export const BASELINE_BUNDLE_BYTES = 2 * 1024 * 1024;
+export const BASELINE_BUNDLE_PREFIX = "EXECUTION_BASELINE_BUNDLE ";
+const BYTES = 65_536, INPUT_BYTES = 16_384, LOG_BYTES = 65_536;
 type Status = "succeeded" | "failed" | "cancelled" | "unknown" | "excluded";
 type Trial = "diagnose" | "reuse";
 interface Case { id: string; trial: Trial; input: string; expected: string; index: number; payload: Record<string, unknown>; truth: Record<string, unknown>; inputSha256: string; expectedSha256: string }
@@ -31,7 +33,7 @@ export interface BaselineReceipt {
   admission: { parentCpuSeconds: number; wallMs: number; codeMaterializationBytes: number };
   files: { path: string; sha256: string; bytes: number }[]; limitations: string[];
 }
-function fail(cause: string): never { throw new Error(`execution baseline: ${cause}; restore the frozen registration and clean code, use a fresh output directory in an admitted container, then retry`); }
+function fail(cause: string, next = "restore the frozen registration and clean code, use a fresh output directory in an admitted container, then retry"): never { throw new Error(`execution baseline: ${cause}; ${next}`); }
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (plain(value)) return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
@@ -198,7 +200,9 @@ export function emitBaseline(output: string): string {
   for (const entry of raw.files) {
     if (!plain(entry) || typeof entry.path !== "string" || !/^[a-z][a-z0-9-]{0,63}\.json$/.test(entry.path)) fail("baseline receipt filename is invalid");
     const text = readTextBounded(join(output, entry.path), BYTES, { noFollow: true }); if (sha256(text) !== entry.sha256) fail("baseline receipt hash changed");
-    size += Buffer.byteLength(text); if (size > BUNDLE_BYTES) fail("baseline bundle exceeds2MiB"); files[entry.path] = text;
+    size += Buffer.byteLength(text); if (size > BASELINE_BUNDLE_BYTES) fail("baseline raw receipts exceed 2 MiB", "keep the existing receipts and transfer files individually instead of --emit"); files[entry.path] = text;
   }
-  return JSON.stringify({ v: 1, files });
+  const serialized = JSON.stringify({ v: 1, files });
+  if (Buffer.byteLength(BASELINE_BUNDLE_PREFIX + serialized + "\n") > BASELINE_BUNDLE_BYTES) fail("serialized baseline bundle exceeds 2 MiB including prefix and newline", "keep the existing receipts and transfer files individually instead of --emit");
+  return serialized;
 }

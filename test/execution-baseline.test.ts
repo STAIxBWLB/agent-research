@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { readTextBounded, sha256, writeAtomic } from "../src/study.ts";
-import { baselineSlots, baselineDenominators, runBaseline, emitBaseline, RESULT_AUTHORITY_DEVIATION } from "../scripts/execution-baseline.ts";
+import { baselineSlots, baselineDenominators, runBaseline, emitBaseline, RESULT_AUTHORITY_DEVIATION, BASELINE_BUNDLE_BYTES, BASELINE_BUNDLE_PREFIX } from "../scripts/execution-baseline.ts";
 import { freezePreregistration, PREREGISTRATION, PROTOCOL_DOC, validateCostRecord } from "../scripts/execution-eval.ts";
 import { tempDir } from "./helpers.ts";
 import { freshValues } from "../scripts/execution-workload.ts";
@@ -59,7 +59,7 @@ test("every observation denominator survives failures, cancellation, uncertainty
 test("baseline admission refuses preregistration drift before any code binding or workload effect", () => {
   const temp = tempDir(), protocol = JSON.parse(readTextBounded(join(root, PREREGISTRATION), 65_536)), corpus = JSON.parse(readTextBounded(join(root, protocol.corpus), 65_536));
   for (const file of [PREREGISTRATION, PROTOCOL_DOC, protocol.corpus, ...corpus.cases.flatMap((row: { input: string; expected: string }) => [row.input, row.expected])]) {
-    const target = join(temp, file); mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, readFileSync(join(root, file)));
+    const target = join(temp, file), bound = file.startsWith("test/fixtures/execution-eval/") && file !== protocol.corpus ? 16_384 : 65_536; mkdirSync(dirname(target), { recursive: true }); writeAtomic(target, readTextBounded(join(root, file), bound), bound);
   }
   const receipt = join(temp, "docs/verification/execution-eval-frozen.json"); freezePreregistration(temp, receipt);
   const fixture = join(temp, corpus.cases[0].input); writeFileSync(fixture, readTextBounded(fixture, 16_384) + "\n");
@@ -98,4 +98,36 @@ test("baseline bundle publication refuses changed receipt content", () => {
   expect(Object.keys(JSON.parse(emitBaseline(temporary)).files)).toHaveLength(25);
   const target = join(temporary, manifest.files[0].path); writeAtomic(target, readTextBounded(target, 65_536) + "\n", 65_536);
   expect(() => emitBaseline(temporary)).toThrow("baseline receipt hash changed");
+});
+
+
+test("baseline CLI refuses missing/relative output and nontrailing flags before effects", () => {
+  for (const args of [["--emit"], ["relative/dir"], ["relative/dir", "--emit"], []]) {
+    const cwd = tempDir();
+    const child = Bun.spawnSync([process.execPath, join(root, "scripts/execution-eval.ts"), "baseline", ...args], { cwd, env: { HOME: cwd, PATH: "/usr/bin:/bin" }, stdout: "pipe", stderr: "pipe", timeout: 3000, maxBuffer: 65_536 });
+    expect(child.exitCode).not.toBe(0); expect(child.stderr.toString()).toContain("absolute output operand");
+    expect(child.stdout.length).toBe(0); expect(existsSync(join(cwd, "--emit"))).toBe(false); expect(existsSync(join(cwd, "relative"))).toBe(false);
+  }
+});
+
+test("baseline CLI allows only one optional trailing emit flag", () => {
+  for (const extra of [["--unknown"], ["--emit", "--emit"]]) {
+    const cwd = tempDir(), output = join(cwd, "outside");
+    const child = Bun.spawnSync([process.execPath, join(root, "scripts/execution-eval.ts"), "baseline", output, ...extra], { cwd, env: { HOME: cwd, PATH: "/usr/bin:/bin" }, stdout: "pipe", stderr: "pipe", timeout: 3000, maxBuffer: 65_536 });
+    expect(child.exitCode).not.toBe(0); expect(child.stderr.toString()).toContain("optional --emit"); expect(existsSync(output)).toBe(false);
+  }
+});
+
+test("baseline emit bounds serialized bytes including prefix, escaping and newline", () => {
+  const directory = tempDir(), files: Record<string, string> = {}, entries: { path: string; sha256: string; bytes: number }[] = [];
+  for (let index = 0; index < 20; index++) {
+    const name = `case-${index}.json`, text = JSON.stringify({ padding: '"'.repeat(30_000) }) + "\n";
+    writeAtomic(join(directory, name), text, 65_536); files[name] = text; entries.push({ path: name, sha256: sha256(text), bytes: Buffer.byteLength(text) });
+  }
+  const manifest = JSON.stringify({ v: 1, files: entries }) + "\n"; writeAtomic(join(directory, "manifest.json"), manifest, 65_536); files["manifest.json"] = manifest;
+  const rawBytes = Object.values(files).reduce((total, text) => total + Buffer.byteLength(text), 0);
+  expect(rawBytes).toBeLessThan(BASELINE_BUNDLE_BYTES);
+  expect(Buffer.byteLength(BASELINE_BUNDLE_PREFIX + JSON.stringify({ v: 1, files }) + "\n")).toBeGreaterThan(BASELINE_BUNDLE_BYTES);
+  expect(() => emitBaseline(directory)).toThrow("serialized baseline bundle exceeds 2 MiB including prefix and newline");
+  expect(readTextBounded(join(directory, "manifest.json"), 65_536)).toBe(manifest);
 });
