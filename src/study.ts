@@ -102,10 +102,10 @@ export function studyFile(dir: string, ...parts: string[]): string { return join
 export function openStudy(dir: string): { dir: string; study: Study } {
   const root = resolve(dir), file = join(root, "study.json");
   if (!existsSync(file)) throw new Error(`${root}: no study.json (run ares init first)`);
-  return { dir: root, study: validStudy(readJsonFile(file, STUDY_BYTES)) };
+  return { dir: root, study: validateStudy(readJsonFile(file, STUDY_BYTES)) };
 }
 
-function validStudy(raw: unknown): Study {
+export function validateStudy(raw: unknown): Study {
   if (plain(raw) && raw.v !== 1 && raw.v !== 2) throw new Error("study.json: unsupported schema version; use an ares version that supports this study, keeping the original file unchanged");
   if (!plain(raw) || (raw.v !== 1 && raw.v !== 2) || typeof raw.id !== "string" || typeof raw.question !== "string" || typeof raw.createdAt !== "string" ||
     !["survey", "experiment"].includes(raw.mode as string)) throw new Error("study.json: malformed");
@@ -212,7 +212,12 @@ export function appendEvent(dir: string, actor: Actor, type: string, data: Recor
 export function readLedger(dir: string): LedgerEvent[] {
   const path = join(dir, "ledger.jsonl");
   if (!existsSync(path)) return [];
-  const lines = readTextBounded(path, LEDGER_BYTES).split("\n");
+  return parseLedger(readTextBounded(path, LEDGER_BYTES));
+}
+/** Shared v1 replay validation for bounded, already captured ledger bytes. */
+export function parseLedger(text: string): LedgerEvent[] {
+  if (Buffer.byteLength(text) > LEDGER_BYTES) throw new Error("ledger.jsonl exceeds its reader bound; restore a bounded ledger before reading");
+  const lines = text.split("\n");
   const events: LedgerEvent[] = [];
   lines.forEach((line, index) => {
     if (!line.trim()) return;

@@ -69,12 +69,18 @@ function* records(dir: string): Generator<Attempt> {
       const path = join(dir, "runs", run, "attempts", name), stat = lstatSync(path);
       if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("attempt record: regular file required; restore the record without symlinks");
       const raw = readJsonFile(path, ATTEMPT_BYTES);
-      if (plain(raw) && (raw.v !== 1 || (typeof raw.status === "string" && !STATUSES.includes(raw.status as AttemptStatus)) || (typeof raw.stage === "string" && !["candidate", "evaluator"].includes(raw.stage)))) throw new Error("attempt record: unsupported schema version, status or stage; use an ares version that supports this record, keeping the original file unchanged");
-      if (!plain(raw) || raw.v !== 1 || raw.run !== run || raw.id !== name.slice(0, 16) || !STATUSES.includes(raw.status as AttemptStatus) || !["candidate", "evaluator"].includes(raw.stage as string) || !plain(raw.stages) || !plain(raw.protocol) || !plain(raw.executor) || typeof raw.startedAt !== "string" || !Number.isFinite(Date.parse(raw.startedAt))) throw new Error("attempt record: malformed; restore its last valid version before retrying");
+      const attempt = validateAttemptRecord(raw, run, name.slice(0, 16));
       if (++count > 1_000_000) throw new Error("attempt store: more than 1000000 records; archive the study and start a new one");
-      yield raw as unknown as Attempt;
+      yield attempt;
     }
   }
+}
+/** Shared store validation for provenance snapshots without a second directory traversal. */
+export function validateAttemptRecord(raw: unknown, run: string, wanted: string): Attempt {
+  runName(run); id(wanted);
+      if (plain(raw) && (raw.v !== 1 || (typeof raw.status === "string" && !STATUSES.includes(raw.status as AttemptStatus)) || (typeof raw.stage === "string" && !["candidate", "evaluator"].includes(raw.stage)))) throw new Error("attempt record: unsupported schema version, status or stage; use an ares version that supports this record, keeping the original file unchanged");
+      if (!plain(raw) || raw.v !== 1 || raw.run !== run || raw.id !== wanted || !STATUSES.includes(raw.status as AttemptStatus) || !["candidate", "evaluator"].includes(raw.stage as string) || !plain(raw.stages) || !plain(raw.protocol) || !plain(raw.executor) || typeof raw.startedAt !== "string" || !Number.isFinite(Date.parse(raw.startedAt))) throw new Error("attempt record: malformed; restore its last valid version before retrying");
+  return raw as unknown as Attempt;
 }
 function load(dir: string): Attempt[] { return [...records(dir)]; }
 function studyDir(dirArg: string): string { const { dir, study } = openStudy(dirArg); requireExperiment(study); return dir; }
