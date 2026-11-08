@@ -167,7 +167,7 @@ test("projection takes no locks or writes, starts no process/network and never r
   }) as typeof fs.openSync);
   const forbidden = (): never => { throw new Error("provenance reader side effect forbidden"); };
   const writes = [spyOn(fs, "writeSync").mockImplementation(forbidden), spyOn(fs, "writeFileSync").mockImplementation(forbidden), spyOn(fs, "appendFileSync").mockImplementation(forbidden), spyOn(fs, "mkdirSync").mockImplementation(forbidden), spyOn(fs, "renameSync").mockImplementation(forbidden), spyOn(fs, "unlinkSync").mockImplementation(forbidden), spyOn(fs, "chmodSync").mockImplementation(forbidden)];
-  const spawn = spyOn(child, "spawn").mockImplementation(forbidden), spawnSync = spyOn(child, "spawnSync").mockImplementation(forbidden), bunSpawn = spyOn(Bun, "spawn").mockImplementation(forbidden), bunSpawnSync = spyOn(Bun, "spawnSync").mockImplementation(forbidden), fetch = spyOn(globalThis, "fetch").mockImplementation(forbidden);
+  const spawn = spyOn(child, "spawn").mockImplementation(forbidden), spawnSync = spyOn(child, "spawnSync").mockImplementation(forbidden), bunSpawn = spyOn(Bun, "spawn").mockImplementation(forbidden), bunSpawnSync = spyOn(Bun, "spawnSync").mockImplementation(forbidden), fetch = spyOn(globalThis, "fetch").mockImplementation(forbidden as typeof globalThis.fetch);
   try {
     const page = readProvenance(f.dir); expect(page.status).toBe("ok");
     for (const write of writes) expect(write).not.toHaveBeenCalled();
