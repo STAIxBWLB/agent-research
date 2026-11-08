@@ -393,3 +393,26 @@ test("provenance options refuse unknown keys and non-string cursors before readi
     expect(() => readProvenance("/synthetic-nonexistent-study", options as never)).toThrow("use only cursor (string), nodeLimit, edgeLimit and traversalLimit");
   }
 });
+
+for (const target of ["proposals/skills", "hypotheses.md"] as const) test(`output exclusion covers captured ${target} before any open`, async () => {
+  const f = await provenanceFixture(), file = join(f.dir, `runs/investigate/attempts/${f.ids.retryAttempt}.json`), record = JSON.parse(readTextBounded(file, ATTEMPT_BYTES));
+  if (target === "hypotheses.md") writeAtomic(join(f.dir, target), "Synthetic private draft", 2 * 1024 * 1024);
+  record.paths.output = join(f.dir, target); record.executor.workdir = "/synthetic-unrelated-workdir"; writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES);
+  const original = fs.openSync, opened: string[] = [], guard = spyOn(fs, "openSync").mockImplementation(((file: fs.PathLike, ...args: unknown[]) => {
+    const name = String(file); if (name.endsWith("/" + target) || name.includes("/" + target + "/")) { opened.push(name); throw new Error("private output read"); }
+    return Reflect.apply(original, fs, [file, ...args]);
+  }) as typeof fs.openSync);
+  try { const page = readProvenance(f.dir); expect(page.status).toBe("unavailable"); expect(page.issues[0]?.code).toBe("executor-overlaps-source"); expect(opened).toEqual([]); }
+  finally { guard.mockRestore(); }
+});
+
+test("ledger attempts whose files are missing remain explicit unavailable evidence", () => {
+  const dir = tempDir(), ctx = { actor: { kind: "person" as const }, http: fakeHttp([]).http }, id = "1234567890abcdef";
+  ops.init(dir, { question: "Synthetic lost attempt record" }, ctx);
+  appendEvent(dir, ctx.actor, "attempt.started", { id, run: "investigate", commit: "a".repeat(40), seed: 1 });
+  appendEvent(dir, ctx.actor, "attempt.finished", { id, run: "investigate", status: "succeeded" });
+  const page = readProvenance(dir); expect(page.status).toBe("unavailable"); expect(page.totals).toBeNull();
+  expect(node(page, "attempt", id)).toMatchObject({ state: "unavailable", availability: "missing", proof: { file: "ledger.jsonl", ledgerIndex: 1, recordType: "attempt.started", nativeId: id } });
+  expect(page.issues.some(issue => issue.code === "missing-attempt-record" && issue.ref?.id === id)).toBe(true);
+  expect(page.edges.some(link => link.from.id === id)).toBe(false);
+});

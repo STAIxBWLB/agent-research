@@ -46,7 +46,22 @@ function parsed(file: SourceFile): unknown { try { return JSON.parse(decode(file
 function capture(dir: string): Snapshot {
   if (existsSync(join(dir, ".ares.lock"))) fail("write-in-progress");
   const files = new Map<string, SourceFile>(), directories: string[] = []; let total = 0, entries = 0;
+  const forbidden: string[] = [];
+  const safe = (name: string) => { if (forbidden.some(prefix => !prefix || name === prefix || name.startsWith(prefix + "/"))) fail("executor-overlaps-source"); };
+  const exclude = (name: string, file: SourceFile) => {
+    if (name !== "executor.json" && !/\/attempts\//.test(name)) return;
+    const raw = parsed(file); if (!plain(raw)) return;
+    if (name === "executor.json") { if (raw.v !== 1) fail("unsupported-version"); try { validateExecutor(raw); } catch { fail("malformed-executor"); } }
+    const executor = name === "executor.json" ? raw : plain(raw.executor) ? raw.executor : {}, paths = name !== "executor.json" && plain(raw.paths) ? raw.paths : {};
+    for (const location of [executor.workdir, paths.snapshot, paths.output, paths.result]) if (typeof location === "string" && location.startsWith("/")) {
+      let address = resolve(location); try { address = realpathSync(address); } catch { /* An absent output location has no readable tree. */ }
+      const inside = relative(dir, address); if (inside === "" || inside !== ".." && !inside.startsWith(".." + sep)) forbidden.push(inside.split(sep).join("/"));
+    }
+    // Reject overlapping metadata too, including locations learned from a later record.
+    for (const captured of files.keys()) safe(captured);
+  };
   const get = (name: string, bound: number): SourceFile | undefined => {
+    safe(name);
     const parts = name.split("/"); let absolute = dir;
     for (const [index, part] of parts.entries()) {
       absolute = join(absolute, part); let stat;
@@ -55,9 +70,10 @@ function capture(dir: string): Snapshot {
       if (index === parts.length - 1 && (stat.size > bound || stat.size > PROVENANCE_SOURCE_BYTES - total || files.size >= PROVENANCE_SOURCE_FILES)) fail("source-traversal-capped", true);
     }
     let bytes: Buffer; try { bytes = readBytesBounded(absolute, Math.min(bound, PROVENANCE_SOURCE_BYTES - total), { noFollow: true }); } catch { return fail("unreadable-source"); }
-    total += bytes.length; const file = { bytes, sha256: sha256(bytes) }; files.set(name, file); return file;
+    total += bytes.length; const file = { bytes, sha256: sha256(bytes) }; files.set(name, file); exclude(name, file); return file;
   };
   const names = (name: string): string[] => {
+    safe(name);
     let stat; try { stat = lstatSync(join(dir, name)); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; return fail("unreadable-source"); }
     if (!stat.isDirectory() || stat.isSymbolicLink()) fail("non-regular-source");
     directories.push(name); const directory = opendirSync(join(dir, name)), result: string[] = [];
@@ -65,31 +81,23 @@ function capture(dir: string): Snapshot {
     finally { directory.closeSync(); }
     return result.sort();
   };
+  // Learn output exclusions from native metadata before opening any other source content.
+  get("executor.json", 65_536);
+  const runs = names("runs");
+  for (const run of runs) {
+    if (!RUN.test(run)) fail("malformed-attempt-store");
+    for (const entry of names(`runs/${run}/attempts`)) { if (!/^[a-f0-9]{16}\.json$/.test(entry)) fail("malformed-attempt-store"); get(`runs/${run}/attempts/${entry}`, 1_048_576); }
+  }
   const studyFile = get("study.json", 65_536); if (!studyFile) fail("missing-study");
   let study: Study; try { study = validateStudy(parsed(studyFile)); } catch (error) { if (error instanceof Error && error.message.includes("unsupported")) return fail("unsupported-version"); return fail("malformed-study"); }
   const ledger = get("ledger.jsonl", 64 * 1024 * 1024); if (!ledger) fail("missing-ledger");
   let events: LedgerEvent[]; try { events = parseLedger(decode(ledger.bytes)); } catch (error) { if (error instanceof Error && error.message.includes("unsupported")) return fail("unsupported-ledger"); return fail("malformed-ledger"); }
   if (events.length > PROVENANCE_EVENTS || events.filter(event => event.type === "plan.set").length > 64) fail("ledger-traversal-capped", true);
-  for (const name of ["plan.json", "hypotheses.md", "design/protocol.json", "design/selection.json", "design/final.json", "executor.json", "literature/candidates.json"]) get(name, name === "hypotheses.md" ? 2 * 1024 * 1024 : name.startsWith("literature/") ? 8 * 1024 * 1024 : 65_536);
-  for (const name of ["plan.json", "design/protocol.json", "design/selection.json", "design/final.json", "executor.json"]) {
+  for (const name of ["plan.json", "hypotheses.md", "design/protocol.json", "design/selection.json", "design/final.json", "literature/candidates.json"]) get(name, name === "hypotheses.md" ? 2 * 1024 * 1024 : name.startsWith("literature/") ? 8 * 1024 * 1024 : 65_536);
+  for (const name of ["plan.json", "design/protocol.json", "design/selection.json", "design/final.json"]) {
     const file = files.get(name); if (file) { const raw = parsed(file); if (!plain(raw)) fail("malformed-source"); if (raw.v !== 1) fail("unsupported-version"); }
   }
-  const executorFile = files.get("executor.json");
-  if (executorFile) { try { validateExecutor(parsed(executorFile)); } catch { fail("malformed-executor"); } }
-  for (const run of names("runs")) {
-    if (!RUN.test(run)) fail("malformed-attempt-store");
-    for (const entry of names(`runs/${run}/attempts`)) { if (!/^[a-f0-9]{16}\.json$/.test(entry)) fail("malformed-attempt-store"); get(`runs/${run}/attempts/${entry}`, 1_048_576); }
-    for (const name of ["investigate.json", ...(run === "ablate" ? ["ablate.json"] : []), ...(run === "final" ? ["final.json"] : [])]) get(`runs/${run}/${name}`, 1_048_576);
-  }
-  // Workdir/output addresses in records are never followed, including a misconfigured private tree nested in task/paper.
-  const forbidden: string[] = [];
-  for (const [name, file] of files) if (name === "executor.json" || /\/attempts\//.test(name)) {
-    const raw = parsed(file); if (!plain(raw)) continue;
-    const executor = name === "executor.json" ? raw : plain(raw.executor) ? raw.executor : {};
-    const paths = name !== "executor.json" && plain(raw.paths) ? raw.paths : {};
-    for (const location of [executor.workdir, paths.snapshot, paths.output, paths.result]) if (typeof location === "string" && location.startsWith("/")) { let address = resolve(location); try { address = realpathSync(address); } catch { /* An absent output location has no readable tree. */ } const inside = relative(dir, address); if (inside === "" || inside !== ".." && !inside.startsWith(".." + sep)) forbidden.push(inside.split(sep).join("/")); }
-  }
-  const safe = (name: string) => { if (forbidden.some(prefix => !prefix || name === prefix || name.startsWith(prefix + "/"))) fail("executor-overlaps-source"); };
+  for (const run of runs) for (const name of ["investigate.json", ...(run === "ablate" ? ["ablate.json"] : []), ...(run === "final" ? ["final.json"] : [])]) get(`runs/${run}/${name}`, 1_048_576);
   const taskHashes: [string, string][] = []; let taskBytes = 0, taskDirectories = 0;
   const task = (name: string, depth: number) => {
     safe(name); if (depth > 64 || ++taskDirectories > 1000) fail("task-traversal-capped", true);
@@ -139,8 +147,9 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
   graph.put({ ref: study, state: "current", availability: "available", proof: graph.proof("study.json"), data: { mode: source.study.mode } });
   const owned = (ref: ExecutionReferenceV1, proof: ProvenanceProof) => graph.edge(study, ref, "contains", proof);
   const events = source.events;
-  const addedIdeas = new Map<string, number>(), decisions = new Map<string, number[]>(), latestAttempts = new Map<string, LedgerEvent>(), starts = new Map<string, LedgerEvent[]>(), reviewIndexes = new Map<string, number>(), skillIndexes = new Map<string, number>();
+  const addedIdeas = new Map<string, number>(), decisions = new Map<string, number[]>(), latestAttempts = new Map<string, LedgerEvent>(), attemptReceipts = new Map<string, { index: number; event: LedgerEvent }>(), starts = new Map<string, LedgerEvent[]>(), reviewIndexes = new Map<string, number>(), skillIndexes = new Map<string, number>();
   for (const [index, event] of events.entries()) {
+    if (event.type.startsWith("attempt.") && typeof event.data.id === "string" && ATTEMPT.test(event.data.id) && !attemptReceipts.has(event.data.id)) attemptReceipts.set(event.data.id, { index, event });
     if (event.type === "attempt.started" && typeof event.data.id === "string") starts.set(event.data.id, [...(starts.get(event.data.id) ?? []), event]);
     if (event.type.startsWith("attempt.") && typeof event.data.id === "string" && typeof event.data.status === "string") latestAttempts.set(event.data.id, event);
     if (event.type === "idea.added" && plain(event.data.idea) && typeof event.data.idea.id === "string") addedIdeas.set(event.data.idea.id, index);
@@ -166,6 +175,10 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
       graph.put({ ref, state: issue ? "corrupt" : "current", availability: "available", proof, data: { status: value.status, stage: value.stage, seed: Number.isSafeInteger(value.seed) ? value.seed : null } });
       if (value.studyId === source.study.id) owned(ref, proof);
       if (issue) graph.issue(issue, ref);
+    }
+    for (const [id, receipt] of attemptReceipts) if (!attemptCounts.has(id)) {
+      const ref = graph.ref("attempt", id), proof = graph.proof(ledger, receipt.index, id);
+      graph.put({ ref, state: "unavailable", availability: "missing", proof }); owned(ref, proof); graph.issue("missing-attempt-record", ref);
     }
     for (const { value, file, ref } of attempts.values()) {
       if (graph.nodes.get(key(ref))?.state !== "current") continue;
