@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.2.0] - 2026-11-07
+
+N-1 compatibility against 0.1.0, the latest published patch of the 0.1 minor line, checked by the `n1` CI job (`bun scripts/n1-check.ts`) on this release commit:
+
+- N-1 CLI: every 0.1.0 command and usage (57 commands) remains, and each usage keeps every 0.1.0 word in order. Changes are additive only: new commands (`autonomy show|set`, `study export`), new optional options and wider enums (`init --autonomy auto|gates|copilot|step`, `accept:<artifact>` gates).
+- N-1 MCP tools: every 0.1.0 tool (52 tools) remains with the same `readOnly` value. New tools are `ares_autonomy_show`, `ares_autonomy_set` and `ares_study_export`.
+- N-1 study/ledger formats: 0.2.0 reads 0.1.0-written survey and experiment studies and ledgers (status, gate list, autonomy show, lit/attempt list) without rewriting their bytes, and plain `auto|gates` studies stay study v1. 0.1.0 refuses two records only newer features write, each without changing the file: study v2 (object, `copilot` or `step` autonomy policies), with its unsupported-schema-version error, and plans whose nodes declare `phase`, with an unknown-field error. Ledger events stay version 1; `studyBundle: 1` is a new export format, not a study record.
+
 - N-1 CI check (#85 T1): a networked `n1` CI job, required by `ci-ok`, resolves N-1 from npm (the latest stable patch of the minor line directly below the checkout's major.minor core, whether or not the checkout is published), installs it into a temp prefix and fails on any removed N-1 command or usage word, removed MCP tool or flipped `readOnly`, on the checkout rewriting an N-1 study or ledger while reading it, or on N-1 not refusing a checkout study version it does not advertise (or not reading one it does) with bytes unchanged. On the initial publication line, with no previous minor, it prints an explicit skip and exits 0; registry and parse errors still fail. `bun run check` stays offline.
 
 - Study export scan (#83): every rule (path, URL, key-like, env) now runs on decoded JSON/JSONL keys and string values, so a raw newline or tab before a path, URL, key or env assignment can no longer hide it; refusal messages are unchanged.
