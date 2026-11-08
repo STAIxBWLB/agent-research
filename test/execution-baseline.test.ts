@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { readTextBounded, sha256, writeAtomic } from "../src/study.ts";
-import { baselineSlots, baselineDenominators, runBaseline, emitBaseline, RESULT_AUTHORITY_DEVIATION, BASELINE_BUNDLE_BYTES, BASELINE_BUNDLE_PREFIX } from "../scripts/execution-baseline.ts";
+import { baselineSlots, baselineDenominators, runBaseline, emitBaseline, RESULT_AUTHORITY_DEVIATION, BASELINE_BUNDLE_BYTES, BASELINE_BUNDLE_PREFIX, classifyChildFailure, inspectBaselineArtifact } from "../scripts/execution-baseline.ts";
 import { freezePreregistration, PREREGISTRATION, PROTOCOL_DOC, validateCostRecord } from "../scripts/execution-eval.ts";
 import { tempDir } from "./helpers.ts";
 import { freshValues } from "../scripts/execution-workload.ts";
@@ -130,4 +130,23 @@ test("baseline emit bounds serialized bytes including prefix, escaping and newli
   expect(Buffer.byteLength(BASELINE_BUNDLE_PREFIX + JSON.stringify({ v: 1, files }) + "\n")).toBeGreaterThan(BASELINE_BUNDLE_BYTES);
   expect(() => emitBaseline(directory)).toThrow("serialized baseline bundle exceeds 2 MiB including prefix and newline");
   expect(readTextBounded(join(directory, "manifest.json"), 65_536)).toBe(manifest);
+});
+
+
+test("unrequested child signal deaths are failures, never adapter cancellations", () => {
+  for (const signalCode of ["SIGSEGV", "SIGABRT"] as const) expect(classifyChildFailure({ exitCode: 1, signalCode })).toEqual({ status: "failed", cause: `signal:${signalCode}` });
+  const cwd = tempDir(), child = Bun.spawnSync([process.execPath, "-e", "process.kill(process.pid, 'SIGTERM')"], { cwd, env: { HOME: cwd, PATH: "/usr/bin:/bin" }, stdout: "pipe", stderr: "pipe", timeout: 3000, maxBuffer: 65_536 });
+  const failure = classifyChildFailure(child);
+  expect(failure).toEqual({ status: "failed", cause: "signal:SIGTERM" });
+  expect(baselineDenominators([{ trial: "reuse", status: failure!.status }]).reuse).toMatchObject({ full: 1, failed: 1, cancelled: 0 });
+  expect(classifyChildFailure({ exitCode: 1, signalCode: "SIGKILL", exitedDueToTimeout: true })?.cause).toBe("wall-budget");
+});
+
+test("a zero-exit child with malformed JSON retains artifact identity and verification timing", () => {
+  const cwd = tempDir(), output = join(cwd, "malformed.json");
+  const child = Bun.spawnSync([process.execPath, "-e", "require('node:fs').writeFileSync(process.argv[1], '{')", output], { cwd, env: { HOME: cwd, PATH: "/usr/bin:/bin" }, stdout: "pipe", stderr: "pipe", timeout: 3000, maxBuffer: 65_536 });
+  expect(child.exitCode).toBe(0);
+  const result = inspectBaselineArtifact(output);
+  expect(result.failure).toEqual({ status: "failed", cause: "malformed-output" }); expect(result.artifact).toEqual({ sha256: sha256("{"), bytes: 1 });
+  expect(result.verificationCpuSeconds).toBeGreaterThanOrEqual(0); expect(result.verificationWallMs).toBeGreaterThanOrEqual(0); expect(result.observed).toBeNull();
 });

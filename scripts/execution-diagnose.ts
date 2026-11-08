@@ -33,6 +33,7 @@ export function resolveDiagnosticFixture(input: unknown): DiagnosticObservation 
   if (!attemptId || !commit || !status || !statuses.includes(status)) return unknown();
   if (artifact?.commit !== undefined && artifact.commit !== commit) return unknown("conflicting-source", "reconcile-visible-source-records");
   const observed = (completeness: string, nextAction: string): DiagnosticObservation => ({ provenance: { attemptId, head: commit, selectedHead, status, completeness }, nextAction });
+  const missingArtifact = () => observed("artifact-missing", artifact?.retention === "pruned" ? "reexecute-from-frozen-inputs" : "restore-or-reexecute-artifact");
   const delivery = plain(value.delivery) ? value.delivery : undefined;
   if (status === "unknown" && delivery?.acknowledged === false && delivery.effectObserved == null) return observed("delivery-unresolved", "reconcile-dispatch-before-retry");
   const parentId = text(attempt.parentAttemptId);
@@ -41,10 +42,14 @@ export function resolveDiagnosticFixture(input: unknown): DiagnosticObservation 
     const events = Array.isArray(value.events) && value.events.length <= 128 ? value.events.filter(plain) : [];
     const linked = events.some(event => event.type === "retry.requested" && event.childAttemptId === attemptId && event.sourceAttemptId === parentId);
     if (parents.length !== 1 || !linked || parents[0]!.commit !== commit || !Number.isSafeInteger(attempt.seed) || parents[0]!.seed !== attempt.seed) return unknown("conflicting-source", "reconcile-visible-source-records");
-    const complete = status === "succeeded" && artifact?.present === true;
-    return { ...observed(complete ? "complete" : "pending", complete ? "use-terminal-retry-result" : "await-retry-result"), retryOf: parentId, independentSamples: 1 };
+    const retry = (observation: DiagnosticObservation) => ({ ...observation, retryOf: parentId, independentSamples: 1 });
+    if (status === "running") return retry(observed("pending", "await-retry-result"));
+    if (status === "failed" || status === "cancelled") return retry(observed("terminal-failure", `inspect-${status}-retry`));
+    if (status === "unknown") return retry(observed("delivery-unresolved", "reconcile-dispatch-before-retry"));
+    if (artifact?.present === false) return retry(missingArtifact());
+    return retry(observed(artifact?.present === true ? "complete" : "artifact-unavailable", artifact?.present === true ? "use-terminal-retry-result" : "inspect-visible-source-records"));
   }
-  if (status === "succeeded" && artifact?.present === false) return observed("artifact-missing", artifact.retention === "pruned" ? "reexecute-from-frozen-inputs" : "restore-or-reexecute-artifact");
+  if (status === "succeeded" && artifact?.present === false) return missingArtifact();
   if (status === "succeeded" && artifact?.present === true) return observed("complete", selectedHead && commit !== selectedHead ? "run-fresh-selected-head" : "inspect-terminal-result");
   return observed("pending", status === "running" ? "await-attempt-result" : "inspect-visible-source-records");
 }

@@ -76,3 +76,17 @@ test("CLI refuses oversized, malformed and linked inputs without echoing their c
     const error = new TextDecoder().decode(result.stderr); expect(error).toContain("execution diagnose:"); expect(error).not.toContain("private diagnostic text");
   }
 });
+
+
+test("linked terminal retries never wait as pending, and missing successful artifacts use the ordinary recovery", () => {
+  for (const status of ["failed", "cancelled"] as const) {
+    const { payload } = fixture(cases.find(row => row.input.includes("retry-terminal"))!); payload.attempts[1].status = status; payload.artifact.present = false;
+    expect(resolveDiagnosticFixture(payload)).toMatchObject({ provenance: { status, completeness: "terminal-failure" }, nextAction: `inspect-${status}-retry` });
+  }
+  const { payload } = fixture(cases.find(row => row.input.includes("retry-terminal"))!); payload.artifact.present = false;
+  expect(resolveDiagnosticFixture(payload)).toMatchObject({ provenance: { status: "succeeded", completeness: "artifact-missing" }, nextAction: "restore-or-reexecute-artifact" });
+  payload.artifact.retention = "pruned";
+  expect(resolveDiagnosticFixture(payload).nextAction).toBe("reexecute-from-frozen-inputs");
+  payload.attempts[1].status = "unknown";
+  expect(resolveDiagnosticFixture(payload)).toMatchObject({ provenance: { completeness: "delivery-unresolved" }, nextAction: "reconcile-dispatch-before-retry" });
+});

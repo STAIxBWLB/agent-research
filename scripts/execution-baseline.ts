@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, rmSync, unlinkSync } from "node:fs";
-import { arch, cpus, hostname, platform, release, tmpdir } from "node:os";
+import { arch, constants, cpus, hostname, platform, release, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { bindRunCode, RUN_CODE_FILE_BYTES } from "./execution-code-binding.ts";
 import { COST_FIELDS, FROZEN_RECEIPT, PREREGISTRATION, verifyPreregistration, validateCostRecord, type CostRecord } from "./execution-eval.ts";
@@ -67,6 +67,27 @@ export function baselineDenominators(rows: { trial: Trial; status: Status }[]) {
   return result;
 }
 function cpuSeconds(start: NodeJS.CpuUsage): number { const cpu = process.cpuUsage(start); return (cpu.user + cpu.system) / 1_000_000; }
+interface BaselineFailure { status: "failed"; cause: string }
+export function classifyChildFailure(child: { exitCode: number; signalCode?: NodeJS.Signals | number; exitedDueToTimeout?: boolean; exitedDueToMaxBuffer?: boolean }): BaselineFailure | undefined {
+  if (child.exitedDueToTimeout) return { status: "failed", cause: "wall-budget" };
+  if (child.exitedDueToMaxBuffer) return { status: "failed", cause: "output-bound" };
+  if (child.signalCode) {
+    const signal = typeof child.signalCode === "number" ? Object.entries(constants.signals).find(([, value]) => value === child.signalCode)?.[0] : Object.hasOwn(constants.signals, child.signalCode) ? child.signalCode : undefined;
+    // No cancellation is initiated by this adapter; a signal is a failed process, including crashes.
+    return { status: "failed", cause: `signal:${signal ?? "unknown"}` };
+  }
+  return child.exitCode !== 0 ? { status: "failed", cause: "child-nonzero" } : undefined;
+}
+export function inspectBaselineArtifact(file: string) {
+  const start = performance.now(), cpu = process.cpuUsage(), text = readTextBounded(file, INPUT_BYTES, { noFollow: true });
+  // Preserve available artifact identity and elapsed verification even if decoding the JSON fails.
+  const result = { artifact: { sha256: sha256(text), bytes: Buffer.byteLength(text) }, observed: null as unknown, failure: undefined as BaselineFailure | undefined, verificationCpuSeconds: cpuSeconds(cpu), verificationWallMs: performance.now() - start };
+  try { result.observed = JSON.parse(text); }
+  catch { result.failure = { status: "failed", cause: "malformed-output" }; }
+  finally { result.verificationCpuSeconds = cpuSeconds(cpu); result.verificationWallMs = performance.now() - start; }
+  return result;
+}
+
 function records(root: string, registration: ReturnType<typeof verifyPreregistration>): Case[] {
   const hashes = new Map([...registration.inputFiles, ...registration.expectedFiles].map(file => [file.path, file.sha256]));
   const read = (name: string, bound: number): Record<string, unknown> => {
@@ -156,14 +177,21 @@ export function runBaseline(rootArg: string, outputArg: string, imageDigest: str
             observation.logs = { stdout: { sha256: sha256(child.stdout), bytes: child.stdout.length }, stderr: { sha256: sha256(child.stderr), bytes: child.stderr.length } };
             const usage = child.resourceUsage;
             if (usage && usage.cpuTime.total >= 0) childCpu = Number(usage.cpuTime.total) / 1_000_000;
-            if (child.exitedDueToTimeout || child.exitedDueToMaxBuffer || child.exitCode !== 0) { observation.status = child.signalCode && !child.exitedDueToTimeout ? "cancelled" : "failed"; observation.cause = child.exitedDueToTimeout ? "wall-budget" : child.exitedDueToMaxBuffer ? "output-bound" : "child-nonzero"; }
+            const failure = classifyChildFailure(child);
+            if (failure) { observation.status = failure.status; observation.cause = failure.cause; }
             else if (usage.maxRSS > protocol.budgets.caseMemoryMiB * 1024 * 1024) { observation.status = "failed"; observation.cause = "memory-budget"; stopped[row.trial] = true; }
             else {
-              const verifyStart = performance.now(), verifyCpu = process.cpuUsage(), result = readTextBounded(artifact, INPUT_BYTES, { noFollow: true });
-              observation.observed = JSON.parse(result); observation.artifacts.push({ sha256: sha256(result), bytes: Buffer.byteLength(result) });
-              observation.matched = matches(row, seed, observation.observed); observation.status = observation.matched ? "succeeded" : "failed";
-              observation.cause = observation.matched ? undefined : "expected-mismatch";
-              observation.costs.verificationCpuSeconds = cpuSeconds(verifyCpu); observation.costs.verificationWallMs = performance.now() - verifyStart;
+              const verifyStart = performance.now(), verifyCpu = process.cpuUsage();
+              try {
+                const result = inspectBaselineArtifact(artifact); observation.artifacts.push(result.artifact);
+                observation.costs.verificationCpuSeconds = result.verificationCpuSeconds; observation.costs.verificationWallMs = result.verificationWallMs;
+                if (result.failure) { observation.status = result.failure.status; observation.cause = result.failure.cause; }
+                else {
+                  observation.observed = result.observed;
+                  observation.matched = matches(row, seed, observation.observed); observation.status = observation.matched ? "succeeded" : "failed";
+                  observation.cause = observation.matched ? undefined : "expected-mismatch";
+                }
+              } finally { observation.costs.verificationCpuSeconds = cpuSeconds(verifyCpu); observation.costs.verificationWallMs = performance.now() - verifyStart; }
             }
           } catch { observation.status = "failed"; observation.cause = "spawn-or-observation-unavailable"; }
           observation.costs.wallElapsedMs = performance.now() - start;
