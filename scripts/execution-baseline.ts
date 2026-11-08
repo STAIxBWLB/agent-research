@@ -5,6 +5,11 @@ import { bindRunCode, RUN_CODE_FILE_BYTES } from "./execution-code-binding.ts";
 import { COST_FIELDS, FROZEN_RECEIPT, PREREGISTRATION, verifyPreregistration, validateCostRecord, type CostRecord } from "./execution-eval.ts";
 import { plain, readBytesBounded, readTextBounded, sha256, writeAtomic } from "../src/study.ts";
 
+export const RESULT_AUTHORITY_DEVIATION = {
+  resultAuthorityLinks: [] as string[],
+  resultAuthorityLinksReason: "synthetic corpus, no ares study; harness-observed only",
+  resultAuthorityDecision: { issue: 63, date: "2026-11-08", scope: "observation-only T2a adapter" },
+};
 const BYTES = 65_536, INPUT_BYTES = 16_384, LOG_BYTES = 65_536, BUNDLE_BYTES = 2 * 1024 * 1024;
 type Status = "succeeded" | "failed" | "cancelled" | "unknown" | "excluded";
 type Trial = "diagnose" | "reuse";
@@ -16,6 +21,7 @@ interface Observation {
   artifacts: { sha256: string; bytes: number }[]; logs: { stdout: { sha256: string; bytes: number }; stderr: { sha256: string; bytes: number } } | null;
 }
 export interface BaselineReceipt {
+  resultAuthorityLinks: string[]; resultAuthorityLinksReason: string; resultAuthorityDecision: { issue: number; date: string; scope: string };
   v: 1; authority: "harness-observed"; kind: "synthetic-baseline-observations"; startedAt: string; endedAt: string;
   registrationReceiptSha256: string; methodSha256: string; inputSha256: string; expectedSha256: string;
   code: ReturnType<typeof bindRunCode>; environment: ReturnType<typeof environment>;
@@ -170,12 +176,12 @@ export function runBaseline(rootArg: string, outputArg: string, imageDigest: str
         } else observation.cause = "budget-stopped-not-started";
         rows.push(observation); caseRows.push(observation);
       }
-      const body = { v: 1, authority: "harness-observed", registrationReceiptSha256: registration.receiptSha256, codeSha256: code.codeSha256, methodSha256: registration.bindings.methodSha256, inputFileSha256: row.inputSha256, expectedFileSha256: row.expectedSha256, observations: caseRows };
+      const body = { ...RESULT_AUTHORITY_DEVIATION, v: 1, authority: "harness-observed", registrationReceiptSha256: registration.receiptSha256, codeSha256: code.codeSha256, methodSha256: registration.bindings.methodSha256, inputFileSha256: row.inputSha256, expectedFileSha256: row.expectedSha256, observations: caseRows };
       const name = `${row.id}.json`, text = JSON.stringify(body, null, 2) + "\n"; writeAtomic(join(output, name), text, BYTES, 0o600); files.push({ path: name, sha256: sha256(text), bytes: Buffer.byteLength(text) });
     }
     const diagnostic = rows.filter(row => row.trial === "diagnose"), correct = diagnostic.filter(row => row.matched === true).length;
     const receipt: BaselineReceipt = {
-      v: 1, authority: "harness-observed", kind: "synthetic-baseline-observations", startedAt, endedAt: new Date().toISOString(), registrationReceiptSha256: registration.receiptSha256, methodSha256: registration.bindings.methodSha256, inputSha256: registration.bindings.inputSha256, expectedSha256: registration.bindings.expectedSha256, code, environment: envIdentity,
+      ...RESULT_AUTHORITY_DEVIATION, v: 1, authority: "harness-observed", kind: "synthetic-baseline-observations", startedAt, endedAt: new Date().toISOString(), registrationReceiptSha256: registration.receiptSha256, methodSha256: registration.bindings.methodSha256, inputSha256: registration.bindings.inputSha256, expectedSha256: registration.bindings.expectedSha256, code, environment: envIdentity,
       schedule: { trials: ["diagnose", "reuse"], repetitions: 3, conditions: ["cold", "warm"], executedArms: ["baseline"], supervision: "preregistered-only", treatmentObservations: 0 }, denominators: baselineDenominators(rows),
       costs: { diagnose: totals(diagnostic), reuse: totals(rows.filter(row => row.trial === "reuse")) }, automatedSourceResolution: { correct, full: diagnostic.length, accuracy: diagnostic.length ? correct / diagnostic.length : "unknown", humanTimeToFind: "unknown" }, admission, files,
       limitations: ["harness-observed synthetic baseline only; no study/attempt, ares-observed/sealed evidence, winner or adoption authority", "rule engine scored against its development fixtures; automated source-resolution accuracy is not workflow usability", "human time-to-find, idle/person time and uninstrumented cost dimensions are unknown", "cold resets private fixture input/output state; warm retains input bytes, but every computation is fresh; no host-cache or JIT coldness claim", "T2a is not T3 control: rerun fresh alongside each authorized treatment in paired AB/BA order", "CPU sums only same-unit parent/self and child process counters; verification/materialization/failure are subsets, never added again", "newly created local receipts are 0600; checked-in synthetic hash/observation copies are ordinary 0644 Git files"] };

@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { readTextBounded, sha256, writeAtomic } from "../src/study.ts";
-import { baselineSlots, baselineDenominators, runBaseline, emitBaseline } from "../scripts/execution-baseline.ts";
+import { baselineSlots, baselineDenominators, runBaseline, emitBaseline, RESULT_AUTHORITY_DEVIATION } from "../scripts/execution-baseline.ts";
 import { freezePreregistration, PREREGISTRATION, PROTOCOL_DOC, validateCostRecord } from "../scripts/execution-eval.ts";
 import { tempDir } from "./helpers.ts";
 import { freshValues } from "../scripts/execution-workload.ts";
@@ -70,6 +70,7 @@ test("committed harness observations retain exact hashes, all rows, empty treatm
   const directory = join(root, "docs/verification/execution-eval-baseline/baseline-3f8f373"), manifestText = readTextBounded(join(directory, "manifest.json"), 65_536), manifest = JSON.parse(manifestText);
   const summary = JSON.parse(readTextBounded(join(directory, "summary.json"), 65_536));
   expect(summary.sourceManifest.sha256).toBe(sha256(manifestText));
+  for (const receipt of [manifest, summary]) { expect(receipt.resultAuthorityLinks).toEqual([]); expect(receipt.resultAuthorityLinksReason).toBe("synthetic corpus, no ares study; harness-observed only"); expect(receipt.resultAuthorityDecision).toEqual(RESULT_AUTHORITY_DEVIATION.resultAuthorityDecision); expect(receipt.metadataClarification.measurementRepeated).toBe(false); }
   expect(sha256(JSON.stringify(manifest.code.files))).toBe(manifest.code.codeSha256);
   expect(manifest.code.files.some((file: { path: string }) => file.path === "bin/ares.js")).toBe(true);
   expect(manifest.code.files.some((file: { path: string }) => file.path === "scripts/execution-baseline.ts")).toBe(true);
@@ -77,6 +78,8 @@ test("committed harness observations retain exact hashes, all rows, empty treatm
   const rows = manifest.files.flatMap((file: { path: string; sha256: string; bytes: number }) => {
     const text = readTextBounded(join(directory, file.path), 65_536); expect(sha256(text)).toBe(file.sha256); expect(Buffer.byteLength(text)).toBe(file.bytes);
     const receipt = JSON.parse(text); expect(receipt.authority).toBe("harness-observed"); expect(receipt.codeSha256).toBe(manifest.code.codeSha256); expect(receipt.methodSha256).toBe(manifest.methodSha256);
+    expect(receipt.resultAuthorityLinks).toEqual([]); expect(receipt.resultAuthorityLinksReason).toBe(RESULT_AUTHORITY_DEVIATION.resultAuthorityLinksReason); expect(receipt.resultAuthorityDecision.issue).toBe(63); expect(receipt.resultAuthorityDecision.date).toBe("2026-11-08");
+    expect(sha256(JSON.stringify(receipt.observations))).toBe(receipt.metadataClarification.observationsSha256); expect(receipt.metadataClarification.measurementRepeated).toBe(false);
     return receipt.observations;
   });
   expect(rows).toHaveLength(144); expect(baselineDenominators(rows)).toEqual(manifest.denominators);

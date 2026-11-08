@@ -18,7 +18,19 @@ bun scripts/execution-eval.ts baseline /absolute/fresh-output-directory --emit
 
 The exact resource-controller wrapper is in [Baseline admission replay](execution-eval-baseline-admission.md). Use the workspace's normal `remote_dev.py verify` admission, one run per worktree and one heavy job per repository. Do not bypass or retry an exit75. The baseline admission uses two CPUs, 256 MiB, 32 PIDs and no network. The adapter verifies those cgroup v2 limits, Linux container presence, the preregistered Bun 1.4.2 and the supplied image ID before effects. It launches one real Bun child at a time. No agent/model/account processes, privileged containers, Docker socket or extra concurrency are used. Standard full checks run as a separate ordinary admitted verify job.
 
-The T1 method/corpus/threshold/denominator receipt `72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20` is verified before baseline admission. The corpus, inputs and expected bytes are checked against that receipt before they are held in memory. Source admission binds the exact clean committed runtime/bootstrap/package/lock/harness/adapter dependency set; untracked, staged, linked or dirty source refuses. A private code snapshot, checked again by per-file hashes, supplies every child. The resulting run receipt records the actual source commit/tree/hash and environment; a later receipt/docs-only commit need not have the same Git commit but must have identical executed-code hashes.
+The T1 method/corpus/threshold/denominator receipt `72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20` is verified before baseline admission. The corpus, inputs and expected bytes are checked against that receipt before they are held in memory. Source admission binds the exact clean committed runtime/bootstrap/package/lock/harness/adapter dependency set; untracked, staged, linked or dirty source refuses. A private code snapshot, checked again by per-file hashes, supplies every child. The resulting run receipt records the actual source commit/tree/hash and environment; a later receipt/docs commit records the actual execution-code hash rather than falsely relabeling the run as current code.
+
+## Deviations from preregistration
+
+The sealed T1 method states:
+
+> Future baseline receipts must link actual existing study/attempt/result hashes.
+
+The synthetic corpus has no ares study, so those links do not exist. The [#63 Decisions entry dated 2026-11-08](https://github.com/STAIxBWLB/agent-research/issues/63) authorizes observation-only T2a instead. Every T2a receipt explicitly has `resultAuthorityLinks: []`, the reason `synthetic corpus, no ares study; harness-observed only`, and the issue/date decision citation. No links are invented, and the sealed method bytes and T1 hash remain unchanged.
+
+Consequences: these observations carry no selection/final/adoption authority, are not workflow-usability evidence and are not T3's control arm. T3 reruns fresh alongside authorized treatment in the paired design. This section and the receipt fields disclose the adapter boundary rather than silently claiming compliance with the original link requirement.
+
+The completed run was captured before the clarification message arrived. Its existing receipts therefore carry an explicit post-capture metadata annotation: original capture SHA-256, original receipt commit, actual execution code commit, unchanged observation-array hash and `measurementRepeated: false`. The prior capture remains in Git history. Only authority metadata and derived file hashes changed; no measured value, cost, timestamp or execution-code identity was edited. Future adapter receipts emit these fields directly.
 
 ## Schedule and candidate visibility
 
@@ -49,9 +61,9 @@ Run `bun install --frozen-lockfile && bun run check` separately for the source g
 
 ## Recorded T2a observation
 
-The completed run executed source commit `3f8f373bc8c13176eae3e4b564c54542a7b3e363`, code hash `d86195d060b84f282db94621b7ddb90afddd2e512d2344e910e9eafd26bb9708`, in one Bun 1.4.2 container. Its image ID was `sha256:72a7d979b414619df086635b69acab42da61718bacf6bd98874d8c90b30a7e1a`; observed cgroup limits were 2 CPU, 256 MiB, 32 PIDs. The later receipt/docs commit changes no executed source bytes.
+The completed run executed source commit `3f8f373bc8c13176eae3e4b564c54542a7b3e363`, code hash `d86195d060b84f282db94621b7ddb90afddd2e512d2344e910e9eafd26bb9708`, in one Bun 1.4.2 container. Its image ID was `sha256:72a7d979b414619df086635b69acab42da61718bacf6bd98874d8c90b30a7e1a`; observed cgroup limits were 2 CPU, 256 MiB, 32 PIDs. The later adapter change only emits explicit authority metadata; these historical observations were not rerun and retain their actual execution-code binding.
 
-The machine manifest and 24 per-case raw summaries are under [baseline-3f8f373](execution-eval-baseline/baseline-3f8f373/manifest.json). Manifest SHA-256 is `dd0e8949b6c1cabd07b34e89e8e79bac178787ce213c4abbe34a430c0e506840`. Their total logical JSON footprint is 338262 bytes; this is not a peak filesystem or retention-cost measurement. The derived [summary](execution-eval-baseline/baseline-3f8f373/summary.json) retains status denominators and cold/warm distributions, and links the admission-failure metadata.
+The machine manifest and 24 per-case raw summaries are under [baseline-3f8f373](execution-eval-baseline/baseline-3f8f373/manifest.json). The annotated manifest SHA-256 is `f1a19d04931d12af6dd7e33ca4eca4e7c1a8e1841de1a5229be145110edc91c1`; original capture SHA-256 `dd0e8949b6c1cabd07b34e89e8e79bac178787ce213c4abbe34a430c0e506840` is preserved in its annotation. Original captured JSON totaled 338262 bytes, and current annotated receipts total 360575 bytes; this is not a peak filesystem or retention-cost measurement. The derived [summary](execution-eval-baseline/baseline-3f8f373/summary.json) retains status denominators and cold/warm distributions, and links the admission-failure metadata.
 
 | Trial | Full | Succeeded | Failed | Cancelled | Unknown | Excluded |
 | --- | --- | --- | --- | --- | --- | --- |

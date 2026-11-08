@@ -4,7 +4,7 @@
   "kind": "descriptive-baseline-only",
   "sourceManifest": {
     "path": "manifest.json",
-    "sha256": "dd0e8949b6c1cabd07b34e89e8e79bac178787ce213c4abbe34a430c0e506840"
+    "sha256": "f1a19d04931d12af6dd7e33ca4eca4e7c1a8e1841de1a5229be145110edc91c1"
   },
   "codeCommit": "3f8f373bc8c13176eae3e4b564c54542a7b3e363",
   "codeSha256": "d86195d060b84f282db94621b7ddb90afddd2e512d2344e910e9eafd26bb9708",
@@ -123,10 +123,9 @@
       }
     }
   },
-  "retainedRawReceiptBytes": 338262,
   "admissionFailures": {
     "path": "admission-failures.json",
-    "sha256": "55678268d75b5b99da6f33696f219db3334b20bd2112153a87114afa261b5836",
+    "sha256": "cf8b0b00f569713c13512b8d7c042eecde258d96e1f59c5aa2c7501ed3644a67",
     "beforeBaseline": 2,
     "caseObservations": 0
   },
@@ -134,5 +133,23 @@
   "supervision": "preregistered-only",
   "t3ControlReuseAllowed": false,
   "humanTimeToFind": "unknown",
-  "interpretation": "Rule engine on its development fixtures and fresh arithmetic only; no workflow usability, comparative saving, final/selection/winner/adoption authority or threshold disposition. Missing costs remain unknown."
+  "interpretation": "Rule engine on its development fixtures and fresh arithmetic only; no workflow usability, comparative saving, final/selection/winner/adoption authority or threshold disposition. Missing costs remain unknown.",
+  "resultAuthorityLinks": [],
+  "resultAuthorityLinksReason": "synthetic corpus, no ares study; harness-observed only",
+  "resultAuthorityDecision": {
+    "issue": 63,
+    "date": "2026-11-08",
+    "scope": "observation-only T2a adapter"
+  },
+  "metadataClarification": {
+    "kind": "post-capture-authority-clarification",
+    "originalCaptureSha256": "8d2ff943cc359d83ec4a7f71e78ff67432f67a0e11f2fd96814992b977f73f19",
+    "originalReceiptGitCommit": "35b905f404a54d7306341b530454fb07893a4c6c",
+    "observationsSha256": null,
+    "recordedExecutionCodeCommit": "3f8f373bc8c13176eae3e4b564c54542a7b3e363",
+    "measurementRepeated": false,
+    "note": "Only receipt metadata changed after capture; observations, costs, timestamps and execution code binding are unchanged. Future emitter now includes the decision explicitly."
+  },
+  "originalCaptureRawReceiptBytes": 338262,
+  "annotatedReceiptBytes": 360575
 }

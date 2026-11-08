@@ -433,5 +433,21 @@
         }
       }
     }
-  ]
+  ],
+  "resultAuthorityLinks": [],
+  "resultAuthorityLinksReason": "synthetic corpus, no ares study; harness-observed only",
+  "resultAuthorityDecision": {
+    "issue": 63,
+    "date": "2026-11-08",
+    "scope": "observation-only T2a adapter"
+  },
+  "metadataClarification": {
+    "kind": "post-capture-authority-clarification",
+    "originalCaptureSha256": "0d3e110bff3bd476419bc6373c36528bb9ba87e9ed6922918090ba3274dd05a2",
+    "originalReceiptGitCommit": "35b905f404a54d7306341b530454fb07893a4c6c",
+    "observationsSha256": "389f93aab7a419cec092afa1e01fd5a79a1402921648d8a4306b83d1217ef6e7",
+    "recordedExecutionCodeCommit": "3f8f373bc8c13176eae3e4b564c54542a7b3e363",
+    "measurementRepeated": false,
+    "note": "Only receipt metadata changed after capture; observations, costs, timestamps and execution code binding are unchanged. Future emitter now includes the decision explicitly."
+  }
 }

@@ -478,123 +478,123 @@
   "files": [
     {
       "path": "diagnose-stale-head-old-card.json",
-      "sha256": "f8c4864f55ed2cac2f1f61f6792b92afe7d59f2c2bed98ff28c86fd99ee72327",
-      "bytes": 14222
+      "sha256": "1b33350c4a8a53badcbe5e0b578c20fca26598d6a42fbd85273e21636e8304c4",
+      "bytes": 15117
     },
     {
       "path": "diagnose-stale-head-changed-selection.json",
-      "sha256": "592583fab166880e829dd504ea7f1d66542a0bd781207d8b59b7b6fac8403a22",
-      "bytes": 14300
+      "sha256": "564524456254c9946f70b847527782c4b5774715a473f2dac415620c6d655657",
+      "bytes": 15195
     },
     {
       "path": "diagnose-missing-artifact-lost-file.json",
-      "sha256": "9246af03d6c17462add47e84145fd6d19ad0a6cf0d3473ff718fbcc269335580",
-      "bytes": 14363
+      "sha256": "2676a949ef5f6457304e3e676fce2fbae0ff2d7febd5deea414232d285ff54ac",
+      "bytes": 15258
     },
     {
       "path": "diagnose-missing-artifact-pruned-file.json",
-      "sha256": "d1c15b79422f80bb00f6f3b214233bfaf3de8cab5a8df17b5bc11f787053c2f1",
-      "bytes": 14368
+      "sha256": "e6cf4c2e813075ce6938c356cd703d0566c4767efb9d6ffdd7953cae73ceb32d",
+      "bytes": 15263
     },
     {
       "path": "diagnose-retry-terminal-child.json",
-      "sha256": "2cc67230d6beb572799fe36d0ce602239d12b370cdc7db634ea9af50793277bb",
-      "bytes": 14684
+      "sha256": "0c4bc2d63cb40ca999611db1c8919ef065e527d43f4061c6bb2774928bdeb177",
+      "bytes": 15579
     },
     {
       "path": "diagnose-retry-active-child.json",
-      "sha256": "cb0b1f4fbd99087d4476833820dfa7872217b4973afab788b39eb0d2fe8447f3",
-      "bytes": 14627
+      "sha256": "2e2c9262975b3aeb76cb787a0eaab137f8e2eec52d62b1294f909fcb3a953eca",
+      "bytes": 15522
     },
     {
       "path": "diagnose-uncertain-delivery-lost-ack.json",
-      "sha256": "0703e115bfc8bb7f758aba019c5c4eb1298854e4d44a97e14809e48a43a26651",
-      "bytes": 14384
+      "sha256": "663a020f5bcf4962b8789f43b50cde63f1f579bd50b3244adaee671f7b6dd3a5",
+      "bytes": 15279
     },
     {
       "path": "diagnose-uncertain-delivery-ended-connection.json",
-      "sha256": "aee89aca98d74530ac2ef7e5d405bdf3334aa12481a649f1b472d2b1e3a50720",
-      "bytes": 14461
+      "sha256": "30b5adc3555c77720138d6154e5699c08b0610e36533c0725a1bc485dcdf3ffd",
+      "bytes": 15356
     },
     {
       "path": "diagnose-privacy-gap-withheld-source.json",
-      "sha256": "0d3e110bff3bd476419bc6373c36528bb9ba87e9ed6922918090ba3274dd05a2",
-      "bytes": 14032
+      "sha256": "5e1cf0d37035db2a9b0051f5dbcb0d876bdd8f9b874672dd8ec26d453384fb1a",
+      "bytes": 14927
     },
     {
       "path": "diagnose-privacy-gap-partial-summary.json",
-      "sha256": "ebaea7fbd1fb14e7f72d8be87e17b3b08d7da0209864161c96f007d42a415e20",
-      "bytes": 14050
+      "sha256": "bd9228548b697c9fe235753e9a45769d7978a849a312f2a1998a22fde2cc700c",
+      "bytes": 14945
     },
     {
       "path": "diagnose-corrupt-source-truncated-json.json",
-      "sha256": "36ecc8d2cb278d6cbbf08d58d7838a78aa1696b8f9c037c509bdd8d1aa230dbb",
-      "bytes": 14084
+      "sha256": "e050d6e4d447e0e8462f0ddaeee23bf0d1d45193664d403447b6f619b1e87e02",
+      "bytes": 14979
     },
     {
       "path": "diagnose-corrupt-source-unsupported-version.json",
-      "sha256": "025bdb3139a858ee3d8b82d3b91a3379f695504c3c54ec870e62f2e82cfe77eb",
-      "bytes": 14137
+      "sha256": "bdde7fce31d81be561a4007042b15a8d012ad8f2d7f4f0ed6530cded89caacbf",
+      "bytes": 15032
     },
     {
       "path": "reuse-local-stage-edit-first-variant.json",
-      "sha256": "62427dafe761b60aae9cf38fd86d28b72099be563aab0bd3b2e714d0d61497a4",
-      "bytes": 12149
+      "sha256": "1b576a4c7dd312fdce441b79075433482e67898ea01e85b33461915cc0791a85",
+      "bytes": 13044
     },
     {
       "path": "reuse-local-stage-edit-second-variant.json",
-      "sha256": "4c9b737e1d8a095fbe0a3c84f94bd4b374b9a1e3d92e36901b18ea5ecd202059",
-      "bytes": 12173
+      "sha256": "302258d0d840c9cb6b8dfa3f87eb9b072dd8dbfd7cdb0decabc6dc963956b9e8",
+      "bytes": 13068
     },
     {
       "path": "reuse-global-code-change-first-variant.json",
-      "sha256": "5fbbb932a8b0c3167eb5c0a8890b4e78753c8d3321c3ea91246f61a2203732c3",
-      "bytes": 12178
+      "sha256": "c2a4dc55db627772ebe70e4627600fe39c035b42296971259869e939e53d4f5b",
+      "bytes": 13073
     },
     {
       "path": "reuse-global-code-change-second-variant.json",
-      "sha256": "3f15c3f48e9fb41757dca71f91f69db8caf2d94a6bfa27d52c1fb1dab02bc202",
-      "bytes": 12192
+      "sha256": "b3db60912e0f6e4071878166e29ba9f97f894b36bde00e69c347039e78edd556",
+      "bytes": 13087
     },
     {
       "path": "reuse-no-hit-first-variant.json",
-      "sha256": "e7c4d662a6de05b1437a4a88f05388856cf9890de451c0a295886684ad2475f3",
-      "bytes": 12121
+      "sha256": "5adb6caa85b3ab7b1f2f1d00440bf540c53c5588db43742df123ef16c6884727",
+      "bytes": 13016
     },
     {
       "path": "reuse-no-hit-second-variant.json",
-      "sha256": "bdd4ee827494bb0c96ad182f8b22b19829610f440b151128d879ed0919db9bc5",
-      "bytes": 12104
+      "sha256": "d91a2d310a2ec66d3966b15da1b7a2bcdbc9f87b5fd44840a0aa541ce9712eff",
+      "bytes": 12999
     },
     {
       "path": "reuse-corrupt-artifact-first-variant.json",
-      "sha256": "3bc03bee07c0281f19e7950ed8e897c682542127e758454f0afd7cc34bcf40ef",
-      "bytes": 12148
+      "sha256": "82b377ebabcad9cd0d188339e55280a85d8b76f9ace93346498c92d00bb0406a",
+      "bytes": 13043
     },
     {
       "path": "reuse-corrupt-artifact-second-variant.json",
-      "sha256": "84efc20d991a8e691853aad43f51cbfd0ae0dd8981ee7ec43bbe9b5092f5ae69",
-      "bytes": 12189
+      "sha256": "a1a7d3f4413de1f31273c281f1c8c348a9f933c86938915c073b50587d4ad116",
+      "bytes": 13084
     },
     {
       "path": "reuse-pruned-artifact-first-variant.json",
-      "sha256": "0e6eb6f73db48d1828e339d5eb36d39cf8bf75bb60780b4278a2090d3e2a22e3",
-      "bytes": 12169
+      "sha256": "9493c31228a0c082280dd9028a48dd8c9f3f168483eb182ef0f1d724c1368166",
+      "bytes": 13064
     },
     {
       "path": "reuse-pruned-artifact-second-variant.json",
-      "sha256": "98538af5974c4b1a548cbb0c1f74a93ae2657524b6fcc98c4247f33b519585f5",
-      "bytes": 12186
+      "sha256": "d90a9af2ac3d2ca8536f4d937f5d8f0fd129c3d17b2d47c5c57a280bd107a91a",
+      "bytes": 13081
     },
     {
       "path": "reuse-interrupted-source-first-variant.json",
-      "sha256": "a77c0ac273c2bd4b5f062f9e510d1476502e36d2d8cdbe87317937b89aaf94ba",
-      "bytes": 12180
+      "sha256": "17c04f1330729c15f0cf1f62a3369f960dc51fbafe890926b676dd1cfb4dba4a",
+      "bytes": 13075
     },
     {
       "path": "reuse-interrupted-source-second-variant.json",
-      "sha256": "819c98a887e69616cfc6c94bcf5981c5c4131d9a0381807cf7bc0e1681e6b7ad",
-      "bytes": 12191
+      "sha256": "a7d5c0b4c9a7f250da1f84dd66bfb0acd170b94371290740af2cfc6199f536a8",
+      "bytes": 13086
     }
   ],
   "limitations": [
@@ -605,5 +605,21 @@
     "T2a is not T3 control: rerun fresh alongside each authorized treatment in paired AB/BA order",
     "CPU sums only same-unit parent/self and child process counters; verification/materialization/failure are subsets, never added again",
     "newly created local receipts are 0600; checked-in synthetic hash/observation copies are ordinary 0644 Git files"
-  ]
+  ],
+  "resultAuthorityLinks": [],
+  "resultAuthorityLinksReason": "synthetic corpus, no ares study; harness-observed only",
+  "resultAuthorityDecision": {
+    "issue": 63,
+    "date": "2026-11-08",
+    "scope": "observation-only T2a adapter"
+  },
+  "metadataClarification": {
+    "kind": "post-capture-authority-clarification",
+    "originalCaptureSha256": "dd0e8949b6c1cabd07b34e89e8e79bac178787ce213c4abbe34a430c0e506840",
+    "originalReceiptGitCommit": "35b905f404a54d7306341b530454fb07893a4c6c",
+    "observationsSha256": null,
+    "recordedExecutionCodeCommit": "3f8f373bc8c13176eae3e4b564c54542a7b3e363",
+    "measurementRepeated": false,
+    "note": "Only receipt metadata changed after capture; observations, costs, timestamps and execution code binding are unchanged. Future emitter now includes the decision explicitly."
+  }
 }
