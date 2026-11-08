@@ -98,3 +98,17 @@ test("Git reads use isolated homes, bounded calls and disabled configuration hel
     expect(existsSync(call.env.HOME!)).toBe(false);
   }
 });
+
+test("historical run identity verifies real commit/tree/ancestry and source blobs", async () => {
+  const {verifyRunCodeCommit} = await import("../scripts/execution-code-binding.ts"), {sha256} = await import("../src/study.ts"), f = fixture(), original = bindRunCode(f.root);
+  expect(() => verifyRunCodeCommit(f.root, original)).not.toThrow();
+  expect(() => verifyRunCodeCommit(f.root, {...original, commit: "f".repeat(40)})).toThrow("execution code binding");
+  expect(() => verifyRunCodeCommit(f.root, {...original, tree: "e".repeat(40)})).toThrow("stored run tree mismatch");
+  f.write("src/runtime.ts", "export const changed = 2;\n"); f.commit(); const changed = bindRunCode(f.root);
+  expect(() => verifyRunCodeCommit(f.root, changed)).not.toThrow();
+  expect(() => verifyRunCodeCommit(f.root, {...original, commit: changed.commit, tree: changed.tree})).toThrow("stored commit file hash mismatch");
+  const forged = structuredClone(original); forged.files[0]!.sha256 = "a".repeat(64); forged.codeSha256 = sha256(JSON.stringify(forged.files)); expect(() => verifyRunCodeCommit(f.root, forged)).toThrow("stored commit file hash mismatch");
+  expect(() => verifyRunCodeCommit(f.root, original)).not.toThrow();
+  f.write("src/space source.ts", "// Synthetic native filename\n"); f.commit(); expect(() => verifyRunCodeCommit(f.root, bindRunCode(f.root))).not.toThrow();
+  f.git("checkout", "--quiet", "--detach", original.commit); expect(() => verifyRunCodeCommit(f.root, changed)).toThrow("not an ancestor");
+});

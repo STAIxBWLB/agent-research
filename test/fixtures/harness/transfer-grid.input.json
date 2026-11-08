@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "taskId": "transfer-grid",
+  "family": "transfer",
+  "prompt": "Count nonzero entries on the main diagonal. Reply with only the integer.",
+  "data": {
+    "matrix": [
+      [
+        1,
+        9,
+        0
+      ],
+      [
+        0,
+        0,
+        8
+      ],
+      [
+        7,
+        0,
+        2
+      ]
+    ]
+  }
+}

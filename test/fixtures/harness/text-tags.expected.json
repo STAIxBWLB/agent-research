@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "answer": "amber,blue,coral",
+  "rubric": {
+    "kind": "exact-string",
+    "normalization": "trim-outer-whitespace-only",
+    "acceptance": "Exact match to the private registered answer after normalization; extra explanations are incorrect.",
+    "subjective": false
+  },
+  "evaluatorKey": "synthetic-only-8d20e3cef4d2a001"
+}

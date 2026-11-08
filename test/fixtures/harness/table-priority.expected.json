@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "answer": "birch",
+  "rubric": {
+    "kind": "exact-string",
+    "normalization": "trim-outer-whitespace-only",
+    "acceptance": "Exact match to the private registered answer after normalization; extra explanations are incorrect.",
+    "subjective": false
+  },
+  "evaluatorKey": "synthetic-only-c40d432c1d9004f6"
+}

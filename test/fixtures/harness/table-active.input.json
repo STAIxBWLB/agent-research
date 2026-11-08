@@ -1,0 +1,27 @@
+{
+  "v": 1,
+  "taskId": "table-active",
+  "family": "tabular",
+  "prompt": "Count rows with active true and score at least the threshold. Reply with only the integer.",
+  "data": {
+    "threshold": 5,
+    "rows": [
+      {
+        "active": true,
+        "score": 5
+      },
+      {
+        "active": false,
+        "score": 8
+      },
+      {
+        "active": true,
+        "score": 7
+      },
+      {
+        "active": true,
+        "score": 2
+      }
+    ]
+  }
+}

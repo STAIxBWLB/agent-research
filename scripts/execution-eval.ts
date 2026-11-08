@@ -30,13 +30,13 @@ function object(raw: unknown, keys: readonly string[], label: string): Record<st
   if (!plain(raw) || Object.keys(raw).some(key => !keys.includes(key))) fail(`${label} has an invalid shape or unknown field`);
   return raw;
 }
-function canonical(raw: unknown, depth = 0): string {
+export function canonical(raw: unknown, depth = 0): string {
   if (depth > 24) fail("method nesting exceeds 24 levels");
   if (Array.isArray(raw)) return `[${raw.map(value => canonical(value, depth + 1)).join(",")}]`;
   if (plain(raw)) return `{${Object.keys(raw).sort().map(key => `${JSON.stringify(key)}:${canonical(raw[key], depth + 1)}`).join(",")}}`;
   return JSON.stringify(raw) ?? "null";
 }
-function filePath(root: string, name: string): string {
+export function filePath(root: string, name: string): string {
   if (!/^[A-Za-z0-9_.\/-]{1,240}$/.test(name) || name.startsWith("/") || name.split("/").some(part => !part || part === "." || part === "..")) fail("source path is not a bounded repository-relative file");
   const parts = name.split("/"); let file = root;
   try {
@@ -131,12 +131,16 @@ export function verifyPreregistration(rootArg: string, receiptFile: string): Fro
 /** First freeze creates a private receipt exclusively. Subsequent freeze calls only verify; they never overwrite it. */
 export function freezePreregistration(rootArg: string, receiptFile: string): FrozenPreregistration {
   if (existsSync(receiptFile)) return verifyPreregistration(rootArg, receiptFile);
-  const receipt = snapshot(resolve(rootArg)), temporary = join(dirname(receiptFile), `.execution-eval-${randomUUID()}.tmp`);
+  return publishEvaluationReceipt(receiptFile, snapshot(resolve(rootArg)), DOCUMENT_BYTES, () => verifyPreregistration(rootArg, receiptFile));
+}
+/** Shared exclusive publication: existing receipts are verified, never overwritten. */
+export function publishEvaluationReceipt<T>(receiptFile: string, receipt: T, maxBytes: number, onExisting: () => T): T {
+  const temporary = join(dirname(receiptFile), `.execution-eval-${randomUUID()}.tmp`);
   try {
-    try { writeAtomic(temporary, JSON.stringify(receipt, null, 2) + "\n", DOCUMENT_BYTES, 0o600); }
+    try { writeAtomic(temporary, JSON.stringify(receipt, null, 2) + "\n", maxBytes, 0o600); }
     catch { fail("receipt staging failed; choose an owned writable receipt directory"); }
     try { linkSync(temporary, receiptFile); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") return verifyPreregistration(rootArg, receiptFile); fail("receipt publication failed (choose an owned directory with hard-link support)"); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") return onExisting(); fail("receipt publication failed (choose an owned directory with hard-link support)"); }
   } finally { if (existsSync(temporary)) unlinkSync(temporary); }
   return receipt;
 }

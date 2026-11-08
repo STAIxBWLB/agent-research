@@ -1,0 +1,13 @@
+{
+  "v": 1,
+  "taskId": "transfer-weighted",
+  "family": "transfer",
+  "prompt": "Multiply each digit by its one-based position and sum. Reply with only the integer.",
+  "data": {
+    "digits": [
+      3,
+      1,
+      2
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "taskId": "text-tags",
+  "family": "text",
+  "prompt": "Lowercase the tags, remove duplicates, sort ascending, and join with commas without spaces.",
+  "data": {
+    "tags": [
+      "Coral",
+      "amber",
+      "Blue",
+      "AMBER"
+    ]
+  }
+}

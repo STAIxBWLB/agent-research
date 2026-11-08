@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "taskId": "transfer-cycle",
+  "family": "transfer",
+  "prompt": "Apply the substitution a->b, b->c, c->a to every character, preserving order. Reply with only the resulting string.",
+  "data": {
+    "text": "cabc"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "taskId": "table-priority",
+  "baseOutputs": [
+    "cedar",
+    "birch",
+    "ash",
+    "BIRCH",
+    "birch",
+    "cedar",
+    "birch"
+  ],
+  "editor": {
+    "proposal": "Check each constraint against the current public input before returning only the requested output.",
+    "probeOutput": "birch",
+    "composedGuidance": "Use only the current public task data. Respect filtering, order, tie-breaking and exact output formatting. Do not infer missing facts.",
+    "successorOutput": "birch"
+  },
+  "selection": {
+    "selectedSlot": 1
+  },
+  "reflection": {
+    "text": "Keep task constraints and output formatting explicit. A plausible alternative is not evidence of correctness; retain uncertainty without reading evaluator material."
+  }
+}

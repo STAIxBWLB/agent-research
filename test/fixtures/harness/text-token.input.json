@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "taskId": "text-token",
+  "family": "text",
+  "prompt": "Count exact whitespace-separated tokens equal to oak. Matching is case-sensitive. Reply with only the integer.",
+  "data": {
+    "text": "oak elm oak Oak ash"
+  }
+}

@@ -1,0 +1,219 @@
+{
+  "v": 1,
+  "status": "preregistered-not-measured",
+  "bindings": {
+    "protocolSha256": "85564a5254995724305c14eb36515a0e139360b669460a7bc7dc64bb0db03e6f",
+    "methodSha256": "079d949e7020eb38e404ddc93ad35ff4e16880df3767a3e6e3b85a15e6338024",
+    "corpusSha256": "9f40153fd6ce6a3c25b76f2ecc5dc0a09becd19260d4f5dc46589f9a2009c02b",
+    "inputSha256": "51b17775b478c1fd487cadefb17130da1a39afdfaa036c198c7e394e6830e699",
+    "expectedSha256": "e8ca1945ddb264bceef413a1b5cce9763655ccec92458e3bf235154033061f64",
+    "controlSha256": "e00c792eb07a264d4af20c91d8a01c23db86aa00c20d1d0eb5883795ba647762",
+    "orderedStreamSha256": "3712cf4b2654599f22ba310e724348ab78354342d397bbd2bb3cae8f66db2065",
+    "learningSourceSha256": "c06c4033757d40ee905a40d7951b97c3dae789f8b7982499d7405f66cd887da6",
+    "thresholdsSha256": "1e344091474fde2b179bc5cf3b40baef8954d67615297472e68b2b11e7578bbd",
+    "denominatorsSha256": "f1ddda0044e4c19a314a86bc7df44e4b54ad7236e3d19ba8b9ff7771ce40c165"
+  },
+  "files": [
+    {
+      "path": "docs/verification/harness-eval-preregistration.json",
+      "sha256": "85564a5254995724305c14eb36515a0e139360b669460a7bc7dc64bb0db03e6f",
+      "bytes": 17083
+    },
+    {
+      "path": "test/fixtures/harness/index.json",
+      "sha256": "6b38e9828d03f78761df639e4066d975121359646b3fc7737257b60319a6ed19",
+      "bytes": 3643
+    },
+    {
+      "path": "test/fixtures/harness/table-amber.input.json",
+      "sha256": "75131606caf3fe52c4667130dec0ca34d0b3d68cd39017bda0f9146c14a98e66",
+      "bytes": 369
+    },
+    {
+      "path": "test/fixtures/harness/table-amber.expected.json",
+      "sha256": "eccdcac2f1d1d2f0b363879a231d46cefa72cda62e99b7177e5d46e2850448ae",
+      "bytes": 326
+    },
+    {
+      "path": "test/fixtures/harness/table-amber.control.json",
+      "sha256": "25342a41adb83d539c2dc3aad8dba427910fcb015899a8dbbdd62e6c04b49665",
+      "bytes": 731
+    },
+    {
+      "path": "test/fixtures/harness/table-active.input.json",
+      "sha256": "0593131d944a3221c87b70a05786f8f9b295892a19ed9b9680f47d42d025b510",
+      "bytes": 467
+    },
+    {
+      "path": "test/fixtures/harness/table-active.expected.json",
+      "sha256": "c8c88262fe2bfa5b55f3f872c8b9b82d287c0b93a69028faef730cb249022ab5",
+      "bytes": 326
+    },
+    {
+      "path": "test/fixtures/harness/table-active.control.json",
+      "sha256": "f8d14ebd5ef73e627014e1cb5470e35ad3219ae0beb95f5d24f655eba49a065d",
+      "bytes": 731
+    },
+    {
+      "path": "test/fixtures/harness/table-balance.input.json",
+      "sha256": "ce2a5a7a08e53655a3ef00d0278dca59aefe878a45a5db553c04a3dd8bd51ac5",
+      "bytes": 458
+    },
+    {
+      "path": "test/fixtures/harness/table-balance.expected.json",
+      "sha256": "ea6a6aa5e74aae1d70b05db48da61893f3ea9fe9481e3a1d085850967b266353",
+      "bytes": 326
+    },
+    {
+      "path": "test/fixtures/harness/table-balance.control.json",
+      "sha256": "1923143e0ec3a97f163a2b4d2a26f77218c6f6e1f720c9ba342c7f94373cde5a",
+      "bytes": 734
+    },
+    {
+      "path": "test/fixtures/harness/table-priority.input.json",
+      "sha256": "cf3e724ea3e1dafc8eb3a262e49e372ad598ccc160c2f3f79c1a3345217d070f",
+      "bytes": 408
+    },
+    {
+      "path": "test/fixtures/harness/table-priority.expected.json",
+      "sha256": "32fe080274b907fb2cf9cad488e672a1c44500876c21c5d567b2bb4092111fed",
+      "bytes": 330
+    },
+    {
+      "path": "test/fixtures/harness/table-priority.control.json",
+      "sha256": "294abfa3609b9bda07e24ef02c6ae7dbfad41d8f2a589ad941922f3412e35a44",
+      "bytes": 759
+    },
+    {
+      "path": "test/fixtures/harness/text-token.input.json",
+      "sha256": "c836130223c36a7c46cb1e20fc6c24414ba058ab24aeca49ae141e40ad48dc61",
+      "bytes": 236
+    },
+    {
+      "path": "test/fixtures/harness/text-token.expected.json",
+      "sha256": "00ee047df046b952a5a01d1d1a7c4283f62e1b482961dedd70fb5958c4b0f650",
+      "bytes": 326
+    },
+    {
+      "path": "test/fixtures/harness/text-token.control.json",
+      "sha256": "59d8edcd7e983e66a92de6918d60504003c24ea3514406356e9bc01e25822322",
+      "bytes": 723
+    },
+    {
+      "path": "test/fixtures/harness/text-tags.input.json",
+      "sha256": "d4bf0d7a2e439e5af9a360e14be6b9fc15efc4c8f50fe1d2bf4a51d2ed544932",
+      "bytes": 260
+    },
+    {
+      "path": "test/fixtures/harness/text-tags.expected.json",
+      "sha256": "374cefb1df2c35b322eda902c380df7084ceb41518b5a27d42f9616307e33706",
+      "bytes": 341
+    },
+    {
+      "path": "test/fixtures/harness/text-tags.control.json",
+      "sha256": "6fabb2e886cdbb851580464e3c3cc30d68c60883a7eaf5dd1d850193548d4429",
+      "bytes": 851
+    },
+    {
+      "path": "test/fixtures/harness/text-marker.input.json",
+      "sha256": "68edb6f884e746a18aa2dc701bd5f380a1bec5595420e24c4cd4c972b06790ea",
+      "bytes": 255
+    },
+    {
+      "path": "test/fixtures/harness/text-marker.expected.json",
+      "sha256": "5346936390f06b68da0debef8fc36ae254403fd40a03c24357a09027b71329b3",
+      "bytes": 329
+    },
+    {
+      "path": "test/fixtures/harness/text-marker.control.json",
+      "sha256": "5069ef86835fde01a453810a1a808b4571eec2b02064ba20a650616bb03051bb",
+      "bytes": 767
+    },
+    {
+      "path": "test/fixtures/harness/text-mapping.input.json",
+      "sha256": "215110c58dedc59bd8e702c0f656e8c2a2ee0db133b60cefc071c25d6cc9bff7",
+      "bytes": 232
+    },
+    {
+      "path": "test/fixtures/harness/text-mapping.expected.json",
+      "sha256": "48d76da38cf34c991d39004b0fb3b210d41f6681652e67335a5a1af23a973f35",
+      "bytes": 331
+    },
+    {
+      "path": "test/fixtures/harness/text-mapping.control.json",
+      "sha256": "3acb0109b4f6e1bdfebb1b500830db27e454b2310e5a58fa511b822325131c86",
+      "bytes": 763
+    },
+    {
+      "path": "test/fixtures/harness/transfer-weighted.input.json",
+      "sha256": "33b050f55d03771c32ae2acc125711185dcaf347570a9f51c993f5ff16d146c3",
+      "bytes": 234
+    },
+    {
+      "path": "test/fixtures/harness/transfer-weighted.expected.json",
+      "sha256": "3be5206b61ced9375677565314175db5d4de9c57fce684ac292422db1a4fc622",
+      "bytes": 327
+    },
+    {
+      "path": "test/fixtures/harness/transfer-weighted.control.json",
+      "sha256": "c5e53db4469924601e5d1c30a53e03f2f32dc6668c82ddef89658dadc59d160e",
+      "bytes": 718
+    },
+    {
+      "path": "test/fixtures/harness/transfer-route.input.json",
+      "sha256": "f409d912919b69014b502f8c1c6b05c1c890bab61fabeb57615bed8f99f674e5",
+      "bytes": 467
+    },
+    {
+      "path": "test/fixtures/harness/transfer-route.expected.json",
+      "sha256": "e18d3982645bde36cfebb0d168569accc8a6474c0898c651700122da9da42739",
+      "bytes": 329
+    },
+    {
+      "path": "test/fixtures/harness/transfer-route.control.json",
+      "sha256": "22aba87ffbe6439161265085b9885f96c4e852a1f7dc9d35dca20a389f145f4f",
+      "bytes": 734
+    },
+    {
+      "path": "test/fixtures/harness/transfer-grid.input.json",
+      "sha256": "883869dcec75b3c4f3d8455e3b25ff071a7097727bd5ad688ce3e38bc1986122",
+      "bytes": 339
+    },
+    {
+      "path": "test/fixtures/harness/transfer-grid.expected.json",
+      "sha256": "7d4dfc0149c3d0c1864cfa2e624f95b6846649409f96dbb8cacd0460f7d47a69",
+      "bytes": 326
+    },
+    {
+      "path": "test/fixtures/harness/transfer-grid.control.json",
+      "sha256": "75377687292d6fc37aa8ae37e8de7aa5241fb83fd07b8ca0c12e57bc9df156a4",
+      "bytes": 701
+    },
+    {
+      "path": "test/fixtures/harness/transfer-cycle.input.json",
+      "sha256": "9bec460888c929a8cdabbb0163bfc18d71b32f1673608fd7aaacd25b7c427b53",
+      "bytes": 234
+    },
+    {
+      "path": "test/fixtures/harness/transfer-cycle.expected.json",
+      "sha256": "f39b4a0f0a18951f2145b22b78a1b4ea93b5a0104f380eb4efc9d73117b83a33",
+      "bytes": 329
+    },
+    {
+      "path": "test/fixtures/harness/transfer-cycle.control.json",
+      "sha256": "ad4f47a546b7b9068e0420fca18cb8f4ae0a8e5e286208ed2eab51bd8ee26302",
+      "bytes": 730
+    },
+    {
+      "path": "test/fixtures/harness/faults.json",
+      "sha256": "7a0c80796270bbcba33bcb9ee6495903dfd47723a543c68959235ef75219f50f",
+      "bytes": 5997
+    },
+    {
+      "path": "docs/verification/harness-eval-protocol.md",
+      "sha256": "079d949e7020eb38e404ddc93ad35ff4e16880df3767a3e6e3b85a15e6338024",
+      "bytes": 15192
+    }
+  ],
+  "receiptSha256": "45a3c21fc5f1280ce0e7433fe5461825547ee417fb56190a2d7080c596afec8d"
+}

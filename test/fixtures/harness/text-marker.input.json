@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "taskId": "text-marker",
+  "family": "text",
+  "prompt": "Return the content of the first TOKEN marker, excluding brackets and prefix. Reply with only that content.",
+  "data": {
+    "text": "Before [TOKEN:fern] after [TOKEN:willow]."
+  }
+}

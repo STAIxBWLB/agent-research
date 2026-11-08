@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "taskId": "text-mapping",
+  "baseOutputs": [
+    "willow",
+    "reed",
+    "oak",
+    "beta=willow",
+    "willow",
+    "WILLOW",
+    "willow"
+  ],
+  "editor": {
+    "proposal": "Check each constraint against the current public input before returning only the requested output.",
+    "probeOutput": "reed",
+    "composedGuidance": "Use only the current public task data. Respect filtering, order, tie-breaking and exact output formatting. Do not infer missing facts.",
+    "successorOutput": "oak"
+  },
+  "selection": {
+    "selectedSlot": 1
+  },
+  "reflection": {
+    "text": "Keep task constraints and output formatting explicit. A plausible alternative is not evidence of correctness; retain uncertainty without reading evaluator material."
+  }
+}

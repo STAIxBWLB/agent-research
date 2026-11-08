@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "taskId": "table-balance",
+  "family": "tabular",
+  "prompt": "For account mint, subtract debit totals from credit totals. Reply with only the integer.",
+  "data": {
+    "rows": [
+      {
+        "account": "mint",
+        "credit": 8,
+        "debit": 1
+      },
+      {
+        "account": "ochre",
+        "credit": 9,
+        "debit": 0
+      },
+      {
+        "account": "mint",
+        "credit": 2,
+        "debit": 3
+      }
+    ]
+  }
+}

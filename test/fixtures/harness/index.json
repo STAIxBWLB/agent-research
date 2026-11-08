@@ -1,0 +1,102 @@
+{
+  "v": 1,
+  "cases": [
+    {
+      "id": "table-amber",
+      "family": "tabular",
+      "split": "learning",
+      "input": "test/fixtures/harness/table-amber.input.json",
+      "expected": "test/fixtures/harness/table-amber.expected.json",
+      "control": "test/fixtures/harness/table-amber.control.json"
+    },
+    {
+      "id": "table-active",
+      "family": "tabular",
+      "split": "learning",
+      "input": "test/fixtures/harness/table-active.input.json",
+      "expected": "test/fixtures/harness/table-active.expected.json",
+      "control": "test/fixtures/harness/table-active.control.json"
+    },
+    {
+      "id": "table-balance",
+      "family": "tabular",
+      "split": "learning",
+      "input": "test/fixtures/harness/table-balance.input.json",
+      "expected": "test/fixtures/harness/table-balance.expected.json",
+      "control": "test/fixtures/harness/table-balance.control.json"
+    },
+    {
+      "id": "table-priority",
+      "family": "tabular",
+      "split": "learning",
+      "input": "test/fixtures/harness/table-priority.input.json",
+      "expected": "test/fixtures/harness/table-priority.expected.json",
+      "control": "test/fixtures/harness/table-priority.control.json"
+    },
+    {
+      "id": "text-token",
+      "family": "text",
+      "split": "learning",
+      "input": "test/fixtures/harness/text-token.input.json",
+      "expected": "test/fixtures/harness/text-token.expected.json",
+      "control": "test/fixtures/harness/text-token.control.json"
+    },
+    {
+      "id": "text-tags",
+      "family": "text",
+      "split": "learning",
+      "input": "test/fixtures/harness/text-tags.input.json",
+      "expected": "test/fixtures/harness/text-tags.expected.json",
+      "control": "test/fixtures/harness/text-tags.control.json"
+    },
+    {
+      "id": "text-marker",
+      "family": "text",
+      "split": "learning",
+      "input": "test/fixtures/harness/text-marker.input.json",
+      "expected": "test/fixtures/harness/text-marker.expected.json",
+      "control": "test/fixtures/harness/text-marker.control.json"
+    },
+    {
+      "id": "text-mapping",
+      "family": "text",
+      "split": "learning",
+      "input": "test/fixtures/harness/text-mapping.input.json",
+      "expected": "test/fixtures/harness/text-mapping.expected.json",
+      "control": "test/fixtures/harness/text-mapping.control.json"
+    },
+    {
+      "id": "transfer-weighted",
+      "family": "transfer",
+      "split": "heldout",
+      "input": "test/fixtures/harness/transfer-weighted.input.json",
+      "expected": "test/fixtures/harness/transfer-weighted.expected.json",
+      "control": "test/fixtures/harness/transfer-weighted.control.json"
+    },
+    {
+      "id": "transfer-route",
+      "family": "transfer",
+      "split": "heldout",
+      "input": "test/fixtures/harness/transfer-route.input.json",
+      "expected": "test/fixtures/harness/transfer-route.expected.json",
+      "control": "test/fixtures/harness/transfer-route.control.json"
+    },
+    {
+      "id": "transfer-grid",
+      "family": "transfer",
+      "split": "heldout",
+      "input": "test/fixtures/harness/transfer-grid.input.json",
+      "expected": "test/fixtures/harness/transfer-grid.expected.json",
+      "control": "test/fixtures/harness/transfer-grid.control.json"
+    },
+    {
+      "id": "transfer-cycle",
+      "family": "transfer",
+      "split": "heldout",
+      "input": "test/fixtures/harness/transfer-cycle.input.json",
+      "expected": "test/fixtures/harness/transfer-cycle.expected.json",
+      "control": "test/fixtures/harness/transfer-cycle.control.json"
+    }
+  ],
+  "faults": "test/fixtures/harness/faults.json"
+}

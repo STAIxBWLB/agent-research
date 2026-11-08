@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "taskId": "table-priority",
+  "family": "tabular",
+  "prompt": "Return the label with maximum priority. Break ties by ascending label. Reply with only the label.",
+  "data": {
+    "rows": [
+      {
+        "label": "cedar",
+        "priority": 4
+      },
+      {
+        "label": "birch",
+        "priority": 4
+      },
+      {
+        "label": "ash",
+        "priority": 2
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "v": 1,
+  "answer": "fern",
+  "rubric": {
+    "kind": "exact-string",
+    "normalization": "trim-outer-whitespace-only",
+    "acceptance": "Exact match to the private registered answer after normalization; extra explanations are incorrect.",
+    "subjective": false
+  },
+  "evaluatorKey": "synthetic-only-c7dd2365f9e8fa7d"
+}
