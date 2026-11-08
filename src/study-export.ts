@@ -102,6 +102,7 @@ function attemptRow(a: Attempt) {
     id: a.id, run: a.run, studyIdSha256: sha256(String(a.studyId)), protocolHash: shaped(a.protocolHash, SHA256), sealBinding: shaped(a.sealBinding, SHA256), commit: shaped(a.commit, GIT_ID), treeId: shaped(a.treeId, GIT_ID),
     snapshotSha256: shaped(a.snapshotSha256, SHA256), seed: Number.isSafeInteger(a.seed) ? a.seed : null, labelSha256: sha256(String(a.label ?? "")), retryOf: shaped(a.retryOf, ATTEMPT_ID), status: a.status, stage: a.stage, ...(reason ? { reasonClass: reason } : {}),
     ...(a.verifiedInputs !== undefined ? { inputs: Object.fromEntries(Object.entries(a.verifiedInputs).map(([name, hash]) => [name, shaped(hash, SHA256)])) } : {}),
+    ...(a.gpuDevices !== undefined ? { gpuDeviceCount: a.gpuDevices.length } : {}),
     durationMs: duration(a.startedAt, a.endedAt), stages,
     metrics: (Array.isArray(a.metrics) ? a.metrics : []).map(m => ({ name: m.name, unit: m.unit, value: finite(m.value), provenance: m.provenance === "ares-observed" ? "ares-observed" : "other" })),
     outputs: (Array.isArray(a.outputs) ? a.outputs : []).map(o => ({ sha256: shaped(o.sha256, SHA256), bytes: finite(o.bytes) })),

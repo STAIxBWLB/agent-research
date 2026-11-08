@@ -188,6 +188,19 @@ The same protocol hash, commit/tree, seed and run return the same attempt. Use `
 
 Raw outputs and logs stay in the private executor attempt directory. The study holds output paths, sha256 and byte counts (regular files only, at most 500 files and 256 MiB total), plus each log stream's path, hash, bytes and truncation flag. Each stdout/stderr copy is capped at 16 MiB; excess log volume does not fail an attempt. `attempt logs` checks the recorded copies and prints tails without changing the study; `--tail` accepts 0..65536 bytes (default 16384), and omitted stage/stream filters return all recorded streams. No log content is persisted in the study.
 
+
+On a shared Linux NVIDIA executor, admission can be enabled explicitly:
+
+```sh
+ares executor set experiment --kind ssh --host ALIAS --workdir /private/owned/path --gpu-devices 0,1 --gpu-min-free-memory-mb 8192 --gpu-max-load-ratio 0.8
+```
+
+The equivalent MCP `ares_executor_set` setting is `gpu: { devices: [0, 1], minFreeMemoryMb: 8192, maxLoadRatio: 0.8 }`. All three fields are required together; omitting GPU settings preserves the existing behavior. The allow list has 1..64 device indexes or full `GPU-...` UUIDs. Memory is a per-device minimum in MB, and load ratio is the one-minute host load average divided by CPU count. Configuration itself performs no probe.
+
+For a new attempt with GPUs and admission settings, ares makes one bounded read-only transport call to `nvidia-smi`, `/proc/loadavg` and `getconf _NPROCESSORS_ONLN`. It picks the first eligible devices in allow-list order, deduplicating index/UUID aliases for the same device. Not enough free devices, excessive load, or missing/malformed telemetry returns `{status:"deferred",reason:"devices"|"load"|"probe",message,exitCode:75}`. The CLI exits 75 and MCP returns the same object. No attempt, approval event or budget is recorded, and no container starts. Ares never queues, waits for admission, automatically retries or preempts other jobs; invoke the command again explicitly when conditions improve. A plan step records a known failed node with the same guidance and requires explicit recovery, without creating an Attempt or automatically probing again.
+
+Chosen UUIDs are frozen in `gpuDevices` and reused for both stages with explicit Docker device selection; inspection checks those UUIDs. Study bundles retain `gpuDeviceCount` only. Duplicate requests for an existing attempt do not probe again. Admission is a point-in-time check, not a resource reservation: host pressure can change after it. GPU settings affect new attempts only; without settings, GPU argv remains the existing `--gpus <n>` path. CPU-only attempts do not probe, even when the executor has GPU settings. Missing telemetry is never treated as an idle host. Tests use fake transport responses; no live GPU admission or training run is claimed.
+
 ## Investigation workflow
 
 Set the selection rule before running baseline and candidate attempts. It fixes the run, primary protocol metric, frozen baseline commit, minimum paired seeds and improvement margin. Save this as `selection.json`, replacing the synthetic baseline SHA with your full frozen commit:
@@ -604,7 +617,7 @@ ares final close <dir> [--json]
 ares final seeds <dir> --file PATH|- [--json]
 ares selection <dir> --file PATH|- [--json]
 ares protocol <dir> --file PATH|- [--json]
-ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--json]
+ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--gpu-devices IDS --gpu-min-free-memory-mb MB --gpu-max-load-ratio RATIO] [--json]
 ares executor inputs hash <dir> <path> [--json]
 ares executor check <dir> [--json]
 ares gate list <dir> [--json]

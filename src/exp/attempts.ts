@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, requireExperiment, requireGate, sha256, withLock, type Actor, type PendingEvent } from "../study.ts";
 import { designBinding, sameProtocolInputs, frozenProtocol, validateStoredProtocol, protocolHash, readProtocol, readDesign, type Protocol } from "./protocol.ts";
-import { buildContainerArgs, validateContainerInputSources, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
+import { buildContainerArgs, probeGpuAdmission, GpuAdmissionDeferred, validateGpuDevices, validateContainerInputSources, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
 import { resolveSnapshot, transferSnapshot, transferTask } from "./snapshot.ts";
 import { collectEvaluation as defaultEvaluationCollector, collectStageEvidence as defaultStageCollector, EvidenceError, MetricsError, outputBudget, type StageEvidence } from "./metrics.ts";
 
@@ -22,6 +22,7 @@ export interface Attempt {
   sealing: { separateContainers: boolean; evaluatorReadOnly: boolean; candidateHasNoEvaluator: boolean; verifiedBy: "ares-observed" };
   launching?: { pid: number; host: string; token: string; claimedAt: string; expiresAt: string };
   verifiedInputs?: Record<string, string>;
+  gpuDevices?: string[];
   pendingAutoApproval?: string;
   finalBinding?: string; finalWinner?: string; pendingFinalApproval?: string;
 }
@@ -85,6 +86,11 @@ export function validateAttemptRecord(raw: unknown, run: string, wanted: string)
     const protocol = validateStoredProtocol(raw.protocol);
     const expected = Object.entries(protocol.inputs ?? {}), verified = raw.verifiedInputs;
     if (!plain(verified) || Object.keys(verified).length !== expected.length || expected.some(([name, input]) => verified[name] !== input.sha256)) throw new Error("attempt inputs: verified hashes do not match the frozen input identities; restore the last valid attempt record before retrying");
+  }
+  if (raw.executor.gpu !== undefined && plain(raw.protocol.limits) && typeof raw.protocol.limits.gpus === "number" && raw.protocol.limits.gpus > 0 && raw.gpuDevices === undefined) throw new Error("attempt GPU: frozen assignment missing; restore the chosen GPU UUIDs from the last valid attempt record before retrying");
+  if (raw.gpuDevices !== undefined) {
+    if (!plain(raw.protocol.limits)) throw new Error("attempt GPU: limits missing; restore the frozen attempt record before retrying");
+    validateGpuDevices(raw.gpuDevices, raw.protocol.limits.gpus as number);
   }
   return raw as unknown as Attempt;
 }
@@ -254,7 +260,10 @@ function observed(raw: unknown, attempt: Attempt, protocol: Protocol, ownershipO
     return !workspace.some(path => executionPathsOverlap(source, path)) && !privateInputs.some(other => executionPathsOverlap(source, other.path!));
   });
   const devices = settings.DeviceRequests;
-  const gpuMatches = expected.limits.gpus === 0 ? devices === null || devices === undefined || (Array.isArray(devices) && devices.length === 0) : Array.isArray(devices) && devices.length === 1 && plain(devices[0]) && devices[0].Count === expected.limits.gpus && Array.isArray(devices[0].Capabilities) && devices[0].Capabilities.some(c => Array.isArray(c) && c.includes("gpu"));
+  const capabilitiesMatch = Array.isArray(devices) && devices.length === 1 && plain(devices[0]) && Array.isArray(devices[0].Capabilities) && devices[0].Capabilities.some(c => Array.isArray(c) && c.includes("gpu"));
+  const gpuMatches = expected.limits.gpus === 0 ? devices === null || devices === undefined || (Array.isArray(devices) && devices.length === 0)
+    : attempt.gpuDevices !== undefined ? capabilitiesMatch && devices[0].Count === 0 && Array.isArray(devices[0].DeviceIDs) && devices[0].DeviceIDs.length === attempt.gpuDevices.length && new Set(devices[0].DeviceIDs).size === attempt.gpuDevices.length && attempt.gpuDevices.every(device => (devices[0].DeviceIDs as unknown[]).includes(device))
+    : capabilitiesMatch && devices[0].Count === expected.limits.gpus;
   if (!gpuMatches) throw hostError(attempt, "GPU limit verification");
   if (config.Seed !== `ARES_SEED=${attempt.seed}`) throw hostError(attempt, "selected seed verification");
   if (config.Image !== expected.image || config.User !== expected.user || JSON.stringify(config.Cmd) !== JSON.stringify(expected.argv) || !plain(config.Labels) || config.Labels["ares.study"] !== attempt.studyId || config.Labels["ares.attempt"] !== attempt.id || config.Labels["ares.stage"] !== attempt.stage || settings.NetworkMode !== "none" || settings.ReadonlyRootfs !== true || !Array.isArray(settings.CapDrop) || !settings.CapDrop.some(c => c === "ALL" || c === "all") || !Array.isArray(settings.SecurityOpt) || !settings.SecurityOpt.includes("no-new-privileges") || !plain(settings.Tmpfs) || !("/tmp" in settings.Tmpfs) || settings.Memory !== expected.limits.memoryMb * 1024 * 1024 || settings.PidsLimit !== expected.limits.pidsLimit || settings.NanoCpus !== Math.round(expected.limits.cpus * 1e9) || (!inputMountsValid || bindMounts.length !== mounts.length + visible.length) || !mounts.every(([source, target, writable]) => bindMounts.some(m => plain(m) && m.Type === "bind" && m.Source === source && m.Destination === target && m.RW === writable))) throw hostError(attempt, "container isolation verification");
@@ -318,7 +327,7 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
     const currentProtocol = executionProtocol(dir, attempt), protocol = verifiedProtocol ?? currentProtocol;
     if (!sameProtocolInputs(currentProtocol, protocol)) throw new InputVerificationError("attempt inputs: identities changed after verification; restore the frozen input identities and retry ares attempt reconcile <dir>");
     // Keep configuration refusals outside the uncertain container-start catch.
-    args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths });
+    args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths, ...(attempt.gpuDevices ? { gpuDevices: attempt.gpuDevices } : {}) });
   } catch (error) {
     if (error instanceof InputVerificationError) await update(dir, attempt.id, ctx, current => {
       if (current.status !== "running" || current.stage !== attempt.stage || current.stages[current.stage]?.containerId || current.launching?.token !== attempt.launching?.token) return undefined;
@@ -400,6 +409,17 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   validateContainerInputSources(protocol, { snapshot: posix.join(inputRoot, "snapshot"), output: posix.join(inputRoot, "output"), evaluator: posix.join(inputRoot, "task", "evaluator"), result: posix.join(inputRoot, "result") });
   const existing = await withLock(dir, () => load(dir).some(a => a.id === wanted));
   const verifiedInputs = !existing && protocol.inputs !== undefined ? await verifyExecutorInputs(executor, protocol, ctx.runner ?? spawnRunner) : undefined;
+  let gpuDevices: string[] | undefined;
+  if (!existing && executor.gpu && protocol.limits.gpus > 0) {
+    const admission = await probeGpuAdmission(executor, protocol.limits.gpus, ctx.runner ?? spawnRunner);
+    if (admission.status === "deferred") {
+      // An overlapping duplicate may have admitted the same identity during this read-only probe.
+      const duplicate = await withLock(dir, () => load(dir).find(attempt => attempt.id === wanted));
+      if (duplicate) return duplicate;
+      throw new GpuAdmissionDeferred(admission);
+    }
+    gpuDevices = admission.devices;
+  }
   let created = false;
   let attempt = await withLock(dir, () => {
     requireCopilotAccept(dir, "hypotheses");
@@ -412,7 +432,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     const binding = designBinding(dir), approval = requireGate(dir, openStudy(dir).study, "design", () => binding);
     enforceBudget(protocol, attempts, now(ctx));
     const root = posix.join(executor.workdir, study.id, wanted);
-    const record: Attempt = { v: 1, id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, protocol: frozenProtocol(protocol), ...(verifiedInputs !== undefined ? { verifiedInputs } : {}), paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };
+    const record: Attempt = { v: 1, id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, ...(gpuDevices ? { gpuDevices } : {}), protocol: frozenProtocol(protocol), ...(verifiedInputs !== undefined ? { verifiedInputs } : {}), paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };
     if (approval.length) record.pendingAutoApproval = binding!;
     if (finalAuthorization) { record.finalBinding = finalAuthorization.binding; record.finalWinner = finalAuthorization.winner; if (finalAuthorization.auto) record.pendingFinalApproval = finalAuthorization.binding; }
     commit(dir, [[file(dir, record), JSON.stringify(record, null, 2) + "\n", ATTEMPT_BYTES]], [{ actor: ctx.actor, type: "attempt.started", data: { id: wanted, run, seed, commit: record.commit, treeId: record.treeId } }]);

@@ -206,7 +206,12 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       count(spec, positional, 1);
       const kind = str("--kind"), workdir = str("--workdir");
       if (!kind || !workdir) throw new Error("executor set: kind/workdir missing; use --kind local|ssh --workdir PATH and --host ALIAS for ssh");
-      result = await ops.executorSet(positional[0]!, { v: 1, kind, workdir, ...(str("--host") !== undefined ? { host: str("--host") } : {}) }, ctx); break;
+      const gpuValues = [str("--gpu-devices"), str("--gpu-min-free-memory-mb"), str("--gpu-max-load-ratio")];
+      const gpuRequested = gpuValues.some(value => value !== undefined);
+      if (gpuRequested && gpuValues.some(value => value === undefined)) throw new Error("executor GPU: incomplete settings; pass --gpu-devices, --gpu-min-free-memory-mb and --gpu-max-load-ratio together");
+      const gpu = gpuRequested ? { devices: gpuValues[0]!.split(",").map(value => value.trim()), minFreeMemoryMb: Number(gpuValues[1]), maxLoadRatio: Number(gpuValues[2]) } : undefined;
+      if (gpu && (!/^[0-9]{1,10}$/.test(gpuValues[1]!) || !/^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$/.test(gpuValues[2]!))) throw new Error("executor GPU: invalid thresholds; use decimal memory MB and a positive decimal load ratio");
+      result = await ops.executorSet(positional[0]!, { v: 1, kind, workdir, ...(str("--host") !== undefined ? { host: str("--host") } : {}), ...(gpu ? { gpu } : {}) }, ctx); break;
     }
     case "executor inputs hash": count(spec, positional, 2); result = await ops.executorInputsHash(positional[0]!, positional[1]!, ctx); break;
     case "executor check": count(spec, positional, 1); result = await ops.executorCheck(positional[0]!, ctx); break;
@@ -215,7 +220,8 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       const repo = str("--repo"), commit = str("--commit"), chosenSeed = seed(str("--seed"));
       if (!repo || !commit) throw new Error("attempt run: repo/commit missing; use --repo PATH --commit FULL_40_HEX_SHA");
       const attempt = await ops.attemptRun(positional[0]!, { repo, commit, ...(chosenSeed !== undefined ? { seed: chosenSeed } : {}), ...(str("--run") !== undefined ? { run: str("--run") } : {}), ...(str("--label") !== undefined ? { label: str("--label") } : {}), ...(str("--retry") !== undefined ? { retry: str("--retry") } : {}), detach: !!flags["--detach"] }, ctx);
-      if (attempt.status !== "running" && attempt.status !== "succeeded") code = 1;
+      if (attempt.status === "deferred") code = 75;
+      else if (attempt.status !== "running" && attempt.status !== "succeeded") code = 1;
       result = attempt; break;
     }
     case "attempt list": {

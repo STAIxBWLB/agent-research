@@ -39,7 +39,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "final seeds", usage: "final seeds <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "selection", usage: "selection <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "protocol", usage: "protocol <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
-  { name: "executor set", usage: "executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--json]", mutates: true, options: { "--kind": "value", "--host": "value", "--workdir": "value", ...json } },
+  { name: "executor set", usage: "executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--gpu-devices IDS --gpu-min-free-memory-mb MB --gpu-max-load-ratio RATIO] [--json]", mutates: true, options: { "--kind": "value", "--host": "value", "--workdir": "value", "--gpu-devices": "value", "--gpu-min-free-memory-mb": "value", "--gpu-max-load-ratio": "value", ...json } },
   { name: "executor inputs hash", usage: "executor inputs hash <dir> <path> [--json]", mutates: "network", options: json },
   { name: "executor check", usage: "executor check <dir> [--json]", mutates: "network", options: json },
   { name: "gate list", usage: "gate list <dir> [--json]", mutates: false, options: json },
