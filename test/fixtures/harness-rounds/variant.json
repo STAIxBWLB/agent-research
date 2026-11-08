@@ -1,0 +1,24 @@
+{
+  "v": 1,
+  "projectKey": "synthetic-study",
+  "taskId": "synthetic-task",
+  "revision": 1,
+  "baselineRoleId": "synthetic-worker",
+  "baselineRoleHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "baselineBytes": 120,
+  "candidateHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "candidateBytes": 180,
+  "author": "synthetic-editor",
+  "problemHypothesis": "The public task constraint can be stated more explicitly.",
+  "expectedObservableDifference": "The successor keeps the requested output format without additional claims.",
+  "rationale": "Synthetic fixture only; no producer attestation or observed improvement is asserted.",
+  "evidence": [
+    {
+      "v": 1,
+      "tool": "ares",
+      "projectKey": "synthetic-study",
+      "kind": "attempt",
+      "id": "aaaaaaaaaaaaaaaa"
+    }
+  ]
+}

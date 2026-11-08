@@ -7,8 +7,17 @@ import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 
 export type Mode = "survey" | "experiment";
-export type GateName = "scope" | "screen" | "design" | "final" | "review" | `plan:${string}` | `accept:${AcceptArtifact}`;
+export type GateName = "scope" | "screen" | "design" | "final" | "review" | `plan:${string}` | `accept:${AcceptArtifact}` | `harness:${string}`;
 export const GATES: readonly GateName[] = ["scope", "screen", "design", "final", "review"];
+export const HARNESS_GATE_ID_BYTES = 64;
+export function isHarnessGate(value: unknown): value is `harness:${string}` {
+  if (typeof value !== "string" || !value.startsWith("harness:")) return false;
+  const id = value.slice("harness:".length);
+  return id.length >= 1 && id.length <= HARNESS_GATE_ID_BYTES && /^[A-Za-z0-9]/.test(id) && !/[^A-Za-z0-9_-]/.test(id);
+}
+function invalidHarnessGate(): never {
+  throw new Error("harness gate: invalid round id; use harness:<round-id> with 1..64 ASCII letters, digits, underscores or hyphens starting with a letter or digit, then retry");
+}
 export interface Study { v: 1 | 2; id: string; question: string; mode: Mode; autonomy: Autonomy; createdAt: string }
 export interface Actor { kind: "person" | "agent" | "auto"; id?: string }
 export function requireExperiment(study: Study): void {
@@ -258,9 +267,11 @@ export function gateState(gate: GateName, events: LedgerEvent[], binder: Binder)
 }
 
 export function decideGate(dir: string, gate: GateName, decision: "approve" | "reject", actor: Actor, binder: Binder, reason?: string): GateState {
-  if (!GATES.includes(gate) && !ACCEPT_ARTIFACTS.some(artifact => gate === `accept:${artifact}`) && !gate.startsWith("plan:")) throw new Error(`unknown gate: ${gate}; run ares gate list to select a gate`);
+  if (gate.startsWith("harness:")) {if (!isHarnessGate(gate)) invalidHarnessGate(); requireExperiment(openStudy(dir).study);}
+  if (!GATES.includes(gate) && !ACCEPT_ARTIFACTS.some(artifact => gate === `accept:${artifact}`) && !gate.startsWith("plan:") && !isHarnessGate(gate)) throw new Error(`unknown gate: ${gate}; run ares gate list to select a gate`);
   const before = gateState(gate, readLedger(dir), binder);
   if (before.state === "none" && gate.startsWith("accept:")) throw new Error(`gate ${gate}: no current copilot draft; inspect ares autonomy show, create the phase artifact, then use ares gate list and ares gate approve <dir> ${gate}`);
+  if (before.state === "none" && isHarnessGate(gate)) throw new Error(`gate ${gate}: nothing to decide yet; run ares harness show / ares harness set to create the round, then run ares gate list`);
   if (before.state === "none") throw new Error(`gate ${gate}: nothing to decide yet${gate.startsWith("plan:") ? "; finish every upstream node with output references, then run ares gate list" : ""}`);
   if (decision === "reject" && !reason) throw new Error(`gate ${gate}: a rejection needs --reason`);
   appendEvent(dir, actor, decision === "approve" ? "gate.approve" : "gate.reject", { gate, binding: before.current!, ...(reason ? { reason } : {}) });
@@ -273,13 +284,15 @@ export function decideGate(dir: string, gate: GateName, decision: "approve" | "r
  * changes a gate.
  */
 export function requireGate(dir: string, study: Study, gate: GateName, binder: Binder, guardedPhase?: Phase): PendingEvent[] {
-  if (gate === "design" || gate === "final") requireExperiment(study);
+  if (gate.startsWith("harness:") && !isHarnessGate(gate)) invalidHarnessGate();
+  if (gate === "design" || gate === "final" || isHarnessGate(gate)) requireExperiment(study);
   const state = gateState(gate, readLedger(dir), binder);
   if (state.state === "approved") return [];
   if (state.state === "pending" && !gate.startsWith("accept:") && resolveAutonomy(study.autonomy, gate, guardedPhase) === "auto") return [{ actor: { kind: "auto" }, type: "gate.approve", data: { gate, binding: state.current! } }];
   if (state.state === "none" && gate.startsWith("accept:")) throw new Error(`gate ${gate}: no current copilot draft; create the phase artifact, then run ares gate list and ares gate approve <dir> ${gate}`);
   if (state.state === "none" && gate === "final") throw new Error("gate final: complete reserved seeds and close investigate/required ablate inputs before final approval");
   if (state.state === "none" && gate.startsWith("plan:")) throw new Error(`gate ${gate}: upstream outputs are not complete; finish every upstream node and run ares gate list again`);
+  if (state.state === "none" && isHarnessGate(gate)) throw new Error(`gate ${gate}: no current round binding; run ares harness show / ares harness set to complete the round inputs, then run ares gate list before retrying`);
   if (state.state === "none") throw new Error(gate === "scope" ? "gate scope: no scope yet (run ares scope)" : gate === "design" ? "gate design: no protocol yet (run ares protocol)" : "gate screen: no included candidates yet");
   if (state.state === "rejected") throw new Error(`gate ${gate} is rejected${state.decided?.reason ? `: ${state.decided.reason}` : ""}; change the content and ask again`);
   throw new Error(`gate ${gate} is pending: run ares gate approve <dir> ${gate}`);

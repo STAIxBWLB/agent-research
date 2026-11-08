@@ -2,6 +2,9 @@
 export interface CommandSpec { name: string; usage: string; mutates: boolean | "network"; options: Record<string, "flag" | "value"> }
 const json = { "--json": "flag" } as const;
 export const COMMANDS: readonly CommandSpec[] = [
+  { name: "harness set", usage: "harness set <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
+  { name: "harness show", usage: "harness show <dir> [--round ID] [--json]", mutates: false, options: { "--round": "value", ...json } },
+  { name: "harness import", usage: "harness import <dir> <round> --file FIXTURE_PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "lineage show", usage: "lineage show <dir> [--root KIND --id ID --revision REV --sha256 HASH] [--cursor CURSOR] [--json]", mutates: false, options: { "--root": "value", "--id": "value", "--revision": "value", "--sha256": "value", "--cursor": "value", ...json } },
   { name: "lineage compare", usage: "lineage compare <dir> (--attempts ID,... | --candidates COMMIT,...) [--json]", mutates: false, options: { "--attempts": "value", "--candidates": "value", ...json } },
   { name: "autonomy show", usage: "autonomy show <dir> [--json]", mutates: false, options: json },
@@ -43,8 +46,8 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "executor inputs hash", usage: "executor inputs hash <dir> <path> [--json]", mutates: "network", options: json },
   { name: "executor check", usage: "executor check <dir> [--json]", mutates: "network", options: json },
   { name: "gate list", usage: "gate list <dir> [--json]", mutates: false, options: json },
-  { name: "gate approve", usage: "gate approve <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact> [--reason TEXT] [--json]", mutates: true, options: { "--reason": "value", ...json } },
-  { name: "gate reject", usage: "gate reject <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact> --reason TEXT [--json]", mutates: true, options: { "--reason": "value", ...json } },
+  { name: "gate approve", usage: "gate approve <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact|harness:round-id> [--reason TEXT] [--json]", mutates: true, options: { "--reason": "value", ...json } },
+  { name: "gate reject", usage: "gate reject <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact|harness:round-id> --reason TEXT [--json]", mutates: true, options: { "--reason": "value", ...json } },
   { name: "attempt run", usage: "attempt run <dir> --repo PATH --commit SHA [--seed N] [--run NAME] [--label TEXT] [--retry ID] [--detach] [--json]", mutates: "network", options: { "--repo": "value", "--commit": "value", "--seed": "value", "--run": "value", "--label": "value", "--retry": "value", "--detach": "flag", ...json } },
   { name: "attempt list", usage: "attempt list <dir> [--run NAME] [--status running|succeeded|failed|cancelled|unknown] [--limit N] [--offset N] [--json]", mutates: false, options: { "--run": "value", "--status": "value", "--limit": "value", "--offset": "value", ...json } },
   { name: "attempt show", usage: "attempt show <dir> <id> [--json]", mutates: false, options: json },

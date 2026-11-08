@@ -371,6 +371,21 @@ Archive is unchanged. Receipt deduplication applies only to successful exports r
 
 Survey and experiment studies both support lessons, archive and all skill commands. Survey archives can export resolved review contradictions, and are empty when no eligible lessons exist. Selection, ideas and experiment-result operations remain experiment-only. All A5 acceptance tests use synthetic records and fake runners; no live amem or vault interoperability is claimed.
 
+## Harness rounds (T1, fixture-only)
+
+Experiment studies can record an independent bounded improvement-round declaration without a container protocol or any model/probe launch:
+
+```sh
+ares harness set study --file round.json
+ares gate approve study harness:round-one
+ares harness import study round-one --file synthetic-probe-fixture.json
+ares harness show study --round round-one --json
+```
+
+These are local ares-owned forms, not agent-hub producer wire import or attestation. The matching MCP tools are `ares_harness_set`, `ares_harness_import` and read-only `ares_harness_show`, through shared operations. At most 16 exact task identities and two candidates per round are allowed; each form is at most 64 KiB and the index at most 1 MiB. The `harness:<id>` gate binds config/guidance/frozen refs, uses the study default autonomy and reopens on explicit definition changes. Previous events remain; duplicate identical sets/imports write nothing. Existing protocol/design/final gates, attempt records and scientific denominators stay independent.
+
+`controlled-lane` authoring must name source execution refs for its measured stages, but current real imports and end-to-end evaluation are always unavailable. Synthetic comparisons can be compatible only, never matched or host-observed. Unknown usage and sampling remain unknown; model/config/input/environment/toolset/budget drift stays explicit. No raw transcript, environment or assurance claim is imported. Nothing starts a probe, calls a model or mutates a hub. Contrast/composition/adoption and the console panel are T2/T3 follow-ups. See [the T1 schema and fixture boundary](docs/design/harness-rounds.md) for fields, source strengths, limits and what remains unverified.
+
 ## Console workflow
 
 Register only studies the console should read; ares never scans the disk:
@@ -588,6 +603,9 @@ The implemented CLI surface below comes from `src/commands-table.ts`; `ares --he
 
 <!-- facts:commands -->
 ```text
+ares harness set <dir> --file PATH|- [--json]
+ares harness show <dir> [--round ID] [--json]
+ares harness import <dir> <round> --file FIXTURE_PATH|- [--json]
 ares lineage show <dir> [--root KIND --id ID --revision REV --sha256 HASH] [--cursor CURSOR] [--json]
 ares lineage compare <dir> (--attempts ID,... | --candidates COMMIT,...) [--json]
 ares autonomy show <dir> [--json]
@@ -629,8 +647,8 @@ ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--gpu-de
 ares executor inputs hash <dir> <path> [--json]
 ares executor check <dir> [--json]
 ares gate list <dir> [--json]
-ares gate approve <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact> [--reason TEXT] [--json]
-ares gate reject <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact> --reason TEXT [--json]
+ares gate approve <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact|harness:round-id> [--reason TEXT] [--json]
+ares gate reject <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact|harness:round-id> --reason TEXT [--json]
 ares attempt run <dir> --repo PATH --commit SHA [--seed N] [--run NAME] [--label TEXT] [--retry ID] [--detach] [--json]
 ares attempt list <dir> [--run NAME] [--status running|succeeded|failed|cancelled|unknown] [--limit N] [--offset N] [--json]
 ares attempt show <dir> <id> [--json]
@@ -655,7 +673,7 @@ ares mcp
 <!-- /facts:commands -->
 
 <!-- facts:mcp-tools -->
-The MCP server publishes 58 tools: `ares_lineage_show`, `ares_lineage_compare`, `ares_autonomy_show`, `ares_autonomy_set`, `ares_watch_set`, `ares_watch_run`, `ares_watch_show`, `ares_console_add`, `ares_console_remove`, `ares_console_list`, `ares_setup`, `ares_manifest`, `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide`, `ares_skill_list`, `ares_plan_set`, `ares_plan_control`, `ares_plan_show`, `ares_status`, `ares_study_export`, `ares_scope_set`, `ares_gate`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show`, `ares_investigate_close`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_posthoc_show`, `ares_final_close`, `ares_final_seeds`, `ares_selection_set`, `ares_protocol_set`, `ares_executor_set`, `ares_executor_inputs_hash`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile`, `ares_attempt_logs`, `ares_lit_search`, `ares_lit_list`, `ares_lit_screen`, `ares_lit_card`, `ares_lit_verify`, `ares_lit_bib`, `ares_review_add`, `ares_review_resolve`, `ares_review_show`, `ares_paper_build`, `ares_paper_check`, `ares_cite_check`, `ares_playbook`.
+The MCP server publishes 61 tools: `ares_harness_set`, `ares_harness_show`, `ares_harness_import`, `ares_lineage_show`, `ares_lineage_compare`, `ares_autonomy_show`, `ares_autonomy_set`, `ares_watch_set`, `ares_watch_run`, `ares_watch_show`, `ares_console_add`, `ares_console_remove`, `ares_console_list`, `ares_setup`, `ares_manifest`, `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide`, `ares_skill_list`, `ares_plan_set`, `ares_plan_control`, `ares_plan_show`, `ares_status`, `ares_study_export`, `ares_scope_set`, `ares_gate`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show`, `ares_investigate_close`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_posthoc_show`, `ares_final_close`, `ares_final_seeds`, `ares_selection_set`, `ares_protocol_set`, `ares_executor_set`, `ares_executor_inputs_hash`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile`, `ares_attempt_logs`, `ares_lit_search`, `ares_lit_list`, `ares_lit_screen`, `ares_lit_card`, `ares_lit_verify`, `ares_lit_bib`, `ares_review_add`, `ares_review_resolve`, `ares_review_show`, `ares_paper_build`, `ares_paper_check`, `ares_cite_check`, `ares_playbook`.
 <!-- /facts:mcp-tools -->
 
 Memory tools are `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide` and `ares_skill_list`; `ares_idea_decide` accepts pivot cause/retryWhen. Archive may write external amem notes; lessons reads external amem. Both carry `openWorldHint`; skill operations stay local. MCP calls preserve agent attribution even without a native shell marker.
@@ -666,7 +684,7 @@ MCP uses shared command handlers; `ares_setup` exposes the same registration pre
 
 ## Version and format discovery
 
-`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `ledgerEvent`, `experimentProtocol`, `executor`, `experimentAttempt`, `studyPlan`, `experimentSelection`, `investigateResult`, `experimentFinalSeeds`, `ablateResult`, `finalResult` and `paperEvidence`, all version 1, carried by each record's `v` field. `study: 2` is the latest supported study format; legacy v1 is also supported. `skillProposal: 2` is the latest readable proposal format; legacy v1 remains supported and new writes remain v1 until the evidence-bound T2 implementation. Proposal Markdown and skill events carry their own `skillProposal` version. Older readers refuse v2 with unsupported-version guidance rather than silently treating it as v1. The `ledgerEvents` list advertises `archive.exported`, `skill.proposed`, `skill.decided`, `watch.set`, `watch.ran` and `autonomy.set` in the version-1 ledger envelope. The manifest also lists `studyRegistry: 1`, `watchConfig: 1` and `studyBundle: 1`; a `study export` bundle manifest carries its version as `bundle: 1` rather than `v`. Unsupported ledger/proposal/registry/watch versions are refused without rewriting their bytes. `mcp.tools` publishes `{name, readOnly}` for installers; grants are fail-closed for mutating or outside-reaching tools.
+`ares manifest --json` (MCP `ares_manifest`, no arguments) reports the running package version, implemented command names/usages and the schema versions of family-readable records. It needs no study, network or executor. Current versions are `manifest`, `ledgerEvent`, `experimentProtocol`, `executor`, `experimentAttempt`, `studyPlan`, `experimentSelection`, `investigateResult`, `experimentFinalSeeds`, `ablateResult`, `finalResult` and `paperEvidence`, all version 1, carried by each record's `v` field. `study: 2` is the latest supported study format; legacy v1 is also supported. `harnessRound: 1` and `harnessFixtureProjection: 1` cover the local round namespace and explicitly synthetic projections; their ledger events are `harness.round.set` and `harness.probe.declared`. `skillProposal: 2` is the latest readable proposal format; legacy v1 remains supported and new writes remain v1 until the evidence-bound T2 implementation. Proposal Markdown and skill events carry their own `skillProposal` version. Older readers refuse v2 with unsupported-version guidance rather than silently treating it as v1. The `ledgerEvents` list advertises `archive.exported`, `skill.proposed`, `skill.decided`, `watch.set`, `watch.ran` and `autonomy.set` in the version-1 ledger envelope. The manifest also lists `studyRegistry: 1`, `watchConfig: 1` and `studyBundle: 1`; a `study export` bundle manifest carries its version as `bundle: 1` rather than `v`. Unsupported ledger/proposal/registry/watch versions are refused without rewriting their bytes. `mcp.tools` publishes `{name, readOnly}` for installers; grants are fail-closed for mutating or outside-reaching tools.
 
 Within a supported schema, readers preserve additive fields on study/attempt records and keep ledger events with unknown kinds. Appending to the ledger leaves prior lines intact; updating an attempt keeps unrecognized fields and stage entries. Unknown stage entries remain readable, including logs and totals, but budget-gated starts refuse with an upgrade instruction because this version cannot account for their resource use. A future schema version or unknown execution status/stage is refused with an upgrade instruction, leaving the original data unchanged. Unknown plan versions or node kinds are refused without changing plan.json. Command input remains strict so unknown options or protocol fields cannot silently change an experiment.
 

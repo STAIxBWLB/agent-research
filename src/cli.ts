@@ -202,6 +202,15 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       if (file === undefined) throw new Error("protocol: input file missing; use --file PATH or --file - for JSON standard input");
       result = await ops.protocol(positional[0]!, await readInput(file, io), ctx); break;
     }
+    case "harness set": {
+      count(spec, positional, 1); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);
+      result = await ops.harnessSet(positional[0]!, await readInput(file, io), ctx); break;
+    }
+    case "harness show": count(spec, positional, 1); result = ops.harnessShow(positional[0]!, str("--round")); break;
+    case "harness import": {
+      count(spec, positional, 2); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);
+      result = await ops.harnessImport(positional[0]!, positional[1]!, await readInput(file, io), ctx); break;
+    }
     case "executor set": {
       count(spec, positional, 1);
       const kind = str("--kind"), workdir = str("--workdir");
