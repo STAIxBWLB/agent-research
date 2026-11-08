@@ -7,64 +7,10 @@ import { plain, readBytesBounded, readTextBounded, sha256, writeAtomic } from ".
 export const PREREGISTRATION = "docs/verification/execution-eval-preregistration.json";
 export const PROTOCOL_DOC = "docs/verification/execution-eval-protocol.md";
 export const FROZEN_RECEIPT = "docs/verification/execution-eval-frozen.json";
-export const CODE_FILES = [
-  "scripts/execution-eval.ts",
-  "package.json",
-  "src/autonomy.ts",
-  "src/cli.ts",
-  "src/commands-table.ts",
-  "src/commands.ts",
-  "src/console/registry.ts",
-  "src/copilot.ts",
-  "src/exp/ablate.ts",
-  "src/exp/artifacts.ts",
-  "src/exp/attempts.ts",
-  "src/exp/executor.ts",
-  "src/exp/final.ts",
-  "src/exp/ideas.ts",
-  "src/exp/investigate.ts",
-  "src/exp/logs.ts",
-  "src/exp/metrics.ts",
-  "src/exp/protocol.ts",
-  "src/exp/selection.ts",
-  "src/exp/snapshot.ts",
-  "src/http.ts",
-  "src/index.ts",
-  "src/lit/bibtex.ts",
-  "src/lit/candidates.ts",
-  "src/lit/cards.ts",
-  "src/lit/cite.ts",
-  "src/lit/sources.ts",
-  "src/lit/verify.ts",
-  "src/lit/watch.ts",
-  "src/manifest.ts",
-  "src/mcp-tools.ts",
-  "src/mcp.ts",
-  "src/memory/amem.ts",
-  "src/memory/archive.ts",
-  "src/memory/lessons.ts",
-  "src/memory/skills.ts",
-  "src/paper/build.ts",
-  "src/paper/check.ts",
-  "src/paper/placeholders.ts",
-  "src/paper/review.ts",
-  "src/plan/controller.ts",
-  "src/plan/definition.ts",
-  "src/plan/hub.ts",
-  "src/plan/state.ts",
-  "src/playbook.ts",
-  "src/scope.ts",
-  "src/setup.ts",
-  "src/study-export.ts",
-  "src/study.ts",
-  "src/ui/panel.css",
-  "src/ui/panel.js",
-  "src/ui/plugin.ts"
-] as const;
 export const DENOMINATORS = ["full", "succeeded", "failed", "cancelled", "unknown", "excluded"] as const;
 export const COST_FIELDS = ["cpuSeconds", "gpuDeviceSeconds", "providerTokens", "providerRequests", "wallElapsedMs", "storagePeakBytes", "storageByteSeconds", "transferBytes", "verificationCpuSeconds", "verificationWallMs", "retentionBytes", "retentionByteSeconds", "materializationCpuSeconds", "materializationWallMs", "materializationTransferBytes", "failureCpuSeconds", "failureGpuDeviceSeconds", "failureWallMs", "failureTransferBytes", "idleWallMs", "personMinutes", "monetaryEstimateUsd"] as const;
 export type CostRecord = Record<typeof COST_FIELDS[number], number | "unknown">;
-const DOCUMENT_BYTES = 65_536, SOURCE_BYTES = 262_144, FIXTURE_BYTES = 16_384, TOTAL_BYTES = 3 * 1024 * 1024, MAX_CASES = 48;
+const DOCUMENT_BYTES = 65_536, FIXTURE_BYTES = 16_384, TOTAL_BYTES = 3 * 1024 * 1024, MAX_CASES = 48;
 const TRIALS = ["diagnose", "reuse", "supervision"] as const;
 const SCENARIOS = {
   diagnose: ["stale-head", "missing-artifact", "retry", "uncertain-delivery", "privacy-gap", "corrupt-source"],
@@ -72,10 +18,10 @@ const SCENARIOS = {
   supervision: ["ordinary-progress", "true-trigger", "misleading-symptom"],
 } as const;
 interface FileHash { path: string; sha256: string; bytes: number }
-interface Bindings { protocolSha256: string; methodSha256: string; thresholdsSha256: string; denominatorsSha256: string; codeSha256: string; inputSha256: string; expectedSha256: string }
+interface Bindings { protocolSha256: string; methodSha256: string; thresholdsSha256: string; denominatorsSha256: string; inputSha256: string; expectedSha256: string }
 export interface FrozenPreregistration {
   v: 1; status: "preregistered-not-measured"; bindings: Bindings;
-  methodFiles: FileHash[]; codeFiles: FileHash[]; inputFiles: FileHash[]; expectedFiles: FileHash[]; receiptSha256: string;
+  methodFiles: FileHash[]; inputFiles: FileHash[]; expectedFiles: FileHash[]; receiptSha256: string;
 }
 function fail(cause: string, next = "restore the preregistered files or register a separately reviewed protocol and new receipt before any run"): never {
   throw new Error(`execution eval: ${cause}; ${next}`);
@@ -164,12 +110,11 @@ function snapshot(root: string): FrozenPreregistration {
     for (const scenario of SCENARIOS[trial]) if (!coverage.has(`${trial}:${scenario}`)) fail(`corpus ${trial} lacks a required scenario`);
   }
   const methodDoc = read(PROTOCOL_DOC, DOCUMENT_BYTES);
-  const code = CODE_FILES.map(name => read(name, SOURCE_BYTES).hash);
   const bindings: Bindings = {
     protocolSha256: source.hash.sha256, methodSha256: sha256(canonical({ protocol, docSha256: methodDoc.hash.sha256 })), thresholdsSha256: sha256(canonical(protocol.thresholds)), denominatorsSha256: sha256(canonical(protocol.denominators)),
-    codeSha256: sha256(canonical(code)), inputSha256: sha256(canonical(inputs)), expectedSha256: sha256(canonical(expected)),
+    inputSha256: sha256(canonical(inputs)), expectedSha256: sha256(canonical(expected)),
   };
-  const body = { v: 1 as const, status: "preregistered-not-measured" as const, bindings, methodFiles: [source.hash, methodDoc.hash], codeFiles: code, inputFiles: inputs, expectedFiles: expected };
+  const body = { v: 1 as const, status: "preregistered-not-measured" as const, bindings, methodFiles: [source.hash, methodDoc.hash], inputFiles: inputs, expectedFiles: expected };
   return { ...body, receiptSha256: sha256(canonical(body)) };
 }
 export function verifyPreregistration(rootArg: string, receiptFile: string): FrozenPreregistration {
@@ -177,9 +122,9 @@ export function verifyPreregistration(rootArg: string, receiptFile: string): Fro
   let raw: unknown;
   try { raw = json(readTextBounded(receiptFile, DOCUMENT_BYTES, { noFollow: true }), "frozen receipt"); }
   catch (error) { if (error instanceof Error && error.message.startsWith("execution eval:")) throw error; fail("frozen receipt is missing, unreadable or over-bound"); }
-  const receipt = object(raw, ["v", "status", "bindings", "methodFiles", "codeFiles", "inputFiles", "expectedFiles", "receiptSha256"], "frozen receipt");
+  const receipt = object(raw, ["v", "status", "bindings", "methodFiles", "inputFiles", "expectedFiles", "receiptSha256"], "frozen receipt");
   if (!plain(receipt.bindings)) fail("frozen receipt bindings are missing");
-  for (const key of ["thresholdsSha256", "denominatorsSha256", "protocolSha256", "methodSha256", "codeSha256", "inputSha256", "expectedSha256"] as const) if (receipt.bindings[key] !== current.bindings[key]) fail(`${key} changed since freeze`);
+  for (const key of ["thresholdsSha256", "denominatorsSha256", "protocolSha256", "methodSha256", "inputSha256", "expectedSha256"] as const) if (receipt.bindings[key] !== current.bindings[key]) fail(`${key} changed since freeze`);
   if (canonical(receipt) !== canonical(current)) fail("frozen receipt content or seal changed");
   return current;
 }

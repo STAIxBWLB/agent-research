@@ -74,7 +74,8 @@
       },
       "artifact": {
         "present": false,
-        "digest": "8c94b48b381d9a12b77999c57819330f74cd2f30d63b76630854af9f823f1da4"
+        "digest": "8c94b48b381d9a12b77999c57819330f74cd2f30d63b76630854af9f823f1da4",
+        "digestRule": "sha256(canonical JSON: recursively sorted object keys, preserved array order, UTF-8, no whitespace)"
       }
     },
     "requiredAcceptance": "fresh-final"

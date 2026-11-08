@@ -1,6 +1,6 @@
 # Execution evaluation preregistration
 
-This is #63 T1, registered before treatment outcomes. All budgets, metrics and thresholds below are **proposed, not measured**. This document and `execution-eval-preregistration.json` are the frozen method; `execution-eval-frozen.json` binds their exact bytes, source code and the corpus. A freeze receipt is a registration record, not evidence that a trial passed.
+This is #63 T1, registered before treatment outcomes. All budgets, metrics and thresholds below are **proposed, not measured**. This document and `execution-eval-preregistration.json` are the frozen method; `execution-eval-frozen.json` binds their exact bytes and the corpus. A freeze receipt is a registration record, not evidence that a trial passed.
 
 The owner approved baseline preparation and a later T2a task. This change performs no baseline or treatment execution. T2a covers current-workflow Diagnose and Reuse baselines only; Supervision stays preregistered because its arms run in agent-hub. Treatment integration, treatment runs, advisory mode and native/account execution each need their separate go-ahead. No lineage, cache/reuse or supervision feature is implemented here. No external Python/Shepherd runtime, proof machinery or dependencies are introduced.
 
@@ -16,7 +16,9 @@ The explicit ordered index is `test/fixtures/execution-eval/corpus.json`. It nam
 
 Only the `input` payload inside each `.input.json` record is candidate-visible. Its wrapper id/trial/scenario, the corpus index and `.expected.json` records remain evaluator-only; never copy those labels into candidate workspaces, stdout or model prompts. Reuse fixtures describe proposed eligibility and deterministic arithmetic, but contain no treatment execution or measured cache benefit. The sealed expected outputs are not independent samples. Diagnoses/tasks are invented; no real task bodies, private logs, account material or internal host names are included.
 
-The manifest is ordered and explicit; the harness never scans the disk. Each fixture is bounded to 16 KiB, the corpus to 48 cases, registration documents/receipts to 64 KiB, code files to 256 KiB and all read source bytes to 3 MiB. Symlink files/parents and non-regular sources are refused. Receipt files are private (0600), created exclusively, and never silently replaced.
+The manifest is ordered and explicit; the harness never scans the disk. Each fixture is bounded to 16 KiB, the corpus to 48 cases, registration documents/receipts to 64 KiB, all read source bytes to 3 MiB. Symlink files/parents and non-regular sources are refused. Receipt files are private (0600), created exclusively, and never silently replaced.
+
+Every artifact-bearing Reuse input states its candidate-visible `artifact.digestRule`: `sha256(canonical JSON: recursively sorted object keys, preserved array order, UTF-8, no whitespace)`. Hash `artifact.payload` alone, not the surrounding digest/rule metadata. Valid payloads match; corrupt-artifact payloads deliberately do not. Missing/pruned artifacts have no payload to validate, and a valid digest alone never makes an interrupted or semantically stale source eligible.
 
 ## Arms, repetitions and order
 
@@ -26,7 +28,7 @@ The manifest is ordered and explicit; the harness never scans the disk. Each fix
 
 For paired trials, arm order is AB when `(corpusIndex + repetitionIndex) % 2 == 0`, BA otherwise. With 12 cases and three repetitions, the total orders balance. Baseline-only work runs only the current arm; placeholders are not fabricated treatment observations. Preserve the planned order for later authorized matching, rather than silently adapting it to outcomes.
 
-Record the exact OS, CPU/hardware identity, Bun version and any container digest in the run-admission receipt before effect. Bun 1.4.2 is the proposed evaluation runtime. The frozen source/authority hashes identify the code; version 0.2.1 identifies the preregistered package line. An environment mismatch invalidates a paired comparison instead of being hidden by aggregation.
+Record the exact OS, CPU/hardware identity, Bun version and any container digest in the run-admission receipt before effect. Bun 1.4.2 is the proposed evaluation runtime. This registration was authored at package 0.2.1, but later arms may run different code without changing the fixed research method. Code is intentionally not part of the preregistration seal. Every T2a/T3 run receipt must bind the exact code it actually executed, including `bin/ares.js`, package identity, the execution harness/adapter/instrumentation and all runtime dependencies, alongside the frozen method/input/expected hashes. An environment mismatch invalidates a paired comparison instead of being hidden by aggregation.
 
 ## Budgets and resource boundaries
 
@@ -85,10 +87,10 @@ bun scripts/execution-eval.ts verify
 bun scripts/execution-eval.ts freeze /absolute/owned-directory/receipt.json
 ```
 
-The default receipt is `docs/verification/execution-eval-frozen.json`. The first command creates it exclusively. If it exists, `freeze` behaves as `verify` and never rewrites it. The explicit code list includes this harness, package identity and all current runtime source files, including selection/final dependencies. The receipt binds those code files, this document and the machine protocol, the index/candidate inputs and evaluator-only expected bytes; it separately binds thresholds and all denominators. Byte edits, changed thresholds, missing denominators or changed source hashes produce a named refusal. Restore the frozen bytes or register a separately reviewed protocol and a new receipt; do not delete or replace the prior evidence silently. There is no `run`, treatment, account or rollout command.
+The default receipt is `docs/verification/execution-eval-frozen.json`. The first command creates it exclusively. If it exists, `freeze` behaves as `verify` and never rewrites it. The preregistration receipt binds this document and the machine protocol, the index/candidate inputs and evaluator-only expected bytes; it separately binds thresholds and all denominators. Byte edits, changed thresholds, missing denominators or changed method/input/expected hashes produce a named refusal. Restore the frozen bytes or register a separately reviewed protocol and a new receipt; do not delete or replace the prior evidence silently. T1 adds only `freeze` and `verify`, with no `run`, treatment, account or rollout command. T2a may extend the harness with baseline commands without invalidating this registration; its per-run code binding is separate.
 
 The existing `src/exp/selection.ts`, closed investigation reader and `src/exp/final.ts` remain the only comparison/final-result authorities. Future baseline receipts must link actual existing study/attempt/result hashes. Final decisive results stay fresh and immutable. Sealed evaluator files provide same-user workflow integrity, not a hostile same-UID security boundary. No new study file, ledger event, CLI/MCP operation or winner calculator is added.
 
 ## Verification scope
 
-Tests cover byte mutation, threshold change, denominator removal, expected/source/method/seal drift, bounds and unknown-cost preservation using temporary synthetic roots. Standard verification is `bun install --frozen-lockfile && bun run check`. Tests never launch live agents, account tools, containers or network requests. Source/fixture checks, hosted CI and native/live evidence must always be labeled separately. The corpus and receipt show preregistration only; T2a baseline measurements remain a follow-up task.
+Tests cover byte mutation, threshold change, denominator removal, expected/method/seal drift and accepted runtime-source changes, bounds and unknown-cost preservation using temporary synthetic roots. Standard verification is `bun install --frozen-lockfile && bun run check`. Tests never launch live agents, account tools, containers or network requests. Source/fixture checks, hosted CI and native/live evidence must always be labeled separately. The corpus and receipt show preregistration only; T2a baseline measurements remain a follow-up task.

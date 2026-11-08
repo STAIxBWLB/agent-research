@@ -80,10 +80,10 @@
     },
     "order": "Use corpus order, not directory enumeration. AB for even (caseIndex+repetitionIndex), BA for odd; 12 paired cases x 3 repetitions balances totals. Do not execute an unauthorized arm. Supervision six orders are ABC, ACB, BAC, BCA, CAB, CBA.",
     "versions": {
-      "package": "0.2.1",
       "bun": "1.4.2",
-      "source": "code file bytes in the frozen receipt",
-      "environment": "record exact OS, CPU/hardware, Bun and any container digest in the run admission receipt; mismatches invalidate the paired comparison"
+      "source": "Preregistration does not seal evolving code. Every T2a/T3 run receipt must bind the exact code snapshot it executed, including bin/ares.js, package identity, harness/adapter/instrumentation and runtime dependencies, alongside this frozen method/input/expected seal.",
+      "environment": "record exact OS, CPU/hardware, Bun and any container digest in the run admission receipt; mismatches invalidate the paired comparison",
+      "registrationPackage": "0.2.1"
     },
     "humanTiming": "distinct participants see each incident once; counterbalance incident assignment across arms. No human participants or sessions are authorized by T1/T2a. Automated source-resolution timings are separate, and cannot substitute for human time-to-find.",
     "expectedVisibility": "Only the input object within *.input.json is candidate-visible. Wrapper id/trial/scenario, corpus index and *.expected.json stay evaluator-only, never copied into candidate outputs.",
@@ -101,7 +101,8 @@
         20
       ]
     },
-    "seedAssignment": "Use each frozen Reuse input.workload.seeds in repetition order, unchanged across arms; the two synthetic variants use the two declared triplets."
+    "seedAssignment": "Use each frozen Reuse input.workload.seeds in repetition order, unchanged across arms; the two synthetic variants use the two declared triplets.",
+    "artifactDigestRule": "sha256(canonical JSON: recursively sorted object keys, preserved array order, UTF-8, no whitespace); hash artifact.payload only, excluding digestRule and digest metadata"
   },
   "budgets": {
     "proposed": true,

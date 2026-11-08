@@ -90,7 +90,8 @@
             }
           ]
         },
-        "digest": "e979f83f2292cfa004d2f5235bf9fb6e22fd4438c83ad2065c793c5f898d8bd5"
+        "digest": "e979f83f2292cfa004d2f5235bf9fb6e22fd4438c83ad2065c793c5f898d8bd5",
+        "digestRule": "sha256(canonical JSON: recursively sorted object keys, preserved array order, UTF-8, no whitespace)"
       }
     },
     "requiredAcceptance": "fresh-final"

@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { CODE_FILES, COST_FIELDS, DENOMINATORS, PREREGISTRATION, PROTOCOL_DOC, freezePreregistration, verifyPreregistration, validateCostRecord } from "../scripts/execution-eval.ts";
-import { readTextBounded } from "../src/study.ts";
+import { COST_FIELDS, DENOMINATORS, PREREGISTRATION, PROTOCOL_DOC, freezePreregistration, verifyPreregistration, validateCostRecord } from "../scripts/execution-eval.ts";
+import { readTextBounded, sha256 } from "../src/study.ts";
 import { tempDir } from "./helpers.ts";
 
 const sourceRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -11,7 +11,7 @@ function fixture() {
   const root = tempDir(), receipt = join(root, "frozen.json");
   const protocol = JSON.parse(readTextBounded(join(sourceRoot, PREREGISTRATION), 65_536));
   const corpus = JSON.parse(readTextBounded(join(sourceRoot, protocol.corpus), 65_536)) as { cases: { input: string; expected: string }[] };
-  for (const name of [PREREGISTRATION, PROTOCOL_DOC, protocol.corpus, ...CODE_FILES, ...corpus.cases.flatMap(row => [row.input, row.expected])]) {
+  for (const name of [PREREGISTRATION, PROTOCOL_DOC, protocol.corpus, ...corpus.cases.flatMap(row => [row.input, row.expected])]) {
     const target = join(root, name); mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, readTextBounded(join(sourceRoot, name), 262_144));
   }
@@ -19,10 +19,11 @@ function fixture() {
 }
 function saveProtocol(f: ReturnType<typeof fixture>) { writeFileSync(join(f.root, PREREGISTRATION), JSON.stringify(f.protocol, null, 2) + "\n"); }
 
-test("first command freezes all code/method/input/expected hashes; repeat freeze verifies without rewriting", () => {
+test("first command freezes method/input/expected hashes; repeat freeze verifies without rewriting", () => {
   const f = fixture(), first = freezePreregistration(f.root, f.receipt), text = readFileSync(f.receipt, "utf8"), mtime = statSync(f.receipt).mtimeMs;
   expect(first.status).toBe("preregistered-not-measured");
-  expect(first.codeFiles.map(row => row.path)).toEqual([...CODE_FILES]);
+  expect(Object.hasOwn(first.bindings, "codeSha256")).toBe(false);
+  expect(Object.hasOwn(first, "codeFiles")).toBe(false);
   expect(first.inputFiles).toHaveLength(37); expect(first.expectedFiles).toHaveLength(36);
   expect(Object.values(first.bindings).every(hash => /^[a-f0-9]{64}$/.test(hash))).toBe(true);
   expect(verifyPreregistration(f.root, f.receipt)).toEqual(first);
@@ -53,15 +54,14 @@ test("changed proposed thresholds and dropped denominators each refuse without r
   }
 });
 
-test("code, expected truth, method changes and tampered receipt seals are separately refused", () => {
-  for (const change of ["code", "expected", "method", "receipt"] as const) {
+test("expected truth, method changes and tampered receipt seals are separately refused", () => {
+  for (const change of ["expected", "method", "receipt"] as const) {
     const f = fixture(); freezePreregistration(f.root, f.receipt);
-    if (change === "code") { const file = join(f.root, CODE_FILES[1]); writeFileSync(file, readFileSync(file, "utf8") + "\n"); }
-    else if (change === "expected") { const file = join(f.root, f.corpus.cases[0]!.expected); writeFileSync(file, readFileSync(file, "utf8") + "\n"); }
+    if (change === "expected") { const file = join(f.root, f.corpus.cases[0]!.expected); writeFileSync(file, readFileSync(file, "utf8") + "\n"); }
     else if (change === "method") { f.protocol.budgets.caseCpuSeconds = 59; saveProtocol(f); }
     else { const raw = JSON.parse(readFileSync(f.receipt, "utf8")); raw.receiptSha256 = "0".repeat(64); writeFileSync(f.receipt, JSON.stringify(raw)); }
     const before = readFileSync(f.receipt, "utf8");
-    expect(() => verifyPreregistration(f.root, f.receipt)).toThrow(change === "code" ? "codeSha256 changed" : change === "expected" ? "expectedSha256 changed" : change === "method" ? "protocolSha256 changed" : "receipt content or seal changed");
+    expect(() => verifyPreregistration(f.root, f.receipt)).toThrow(change === "expected" ? "expectedSha256 changed" : change === "method" ? "protocolSha256 changed" : "receipt content or seal changed");
     expect(readFileSync(f.receipt, "utf8")).toBe(before);
   }
 });
@@ -103,4 +103,35 @@ test("corpus wrappers and supervision labels stay outside candidate payloads; re
   }
   expect(counts).toEqual(f.protocol.design.plannedCases);
   expect(Object.keys(f.protocol.costs.fields).sort()).toEqual([...COST_FIELDS].sort());
+});
+
+test("evolving source, bootstrap, harness and release versions do not invalidate fixed preregistration", () => {
+  const f = fixture(), files = ["src/http.ts", "scripts/execution-eval.ts", "bin/ares.js", "package.json"];
+  for (const name of files) { const file = join(f.root, name); mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, "synthetic code at freeze\n"); }
+  const receipt = freezePreregistration(f.root, f.receipt), before = readFileSync(f.receipt, "utf8");
+  for (const name of files) writeFileSync(join(f.root, name), "changed code for a later arm or release\n");
+  expect(verifyPreregistration(f.root, f.receipt)).toEqual(receipt);
+  expect(freezePreregistration(f.root, f.receipt)).toEqual(receipt);
+  expect(readFileSync(f.receipt, "utf8")).toBe(before);
+});
+
+test("every present reuse artifact is judgeable under its candidate-visible canonical digest rule", () => {
+  const f = fixture(); let valid = 0, corrupt = 0;
+  const canonical = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+    if (value !== null && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, part]) => `${JSON.stringify(key)}:${canonical(part)}`).join(",")}}`;
+    return JSON.stringify(value) ?? "null";
+  };
+  for (const row of f.corpus.cases) {
+    const input = JSON.parse(readTextBounded(join(f.root, row.input), 16_384));
+    if (input.trial !== "reuse") continue;
+    const artifact = input.input.source?.artifact;
+    if (!artifact) continue;
+    expect(artifact.digestRule).toBe("sha256(canonical JSON: recursively sorted object keys, preserved array order, UTF-8, no whitespace)");
+    if (!artifact.present || artifact.payload === null || artifact.payload === undefined) continue;
+    const calculated = sha256(canonical(artifact.payload));
+    if (input.scenario === "corrupt-artifact") { expect(calculated).not.toBe(artifact.digest); corrupt++; }
+    else { expect(calculated).toBe(artifact.digest); valid++; }
+  }
+  expect(valid).toBe(6); expect(corrupt).toBe(2);
 });
