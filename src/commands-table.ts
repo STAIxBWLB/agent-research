@@ -2,6 +2,11 @@
 export interface CommandSpec { name: string; usage: string; mutates: boolean | "network"; options: Record<string, "flag" | "value"> }
 const json = { "--json": "flag" } as const;
 export const COMMANDS: readonly CommandSpec[] = [
+  { name: "harness stream set", usage: "harness stream set <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
+  { name: "harness stream show", usage: "harness stream show <dir> [--json]", mutates: false, options: json },
+  { name: "experience select", usage: "experience select <dir> --file PATH|- [--json]", mutates: "network", options: { "--file": "value", ...json } },
+  { name: "experience freeze", usage: "experience freeze <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
+  { name: "experience check", usage: "experience check <dir> <round> --model MODEL --runtime VERSION [--json]", mutates: "network", options: { "--model": "value", "--runtime": "value", ...json } },
   { name: "harness set", usage: "harness set <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "harness show", usage: "harness show <dir> [--round ID] [--json]", mutates: false, options: { "--round": "value", ...json } },
   { name: "harness import", usage: "harness import <dir> <round> --file FIXTURE_PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },

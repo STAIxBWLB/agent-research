@@ -202,6 +202,16 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       if (file === undefined) throw new Error("protocol: input file missing; use --file PATH or --file - for JSON standard input");
       result = await ops.protocol(positional[0]!, await readInput(file, io), ctx); break;
     }
+    case "harness stream set": case "experience freeze": case "experience select": {
+      count(spec, positional, 1); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);
+      const raw = await readInput(file, io);
+      result = spec.name === "harness stream set" ? await ops.harnessStreamSet(positional[0]!, raw, ctx) : spec.name === "experience freeze" ? await ops.experienceFreeze(positional[0]!, raw, ctx) : await ops.experienceSelect(positional[0]!, raw, ctx, env); break;
+    }
+    case "harness stream show": count(spec, positional, 1); result = ops.harnessStreamShow(positional[0]!); break;
+    case "experience check": {
+      count(spec, positional, 2); const model = str("--model"), runtime = str("--runtime"); if (!model || !runtime) throw new Error(`usage: ares ${spec.usage}`);
+      result = await ops.experienceCheck(positional[0]!, positional[1]!, {model, runtime}, ctx, env); break;
+    }
     case "harness set": {
       count(spec, positional, 1); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);
       result = await ops.harnessSet(positional[0]!, await readInput(file, io), ctx); break;

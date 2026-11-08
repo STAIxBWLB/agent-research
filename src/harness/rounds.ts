@@ -1,3 +1,4 @@
+import {requireRoundExperiences} from "./experience.ts";
 import {hasHarnessCredential} from "./privacy.ts";
 import {lstatSync} from "node:fs";
 import {join} from "node:path";
@@ -10,6 +11,7 @@ import {parseProbeFixture, compareProbeFixtures, type ProbeFixtureProjectionV1} 
 export const HARNESS_ROUNDS = 16, HARNESS_FORM_BYTES = 65_536, HARNESS_INDEX_BYTES = 1_048_576;
 export interface DeclaredExecutionRef {v: 1; tool: "ahub"; projectKey: string; kind: string; id: string; revision?: string; sha256: string}
 export interface HarnessRound {
+  context?: {streamSha256: string; improverContextHash: string};
   v: 1; id: string; task: {id: string; inputSha256: string}; baseline: {guidanceSha256: string};
   candidates: {id: string; guidanceSha256: string; category?: "procedure" | "domain"}[];
   hypothesis: {deficiency: string; predictedChange: string}; experience: {ref: SkillEvidenceReference; digest: string}[];
@@ -37,7 +39,7 @@ function execution(raw: unknown): DeclaredExecutionRef {
 }
 /** Ares-owned round schema, not a producer manifest or execution admission. */
 export function validateHarnessRound(raw: unknown, studyId?: string): HarnessRound {
-  const row = object(raw, ["v", "id", "task", "baseline", "candidates", "hypothesis", "experience", "authoring", "sourceExecutions"], "round");
+  const row = object(raw, ["v", "id", "task", "baseline", "candidates", "hypothesis", "experience", "authoring", "sourceExecutions", "context"], "round");
   if (row.v !== 1) fail("unsupported round version; use a version supporting the original record, keeping it unchanged");
   const task = object(row.task, ["id", "inputSha256"], "task"), baseline = object(row.baseline, ["guidanceSha256"], "baseline"), hypothesis = object(row.hypothesis, ["deficiency", "predictedChange"], "hypothesis");
   if (!Array.isArray(row.candidates) || row.candidates.length > 2 || !Array.isArray(row.experience) || row.experience.length > 16 || !["uncontrolled-authoring", "controlled-lane"].includes(row.authoring as string)) fail("invalid candidate/experience count or authoring mode");
@@ -47,7 +49,8 @@ export function validateHarnessRound(raw: unknown, studyId?: string): HarnessRou
   const sources = row.sourceExecutions === undefined ? undefined : object(row.sourceExecutions, ["proposal1", "proposal2", "composition", "selection", "reflection"], "source executions");
   const sourceExecutions = sources && Object.fromEntries(Object.entries(sources).map(([stage, value]) => [stage, execution(value)]));
   if (row.authoring === "controlled-lane" && candidates.some((_candidate, index) => !sourceExecutions?.[`proposal${index + 1}`])) fail("controlled model-authored proposals require their source execution receipt refs");
-  const round: HarnessRound = {v: 1, id: id(row.id), task: {id: text(task.id, 256, "task id"), inputSha256: hash(task.inputSha256)}, baseline: {guidanceSha256: hash(baseline.guidanceSha256)}, candidates, hypothesis: {deficiency: text(hypothesis.deficiency, 2000, "deficiency"), predictedChange: text(hypothesis.predictedChange, 2000, "predicted change")}, experience, authoring: row.authoring as HarnessRound["authoring"], ...(sourceExecutions ? {sourceExecutions} : {})};
+  const context = row.context === undefined ? undefined : object(row.context, ["streamSha256", "improverContextHash"], "round context");
+  const round: HarnessRound = {v: 1, id: id(row.id), task: {id: text(task.id, 256, "task id"), inputSha256: hash(task.inputSha256)}, baseline: {guidanceSha256: hash(baseline.guidanceSha256)}, candidates, hypothesis: {deficiency: text(hypothesis.deficiency, 2000, "deficiency"), predictedChange: text(hypothesis.predictedChange, 2000, "predicted change")}, experience, authoring: row.authoring as HarnessRound["authoring"], ...(sourceExecutions ? {sourceExecutions} : {}), ...(context ? {context: {streamSha256: hash(context.streamSha256), improverContextHash: hash(context.improverContextHash)}} : {})};
   checkMetadata(round);
   if (Buffer.byteLength(JSON.stringify(round)) > HARNESS_FORM_BYTES) fail("round exceeds 64 KiB"); return round;
 }
@@ -89,6 +92,7 @@ function read(dirArg: string, providedEvents?: LedgerEvent[]) {
     if (design && (!design.isDirectory() || design.isSymbolicLink())) fail("design must be a regular directory, not a link");
     stat = lstatSync(file, {throwIfNoEntry: false});
   } catch {return fail("harness index metadata unavailable or linked; restore a regular design directory and index");}
+  requireRoundExperiences(dir, folded.rounds, events);
   if (!stat) {if (folded.rounds.length) fail("design/harness.json missing; restore its committed index"); return {dir, study, events, ...folded};}
   if (!stat.isFile() || stat.isSymbolicLink()) fail("harness index must be a regular file, not a link");
   let parsed: unknown; try {parsed = JSON.parse(readTextBounded(file, HARNESS_INDEX_BYTES, {noFollow: true}));} catch {return fail("index is missing, unreadable, malformed or over 1 MiB; restore design/harness.json");}
@@ -102,6 +106,7 @@ export function harnessBinding(dir: string, roundId: string): string | undefined
 /** Caller holds the study lock. Definition updates preserve the prior events and reopen only this round's gate. */
 export function setHarnessRound(dirArg: string, raw: unknown, actor: Actor): HarnessRound {
   const current = read(dirArg), round = validateHarnessRound(raw, current.study.id), old = current.rounds.find(value => value.id === round.id);
+  requireRoundExperiences(current.dir, [round], current.events);
   if (old && canonical(old.task) !== canonical(round.task) || current.rounds.some(value => value.id !== round.id && canonical(value.task) === canonical(round.task))) fail("task identity is immutable and may have only one round");
   if (old && binding(old) === binding(round)) return old;
   if (!old && current.rounds.length >= HARNESS_ROUNDS) fail("16-round limit reached; use another experiment study");

@@ -1,3 +1,4 @@
+import {setHarnessStream, readHarnessStream, selectExperience, freezeExperience, checkExperience} from "./harness/experience.ts";
 import {harnessRoundBinding, readHarnessRounds, type HarnessRound, setHarnessRound, showHarness, importHarnessFixture} from "./harness/rounds.ts";
 import { readProvenance, compareLineage, type ProvenanceOptions, type ProvenancePage, type LineageComparison } from "./provenance.ts";
 import { validateAutonomyMode, validatePhase, PHASES, ACCEPT_ARTIFACTS, resolveAutonomy, type AcceptArtifact, type Autonomy } from "./autonomy.ts";
@@ -112,6 +113,11 @@ export async function executorInputsHash(dirArg: string, path: string, ctx: Ctx)
   return hashExecutorInput(executor, path, ctx.runner);
 }
 export const executorCheck = (dir: string, ctx: Ctx) => checkExecutor(dir, ctx.runner);
+export const harnessStreamSet = (dir: string, raw: unknown, ctx: Ctx) => withLock(dir, () => setHarnessStream(dir, raw, ctx.actor));
+export const harnessStreamShow = (dir: string) => readHarnessStream(dir);
+export const experienceSelect = (dir: string, raw: unknown, ctx: Pick<Ctx, "runner" | "now">, env: NodeJS.ProcessEnv = process.env) => selectExperience(dir, raw, {...ctx, env});
+export const experienceFreeze = (dir: string, raw: unknown, ctx: Ctx) => withLock(dir, () => freezeExperience(dir, raw, ctx.actor));
+export const experienceCheck = (dir: string, round: string, identity: {model: string; runtime: string}, ctx: Pick<Ctx, "runner" | "now">, env: NodeJS.ProcessEnv = process.env) => checkExperience(dir, round, identity, {...ctx, env});
 export const harnessSet = (dir: string, raw: unknown, ctx: Ctx) => withLock(dir, () => setHarnessRound(dir, raw, ctx.actor));
 export const harnessShow = (dir: string, round?: string) => showHarness(dir, round);
 export const harnessImport = (dir: string, round: string, raw: unknown, ctx: Ctx) => withLock(dir, () => importHarnessFixture(dir, round, raw, ctx.actor));
