@@ -294,3 +294,67 @@ test("observed hub bindings survive removal with the native dispatch terminal st
   expect(node(page, "dispatch", "1:external:1").state).toBe("historical");
   expect(node(page, "dispatch", "1:external:1").data).toMatchObject({ status: "done", hubTaskId: 19, hubProject: "synthetic-late-board" });
 });
+
+test("every emitted edge names the source record containing its relationship", async () => {
+  const f = await provenanceFixture(), page = readProvenance(f.dir), events = readLedger(f.dir);
+  expect(page.status).toBe("ok");
+  const witnessed = new Set<string>();
+  const ids = (value: unknown): string[] => {
+    if (Array.isArray(value)) return value.flatMap(row => typeof row === "string" ? [row] : row && typeof row === "object" && "id" in row && typeof row.id === "string" ? [row.id] : []);
+    if (value && typeof value === "object") return ["running", "succeeded", "failed", "cancelled", "unknown"].flatMap(status => ids((value as Record<string, unknown>)[status]));
+    return [];
+  };
+  for (const link of page.edges) {
+    witnessed.add(link.relation);
+    const text = readTextBounded(join(f.dir, link.proof.file), LEDGER_BYTES);
+    const record = link.proof.ledgerIndex !== undefined ? events[link.proof.ledgerIndex]! : JSON.parse(text);
+    const data = link.proof.ledgerIndex !== undefined ? record.data : record;
+    switch (link.relation) {
+      case "contains":
+        if (link.to.kind === "idea") expect(data.idea.id).toBe(link.to.id);
+        else if (link.to.kind === "skill-proposal") expect(data.proposal.name).toBe(link.to.id);
+        else if (link.to.kind === "plan-revision") expect(String(data.revision)).toBe(link.to.id);
+        else { expect(data.id).toBe(link.to.id); expect(data.studyId).toBe(link.from.id); }
+        break;
+      case "retryOf": expect(data.id).toBe(link.from.id); expect(data.retryOf).toBe(link.to.id); break;
+      case "parent": expect(data.idea.id).toBe(link.from.id); expect(data.idea.parent).toBe(link.to.id); break;
+      case "cites-attempt":
+        if (link.from.kind === "idea") { expect(data.id).toBe(link.from.id); expect(data.attempts).toContain(link.to.id); }
+        else { expect(data.proposal.name).toBe(link.from.id); expect(data.proposal.evidence).toContain(`ares:${f.studyId}/attempt:${link.to.id}`); }
+        break;
+      case "produced": expect(data.id).toBe(link.from.id); expect(data.outputs.some((row: {sha256: string}) => row.sha256 === link.to.sha256)).toBe(true); break;
+      case "dispatched": expect(String(data.revision)).toBe(link.from.id); expect(data.dispatchId).toBe(link.to.id); break;
+      case "observed-in": expect(data.dispatchId).toBe(link.from.id); expect(String(data.revision)).toBe(link.to.id); break;
+      case "expected-attempt": expect(data.dispatchId).toBe(link.from.id); expect(data.attemptId).toBe(link.to.id); break;
+      case "observed-attempt": expect(data.dispatchId).toBe(link.from.id); expect(data.output.attemptId).toBe(link.to.id); break;
+      case "observed-output": expect(data.dispatchId).toBe(link.from.id); expect(data.output.sha256).toBe(link.to.sha256); break;
+      case "closed": expect(data.evidenceSha256 ?? data.sha256).toBe(link.to.sha256); break;
+      case "reviewed": expect(data.review.buildSha256).toBe(link.to.sha256); expect(data.id).toBe(link.proof.nativeId); break;
+      case "uses-attempt":
+        expect(link.proof.file).toMatch(/^runs\/[^/]+\/(investigate|ablate|final)\.json$/);
+        expect([...ids(data.attempts), ...ids(data.baseline?.attempts), ...ids(data.reference?.attempts), ...(data.candidates ?? []).flatMap((row: {attempts: unknown}) => ids(row.attempts)), ...(data.ablations ?? []).flatMap((row: {attempts: unknown}) => ids(row.attempts)), ...ids(data.excluded)]).toContain(link.to.id);
+        expect(sha256(text)).toBe(link.from.sha256); break;
+      case "names-idea": expect(data.winner.idea).toBe(link.to.id); expect(sha256(text)).toBe(link.from.sha256); break;
+      case "uses-closed-result": expect([data.investigateSha256, data.ablateSha256]).toContain(link.to.sha256); expect(sha256(text)).toBe(link.from.sha256); break;
+      case "uses-source": expect(link.proof.file).toBe("paper/build/evidence.json"); expect(data.placeholders.some((row: {source: {sha256: string}}) => row.source.sha256 === link.to.sha256 || row.source.sha256 === node(page, "attempt", link.to.id)?.proof.sha256)).toBe(true); expect(sha256(text)).toBe(link.from.sha256); break;
+      default: throw new Error(`Unaudited relation ${link.relation}`);
+    }
+  }
+  for (const relation of ["uses-attempt", "names-idea", "uses-closed-result", "uses-source", "closed"]) expect(witnessed.has(relation)).toBe(true);
+});
+
+for (const scenario of ["missing", "foreign", "run", "commit", "seed", "duplicate"] as const) test(`attempt provenance refuses ${scenario} start identity`, async () => {
+  const f = await provenanceFixture(), id = f.ids.retryAttempt, file = join(f.dir, `runs/investigate/attempts/${id}.json`);
+  const events = readLedger(f.dir), start = events.find(event => event.type === "attempt.started" && event.data.id === id)!;
+  if (scenario === "foreign") {
+    const attempt = JSON.parse(readTextBounded(file, ATTEMPT_BYTES)); attempt.studyId = "foreign-synthetic-study"; writeAtomic(file, JSON.stringify(attempt), ATTEMPT_BYTES);
+  } else if (scenario === "run") start.data.run = "other-run";
+  else if (scenario === "commit") start.data.commit = "c".repeat(40);
+  else if (scenario === "seed") start.data.seed = 987;
+  const changed = scenario === "missing" ? events.filter(event => event !== start) : scenario === "duplicate" ? [...events, start] : events;
+  writeAtomic(join(f.dir, "ledger.jsonl"), changed.map(event => JSON.stringify(event)).join("\n") + "\n", LEDGER_BYTES);
+  const page = readProvenance(f.dir); expect(page.status).toBe("unavailable"); expect(node(page, "attempt", id).state).toBe("corrupt");
+  const issue = scenario === "missing" ? "missing-attempt-start-receipt" : scenario === "foreign" ? "attempt-study-identity-mismatch" : scenario === "duplicate" ? "duplicate-attempt-start-receipt" : "attempt-start-identity-mismatch";
+  expect(page.issues.some(value => value.code === issue && value.ref?.id === id)).toBe(true);
+  expect(page.edges.some(value => value.from.kind === "attempt" && value.from.id === id && ["retryOf", "produced"].includes(value.relation))).toBe(false);
+});

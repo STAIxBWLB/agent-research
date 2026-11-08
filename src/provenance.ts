@@ -138,8 +138,9 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
   graph.put({ ref: study, state: "current", availability: "available", proof: graph.proof("study.json"), data: { mode: source.study.mode } });
   const owned = (ref: ExecutionReferenceV1, proof: ProvenanceProof) => graph.edge(study, ref, "contains", proof);
   const events = source.events;
-  const addedIdeas = new Map<string, number>(), decisions = new Map<string, number[]>(), latestAttempts = new Map<string, LedgerEvent>(), reviewIndexes = new Map<string, number>(), skillIndexes = new Map<string, number>();
+  const addedIdeas = new Map<string, number>(), decisions = new Map<string, number[]>(), latestAttempts = new Map<string, LedgerEvent>(), starts = new Map<string, LedgerEvent[]>(), reviewIndexes = new Map<string, number>(), skillIndexes = new Map<string, number>();
   for (const [index, event] of events.entries()) {
+    if (event.type === "attempt.started" && typeof event.data.id === "string") starts.set(event.data.id, [...(starts.get(event.data.id) ?? []), event]);
     if (event.type.startsWith("attempt.") && typeof event.data.id === "string" && typeof event.data.status === "string") latestAttempts.set(event.data.id, event);
     if (event.type === "idea.added" && plain(event.data.idea) && typeof event.data.idea.id === "string") addedIdeas.set(event.data.idea.id, index);
     if (event.type === "idea.decided" && typeof event.data.id === "string") decisions.set(event.data.id, [...(decisions.get(event.data.id) ?? []), index]);
@@ -156,10 +157,15 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
       if (attempts.has(value.id)) { graph.issue("duplicate-attempt-id", ref); continue; }
       attempts.set(value.id, { value, file, ref });
       const latest = latestAttempts.get(value.id);
-      const conflict = latest?.data.status !== undefined && latest.data.status !== value.status;
-      graph.put({ ref, state: conflict ? "corrupt" : "current", availability: "available", proof, data: { status: value.status, stage: value.stage, seed: Number.isSafeInteger(value.seed) ? value.seed : null } }); owned(ref, proof); if (conflict) graph.issue("attempt-receipt-mismatch", ref);
+      const start = starts.get(value.id) ?? [];
+      const identity = value.studyId !== source.study.id || typeof value.commit !== "string" || !/^[a-f0-9]{40}$/.test(value.commit) || !Number.isSafeInteger(value.seed);
+      const issue = identity ? "attempt-study-identity-mismatch" : start.length === 0 ? "missing-attempt-start-receipt" : start.length > 1 ? "duplicate-attempt-start-receipt" : start[0]!.data.run !== value.run || start[0]!.data.commit !== value.commit || start[0]!.data.seed !== value.seed ? "attempt-start-identity-mismatch" : latest?.data.status !== undefined && latest.data.status !== value.status ? "attempt-receipt-mismatch" : undefined;
+      graph.put({ ref, state: issue ? "corrupt" : "current", availability: "available", proof, data: { status: value.status, stage: value.stage, seed: Number.isSafeInteger(value.seed) ? value.seed : null } });
+      if (value.studyId === source.study.id) owned(ref, proof);
+      if (issue) graph.issue(issue, ref);
     }
     for (const { value, file, ref } of attempts.values()) {
+      if (graph.nodes.get(key(ref))?.state !== "current") continue;
       const proof = graph.proof(file);
       if (value.retryOf !== undefined) { if (typeof value.retryOf !== "string" || !ATTEMPT.test(value.retryOf)) graph.issue("corrupt-retry-reference", ref); else graph.edge(ref, graph.target("attempt", value.retryOf, proof), "retryOf", proof); }
       if (!Array.isArray(value.outputs)) { graph.issue("corrupt-output-inventory", ref); continue; }
@@ -281,8 +287,8 @@ function closures(dir: string, graph: Graph, study: ExecutionReferenceV1): void 
   }
   for (const record of records) {
     if (!record.raw || source.files.get(record.file)?.sha256 !== record.hash || record.raw.v !== 1 || graph.nodes.get(key(record.ref))?.state === "corrupt") continue;
-    const raw = record.raw;
-    const attempt = (id: unknown) => { graph.touch(); if (typeof id === "string" && ATTEMPT.test(id)) graph.edge(record.ref, graph.target("attempt", id, record.proof), "uses-attempt", record.proof); };
+    const raw = record.raw, proof = graph.proof(record.file);
+    const attempt = (id: unknown) => { graph.touch(); if (typeof id === "string" && ATTEMPT.test(id)) graph.edge(record.ref, graph.target("attempt", id, proof), "uses-attempt", proof); };
     const statuses = (value: unknown) => {
       if (Array.isArray(value)) { if (value.length > graph.limit * 8) throw new TraversalCap(); for (const row of value) { graph.touch(); if (plain(row)) attempt(row.id); else attempt(row); } }
       else if (plain(value)) for (const status of ["running", "succeeded", "failed", "cancelled", "unknown"]) if (Array.isArray(value[status])) for (const id of value[status]) attempt(id);
@@ -290,21 +296,21 @@ function closures(dir: string, graph: Graph, study: ExecutionReferenceV1): void 
     if (record.family === "investigate") {
       if (plain(raw.baseline)) statuses(raw.baseline.attempts);
       if (Array.isArray(raw.candidates)) for (const candidate of raw.candidates) { graph.touch(); if (plain(candidate)) statuses(candidate.attempts); }
-      if (plain(raw.winner) && typeof raw.winner.idea === "string") graph.edge(record.ref, graph.target("idea", raw.winner.idea, record.proof), "names-idea", record.proof);
+      if (plain(raw.winner) && typeof raw.winner.idea === "string") graph.edge(record.ref, graph.target("idea", raw.winner.idea, proof), "names-idea", proof);
     } else if (record.family === "ablate") {
       if (plain(raw.reference)) statuses(raw.reference.attempts);
       if (Array.isArray(raw.ablations)) for (const ablation of raw.ablations) { graph.touch(); if (plain(ablation)) statuses(ablation.attempts); }
     } else if (record.family === "final") statuses(raw.attempts);
     if (Array.isArray(raw.excluded)) for (const row of raw.excluded) { graph.touch(); if (plain(row)) attempt(row.id); }
-    for (const name of ["investigateSha256", "ablateSha256"]) if (typeof raw[name] === "string") { const linked = records.find(value => value.hash === raw[name] && value.family === (name === "investigateSha256" ? "investigate" : "ablate")); if (linked) graph.edge(record.ref, linked.ref, "uses-closed-result", record.proof); }
+    for (const name of ["investigateSha256", "ablateSha256"]) if (typeof raw[name] === "string") { const linked = records.find(value => value.hash === raw[name] && value.family === (name === "investigateSha256" ? "investigate" : "ablate")); if (linked) graph.edge(record.ref, linked.ref, "uses-closed-result", proof); }
     if (record.family === "paper" && Array.isArray(raw.placeholders)) for (const placeholder of raw.placeholders) { graph.touch();
       if (!plain(placeholder) || !plain(placeholder.source) || typeof placeholder.source.sha256 !== "string" || typeof placeholder.source.file !== "string") continue;
       const hash = placeholder.source.sha256, file = placeholder.source.file;
       const closed = records.find(value => value.hash === hash && value.file === file);
-      if (closed) graph.edge(record.ref, closed.ref, "uses-source", record.proof);
+      if (closed) graph.edge(record.ref, closed.ref, "uses-source", proof);
       else {
         const id = /^runs\/[A-Za-z0-9][A-Za-z0-9_-]{0,63}\/attempts\/([a-f0-9]{16})\.json$/.exec(file)?.[1];
-        if (id && source.files.get(file)?.sha256 === hash) graph.edge(record.ref, graph.target("attempt", id, record.proof), "uses-source", record.proof);
+        if (id && source.files.get(file)?.sha256 === hash) graph.edge(record.ref, graph.target("attempt", id, proof), "uses-source", proof);
       }
     }
   }
