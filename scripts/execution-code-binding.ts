@@ -90,6 +90,6 @@ export function bindRunCode(root: string): RunCodeBinding {
     return { commit, tree, files, codeSha256: sha256(JSON.stringify(files)) };
   } catch (error) {
     if (error instanceof CodeBindingError) throw error;
-    fail("source is missing, unreadable, linked or over-bound");
+    return fail("source is missing, unreadable, linked or over-bound");
   } finally { if (home !== undefined) rmSync(home, { recursive: true, force: true }); }
 }

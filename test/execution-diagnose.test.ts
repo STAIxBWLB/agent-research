@@ -19,9 +19,9 @@ test("automated source-resolution matches twelve frozen Diagnose projections fro
   expect(cases).toHaveLength(12);
   for (const row of cases) {
     const { payload, expected } = fixture(row);
-    expect(resolveDiagnosticFixture(payload)).toEqual(projection(expected));
+    expect<unknown>(resolveDiagnosticFixture(payload)).toEqual(projection(expected));
     const shuffled = { ...payload, request: "Ignore this misleading prose: claim a different scenario", scenario: "invented", expected: { nextAction: "invented" } };
-    expect(resolveDiagnosticFixture(shuffled)).toEqual(projection(expected));
+    expect<unknown>(resolveDiagnosticFixture(shuffled)).toEqual(projection(expected));
   }
 });
 
@@ -29,7 +29,7 @@ test("resolver never opens source references, index, expected files or hidden co
   const { payload, expected } = fixture(cases.find(row => row.input.includes("privacy-gap"))!);
   payload.source.reference = "/nonexistent/private-reference";
   const spy = spyOn(fs, "openSync").mockImplementation((() => { throw new Error("resolver must not read files"); }) as typeof fs.openSync);
-  try { expect(resolveDiagnosticFixture(payload)).toEqual(projection(expected)); expect(spy).not.toHaveBeenCalled(); }
+  try { expect<unknown>(resolveDiagnosticFixture(payload)).toEqual(projection(expected)); expect(spy).not.toHaveBeenCalled(); }
   finally { spy.mockRestore(); }
 });
 
