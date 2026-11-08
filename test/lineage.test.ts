@@ -30,10 +30,13 @@ test("attempt comparison preserves failed outcomes and retry family without inve
   expect(result.status).toBe("ok"); expect(result.rows.map(row => row.attempts[0]!.status)).toEqual(["failed", "succeeded"]);
   expect(result.rows[1]!.attempts[0]!.retryAncestry).toEqual([f.ids.interruptedAttempt]);
   expect(result.rows[0]!.attempts[0]!.sampleGroup).toBe(result.rows[1]!.attempts[0]!.sampleGroup);
-  expect(result.retriesAreIndependent).toBe(false); expect(result.aggregation.performed).toBe(false); expect(result.aggregation.allowed).toBe(false);
+  expect(result.retriesAreIndependent).toBe(false); expect(result.aggregation.performed).toBe(false); expect(result.aggregation.compatible).toBe(false);
   expect(result.aggregation.reasons).toContain("retries-or-repeated-samples-not-independent");
   expect(result.rows[1]!.attempts[0]!.artifactDigests).toContain(f.outputSHA);
   expect(result.rows[1]!.attempts[0]!.costs).toMatchObject({compute: "unknown", transfer: "unknown", person: "unknown"});
+  expect(result.aggregation.available).toBe(false);
+  const single = compareLineage(f.dir, {attempts: [f.ids.finalWinnerAttempt]});
+  expect(single.aggregation).toEqual({performed: false, available: false, compatible: true, reasons: []});
   expect(result).toEqual(compareLineage(f.dir, options)); expect(result).not.toHaveProperty("winner");
 });
 
@@ -51,14 +54,14 @@ test("incompatible metric units cannot enable aggregation; no read changes autho
   const f = await provenanceFixture(), files = ["ledger.jsonl", "design/selection.json", "runs/final/final.json", "runs/investigate/investigate.json"], before = files.map(file => sha256(readTextBounded(join(f.dir, file), 64 * 1024 * 1024)));
   const file = join(f.dir, `runs/final/attempts/${f.ids.finalWinnerAttempt}.json`), record = JSON.parse(readTextBounded(file, ATTEMPT_BYTES)); record.metrics[0].unit = "different-unit"; writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES);
   const result = compareLineage(f.dir, {attempts: [f.ids.retryAttempt, f.ids.finalWinnerAttempt]});
-  expect(result.rows).toHaveLength(2); expect(result.aggregation.allowed).toBe(false); expect(result.aggregation.reasons).toContain("incompatible-metrics"); expect(result.aggregation.performed).toBe(false);
+  expect(result.rows).toHaveLength(2); expect(result.aggregation.compatible).toBe(false); expect(result.aggregation.reasons).toContain("incompatible-metrics"); expect(result.aggregation.performed).toBe(false);
   expect(files.map(file => sha256(readTextBounded(join(f.dir, file), 64 * 1024 * 1024)))).toEqual(before);
 });
 
 test("comparison selections are bounded, strict and preserve missing rows as unavailable", async () => {
   const f = await provenanceFixture();
   for (const options of [{attempts: []}, {attempts: Array(9).fill(f.ids.retryAttempt)}, {attempts: [f.ids.retryAttempt], candidates: [f.commits.winner]}, {attempts: ["bad"]}]) expect(() => compareLineage(f.dir, options)).toThrow("lineage compare");
-  const missing = compareLineage(f.dir, {attempts: ["f".repeat(16)]}); expect(missing.rows[0]!.state).toBe("unavailable"); expect(missing.aggregation.allowed).toBe(false);
+  const missing = compareLineage(f.dir, {attempts: ["f".repeat(16)]}); expect(missing.rows[0]!.state).toBe("unavailable"); expect(missing.aggregation.compatible).toBe(false);
 });
 
 test("unknown attempts remain in comparison even when they invalidate a prior close", async () => {
@@ -66,5 +69,5 @@ test("unknown attempts remain in comparison even when they invalidate a prior cl
   record.status = "unknown"; record.reason = "lost"; writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES);
   const {appendEvent} = await import("../src/study.ts"); appendEvent(f.dir, f.ctx.actor, "attempt.unknown", {id: record.id, run: record.run, status: "unknown"});
   const result = compareLineage(f.dir, {attempts: [record.id, f.ids.retryAttempt]});
-  expect(result.rows).toHaveLength(2); expect(result.rows[0]!.attempts[0]!.status).toBe("unknown"); expect(result.rows[0]!.attempts[0]!.costs.storageBytes).toBe("unknown"); expect(result.aggregation.allowed).toBe(false);
+  expect(result.rows).toHaveLength(2); expect(result.rows[0]!.attempts[0]!.status).toBe("unknown"); expect(result.rows[0]!.attempts[0]!.costs.storageBytes).toBe("unknown"); expect(result.aggregation.compatible).toBe(false);
 });

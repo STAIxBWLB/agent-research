@@ -422,7 +422,7 @@ export interface LineageComparisonRow { kind: "attempt" | "candidate"; id: strin
 export interface LineageComparison {
   v: 1; status: ProvenancePage["status"]; sourceSha256: string | null; ledgerPosition: number | null;
   rows: LineageComparisonRow[]; issues: ProvenanceIssue[]; retriesAreIndependent: false;
-  aggregation: {performed: false; allowed: boolean; reasons: string[]}; resultAuthority: "existing-investigation-and-final-only";
+  aggregation: {performed: false; available: false; compatible: boolean; reasons: string[]}; resultAuthority: "existing-investigation-and-final-only";
 }
 function comparisonAttempt(value: Attempt, attempts: Map<string, Attempt>): AttemptComparison {
   if (!HASH.test(value.protocolHash) || !/^[a-f0-9]{40}$/.test(value.treeId) || !Array.isArray(value.metrics) || value.metrics.length > 64 || value.metrics.some(metric => !plain(metric) || typeof metric.name !== "string" || typeof metric.unit !== "string" || metric.provenance !== "ares-observed" || typeof metric.value !== "number" || !Number.isFinite(metric.value))) fail("malformed-comparison-attempt");
@@ -443,7 +443,7 @@ export function compareLineage(dirArg: string, options: {attempts?: string[]; ca
   if (!plain(options as unknown) || Object.keys(options).some(name => !["attempts", "candidates"].includes(name)) || (options.attempts === undefined) === (options.candidates === undefined)) throw new Error("lineage compare: select exactly one of attempts or candidates; pass 1..8 native ids before retrying");
   const ids = options.attempts ?? options.candidates!, kind = options.attempts ? "attempt" : "candidate";
   if (!Array.isArray(ids) || ids.length < 1 || ids.length > 8 || new Set(ids).size !== ids.length || ids.some(id => typeof id !== "string" || !(kind === "attempt" ? ATTEMPT : /^[a-f0-9]{40}$/).test(id))) throw new Error("lineage compare: select 1..8 distinct 16-hex attempt ids or 40-hex candidate commits; correct the selection before retrying");
-  const result: LineageComparison = {v: 1, status: "unavailable", sourceSha256: null, ledgerPosition: null, rows: [], issues: [], retriesAreIndependent: false, aggregation: {performed: false, allowed: false, reasons: []}, resultAuthority: "existing-investigation-and-final-only"};
+  const result: LineageComparison = {v: 1, status: "unavailable", sourceSha256: null, ledgerPosition: null, rows: [], issues: [], retriesAreIndependent: false, aggregation: {performed: false, available: false, compatible: false, reasons: []}, resultAuthority: "existing-investigation-and-final-only"};
   let source: Snapshot | undefined;
   try {
     const dir = realpathSync(resolve(dirArg)); source = capture(dir); result.sourceSha256 = source.hash; result.ledgerPosition = source.ledgerPosition;
@@ -475,7 +475,7 @@ export function compareLineage(dirArg: string, options: {attempts?: string[]; ca
     if (values.some(value => value.retryOf !== null) || new Set(values.map(value => value.sampleGroup)).size < values.length) reasons.add("retries-or-repeated-samples-not-independent");
     if (new Set(values.map(value => canonical(value.metrics.map(metric => [metric.name, metric.unit]).sort()))).size > 1) reasons.add("incompatible-metrics");
     if (!values.length || values.some(value => !value.metrics.length)) reasons.add("metrics-unavailable");
-    result.aggregation = {performed: false, allowed: reasons.size === 0, reasons: [...reasons].sort()};
+    result.aggregation = {performed: false, available: false, compatible: reasons.size === 0, reasons: [...reasons].sort()};
     const after = capture(dir); if (after.hash !== source.hash || after.ledgerPosition !== source.ledgerPosition) fail("source-changed");
     if (Buffer.byteLength(JSON.stringify(result)) > PROVENANCE_PAGE_BYTES) fail("comparison-page-capped", true);
     return result;
@@ -483,6 +483,6 @@ export function compareLineage(dirArg: string, options: {attempts?: string[]; ca
     const code = error instanceof SourceFailure ? error.code : "comparison-source-unavailable";
     result.status = error instanceof SourceFailure && error.capped ? "capped" : code === "source-changed" || code === "write-in-progress" ? "changed" : "unavailable";
     result.rows = []; result.issues = [{code, message: `lineage compare ${code}; inspect lineage show and restore valid source records or retry the read`}];
-    result.aggregation = {performed: false, allowed: false, reasons: [code]}; return result;
+    result.aggregation = {performed: false, available: false, compatible: false, reasons: [code]}; return result;
   }
 }
