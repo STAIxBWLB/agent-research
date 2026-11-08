@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import { existsSync, mkdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
-import { autonomySet, init, gateDecide, gateList, planSet, planControl, planShow, planRun, finalSeeds, selection, investigateClose } from "../src/commands.ts";
+import { autonomySet, attemptRun as commandAttemptRun, init, gateDecide, gateList, planSet, planControl, planShow, planRun, finalSeeds, selection, investigateClose } from "../src/commands.ts";
 import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, CONTROL_FUTURE_SKEW_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
@@ -24,6 +24,7 @@ function runtime(dir: string) {
   const clock = { value: Date.parse("2030-01-01T00:00:00Z") };
   let beforeHash: (() => Promise<void>) | undefined;
   let beforeResolve: (() => Promise<void>) | undefined, runFailure = false, daemonDown = false, lostStartResponse = false, versionFailure = false;
+  let gpuProbe: ProcessResult | undefined;
   let inputHash = "a".repeat(64);
   let metricsPayload: string | null = '{"score":7}';
   const ok = (stdout = ""): ProcessResult => ({ exitCode: 0, stdout, stderr: "" });
@@ -48,6 +49,7 @@ function runtime(dir: string) {
       else for await (const _chunk of request.stdin as AsyncIterable<Uint8Array>) { /* consume without real extraction */ }
       return ok();
     }
+    if (request.command === "sh" && args.some(arg => arg.includes("ARES_GPU_INVENTORY"))) return gpuProbe ?? ok(gpuProbeText());
     if (request.command === "sh") {
       if (request.stdoutSink) {
         const stage = args.join(" ").includes("candidate.stdout.log") ? "candidate" : "evaluator";
@@ -85,7 +87,7 @@ function runtime(dir: string) {
         });
         const labels = Object.fromEntries(a.flatMap((x, i) => x === "--label" ? [a[i + 1]!] : []).map(x => { const index = x.indexOf("="); return [x.slice(0, index), x.slice(index + 1)]; }));
         const seed = a.flatMap((x, i) => x === "--env" ? [a[i + 1]!] : []).find(x => x.startsWith("ARES_SEED="));
-        return ok(JSON.stringify([{ Id: found.id, State: { Running: found.running, ExitCode: found.exitCode, StartedAt: found.startedAt, ...(found.finishedAt ? { FinishedAt: found.finishedAt } : {}) }, Config: { Seed: seed, Image: a[imageAt], User: value(a, "--user"), Cmd: a.slice(imageAt + 1), Labels: labels }, HostConfig: { NetworkMode: "none", ReadonlyRootfs: true, CapDrop: ["ALL"], SecurityOpt: ["no-new-privileges"], Tmpfs: { "/tmp": "" }, Memory: Number.parseInt(value(a, "--memory")) * 1024 * 1024, PidsLimit: Number(value(a, "--pids-limit")), NanoCpus: Number(value(a, "--cpus")) * 1e9, DeviceRequests: a.includes("--gpus") ? [{ Count: Number(value(a, "--gpus")), Capabilities: [["gpu"]] }] : [] }, Mounts: mounts }]));
+        return ok(JSON.stringify([{ Id: found.id, State: { Running: found.running, ExitCode: found.exitCode, StartedAt: found.startedAt, ...(found.finishedAt ? { FinishedAt: found.finishedAt } : {}) }, Config: { Seed: seed, Image: a[imageAt], User: value(a, "--user"), Cmd: a.slice(imageAt + 1), Labels: labels }, HostConfig: { NetworkMode: "none", ReadonlyRootfs: true, CapDrop: ["ALL"], SecurityOpt: ["no-new-privileges"], Tmpfs: { "/tmp": "" }, Memory: Number.parseInt(value(a, "--memory")) * 1024 * 1024, PidsLimit: Number(value(a, "--pids-limit")), NanoCpus: Number(value(a, "--cpus")) * 1e9, DeviceRequests: a.includes("--gpus") ? value(a, "--gpus").includes("device=") ? [{ Count: 0, DeviceIDs: value(a, "--gpus").replaceAll('"', "").slice(7).split(","), Capabilities: [["gpu"]] }] : [{ Count: Number(value(a, "--gpus")), Capabilities: [["gpu"]] }] : [] }, Mounts: mounts }]));
       }
       if (args[0] === "ps") return ok([...containers.entries()].filter(([name]) => args.includes(`name=^/${name}$`)).map(([, c]) => c.id).join("\n"));
     }
@@ -95,7 +97,7 @@ function runtime(dir: string) {
     const log = { path: `/synthetic/${stage}.log`, sha256: sha256(""), bytes: 0, truncated: false };
     return { logs: { stdout: log, stderr: log }, outputs: [] };
   } };
-  return { requests, containers, clock, ctx, beforeHash: (hook: () => Promise<void>) => { beforeHash = hook; }, inputHash: (hash: string) => { inputHash = hash; }, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; } };
+  return { requests, containers, clock, ctx, gpuProbe: (result: ProcessResult) => { gpuProbe = result; }, beforeHash: (hook: () => Promise<void>) => { beforeHash = hook; }, inputHash: (hash: string) => { inputHash = hash; }, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; } };
 }
 async function setup(p = protocol(), autonomy = "gates", approved = true) {
   const dir = tempDir(); init(dir, { question: "Synthetic?", mode: "experiment", autonomy }, { actor });
@@ -813,4 +815,97 @@ test("identity drift at the short launch fence remains a recoverable never-launc
   await reconcileAttempts(dir, fake.ctx);
   expect(showAttempt(dir, waiting.id).stages.candidate?.containerId).toBeDefined();
   expect(fake.containers.size).toBe(1);
+});
+
+const GPU_A = "GPU-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", GPU_B = "GPU-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+function gpuProbeText(load = "0.50", memory = "8192") {
+  return `ARES_GPU_INVENTORY\n0, ${GPU_A}, 4096\n1, ${GPU_B}, ${memory}\nARES_GPU_LOAD\n${load} 0.25 0.10 1/100 100\nARES_GPU_CPUS\n8\nARES_GPU_END\n`;
+}
+function gpuProtocol(count = 2): Protocol {
+  const p = protocol(); return { ...p, limits: { ...p.limits, gpus: count }, budget: { ...p.budget, maxGpuHours: 1 } };
+}
+async function setupGpu(count = 2) {
+  const f = await setup(gpuProtocol(count));
+  await withLock(f.dir, () => setExecutor(f.dir, { v: 1, kind: "local", workdir: "/private/synthetic-executor", gpu: { devices: [1, 0], minFreeMemoryMb: 4096, maxLoadRatio: 0.8 } }, actor));
+  return f;
+}
+test("admitted GPUs are UUID-pinned in both stages and export contains count only", async () => {
+  const { dir, fake } = await setupGpu(), started = await runAttempt(dir, request, fake.ctx);
+  expect(started.gpuDevices).toEqual([GPU_B, GPU_A]);
+  expect(running(fake, "candidate").args).toContain(`"device=${GPU_B},${GPU_A}"`);
+  const before = fake.requests.length;
+  expect((await runAttempt(dir, request, fake.ctx)).id).toBe(started.id);
+  expect(fake.requests.slice(before).some(r => r.args.some(arg => arg.includes("ARES_GPU_INVENTORY")))).toBe(false);
+  running(fake, "candidate").running = false; await reconcileAttempts(dir, fake.ctx);
+  expect(running(fake, "evaluator").args).toContain(`"device=${GPU_B},${GPU_A}"`);
+  running(fake, "evaluator").running = false; await reconcileAttempts(dir, fake.ctx);
+  expect(showAttempt(dir, started.id).status).toBe("succeeded");
+  expect(fake.requests.filter(r => r.args.some(arg => arg.includes("ARES_GPU_INVENTORY")))).toHaveLength(1);
+  const { exportBundle } = await import("../src/study-export.ts"), target = join(tempDir(), "bundle");
+  await exportBundle(dir, { bundle: target });
+  const exported = readTextBounded(join(target, "attempts.jsonl"), 1024 * 1024);
+  expect(JSON.parse(exported).gpuDeviceCount).toBe(2); expect(exported).not.toContain("GPU-");
+});
+for (const reason of ["devices", "load", "probe"] as const) test(`GPU ${reason} deferral has CLI/MCP parity, exit75 and no attempt/event/budget`, async () => {
+  const { dir, fake } = await setupGpu();
+  fake.gpuProbe(reason === "probe" ? { exitCode: 1, stdout: "private telemetry", stderr: "sensitive diagnostic" } : { exitCode: 0, stdout: reason === "load" ? gpuProbeText("8.0") : gpuProbeText("0.50", "1024"), stderr: "" });
+  const before = readTextBounded(join(dir, "ledger.jsonl"), 1024 * 1024);
+  const ctx = { ...fake.ctx, http: fakeHttp([]).http }, response = await commandAttemptRun(dir, request, ctx);
+  expect(response).toMatchObject({ status: "deferred", reason, exitCode: 75 });
+  const { run } = await import("../src/cli.ts"), { createAresMcp } = await import("../src/mcp-tools.ts"), home = tempDir(), env = { HOME: home, AGENTHUB_HOME: join(home, "family") };
+  const cli = await run(["attempt", "run", dir, "--repo", request.repo, "--commit", request.commit, "--detach", "--json"], env, ctx);
+  expect(cli.code).toBe(75); expect(JSON.parse(cli.text)).toEqual(response);
+  const mcp = createAresMcp(env, ctx.http, fake.ctx);
+  expect(await mcp.handlers.ares_attempt_run!({ study: dir, repo: request.repo, commit: request.commit })).toEqual(response);
+  expect(listAttempts(dir).attempts).toHaveLength(0);
+  expect(budgetUsage(listAttempts(dir).attempts, fake.clock.value)).toEqual({ attempts: 0, wallHours: 0, gpuHours: 0 });
+  expect(readTextBounded(join(dir, "ledger.jsonl"), 1024 * 1024)).toBe(before);
+  expect(fake.containers.size).toBe(0); expect(fake.requests.some(r => r.command === "docker")).toBe(false);
+  expect(fake.requests.filter(r => r.args.some(arg => arg.includes("ARES_GPU_INVENTORY")))).toHaveLength(3);
+  expect(JSON.stringify(response)).not.toMatch(/private telemetry|sensitive diagnostic/);
+});
+test("GPU-free executor preserves numeric GPU argv and does not probe", async () => {
+  const { dir, fake } = await setup(gpuProtocol(1)), started = await runAttempt(dir, request, fake.ctx);
+  expect(started.gpuDevices).toBeUndefined();
+  const args = running(fake, "candidate").args; expect(args[args.indexOf("--gpus") + 1]).toBe("1");
+  expect(fake.requests.some(r => r.args.some(arg => arg.includes("ARES_GPU_INVENTORY")))).toBe(false);
+});
+for (const mode of ["gates", "step"] as const) test(`a deferred ${mode} plan attempt leaves no attempt id or parallel slot`, async () => {
+  const { dir, fake } = await setupGpu(), stop = new AbortController(); let resumed = false;
+  const ctx = { ...fake.ctx, http: fakeHttp([]).http, signal: stop.signal, sleep: async () => {
+    if (!resumed) { resumed = true; await planControl(dir, { action: "resume", commandId: "run", expectedRevision: 1 }, { ...fake.ctx, http: fakeHttp([]).http }); }
+    if (readLedger(dir).some(event => event.type === "node.observed")) stop.abort();
+    await Bun.sleep(1);
+  } };
+  fake.gpuProbe({ exitCode: 0, stdout: gpuProbeText("8.0"), stderr: "" });
+  if (mode === "step") await autonomySet(dir, "step", undefined, ctx);
+  await planSet(dir, { v: 1, nodes: [{ id: "gpu", kind: "step", command: "attempt.run", args: { repo: request.repo, commit: request.commit } }, { id: "next", kind: "step", command: "lit.bib", args: {}, needs: ["gpu"] }], edges: [] }, ctx);
+  const timer = setTimeout(() => stop.abort(), 4000);
+  const result = await planRun(dir, {}, ctx); clearTimeout(timer);
+  expect(result.nodes.find(node => node.id === "gpu")?.status).toBe("failed");
+  expect(result.nodes.find(node => node.id === "gpu")?.reason).toContain("deferred:load");
+  expect(result.nodes.find(node => node.id === "gpu")?.reason).toContain("ares plan control <dir> retry gpu");
+  expect(result.nodes.find(node => node.id === "gpu")?.attemptId).toBeUndefined();
+  expect(result.nodes.filter(node => node.status === "dispatched")).toHaveLength(0);
+  if (mode === "step") {
+    expect(result.state).toBe("paused"); expect(result.pauseReason).toBe("step");
+    expect(result.nodes.find(node => node.id === "gpu")?.lastObserved?.step).toBe(true);
+    expect(readLedger(dir).filter(event => event.type === "plan.paused" && event.data.reason === "step")).toHaveLength(1);
+  }
+  expect(budgetUsage(listAttempts(dir).attempts, fake.clock.value)).toEqual({ attempts: 0, wallHours: 0, gpuHours: 0 });
+  expect(listAttempts(dir).attempts).toHaveLength(0);
+  expect(fake.requests.filter(r => r.args.some(arg => arg.includes("ARES_GPU_INVENTORY")))).toHaveLength(1);
+});
+
+test("CPU-only attempts skip configured admission and auto-mode deferral records no approval", async () => {
+  const cpu = await setupGpu(0); cpu.fake.gpuProbe({ exitCode: 1, stdout: "", stderr: "unavailable" });
+  const started = await runAttempt(cpu.dir, request, cpu.fake.ctx);
+  expect(started.gpuDevices).toBeUndefined();
+  expect(cpu.fake.requests.some(r => r.args.some(arg => arg.includes("ARES_GPU_INVENTORY")))).toBe(false);
+  const f = await setup(gpuProtocol(1), "auto", false);
+  await withLock(f.dir, () => setExecutor(f.dir, { v: 1, kind: "local", workdir: "/private/synthetic-executor", gpu: { devices: [0], minFreeMemoryMb: 4096, maxLoadRatio: 0.8 } }, actor));
+  f.fake.gpuProbe({ exitCode: 1, stdout: "", stderr: "unavailable" });
+  expect(await commandAttemptRun(f.dir, request, { ...f.fake.ctx, http: fakeHttp([]).http })).toMatchObject({ status: "deferred", reason: "probe" });
+  expect(readLedger(f.dir).some(event => event.type === "gate.approve")).toBe(false);
+  expect(listAttempts(f.dir).attempts).toHaveLength(0);
 });

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- GPU admission (#94): optional executor device allow list, minimum free memory and maximum host-load ratio enable one bounded read-only probe before new GPU attempts. Admission defers with CLI exit 75 and the same structured MCP result for devices/load/probe failures, creating no attempt, approval or budget use. Chosen UUIDs pin both stages; exports retain device count only. No queue, automatic retry or preemption is added. Executors without GPU settings preserve count-based argv and CPU-only attempts skip probes. This extends executor v1 with a strict optional field; earlier readers refuse that field, and existing no-settings studies remain unchanged.
+
 - Executor-local inputs (#93): optional protocol inputs bind named manifest hashes and read-only stage mounts while keeping network none and existing output limits. The executor hash CLI/MCP command streams regular files through Python3 without downloading or copying input data. Attempts keep path-free input identities and verified hashes; export keeps names/hashes only. Locator changes preserve approval, identity changes stale it; restart requires matching current input identities. No-input protocol hashes/design bindings and old studies remain unchanged; older readers refuse the optional inputs field. Python3 is required and reported by executor check only for input protocols.
 
 ## [0.2.1] - 2026-11-08

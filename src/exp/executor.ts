@@ -4,7 +4,8 @@ import { join, posix } from "node:path";
 import { commit, openStudy, plain, readJsonFile, requireExperiment, type Actor } from "../study.ts";
 import { readProtocol, canonicalExecutorPath, validateProtocol, type Protocol } from "./protocol.ts";
 
-export interface Executor { v: 1; kind: "local" | "ssh"; host?: string; workdir: string }
+export interface ExecutorGpu { devices: (number | string)[]; minFreeMemoryMb: number; maxLoadRatio: number }
+export interface Executor { v: 1; kind: "local" | "ssh"; host?: string; workdir: string; gpu?: ExecutorGpu }
 export interface ProcessRequest {
   command: string; args: string[]; stdin?: Uint8Array | AsyncIterable<Uint8Array>;
   stdoutSink?: (chunk: Uint8Array) => void | Promise<void>; signal?: AbortSignal;
@@ -94,15 +95,39 @@ function directory(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length > 4096 || !value.startsWith("/") || /[\0\r\n,"]/.test(value)) throw new Error(`${field}: invalid directory; use an absolute path of at most 4096 characters without NUL, newlines, commas or double quotes`);
   return canonicalExecutorPath(value);
 }
+export const GPU_UUID = /^GPU-[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/;
+function gpuConfigurationError(field: string): never { throw new Error(`executor.gpu.${field}: invalid explicit GPU settings; set 1..64 distinct index/UUID devices, minFreeMemoryMb integer 0..2147483647 and maxLoadRatio >0..1000000 with no other fields`); }
+function gpuSelector(raw: unknown): string {
+  if (typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0) return String(raw);
+  if (typeof raw === "string" && /^(?:0|[1-9][0-9]*)$/.test(raw) && Number.isSafeInteger(Number(raw))) return raw;
+  if (typeof raw === "string" && GPU_UUID.test(raw)) return "GPU-" + raw.slice(4).toLowerCase();
+  return gpuConfigurationError("devices");
+}
+export function validateExecutorGpu(raw: unknown): ExecutorGpu {
+  if (!plain(raw) || Object.keys(raw).some(key => !["devices", "minFreeMemoryMb", "maxLoadRatio"].includes(key))) gpuConfigurationError("configuration");
+  if (!Array.isArray(raw.devices) || raw.devices.length < 1 || raw.devices.length > 64) gpuConfigurationError("devices");
+  const devices = raw.devices.map(gpuSelector);
+  if (new Set(devices).size !== devices.length) gpuConfigurationError("devices");
+  if (!Number.isSafeInteger(raw.minFreeMemoryMb) || Number(raw.minFreeMemoryMb) < 0 || Number(raw.minFreeMemoryMb) > 2_147_483_647) gpuConfigurationError("minFreeMemoryMb");
+  if (typeof raw.maxLoadRatio !== "number" || !Number.isFinite(raw.maxLoadRatio) || raw.maxLoadRatio <= 0 || raw.maxLoadRatio > 1_000_000) gpuConfigurationError("maxLoadRatio");
+  return { devices, minFreeMemoryMb: raw.minFreeMemoryMb as number, maxLoadRatio: raw.maxLoadRatio };
+}
+/** Frozen assignments and explicit Docker device arguments contain unique UUIDs only. */
+export function validateGpuDevices(raw: unknown, count: number): string[] {
+  if (!Number.isSafeInteger(count) || count < 0 || count > 64 || !Array.isArray(raw) || raw.length !== count || raw.some(id => typeof id !== "string" || !GPU_UUID.test(id))) throw new Error("GPU devices: invalid frozen assignment; restore exactly the requested number of distinct GPU UUIDs before retrying the attempt");
+  const devices = (raw as string[]).map(id => "GPU-" + id.slice(4).toLowerCase());
+  if (new Set(devices).size !== devices.length) throw new Error("GPU devices: duplicate frozen assignment; restore distinct GPU UUIDs before retrying the attempt");
+  return devices;
+}
 export function validateExecutor(raw: unknown): Executor {
   if (!plain(raw)) throw new Error("executor: object required; pass kind and workdir to ares executor set");
-  const extra = Object.keys(raw).find(key => !["v", "kind", "host", "workdir"].includes(key));
-  if (extra !== undefined) throw new Error(`executor: unknown field ${extra}; use only v, kind, host and workdir`);
+  const extra = Object.keys(raw).find(key => !["v", "kind", "host", "workdir", "gpu"].includes(key));
+  if (extra !== undefined) throw new Error(`executor: unknown field ${extra}; use only v, kind, host, workdir and optional gpu`);
   if (raw.v !== 1 || (raw.kind !== "local" && raw.kind !== "ssh")) throw new Error("executor: invalid version or kind; set v to 1 and kind to local or ssh");
   if (raw.kind === "ssh" && (typeof raw.host !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(raw.host))) throw new Error("executor.host: invalid SSH alias; configure an SSH alias and pass its name only (letters, digits, dot, underscore or hyphen)");
   if (raw.kind === "local" && raw.host !== undefined) throw new Error("executor.host: local executor has no SSH host; remove host or set kind to ssh");
   if (raw.workdir === undefined || raw.workdir === null) throw new Error("executor.workdir: required with no default; run ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH using a private directory on the executor host");
-  return { v: 1, kind: raw.kind, ...(raw.kind === "ssh" ? { host: raw.host as string } : {}), workdir: directory(raw.workdir, "executor.workdir") };
+  return { v: 1, kind: raw.kind, ...(raw.kind === "ssh" ? { host: raw.host as string } : {}), workdir: directory(raw.workdir, "executor.workdir"), ...(raw.gpu === undefined ? {} : { gpu: validateExecutorGpu(raw.gpu) }) };
 }
 export function readExecutor(dir: string): Executor | undefined {
   const file = join(dir, "executor.json");
@@ -129,6 +154,67 @@ export class InputVerificationError extends Error {}
 export class InputConfigurationError extends InputVerificationError {
   constructor(message: string) { super(message); this.name = "InputConfigurationError"; }
 }
+export interface GpuDeferred { status: "deferred"; reason: "devices" | "load" | "probe"; message: string; exitCode: 75 }
+export type GpuAdmission = { status: "admitted"; devices: string[] } | GpuDeferred;
+export class GpuAdmissionDeferred extends Error {
+  constructor(readonly result: GpuDeferred) { super(result.message); this.name = "GpuAdmissionDeferred"; }
+}
+export const GPU_PROBE_TIMEOUT_MS = 10_000, GPU_PROBE_OUTPUT_BYTES = 65_536, GPU_INVENTORY_LIMIT = 256;
+export const GPU_ADMISSION_SCRIPT = `set -eu
+printf 'ARES_GPU_INVENTORY\n'
+nvidia-smi --query-gpu=index,uuid,memory.free --format=csv,noheader,nounits
+printf 'ARES_GPU_LOAD\n'
+cat /proc/loadavg
+printf 'ARES_GPU_CPUS\n'
+if command -v nproc >/dev/null 2>&1; then nproc; else getconf _NPROCESSORS_ONLN; fi
+printf 'ARES_GPU_END\n'
+`;
+function gpuDeferred(reason: GpuDeferred["reason"]): GpuDeferred {
+  const message = reason === "probe" ? "GPU admission deferred: probe unavailable or malformed; restore nvidia-smi, load and CPU telemetry before retrying" : reason === "load" ? "GPU admission deferred: load ratio exceeds the configured limit; retry after host pressure falls" : "GPU admission deferred: insufficient configured devices meet the free-memory requirement; free the configured devices or retry later";
+  return { status: "deferred", reason, message, exitCode: 75 };
+}
+interface GpuInventoryRow { index: string; uuid: string; memory: number }
+function gpuProbe(stdout: string): { inventory: GpuInventoryRow[]; loadRatio: number } {
+  const lines = stdout.split(/\r?\n/); if (lines.at(-1) === "") lines.pop();
+  const load = lines.indexOf("ARES_GPU_LOAD"), cpus = lines.indexOf("ARES_GPU_CPUS");
+  if (lines[0] !== "ARES_GPU_INVENTORY" || load < 1 || load - 1 > GPU_INVENTORY_LIMIT || cpus !== load + 2 || lines.length !== cpus + 3 || lines.at(-1) !== "ARES_GPU_END") throw new Error("probe shape");
+  const indexes = new Set<string>(), uuids = new Set<string>(), inventory: GpuInventoryRow[] = [];
+  for (const line of lines.slice(1, load)) {
+    const fields = line.split(",").map(field => field.trim());
+    if (fields.length !== 3 || !/^(?:0|[1-9][0-9]*)$/.test(fields[0]!) || !Number.isSafeInteger(Number(fields[0])) || !GPU_UUID.test(fields[1]!) || !/^[0-9]+(?:\.[0-9]+)?$/.test(fields[2]!) || !Number.isFinite(Number(fields[2]))) throw new Error("GPU inventory");
+    const index = fields[0]!, uuid = "GPU-" + fields[1]!.slice(4).toLowerCase();
+    if (indexes.has(index) || uuids.has(uuid)) throw new Error("duplicate GPU identity");
+    indexes.add(index); uuids.add(uuid); inventory.push({ index, uuid, memory: Number(fields[2]) });
+  }
+  const parts = lines[load + 1]!.split(/ +/), decimal = /^[0-9]+(?:\.[0-9]+)?$/;
+  if (parts.length !== 5 || parts.slice(0, 3).some(value => !decimal.test(value) || !Number.isFinite(Number(value))) || !/^[0-9]+\/[0-9]+$/.test(parts[3]!) || !/^[0-9]+$/.test(parts[4]!)) throw new Error("load telemetry");
+  const [active, total] = parts[3]!.split("/").map(Number);
+  if (![active, total, Number(parts[4])].every(Number.isSafeInteger) || total! < 1 || active! > total!) throw new Error("load identity");
+  const cpu = lines[cpus + 1]!;
+  if (!/^[1-9][0-9]*$/.test(cpu) || !Number.isSafeInteger(Number(cpu))) throw new Error("CPU telemetry");
+  return { inventory, loadRatio: Number(parts[0]) / Number(cpu) };
+}
+/** One read-only probe; admission never sleeps, retries or reserves a physical GPU. */
+export async function probeGpuAdmission(executorArg: Executor, count: number, runner: ProcessRunner = spawnRunner): Promise<GpuAdmission> {
+  const executor = validateExecutor(executorArg);
+  if (!Number.isSafeInteger(count) || count < 0 || count > 64) throw new Error("GPU admission count: integer 0..64 required; use the protocol GPU count before retrying");
+  if (!executor.gpu || count === 0) return { status: "admitted", devices: [] };
+  let parsed: ReturnType<typeof gpuProbe>;
+  try {
+    const result = await runOnExecutor(executor, "sh", ["-c", GPU_ADMISSION_SCRIPT], runner, { timeoutMs: GPU_PROBE_TIMEOUT_MS, maxOutputBytes: GPU_PROBE_OUTPUT_BYTES });
+    if (result.exitCode !== 0 || result.timedOut || result.truncated || Buffer.byteLength(result.stdout) > GPU_PROBE_OUTPUT_BYTES) return gpuDeferred("probe");
+    parsed = gpuProbe(result.stdout);
+  } catch { return gpuDeferred("probe"); }
+  if (parsed.loadRatio > executor.gpu.maxLoadRatio) return gpuDeferred("load");
+  const devices: string[] = [];
+  for (const selector of executor.gpu.devices) {
+    const gpu = parsed.inventory.find(gpu => gpu.index === String(selector) || gpu.uuid === selector);
+    if (!gpu || gpu.memory < executor.gpu.minFreeMemoryMb || devices.includes(gpu.uuid)) continue;
+    devices.push(gpu.uuid); if (devices.length === count) return { status: "admitted", devices };
+  }
+  return gpuDeferred("devices");
+}
+
 export interface InputManifest { sha256: string; files: number; bytes: number }
 export const INPUT_MANIFEST_FILES = 100_000, INPUT_MANIFEST_TIMEOUT_MS = 300_000, INPUT_MANIFEST_OUTPUT_BYTES = 4096;
 // ponytail: ceiling 100,000 files/directories, depth 64 and 5 minutes; bytes stream in 1 MiB chunks, never into the study.
@@ -265,7 +351,7 @@ export function executionPathsOverlap(left: string, right: string): boolean {
 }
 export type Stage = "candidate" | "evaluator";
 export interface ContainerPaths { snapshot: string; output: string; evaluator: string; result: string }
-export interface ContainerOptions { protocol: Protocol; stage: Stage; studyId: string; attemptId: string; user: string; paths: ContainerPaths; seed?: number }
+export interface ContainerOptions { protocol: Protocol; stage: Stage; studyId: string; attemptId: string; user: string; paths: ContainerPaths; seed?: number; gpuDevices?: string[] }
 export function containerName(attemptId: string, stage: Stage): string {
   if (!/^[a-f0-9]{16}$/.test(attemptId) || !["candidate", "evaluator"].includes(stage)) throw new Error("container identity: invalid attempt or stage; use a 16-hex attempt id and candidate or evaluator stage");
   return `ares-${attemptId}-${stage}`;
@@ -300,7 +386,10 @@ export function buildContainerArgs(options: ContainerOptions): string[] {
   const argv = ["run", "--detach", "--pull", "missing", "--name", name, "--label", `ares.study=${options.studyId}`, "--label", `ares.attempt=${options.attemptId}`, "--label", `ares.stage=${options.stage}`,
     "--network", "none", "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", options.user,
     "--cpus", String(p.limits.cpus), "--memory", `${p.limits.memoryMb}m`, "--pids-limit", String(p.limits.pidsLimit), "--env", `ARES_SEED=${seed}`];
-  if (p.limits.gpus > 0) argv.push("--gpus", String(p.limits.gpus));
+  if (options.gpuDevices !== undefined) {
+    const devices = validateGpuDevices(options.gpuDevices, p.limits.gpus);
+    if (devices.length) argv.push("--gpus", `"device=${devices.join(",")}"`);
+  } else if (p.limits.gpus > 0) argv.push("--gpus", String(p.limits.gpus));
   const mount = (source: string, target: string, readonly: boolean) => argv.push("--mount", `type=bind,src=${source},dst=${target}${readonly ? ",readonly" : ""}`);
   if (options.stage === "candidate") {
     mount(paths.snapshot, "/workspace", true); mount(paths.output, "/out", false);

@@ -20,7 +20,7 @@ import { setSelection } from "./exp/selection.ts";
 import { createHubClient } from "./plan/hub.ts";
 import { runPlan, type ControllerRuntime, type Observation, type StepNode } from "./plan/controller.ts";
 import { resolveSnapshot } from "./exp/snapshot.ts";
-import { spawnRunner } from "./exp/executor.ts";
+import { GpuAdmissionDeferred, spawnRunner } from "./exp/executor.ts";
 import { foldPlan, readPlanState, planGateBinding, prepareControl, type ControlRequest, type ControlResult } from "./plan/state.ts";
 import { setPlan } from "./plan/definition.ts";
 export { manifest } from "./manifest.ts";
@@ -106,7 +106,10 @@ export async function executorInputsHash(dirArg: string, path: string, ctx: Ctx)
   return hashExecutorInput(executor, path, ctx.runner);
 }
 export const executorCheck = (dir: string, ctx: Ctx) => checkExecutor(dir, ctx.runner);
-export const attemptRun = (dir: string, options: AttemptOptions, ctx: Ctx) => runAttempt(dir, options, ctx);
+export async function attemptRun(dir: string, options: AttemptOptions, ctx: Ctx) {
+  try { return await runAttempt(dir, options, ctx); }
+  catch (error) { if (error instanceof GpuAdmissionDeferred) return error.result; throw error; }
+}
 export const attemptList = (dir: string, options: AttemptListOptions = {}) => listAttemptSummaries(dir, options);
 export const attemptShow = (dir: string, id: string) => showAttempt(dir, id);
 export const attemptCancel = (dir: string, id: string, reason: string | undefined, ctx: Ctx) => cancelAttempt(dir, id, reason, ctx);
@@ -360,7 +363,13 @@ export async function planRun(dirArg: string, options: { parallel?: number }, ct
       return { attemptId: attemptId(protocolHash(design.protocol), snapshot.commit, snapshot.treeId, options.seed ?? design.protocol.seeds[0]!, options.run ?? "main", options.retry) };
     },
     execute: async (node, state) => {
-      if (node.command === "attempt.run") return observed(await runAttempt(dir, { ...attemptOptions(node, state.retryOf), expectedId: state.attemptId! }, ctx));
+      if (node.command === "attempt.run") {
+        try { return observed(await runAttempt(dir, { ...attemptOptions(node, state.retryOf), expectedId: state.attemptId! }, ctx)); }
+        catch (error) {
+          if (error instanceof GpuAdmissionDeferred) return { status: "failed", reason: `deferred:${error.result.reason}; ${error.result.message}; run ares plan control <dir> retry ${node.id} --command-id ID --expected-revision N` };
+          throw error;
+        }
+      }
       let result: unknown, ok = true;
       switch (node.command) {
         case "watch.run": {
