@@ -60,6 +60,7 @@ const binding = harnessRoundBinding;
 const path = (dir: string) => join(dir, "design", "harness.json");
 function replay(events: LedgerEvent[], studyId: string) {
   const rounds = new Map<string, HarnessRound>(), tasks = new Map<string, string>(), probes: DeclaredProbe[] = [];
+  const projectionIds = new Set<string>(), roundArms = new Set<string>();
   for (const event of events) {
     if (!event.type.startsWith("harness.")) continue;
     if (event.data.v !== 1) fail("unsupported harness event version; keep original bytes and use a supporting version");
@@ -71,7 +72,9 @@ function replay(events: LedgerEvent[], studyId: string) {
     } else if (event.type === "harness.probe.declared") {
       const round = rounds.get(String(event.data.round)), projection = parseProbeFixture(event.data.projection);
       if (!round || !matchesRound(round, projection) || event.data.binding !== binding(round) || event.data.projectionSha256 !== sha256(canonical(projection)) || event.data.sourceStrength !== "synthetic-fixture") fail("declared probe receipt mismatch");
-      if (probes.some(probe => probe.round === round.id && (probe.projection.id === projection.id || probe.binding === binding(round) && probe.projection.arm === projection.arm))) fail("duplicate declared probe journal event");
+      const projectionKey = canonical([round.id, projection.id]), armKey = canonical([round.id, binding(round), projection.arm]);
+      if (projectionIds.has(projectionKey) || roundArms.has(armKey)) fail("duplicate declared probe journal event");
+      projectionIds.add(projectionKey); roundArms.add(armKey);
       probes.push({round: round.id, binding: binding(round), projectionSha256: event.data.projectionSha256 as string, sourceStrength: "synthetic-fixture", projection});
     } else fail("unsupported harness form; keep its history and use a version supporting it");
   }

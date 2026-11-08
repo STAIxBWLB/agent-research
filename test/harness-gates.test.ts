@@ -80,3 +80,13 @@ test("survey and malformed namespace ids refuse before binders or writes", () =>
   }
   expect(calls).toBe(0); expect(f.bytes()).toEqual(original);
 });
+
+
+test("unknown well-formed harness gates name the show/set and gate-list recovery steps", () => {
+  const f = fixture(), before = f.bytes();
+  for (const decision of ["approve", "reject"] as const) {
+    expect(() => decideGate(f.dir, gate, decision, person, f.binder, "Synthetic rejection")).toThrow("run ares harness show / ares harness set");
+    expect(() => decideGate(f.dir, gate, decision, person, f.binder, "Synthetic rejection")).toThrow("then run ares gate list");
+  }
+  expect(f.bytes()).toEqual(before);
+});

@@ -1,3 +1,4 @@
+import {canonical} from "../src/plan/state.ts";
 import {expect, spyOn, test} from "bun:test";
 import {join} from "node:path";
 import * as fs from "node:fs";
@@ -6,11 +7,11 @@ import * as ops from "../src/commands.ts";
 import {run} from "../src/cli.ts";
 import {createAresMcp} from "../src/mcp-tools.ts";
 import {readHarnessProbeSource} from "../src/plan/hub.ts";
-import {validateHarnessRound, HARNESS_INDEX_BYTES} from "../src/harness/rounds.ts";
+import {validateHarnessRound, readHarnessRounds, HARNESS_INDEX_BYTES} from "../src/harness/rounds.ts";
 import {parseProbeFixture} from "../src/harness/receipts.ts";
 import {designBinding, protocolHash, readProtocol} from "../src/exp/protocol.ts";
 import {budgetUsage} from "../src/exp/attempts.ts";
-import {readTextBounded, readBytesBounded, readLedger, writeAtomic} from "../src/study.ts";
+import {readTextBounded, readBytesBounded, readLedger, writeAtomic, sha256} from "../src/study.ts";
 import {metricProtocol} from "./metric-fixtures.ts";
 import {fakeHttp, fakeRunner, tempDir} from "./helpers.ts";
 
@@ -155,4 +156,38 @@ test("sixteen harness gates share one ledger fold per gate list or binder snapsh
   const old = ops.gateList(f.dir).find(gate => gate.gate === "harness:round-0")!.current;
   await ops.harnessSet(f.dir, {...raw, id: "round-0", task: {...raw.task, id: "task-0"}, hypothesis: {...raw.hypothesis, predictedChange: "Synthetic fresh binding"}}, f.ctx);
   expect(ops.gateList(f.dir).find(gate => gate.gate === "harness:round-0")!.current).not.toBe(old);
+});
+
+
+test("canonical URL and key markers refuse round and fixture persistence before any write", async () => {
+  const f = fixture("experiment", "auto"), raw = definition();
+  const markers = ["ghp_" + "a".repeat(16), "xoxb-" + "a".repeat(12), "xoxp-" + "b".repeat(12), "AKIA" + "A".repeat(16), "eyJ" + "a".repeat(20), "pk-" + "a".repeat(16), "rk-" + "a".repeat(16), "https://example.invalid/request", "mailto:synthetic@example.invalid", "Aa0".repeat(12)];
+  const ledger = () => readBytesBounded(join(f.dir, "ledger.jsonl"), HARNESS_INDEX_BYTES), before = ledger();
+  for (const marker of markers) {
+    await expect(ops.harnessSet(f.dir, {...raw, hypothesis: {...raw.hypothesis, deficiency: marker}}, f.ctx)).rejects.toThrow("credentials");
+    expect(existsSync(join(f.dir, "design", "harness.json"))).toBe(false); expect(ledger()).toEqual(before);
+  }
+  await ops.harnessSet(f.dir, raw, f.ctx); const saved = bytes(f.dir);
+  for (const marker of markers) {
+    await expect(ops.harnessImport(f.dir, raw.id, {...source("baseline"), requestedModel: marker}, f.ctx)).rejects.toThrow();
+    expect(bytes(f.dir)).toEqual(saved);
+  }
+  expect(() => validateHarnessRound({...raw, hypothesis: {...raw.hypothesis, deficiency: "setting=value is ordinary prose"}}, "synthetic-study")).not.toThrow();
+});
+
+test("historical probe ids and per-binding arms remain unique across definition edits", async () => {
+  const f = fixture("experiment", "auto"), raw = definition();
+  for (let index = 0; index < 24; index++) {
+    await ops.harnessSet(f.dir, {...raw, hypothesis: {...raw.hypothesis, predictedChange: `Synthetic revision ${index}`}}, f.ctx);
+    await ops.harnessImport(f.dir, raw.id, {...source("baseline"), id: `probe-${index}`}, f.ctx);
+  }
+  const events = readLedger(f.dir), last = events.at(-1)!;
+  expect(readHarnessRounds(f.dir)).toHaveLength(1);
+  for (const projection of [last.data.projection, {...last.data.projection as object, id: "different-id"}]) {
+    const data = {...last.data, projection, projectionSha256: sha256(canonical(projection))};
+    expect(() => readHarnessRounds(f.dir, [...events, {...last, data}])).toThrow("duplicate declared probe");
+  }
+  const oldest = events.find(event => event.type === "harness.probe.declared")!.data.projection as {id: string};
+  const projection = {...last.data.projection as object, id: oldest.id};
+  expect(() => readHarnessRounds(f.dir, [...events, {...last, data: {...last.data, projection, projectionSha256: sha256(canonical(projection))}}])).toThrow("duplicate declared probe");
 });
