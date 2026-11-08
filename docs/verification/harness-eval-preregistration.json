@@ -1,0 +1,494 @@
+{
+  "v": 1,
+  "id": "harness-guidance-preregistration-2026-11-08",
+  "status": "proposed-not-measured",
+  "scope": {
+    "task": "#68 T1 and T2 fixture-only",
+    "authorized": [
+      "preregistration",
+      "deterministic prerecorded data-control replay",
+      "fault-guard tests"
+    ],
+    "liveComparisons": "unavailable",
+    "modelsInvoked": false,
+    "notMeasurements": [
+      "fixture quality is not model benefit",
+      "stageCalls are future call opportunities, not observed provider usage"
+    ],
+    "requiresSeparateAuthorization": [
+      "T3 matched-budget live calls",
+      "independent live judging",
+      "T4 opt-in adoption",
+      "native or account execution"
+    ],
+    "requiredLiveLane": "G2 confined role-specific local worker for every proposer, worker, composer, selector and reflector",
+    "producerDependencies": [
+      "agent-research#66",
+      "agent-research#67",
+      "agent-hub#1225",
+      "agent-hub#1226"
+    ]
+  },
+  "authority": {
+    "result": "existing ares selection, number provenance and fresh final only",
+    "fixtureReplay": "data-only control replay; not a container Attempt, native probe, model run or adoption decision",
+    "priorSeals": "Existing #63 protocol, corpus, seals and baseline receipts stay unchanged.",
+    "noWrites": [
+      "agent-hub board",
+      "amem store",
+      "vault",
+      "production policy"
+    ],
+    "roleDtoAllowlist": {
+      "proposer": [
+        "v",
+        "role",
+        "taskId",
+        "prompt",
+        "data",
+        "library",
+        "librarySha256",
+        "guidance",
+        "outputs"
+      ],
+      "worker": [
+        "v",
+        "role",
+        "taskId",
+        "prompt",
+        "data",
+        "library",
+        "librarySha256",
+        "guidance"
+      ],
+      "composer": [
+        "v",
+        "role",
+        "taskId",
+        "prompt",
+        "data",
+        "library",
+        "librarySha256",
+        "proposal",
+        "outputs"
+      ],
+      "selector": [
+        "v",
+        "role",
+        "taskId",
+        "prompt",
+        "data",
+        "library",
+        "librarySha256",
+        "candidates"
+      ],
+      "reflector": [
+        "v",
+        "role",
+        "taskId",
+        "prompt",
+        "data",
+        "library",
+        "librarySha256",
+        "guidance",
+        "selectedOutput"
+      ]
+    },
+    "roleRestrictions": [
+      "Each role receives exactly its allowlisted DTO fields. Common v is 1; role is the named role, not a method/condition label.",
+      "library is an array of {sourceTaskId,text,sha256}; its bytes/hash remain identical for every role in a round. Conditions without library pin the empty array.",
+      "outputs/candidates contain only opaque {id,output} pairs. Selector has candidates, never guidance, method/origin labels, selectedSlot, expected, rubric or judgment.",
+      "Only current public taskId/prompt/data and outputs plus allowed prior completed learning-source DTO entries may be copied. No raw control file, paths or future-task info enters any role.",
+      "The outer data-only adapter replays prerecorded selectedSlot 0/1; frozen-base and retrieval-only have one candidate and no selector, hence slot 0.",
+      "Synthetic role inputs may be committed as boundary evidence; same-user private files and DTO validation do not establish OS isolation, live confinement or provider confidentiality."
+    ]
+  },
+  "corpus": {
+    "index": "test/fixtures/harness/index.json",
+    "learningSourceIds": [
+      "table-amber",
+      "table-active",
+      "table-balance",
+      "table-priority",
+      "text-token",
+      "text-tags",
+      "text-marker",
+      "text-mapping"
+    ],
+    "heldoutIds": [
+      "transfer-weighted",
+      "transfer-route",
+      "transfer-grid",
+      "transfer-cycle"
+    ],
+    "partitionBeforeLibrary": true,
+    "transferFamily": "transfer"
+  },
+  "orders": [
+    {
+      "id": "learning-first-a",
+      "repetition": 1,
+      "taskIds": [
+        "table-amber",
+        "table-active",
+        "table-balance",
+        "table-priority",
+        "text-token",
+        "text-tags",
+        "text-marker",
+        "text-mapping",
+        "transfer-weighted",
+        "transfer-route",
+        "transfer-grid",
+        "transfer-cycle"
+      ]
+    },
+    {
+      "id": "learning-first-b",
+      "repetition": 2,
+      "taskIds": [
+        "text-token",
+        "text-tags",
+        "text-marker",
+        "text-mapping",
+        "table-amber",
+        "table-active",
+        "table-balance",
+        "table-priority",
+        "transfer-grid",
+        "transfer-cycle",
+        "transfer-weighted",
+        "transfer-route"
+      ]
+    },
+    {
+      "id": "learning-first-c",
+      "repetition": 3,
+      "taskIds": [
+        "text-mapping",
+        "text-marker",
+        "text-tags",
+        "text-token",
+        "table-priority",
+        "table-balance",
+        "table-active",
+        "table-amber",
+        "transfer-cycle",
+        "transfer-grid",
+        "transfer-route",
+        "transfer-weighted"
+      ]
+    }
+  ],
+  "conditions": [
+    {
+      "id": "frozen-base",
+      "stageCalls": {
+        "reference": 1,
+        "proposal": 0,
+        "probe": 0,
+        "composition": 0,
+        "successor": 0,
+        "selection": 0,
+        "reflection": 0,
+        "retrieval": 0
+      }
+    },
+    {
+      "id": "repeated-base",
+      "stageCalls": {
+        "reference": 7,
+        "proposal": 0,
+        "probe": 0,
+        "composition": 0,
+        "successor": 0,
+        "selection": 1,
+        "reflection": 0,
+        "retrieval": 0
+      }
+    },
+    {
+      "id": "retrieval-only",
+      "stageCalls": {
+        "reference": 1,
+        "proposal": 0,
+        "probe": 0,
+        "composition": 0,
+        "successor": 0,
+        "selection": 0,
+        "reflection": 0,
+        "retrieval": 0
+      }
+    },
+    {
+      "id": "contrastive-no-library",
+      "stageCalls": {
+        "reference": 1,
+        "proposal": 1,
+        "probe": 1,
+        "composition": 1,
+        "successor": 1,
+        "selection": 1,
+        "reflection": 1,
+        "retrieval": 0
+      }
+    },
+    {
+      "id": "contrastive-prior",
+      "stageCalls": {
+        "reference": 1,
+        "proposal": 1,
+        "probe": 1,
+        "composition": 1,
+        "successor": 1,
+        "selection": 1,
+        "reflection": 1,
+        "retrieval": 0
+      }
+    }
+  ],
+  "budgets": {
+    "calls": 8,
+    "providerTokens": 8000,
+    "wallMs": 60000,
+    "appliesTo": "one aggregate future live per-task ceiling shared by all roles/stages in each condition",
+    "unusedCallAllowanceByCondition": {
+      "frozen-base": 7,
+      "repeated-base": 0,
+      "retrieval-only": 7,
+      "contrastive-no-library": 1,
+      "contrastive-prior": 1
+    },
+    "unusedPolicy": "Report actual unused allowance. Never force calls, tokens or waiting to consume a budget.",
+    "selectionControl": "For frozen-base/retrieval-only, one output and no selector; use slot 0. For repeated-base and both contrastive arms, replay the registered selectedSlot (0 or 1).",
+    "executorModel": "unavailable until separately authorized and pinned; equal across conditions",
+    "editorModel": "unavailable until separately authorized and pinned; equal across editing conditions; disclose any advantage over executor",
+    "toolsetAndEnvironment": "identical authorized data/tools/environment across live conditions; no public benchmark download or search",
+    "parallelAttemptsPerStudy": 1,
+    "cpuWorkers": 2,
+    "gpuDevices": 0,
+    "maxTasksPerStudyStream": 16,
+    "fixtureFileBytes": 16384,
+    "protocolFileBytes": 65536,
+    "corpusBytes": 1048576,
+    "perConditionOrderStudy": "separate study for each of five conditions and three orders",
+    "actualProviderUsage": "unknown; no models invoked by the preregistration or data-only fixture replay",
+    "controlReceiptBytes": 8388608
+  },
+  "metrics": {
+    "validOutputRate": "valid outputs / full planned condition-task-order presentations, with executed and unavailable counts separate",
+    "correctness": "private exact-string executable fixture checks; live judging independently blind after every compared output freezes",
+    "humanRubric": "not measured; any subjective open-world tasks require a separate declared rubric and separate reporting",
+    "regressions": "independently checked quality loss versus preregistered comparator; do not judge with the editor or role payload",
+    "selectedVersusBestGap": "offline evaluator-only gap across frozen output slots; best slot never enters role DTOs or the prerecord selector",
+    "falseImprovementClaims": "claims contradicted by independent checks or unsupported by unknown outcome/cost data",
+    "personReviewEffort": "person minutes/decisions separately; fixture labels do not measure them",
+    "uncertainty": "per-task paired distributions and all three declared orders; fixed small synthetic corpus is not statistical significance; task-order setting and model sampling seed are separate"
+  },
+  "denominators": [
+    "planned",
+    "executed",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "denied",
+    "judge-unavailable",
+    "unknown",
+    "excluded",
+    "unavailable"
+  ],
+  "thresholds": {
+    "status": "proposed-not-measured",
+    "faultSuite": {
+      "maxAuthorityViolations": 0,
+      "maxPrivacyViolations": 0,
+      "maxEvaluatorAccessViolations": 0
+    },
+    "guidance": {
+      "maxRegressionIncrease": 0,
+      "minValidOutcomeGainPercentagePoints": 5,
+      "minCostPerAcceptedOutcomeReductionPct": 20,
+      "qualityMustNotDecrease": true,
+      "comparator": "repeated-base",
+      "rule": "no regression increase AND (valid outcome gain OR cost reduction at no lower quality)"
+    },
+    "experience": {
+      "heldoutQualityMustNotDecrease": true,
+      "minCostPerAcceptedOutcomeReductionPct": 10,
+      "comparator": "contrastive-no-library"
+    },
+    "missingEvidence": "insufficient-evidence"
+  },
+  "costs": {
+    "stages": [
+      "reference",
+      "proposal",
+      "probe",
+      "composition",
+      "successor",
+      "selection",
+      "reflection",
+      "retrieval"
+    ],
+    "fields": {
+      "cpuSeconds": {
+        "category": "compute",
+        "unit": "process CPU seconds",
+        "accounting": "total",
+        "unknown": "unknown"
+      },
+      "gpuDeviceSeconds": {
+        "category": "compute",
+        "unit": "device-active seconds",
+        "accounting": "separate-clock",
+        "unknown": "unknown"
+      },
+      "providerTokens": {
+        "category": "provider",
+        "unit": "tokens",
+        "accounting": "separate-unit",
+        "unknown": "unknown"
+      },
+      "providerRequests": {
+        "category": "provider",
+        "unit": "requests",
+        "accounting": "separate-unit",
+        "unknown": "unknown"
+      },
+      "wallElapsedMs": {
+        "category": "wall",
+        "unit": "monotonic elapsed milliseconds",
+        "accounting": "total",
+        "unknown": "unknown"
+      },
+      "storagePeakBytes": {
+        "category": "storage",
+        "unit": "bytes",
+        "accounting": "peak",
+        "unknown": "unknown"
+      },
+      "storageByteSeconds": {
+        "category": "storage",
+        "unit": "byte-seconds",
+        "accounting": "integral",
+        "unknown": "unknown"
+      },
+      "transferBytes": {
+        "category": "transfer",
+        "unit": "bytes",
+        "accounting": "total",
+        "unknown": "unknown"
+      },
+      "verificationCpuSeconds": {
+        "category": "verification",
+        "unit": "process CPU seconds",
+        "accounting": "subset-of-cpuSeconds",
+        "unknown": "unknown"
+      },
+      "verificationWallMs": {
+        "category": "verification",
+        "unit": "monotonic elapsed milliseconds",
+        "accounting": "subset-of-wallElapsedMs",
+        "unknown": "unknown"
+      },
+      "retentionBytes": {
+        "category": "retention",
+        "unit": "bytes",
+        "accounting": "separate-snapshot",
+        "unknown": "unknown"
+      },
+      "retentionByteSeconds": {
+        "category": "retention",
+        "unit": "byte-seconds",
+        "accounting": "subset-of-storageByteSeconds",
+        "unknown": "unknown"
+      },
+      "materializationCpuSeconds": {
+        "category": "materialization",
+        "unit": "process CPU seconds",
+        "accounting": "subset-of-cpuSeconds",
+        "unknown": "unknown"
+      },
+      "materializationWallMs": {
+        "category": "materialization",
+        "unit": "monotonic elapsed milliseconds",
+        "accounting": "subset-of-wallElapsedMs",
+        "unknown": "unknown"
+      },
+      "materializationTransferBytes": {
+        "category": "materialization",
+        "unit": "bytes",
+        "accounting": "subset-of-transferBytes",
+        "unknown": "unknown"
+      },
+      "failureCpuSeconds": {
+        "category": "failure-overhead",
+        "unit": "process CPU seconds",
+        "accounting": "subset-of-cpuSeconds",
+        "unknown": "unknown"
+      },
+      "failureGpuDeviceSeconds": {
+        "category": "failure-overhead",
+        "unit": "device-active seconds",
+        "accounting": "subset-of-gpuDeviceSeconds",
+        "unknown": "unknown"
+      },
+      "failureWallMs": {
+        "category": "failure-overhead",
+        "unit": "monotonic elapsed milliseconds",
+        "accounting": "subset-of-wallElapsedMs",
+        "unknown": "unknown"
+      },
+      "failureTransferBytes": {
+        "category": "failure-overhead",
+        "unit": "bytes",
+        "accounting": "subset-of-transferBytes",
+        "unknown": "unknown"
+      },
+      "idleWallMs": {
+        "category": "idle",
+        "unit": "monotonic elapsed milliseconds",
+        "accounting": "separate",
+        "unknown": "unknown"
+      },
+      "personMinutes": {
+        "category": "person",
+        "unit": "person minutes",
+        "accounting": "separate",
+        "unknown": "unknown"
+      },
+      "monetaryEstimateUsd": {
+        "category": "estimate",
+        "unit": "USD estimate",
+        "accounting": "separate-not-measured-cost",
+        "unknown": "unknown"
+      }
+    },
+    "accounting": "Record every dimension per stage and end-to-end; subset timings annotate totals and are never added twice. No scalar sum across CPU/device/wall/person clocks, bytes, tokens or estimates.",
+    "unknown": "unknown is a literal unavailable measurement, never zero or an inferred model/provider estimate",
+    "fixtureScope": "No fixture replay quality, call-opportunity count or prerecorded output is a live benefit/cost measurement."
+  },
+  "reporting": {
+    "plannedTaskConditionOrderRecords": 180,
+    "perConditionRecords": 36,
+    "learningRecords": 120,
+    "heldoutRecords": 60,
+    "faultFixtures": "separate structural/fault denominator; never add faults to task quality denominators",
+    "strictTransfer": "Only registered learning-source tasks feed library entries. Freeze that completed authorized set for the entire held-out segment. All held-out reflections stay quarantined until every held-out output and judgment freezes, across all comparison arms.",
+    "learningStream": "During learning, only completed preceding learningSourceIds in the registered order can supply prior entries; exclude the current and future tasks. Record an ordered source/hash stream.",
+    "roundFreeze": "Pin one library content/membership/policy hash per target round; proposal, probe, composition, successor and reflection use the same prior snapshot.",
+    "policyRevocation": "Invalidate the affected condition; never silently replace, remove, substitute or refresh library entries to rescue it.",
+    "fixtureReport": "structural/fault pass or refusal only; all live conditions, metric improvements and cost-benefit conclusions unavailable/unknown",
+    "liveReport": "publish full negative/unknown denominators, exact code/method/corpus/order/library/policy hashes, every cost stage, limits and source/fixture vs hosted CI vs native/live evidence",
+    "adoption": "No T1/T2 adopt verdict or rollout. T4 may separately consider guidance and library experience only after authorized matched-budget live evidence."
+  },
+  "stopConditions": [
+    "Any authority/privacy/evaluator-access violation stops the affected condition and forbids benefit claims.",
+    "Changed code/method/corpus/order/policy/library bytes on resume refuse; retain the prior receipt rather than silently replacing it.",
+    "Denied or revoked policy/source invalidates the affected condition; record denied/unavailable and do not substitute data.",
+    "Unavailable G2 role lane, required producer or separate authorization marks the entire live comparison unavailable.",
+    "Judge-unavailable, unknown telemetry or sparse outcomes mean insufficient evidence; never convert them to success or zero cost.",
+    "Aggregate call/token/wall ceiling exhaustion stops the task; retain partial costs and failed/cancelled/unknown denominators.",
+    "No extra reruns after looking at outcomes; changing the declared stream requires a separately reviewed preregistration."
+  ]
+}

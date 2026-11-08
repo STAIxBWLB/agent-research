@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "taskId": "table-amber",
+  "family": "tabular",
+  "prompt": "Sum value for rows whose group is amber. Reply with only the integer.",
+  "data": {
+    "rows": [
+      {
+        "group": "amber",
+        "value": 4
+      },
+      {
+        "group": "blue",
+        "value": 9
+      },
+      {
+        "group": "amber",
+        "value": 3
+      }
+    ]
+  }
+}

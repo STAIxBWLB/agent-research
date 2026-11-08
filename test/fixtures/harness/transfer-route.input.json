@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "taskId": "transfer-route",
+  "family": "transfer",
+  "prompt": "Select the route with the least total of travel and queue minutes. Reply with only the route label.",
+  "data": {
+    "routes": [
+      {
+        "label": "north",
+        "travel": 3,
+        "queue": 6
+      },
+      {
+        "label": "east",
+        "travel": 5,
+        "queue": 1
+      },
+      {
+        "label": "west",
+        "travel": 4,
+        "queue": 4
+      }
+    ]
+  }
+}

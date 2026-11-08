@@ -1,0 +1,176 @@
+{
+  "v": 1,
+  "cases": [
+    {
+      "id": "evaluator-key-proposer",
+      "kind": "evaluator-leak",
+      "role": "proposer",
+      "payload": {
+        "taskId": "synthetic-current",
+        "prompt": "Synthetic current task",
+        "data": {},
+        "evaluatorKey": "synthetic-only-forbidden"
+      }
+    },
+    {
+      "id": "rubric-worker",
+      "kind": "rubric-leak",
+      "role": "worker",
+      "payload": {
+        "taskId": "synthetic-current",
+        "prompt": "Synthetic current task",
+        "data": {},
+        "rubric": {
+          "private": "must not enter a role DTO"
+        }
+      }
+    },
+    {
+      "id": "answer-composer",
+      "kind": "expected-leak",
+      "role": "composer",
+      "payload": {
+        "taskId": "synthetic-current",
+        "prompt": "Synthetic current task",
+        "data": {},
+        "expected": {
+          "answer": "private evaluator fixture"
+        }
+      }
+    },
+    {
+      "id": "future-selector",
+      "kind": "future-task-leak",
+      "role": "selector",
+      "payload": {
+        "taskId": "synthetic-current",
+        "outputs": [
+          "synthetic output"
+        ],
+        "futureTasks": [
+          {
+            "taskId": "synthetic-future-not-current",
+            "prompt": "unavailable future prompt"
+          }
+        ]
+      }
+    },
+    {
+      "id": "control-reflector",
+      "kind": "control-path-leak",
+      "role": "reflector",
+      "payload": {
+        "taskId": "synthetic-current",
+        "frozenOutput": "synthetic output",
+        "controlPath": "private-fixture/control.json",
+        "control": {
+          "selection": {
+            "selectedSlot": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "slot-selector",
+      "kind": "selection-oracle-leak",
+      "role": "selector",
+      "payload": {
+        "taskId": "synthetic-current",
+        "outputs": [
+          "synthetic first",
+          "synthetic second"
+        ],
+        "selectedSlot": 1
+      }
+    },
+    {
+      "id": "library-future",
+      "kind": "future-library-source",
+      "role": "proposer",
+      "payload": {
+        "taskId": "synthetic-current",
+        "priorLibrary": [
+          {
+            "sourceTaskId": "synthetic-not-completed",
+            "guidance": "unavailable unfinished-source guidance"
+          }
+        ]
+      }
+    },
+    {
+      "id": "heldout-feedback",
+      "kind": "heldout-library-feedback",
+      "role": "reflector",
+      "payload": {
+        "taskId": "synthetic-current",
+        "exportTarget": "active-library",
+        "reflectionSplit": "heldout",
+        "text": "Must remain quarantined until all held-out outputs and judgments freeze."
+      }
+    },
+    {
+      "id": "resume-drift",
+      "kind": "changed-resume",
+      "role": "worker",
+      "payload": {
+        "registeredInputSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "resumedInputSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "output": "synthetic unchanged output"
+      }
+    },
+    {
+      "id": "policy-denial",
+      "kind": "denied",
+      "role": "worker",
+      "payload": {
+        "policy": {
+          "status": "denied"
+        },
+        "conditionId": "contrastive-prior",
+        "request": "synthetic role request"
+      }
+    },
+    {
+      "id": "policy-revoked",
+      "kind": "policy-revocation",
+      "role": "proposer",
+      "payload": {
+        "policy": {
+          "status": "revoked",
+          "sourceTaskId": "synthetic-previous-learning"
+        },
+        "conditionId": "contrastive-prior"
+      }
+    },
+    {
+      "id": "judge-missing",
+      "kind": "judge-unavailable",
+      "role": "selector",
+      "payload": {
+        "outputFrozen": true,
+        "judgeStatus": "unavailable",
+        "judgment": null
+      }
+    },
+    {
+      "id": "usage-missing",
+      "kind": "unknown",
+      "role": "worker",
+      "payload": {
+        "outputFrozen": true,
+        "providerTokens": "unknown",
+        "wallElapsedMs": "unknown",
+        "judgeStatus": "unknown"
+      }
+    },
+    {
+      "id": "round-drift",
+      "kind": "within-round-library-change",
+      "role": "composer",
+      "payload": {
+        "referenceLibrarySha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "compositionLibrarySha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    }
+  ]
+}

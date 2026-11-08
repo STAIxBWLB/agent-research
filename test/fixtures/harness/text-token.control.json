@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "taskId": "text-token",
+  "baseOutputs": [
+    "2",
+    "3",
+    "1",
+    "5",
+    "2",
+    "two",
+    "2"
+  ],
+  "editor": {
+    "proposal": "Check each constraint against the current public input before returning only the requested output.",
+    "probeOutput": "3",
+    "composedGuidance": "Use only the current public task data. Respect filtering, order, tie-breaking and exact output formatting. Do not infer missing facts.",
+    "successorOutput": "2"
+  },
+  "selection": {
+    "selectedSlot": 0
+  },
+  "reflection": {
+    "text": "Keep task constraints and output formatting explicit. A plausible alternative is not evidence of correctness; retain uncertainty without reading evaluator material."
+  }
+}

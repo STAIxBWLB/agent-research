@@ -1,0 +1,9 @@
+{
+  "v": 1,
+  "taskId": "text-mapping",
+  "family": "text",
+  "prompt": "Read the exact key beta from the newline-separated mapping. Reply with only its value.",
+  "data": {
+    "mapping": "alpha=reed\nbeta=willow\ngamma=oak"
+  }
+}

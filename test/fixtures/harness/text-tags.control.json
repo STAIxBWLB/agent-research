@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "taskId": "text-tags",
+  "baseOutputs": [
+    "Coral,amber,Blue",
+    "amber,blue,coral",
+    "amber,blue",
+    "amber, blue, coral",
+    "amber,coral,blue",
+    "AMBER,BLUE,CORAL",
+    "amber,blue,coral"
+  ],
+  "editor": {
+    "proposal": "Check each constraint against the current public input before returning only the requested output.",
+    "probeOutput": "amber,blue,coral",
+    "composedGuidance": "Use only the current public task data. Respect filtering, order, tie-breaking and exact output formatting. Do not infer missing facts.",
+    "successorOutput": "amber,blue,coral"
+  },
+  "selection": {
+    "selectedSlot": 1
+  },
+  "reflection": {
+    "text": "Keep task constraints and output formatting explicit. A plausible alternative is not evidence of correctness; retain uncertainty without reading evaluator material."
+  }
+}
