@@ -17,7 +17,7 @@ import { investigateResultPath } from "../exp/investigate.ts";
 import { readClosedFinal, finalResultPath } from "../exp/final.ts";
 import { readCurrentBuild, paperBuildPaths } from "../paper/build.ts";
 import { loadCandidates } from "../lit/candidates.ts";
-import { openStudy, readLedger, readBytesBounded, readTextBounded, sha256, boundedText, plain, type LedgerEvent } from "../study.ts";
+import { openStudy, readLedger, readBytesBounded, readTextBounded, sha256, boundedText, plain, isHarnessGate, type LedgerEvent } from "../study.ts";
 
 type Args = Record<string, unknown>;
 interface Context { home: string; log(line: string): void; features?: readonly string[] }
@@ -74,6 +74,7 @@ export function gateWaitingTimes(events: LedgerEvent[], inputs: GateInputs, obse
   for (const event of events) {
     const data = event.data;
     switch (event.type) {
+      case "harness.round.set": if (plain(data.round) && isHarnessGate(`harness:${String(data.round.id)}`) && typeof data.binding === "string") observe(`harness:${data.round.id}`, data.binding, event.at); break;
       case "scope.set": if (typeof data.sha256 === "string") observe("scope", data.sha256, event.at); break;
       case "lit.screen": {
         let changed = false;
@@ -282,6 +283,7 @@ function readParam(input: Args, name: typeof LINEAGE_PARAMS[number]): string | u
 }
 /** Explicit read panels only; the ordinary overview/inbox polling paths never call these operations. */
 function executionPanel(dir: string, input: Args): Args {
+  if (input.panel === "harness") return {harness: ops.harnessShow(dir, input.round as string | undefined)};
   if (input.panel === "compare") {
     if (["rootKind", "rootId", "rootRevision", "rootSha256", "graphCursor"].some(name => input[name] !== undefined)) throw new Error("console compare: use only attempts or candidates selection parameters; clear lineage filters and retry");
     const attempts = readParam(input, "attempts"), candidates = readParam(input, "candidates");
@@ -302,7 +304,7 @@ function executionPanel(dir: string, input: Args): Args {
 }
 export function createPlugin(runtime: Runtime = {}) { return {
   manifest: { api: 1 as const, tool: "ares", version, title: "Research", icon: "agents", pollMs: 15000,
-    panels: [{ id: "studies", title: "Studies", order: 1 }, { id: "study", title: "Study", order: 2 }, { id: "lineage", title: "Lineage", order: 3 }, { id: "compare", title: "Compare attempts", order: 4 }],
+    panels: [{ id: "studies", title: "Studies", order: 1 }, { id: "study", title: "Study", order: 2 }, { id: "lineage", title: "Lineage", order: 3 }, { id: "compare", title: "Compare attempts", order: 4 }, {id: "harness", title: "Harness rounds", order: 5}],
     capabilities: { actions: Object.keys(ACTIONS), confirm: true, inbox: true, multiProject: false, search: false } },
   async open(ctx: Context): Promise<Provider> {
     const assets = { js: readTextBounded(fileURLToPath(new URL("./panel.js", import.meta.url)), 262144), css: readTextBounded(fileURLToPath(new URL("./panel.css", import.meta.url)), 262144) };
@@ -312,15 +314,18 @@ export function createPlugin(runtime: Runtime = {}) { return {
     return {
       assets,
       async snapshot(input) {
-        if (input.panel === "lineage" || input.panel === "compare") {
-          const allowed = ["panel", "study", "after", ...LINEAGE_PARAMS], extra = Object.keys(input).find(name => !allowed.includes(name));
-          if (extra !== undefined) return {cursor: 0, changed: true, study: null, lineage: null, comparison: null, error: `console read snapshot: unknown field ${line(extra, 80)}; allowed fields: ${allowed.join(", ")}; correct the view parameters and retry`};
+        const explicitRead = input.panel === "lineage" || input.panel === "compare" || input.panel === "harness";
+        const emptyRead = input.panel === "harness" ? {harness: null} : {lineage: null, comparison: null};
+        if (explicitRead) {
+          const allowed = ["panel", "study", "after", ...(input.panel === "harness" ? ["round"] : LINEAGE_PARAMS)], extra = Object.keys(input).find(name => !allowed.includes(name));
+          if (extra !== undefined) return {cursor: 0, changed: true, study: null, ...emptyRead, error: `console read snapshot: unknown field ${line(extra, 80)}; allowed fields: ${allowed.join(", ")}; correct the view parameters and retry`};
+          if (input.panel === "harness" && input.round !== undefined && (typeof input.round !== "string" || !isHarnessGate(`harness:${input.round}`))) return {cursor: 0, changed: true, study: null, harness: null, error: "console harness: invalid round; pass a 1..64 character ASCII run-name and retry"};
         }
         const registry = readRegistry(ctx.home);
         const cursor = registry.studies.reduce((sum, dir) => {
           try { const info = statSync(join(dir, "ledger.jsonl")); return sum + (info.isFile() ? info.size : 0); } catch { return sum; }
         }, 0);
-        const view = canonical([input.panel, str(input.study) ?? str(input.id) ?? "", ...LINEAGE_PARAMS.map(name => typeof input[name] === "string" ? sha256(input[name] as string) : typeof input[name])]);
+        const view = canonical([input.panel, str(input.study) ?? str(input.id) ?? "", ...(input.panel === "harness" ? ["round"] : LINEAGE_PARAMS).map(name => typeof input[name] === "string" ? sha256(input[name] as string) : typeof input[name])]);
         const deliver = (payload: Args): Args => {
           const hash = sha256(canonical(payload));
           if (input.after === cursor && seen.get(view) === hash) return { cursor, changed: false };
@@ -328,14 +333,18 @@ export function createPlugin(runtime: Runtime = {}) { return {
           seen.set(view, hash);
           return { ...payload, changed: true };
         };
-        if (input.panel === "lineage" || input.panel === "compare") {
+        if (explicitRead) {
           const choices = registry.studies.map(dir => ({dir})), selected = str(input.study);
-          if (!selected || !registry.studies.includes(selected)) return deliver({cursor, studies: choices, study: null, lineage: null, comparison: null, error: selected ? "Requested study is not registered; use ares console add or choose a registered study" : "Choose a registered study"});
+          if (!selected || !registry.studies.includes(selected)) return deliver({cursor, studies: choices, study: null, ...emptyRead, error: selected ? "Requested study is not registered; use ares console add or choose a registered study" : "Choose a registered study"});
+          if (input.panel === "harness") {
+            try {if (realpathSync(selected) !== selected) throw new Error();}
+            catch {return deliver({cursor, studies: choices, study: {dir: selected, available: false}, harness: null, error: "Registered study is missing or now resolves elsewhere; restore its canonical directory and refresh"});}
+          }
           let summary: Args = {dir: selected};
           try { const {study} = openStudy(selected); summary = {...summary, id: study.id, question: study.question, mode: study.mode, available: true}; }
           catch { summary = {...summary, available: false, reason: "Study metadata unavailable; restore valid study.json and refresh"}; }
           try { return deliver({cursor, studies: choices, study: summary, ...executionPanel(selected, input)}); }
-          catch (cause) { return deliver({cursor, studies: choices, study: summary, lineage: null, comparison: null, error: error(cause)}); }
+          catch (cause) { return deliver({cursor, studies: choices, study: summary, ...emptyRead, error: error(cause)}); }
         }
         const registered = new Set(registry.studies); for (const dir of lastAt.keys()) if (!registered.has(dir)) lastAt.delete(dir);
         if (input.panel === "inbox") targets.clear();

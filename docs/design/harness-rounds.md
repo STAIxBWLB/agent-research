@@ -45,6 +45,33 @@ Probe fields are the #1226 concepts: v, id, experimentId, arm, taskId, taskRevis
 
 Show returns current declarations, historical counts, comparisons and unavailable real/evaluation states. It reports truncation/remaining if the complete encoded view would exceed 1 MiB. Full history remains in the bounded study ledger; reads do not launch or resolve anything.
 
-## Pending T2 and T3
 
-Contrast, per-edit composition, successor readiness, adoption/closure, explicit real-source resolution and the console producer panel are not implemented here. They must preserve the distinction between subjective preference, task checks, measured outcomes and transferable support. A successor will remain untested until its exact execution receipt exists. No fixture record can create native metrics, pass scientific final gates, activate guidance or export a lesson.
+## Contrast, composition and experimental closure
+
+T2/T3 extend this namespace with `harness.contrast.recorded`, `harness.composition.recorded`, `harness.adoption.decided` and `harness.round.closed` (format `harnessTransition: 1`). They remain local fixture records, not measured live evidence. All writes carry the current round binding, bounded normalized form, actor, canonical record hash and event time. New free text uses the same shared URL/key-like and harness assignment/bearer guard. Real producer reads, model calls, probe launch, native metrics, final qualification and transfer promotion remain unavailable.
+
+`harness show --json` returns the current `transitions.fingerprint`, computed over the current definition, admitted projections, contrasts and composition. Each new form supplies that value. A stale fingerprint refuses before approval or writes. IDs are immutable across history: an identical re-submission returns its receipt without writes; changed reuse refuses, even after a definition revision. Replay checks hashes, refs and fingerprints at the event's position, using maps and bounded current buckets rather than scanning all historical transitions per event.
+
+A contrast has these fields:
+
+```json
+{"v":1,"id":"contrast-one","fingerprint":"<current fingerprint>","arm":"candidate","outcome":"inconclusive","basis":"human-judgment","observations":"Synthetic admitted behavior","uncertainty":"No real producer proof","explanations":["Task variation may explain it"],"evidence":[{"probe":"synthetic-candidate-probe","projectionSha256":"<admitted projection hash>","outputManifestHash":"<its declared output hash>"}]}
+```
+
+Outcomes are improved/unchanged/regressed/inconclusive; basis is task-check/human-judgment/model-judgment. Model judgments require a model identity. Every evidence ref must match a current admitted projection and, if supplied, its exact declared output hash. Non-inconclusive comparisons require the baseline and selected guidance execution refs. Missing/failed/unknown declarations stay visible; a subjective label never changes their state or becomes an evaluator metric. Task-check basis is a declared fixture-check annotation here, not an executed independent correctness check. Actor comes only from the shared command context, not the form.
+
+A composition enumerates 1..32 unique sections. Each has `{section,decision,contrasts:[{id,sha256}],reason}`, with decision keep/drop/revise and 1..16 current exact contrast links. The form also has v, id, fingerprint, optional model/sourceExecution and `successorSha256` (a declared new guidance hash, or null to keep baseline). There is at most one composition/successor per definition; another successor requires an explicit definition revision. Up to 64 contrasts may be active per definition. Every form remains under 64 KiB and the existing event/ledger caps. Mutations also refuse before the current round evidence view would exhaust its 1 MiB read envelope, reserving space for the full header and closure; the existing records remain readable.
+
+A new successor is `unexecuted` until an explicitly imported successor fixture names that exact hash under the current round. T1's baseline and at most two candidates remain; there may be one extra successor import. Parent executions never count for different bytes. If composition preserves an already executed identical guidance hash, its existing execution is referenced and another successor sample is refused. A fixture declaration remains fixture-only, including when its state says succeeded; real execution assurance and end-to-end evaluation are still unavailable.
+
+Controlled-lane composition, selection/adoption and model contrast forms require their own declared sourceExecution and model identity. They do not mutate the pre-probe definition to add a later source and do not imply that a confined producer actually ran. The source map and per-form refs remain declared/unresolved; missing runtime/budget/served-source assurance cannot be promoted.
+
+## Preview, confirmation and readiness
+
+`harness adopt --file` accepts `{v,id,fingerprint,decision,arm,reason,checks}` plus optional model/sourceExecution. Decisions are adopt, keep-baseline or inconclusive. Checks are exact admitted probe/output refs; they are never looked up from arbitrary paths or executed by ares. Keep-baseline names baseline; adopt names a declared candidate/successor. Without independent real correctness evidence every disposition is explicitly experimental, even when fixture check refs are supplied. It cannot qualify a reusable improvement, pass scientific final approval or demonstrate transfer.
+
+Without `--confirm`, the command returns a confirmation fingerprint and preview without writing or auto-approving. Confirming the current form writes the explicit adoption and linked closure in the same study commit under the ordinary harness gate. A wrong or stale confirmation changes nothing. Keeping baseline and inconclusive are ordinary completed administrative outcomes. Closed means the fixture round received a disposition, never scientific success. The current readiness explicitly retains `experimental:true`, correctness unavailable and transfer not-demonstrated.
+
+Adding evidence makes an earlier closure stale, while a new definition reopens readiness. Neither rewrites the old decision. Full prior forms/actors/hashes remain in the bounded ledger; current view records are always bound to their own definition. Later curated lessons require separately implemented source/lesson review/export receipts, not closure alone.
+
+The read-only console Harness rounds panel delegates this same show view for an explicitly selected registered study/round. It renders comparison identities, contrasts, section-to-evidence links, closure/current-vs-stale state and successor execution state. It offers no adoption action or external source resolution. Ordinary studies/inbox polling never starts a harness source read, model or executor. Every shortened envelope/visual list is marked incomplete; inspect a single round through CLI JSON when the all-round view reports truncated/remaining.

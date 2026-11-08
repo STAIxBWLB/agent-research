@@ -78,6 +78,9 @@ const SELECTION = obj({
 const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), parent: text(64), commit: { type: "string", minLength: 40, maxLength: 40 } }, ["id", "title", "hypothesis"]);
 
 export const ARES_TOOLS: readonly McpTool[] = [
+  { name: "ares_harness_contrast", description: "Record an actor-attributed fixture contrast against current admitted probe/output hashes and evidence fingerprint. Subjective judgments stay separate from task checks; no native metric or transfer authority.", inputSchema: obj({study, round: text(64), contrast: {type: "object"}}, ["study", "round", "contrast"]), annotations: write },
+  { name: "ares_harness_compose", description: "Record per-section keep/drop/revise decisions linked to current contrasts, declaring at most one successor hash. A new successor remains unexecuted until its own exact fixture execution; real evidence is unavailable.", inputSchema: obj({study, round: text(64), composition: {type: "object"}}, ["study", "round", "composition"]), annotations: write },
+  { name: "ares_harness_adopt", description: "Preview an experimental fixture-only adopt/keep-baseline/inconclusive decision; confirm its returned fingerprint to commit disposition and closure together under the round gate. Does not create correctness, scientific success or demonstrated transfer.", inputSchema: obj({study, round: text(64), decision: {type: "object"}, confirm: text(64)}, ["study", "round", "decision"]), annotations: write },
   { name: "ares_harness_stream_set", description: "Fix an immutable ordered 1..16-task experiment stream before its first harness round. No source reads or execution.", inputSchema: obj({study, stream: {type: "object"}}, ["study", "stream"]), annotations: write },
   { name: "ares_harness_stream_show", description: "Read the receipted immutable local harness stream without writes or source reads.", inputSchema: obj({study}, ["study"]), annotations: read },
   { name: "ares_experience_select", description: "Rank existing project lessons; exact-id screen only explicit selections. Nonempty prospective experience remains unavailable until native round closure/lesson receipts exist. Stores no bodies and makes no memory writes.", inputSchema: obj({study, selection: {type: "object"}}, ["study", "selection"]), annotations: {...read, openWorldHint: true} },
@@ -159,6 +162,9 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
   const background = new Map<Promise<void>, () => void>();
   const track = (completion: Promise<void>, terminate: () => void) => { background.set(completion, terminate); void completion.then(() => { background.delete(completion); }); };
   const handlers: Record<string, McpHandler> = {
+    ares_harness_contrast: a => ops.harnessContrast(dir(a), a.round as string, a.contrast, ctx),
+    ares_harness_compose: a => ops.harnessCompose(dir(a), a.round as string, a.composition, ctx),
+    ares_harness_adopt: a => ops.harnessAdopt(dir(a), a.round as string, a.decision, a.confirm as string | undefined, ctx),
     ares_harness_stream_set: a => ops.harnessStreamSet(dir(a), a.stream, ctx),
     ares_harness_stream_show: a => ops.harnessStreamShow(dir(a)),
     ares_experience_select: a => ops.experienceSelect(dir(a), a.selection, ctx, memoryEnv),

@@ -90,8 +90,8 @@ test("experiment MCP pivot preserves cause/retryWhen and refuses them on refine"
 
 test("manifest advertises A5 formats/events and unsupported versions refuse without rewriting bytes", async () => {
   expect(ops.manifest().formats.skillProposal).toBe(2);
-  expect(ops.manifest().ledgerEvents).toEqual(["archive.exported", "skill.proposed", "skill.decided", "watch.set", "watch.ran", "autonomy.set", "harness.round.set", "harness.probe.declared", "experience.stream.set", "experience.frozen"]);
-  const snapshot = ops.manifest(); snapshot.ledgerEvents.pop(); expect(ops.manifest().ledgerEvents).toHaveLength(10);
+  expect(ops.manifest().ledgerEvents).toEqual(["archive.exported", "skill.proposed", "skill.decided", "watch.set", "watch.ran", "autonomy.set", "harness.round.set", "harness.probe.declared", "harness.contrast.recorded", "harness.composition.recorded", "harness.adoption.decided", "harness.round.closed", "experience.stream.set", "experience.frozen"]);
+  const snapshot = ops.manifest(); snapshot.ledgerEvents.pop(); expect(ops.manifest().ledgerEvents).toHaveLength(14);
   for (const kind of ["ledger", "proposal-event", "proposal-file"]) {
     const dir = study(); await ops.skillPropose(dir, proposal, { actor });
     const journal = join(dir, "ledger.jsonl"), proposalFile = join(dir, "proposals", "skills", `${proposal.name}.md`);
