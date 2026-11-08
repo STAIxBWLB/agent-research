@@ -327,16 +327,16 @@ test("every emitted edge names the source record containing its relationship", a
       case "observed-in": expect(data.dispatchId).toBe(link.from.id); expect(String(data.revision)).toBe(link.to.id); break;
       case "expected-attempt": expect(data.dispatchId).toBe(link.from.id); expect(data.attemptId).toBe(link.to.id); break;
       case "observed-attempt": expect(data.dispatchId).toBe(link.from.id); expect(data.output.attemptId).toBe(link.to.id); break;
-      case "observed-output": expect(data.dispatchId).toBe(link.from.id); expect(data.output.sha256).toBe(link.to.sha256); break;
-      case "closed": expect(data.evidenceSha256 ?? data.sha256).toBe(link.to.sha256); break;
-      case "reviewed": expect(data.review.buildSha256).toBe(link.to.sha256); expect(data.id).toBe(link.proof.nativeId); break;
+      case "observed-output": expect(data.dispatchId).toBe(link.from.id); expect(data.output.sha256).toBe(link.to.sha256!); break;
+      case "closed": expect(data.evidenceSha256 ?? data.sha256).toBe(link.to.sha256!); break;
+      case "reviewed": expect(data.review.buildSha256).toBe(link.to.sha256!); expect(data.id).toBe(link.proof.nativeId); break;
       case "uses-attempt":
         expect(link.proof.file).toMatch(/^runs\/[^/]+\/(investigate|ablate|final)\.json$/);
         expect([...ids(data.attempts), ...ids(data.baseline?.attempts), ...ids(data.reference?.attempts), ...(data.candidates ?? []).flatMap((row: {attempts: unknown}) => ids(row.attempts)), ...(data.ablations ?? []).flatMap((row: {attempts: unknown}) => ids(row.attempts)), ...ids(data.excluded)]).toContain(link.to.id);
-        expect(sha256(text)).toBe(link.from.sha256); break;
-      case "names-idea": expect(data.winner.idea).toBe(link.to.id); expect(sha256(text)).toBe(link.from.sha256); break;
-      case "uses-closed-result": expect([data.investigateSha256, data.ablateSha256]).toContain(link.to.sha256); expect(sha256(text)).toBe(link.from.sha256); break;
-      case "uses-source": expect(link.proof.file).toBe("paper/build/evidence.json"); expect(data.placeholders.some((row: {source: {sha256: string}}) => row.source.sha256 === link.to.sha256 || row.source.sha256 === node(page, "attempt", link.to.id)?.proof.sha256)).toBe(true); expect(sha256(text)).toBe(link.from.sha256); break;
+        expect(sha256(text)).toBe(link.from.sha256!); break;
+      case "names-idea": expect(data.winner.idea).toBe(link.to.id); expect(sha256(text)).toBe(link.from.sha256!); break;
+      case "uses-closed-result": expect([data.investigateSha256, data.ablateSha256]).toContain(link.to.sha256); expect(sha256(text)).toBe(link.from.sha256!); break;
+      case "uses-source": expect(link.proof.file).toBe("paper/build/evidence.json"); expect(data.placeholders.some((row: {source: {sha256: string}}) => row.source.sha256 === link.to.sha256 || row.source.sha256 === node(page, "attempt", link.to.id)?.proof.sha256)).toBe(true); expect(sha256(text)).toBe(link.from.sha256!); break;
       default: throw new Error(`Unaudited relation ${link.relation}`);
     }
   }
