@@ -157,3 +157,14 @@ test("legacy no-input protocol hash and raw-byte design seals remain identical",
   expect(readSelection(dir, design.protocol)?.run).toBe("investigate");
   expect(design.binding).toBe(sha256(JSON.stringify([sha256(currentText), tree, selectionHash(dir, design.protocol), finalSeedsHash(dir, design.protocol)])));
 });
+
+test("trailing separators are canonicalized before stage-private source checks", async () => {
+  const { buildContainerArgs } = await import("../src/exp/executor.ts");
+  expect(validateProtocolInputs({ root: { ...input(), path: "/data/" } }).root!.path).toBe("/data");
+  const p = validateProtocol({ ...protocol(), inputs: {
+    broad: { ...input(), path: "/data/", mount: { candidate: "/in/broad" } },
+    private: { ...input(), path: "/data/private", mount: { evaluator: "/in/private" } },
+  } });
+  expect(() => buildContainerArgs({ protocol: p, stage: "candidate", studyId: "synthetic", attemptId: "a".repeat(16), user: "1000:1000", paths: { snapshot: "/work/snapshot/", output: "/work/output/", evaluator: "/work/evaluator/", result: "/work/result/" } })).toThrow("stage-private");
+  expect(validateProtocolInputs({ root: { ...input(), path: "/" } }).root!.path).toBe("/");
+});

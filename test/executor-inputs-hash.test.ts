@@ -31,7 +31,7 @@ test("transport failures and malformed metadata refuse without exposing paths, s
   for (const outcome of cases) {
     const fake = fakeRunner([outcome]); let message = "";
     try { await hashExecutorInput(local, privatePath, fake.runner); } catch (error) { message = (error as Error).message; }
-    expect(message).toContain("executor input manifest: hashing failed"); expect(message).toContain("rerun ares executor inputs hash");
+    expect(message).toContain("executor input manifest: hashing failed"); expect(message).toContain("the path and its ancestors must not be symlinks"); expect(message).toContain("rerun ares executor inputs hash");
     expect(message).not.toContain(privatePath); expect(message).not.toContain(privateError); expect(fake.requests).toHaveLength(1);
   }
 });

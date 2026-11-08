@@ -669,3 +669,34 @@ test("input identity drift on restart refuses with restore guidance before a new
   expect(showAttempt(dir, first.id).stage).toBe("candidate");
   expect(fake.containers.size).toBe(1);
 });
+
+test("same-identity locator relocation during a running candidate remains reconcilable", async () => {
+  const p = inputProtocol(), { dir, fake } = await setup(p), first = await runAttempt(dir, request, fake.ctx);
+  await withLock(dir, () => setProtocol(dir, { ...p, inputs: { ...p.inputs, train: { ...p.inputs!.train!, path: "/synthetic/relocated-training" } } }, actor));
+  expect((await reconcileAttempts(dir, fake.ctx))).toEqual([]);
+  expect(showAttempt(dir, first.id).status).toBe("running");
+  running(fake, "candidate").running = false; await reconcileAttempts(dir, fake.ctx);
+  running(fake, "evaluator").running = false; await reconcileAttempts(dir, fake.ctx);
+  expect(showAttempt(dir, first.id).status).toBe("succeeded");
+});
+test("an evaluator launch blocked by input verification retries after restore without becoming lost", async () => {
+  const { dir, fake } = await setup(inputProtocol()), first = await runAttempt(dir, request, fake.ctx);
+  running(fake, "candidate").running = false; fake.inputHash("b".repeat(64));
+  await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("manifest hash mismatch");
+  let current = showAttempt(dir, first.id);
+  expect(current.status).toBe("running"); expect(current.stage).toBe("evaluator"); expect(current.stages.evaluator?.launchPending).toBe(true);
+  expect(current.stages.evaluator?.containerId).toBeUndefined(); expect(fake.containers.size).toBe(1);
+  await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("manifest hash mismatch");
+  expect(showAttempt(dir, first.id).status).toBe("running");
+  fake.inputHash("a".repeat(64)); await reconcileAttempts(dir, fake.ctx);
+  current = showAttempt(dir, first.id); expect(current.stages.evaluator?.launchPending).toBeUndefined(); expect(fake.containers.size).toBe(2);
+  running(fake, "evaluator").running = false; await reconcileAttempts(dir, fake.ctx);
+  expect(showAttempt(dir, first.id).status).toBe("succeeded");
+  expect(readLedger(dir).some(e => e.type === "attempt.unknown")).toBe(false);
+});
+for (const source of ["relative/input", "/synthetic/private-heldout/", "/private/synthetic-executor/"]) test(`observed input mounts refuse unsafe source ${source}`, async () => {
+  const { dir, fake } = await setup(inputProtocol()); await runAttempt(dir, request, fake.ctx);
+  const candidate = running(fake, "candidate"), index = candidate.args.findIndex(arg => arg.includes("dst=/in/train,"));
+  candidate.args[index] = `type=bind,src=${source},dst=/in/train,readonly`;
+  await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("reconcile");
+});

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, posix } from "node:path";
 import { commit, openStudy, plain, readJsonFile, requireExperiment, type Actor } from "../study.ts";
-import { readProtocol, validateProtocol, type Protocol } from "./protocol.ts";
+import { readProtocol, canonicalExecutorPath, validateProtocol, type Protocol } from "./protocol.ts";
 
 export interface Executor { v: 1; kind: "local" | "ssh"; host?: string; workdir: string }
 export interface ProcessRequest {
@@ -92,7 +92,7 @@ function failed(executor: Executor, step: string): Error {
 }
 function directory(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length > 4096 || !value.startsWith("/") || /[\0\r\n,"]/.test(value)) throw new Error(`${field}: invalid directory; use an absolute path of at most 4096 characters without NUL, newlines, commas or double quotes`);
-  return posix.normalize(value);
+  return canonicalExecutorPath(value);
 }
 export function validateExecutor(raw: unknown): Executor {
   if (!plain(raw)) throw new Error("executor: object required; pass kind and workdir to ares executor set");
@@ -200,7 +200,7 @@ except Exception:
 /** Host-local streaming only: stdout is bounded metadata, never file names, contents or host paths. */
 export async function hashExecutorInput(executorArg: Executor, path: string, runner: ProcessRunner = spawnRunner): Promise<InputManifest> {
   const executor = validateExecutor(executorArg), source = directory(path, "executor input path");
-  const refuse = () => new Error("executor input manifest: hashing failed; check Python3 and a stable readable regular directory without links/special files on the executor, then rerun ares executor inputs hash <dir> <path>");
+  const refuse = () => new Error("executor input manifest: hashing failed; check Python3 and a stable readable regular directory without special files on the executor; the path and its ancestors must not be symlinks; then rerun ares executor inputs hash <dir> <path>");
   let result: ProcessResult;
   try {result = await runOnExecutor(executor, "python3", ["-I", "-S", "-c", INPUT_MANIFEST_SCRIPT, source], runner, {timeoutMs: INPUT_MANIFEST_TIMEOUT_MS, maxOutputBytes: INPUT_MANIFEST_OUTPUT_BYTES});}
   catch {throw refuse();}
@@ -256,6 +256,10 @@ export async function checkExecutorInputs(executor: Executor, protocol: Protocol
   return { ...(Object.keys(protocol.inputs ?? {}).length ? { inputRuntime: "python3" as const } : {}), executor, serverVersion: version, user: `${uid}:${gid}`, images, pull: "missing" };
 }
 
+export function executionPathsOverlap(left: string, right: string): boolean {
+  const a = canonicalExecutorPath(left), b = canonicalExecutorPath(right);
+  return a === b || a.startsWith(b === "/" ? b : `${b}/`) || b.startsWith(a === "/" ? a : `${a}/`);
+}
 export type Stage = "candidate" | "evaluator";
 export interface ContainerPaths { snapshot: string; output: string; evaluator: string; result: string }
 export interface ContainerOptions { protocol: Protocol; stage: Stage; studyId: string; attemptId: string; user: string; paths: ContainerPaths; seed?: number }
@@ -278,7 +282,7 @@ export function buildContainerArgs(options: ContainerOptions): string[] {
     if (!x || !y || x === y || x.startsWith(y === "/" ? y : `${y}/`) || y.startsWith(x === "/" ? x : `${x}/`)) throw new Error("container mounts: overlapping sources; use separate snapshot, output, evaluator and result directories");
   }
   const inputs = Object.values(p.inputs ?? {});
-  const overlaps = (a: string, b: string) => a === b || a.startsWith(b === "/" ? b : `${b}/`) || b.startsWith(a === "/" ? a : `${a}/`);
+  const overlaps = executionPathsOverlap;
   for (const input of inputs) if (sources.some(source => overlaps(source, input.path!))) throw new Error("container inputs: source overlaps the attempt workspace; stage inputs in a separate executor directory before retrying");
   for (let a = 0; a < inputs.length; a++) for (let b = a + 1; b < inputs.length; b++) {
     const x = inputs[a]!, y = inputs[b]!;

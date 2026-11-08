@@ -8,12 +8,12 @@ import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, requireExperiment, requireGate, sha256, withLock, type Actor, type PendingEvent } from "../study.ts";
 import { designBinding, sameProtocolInputs, frozenProtocol, validateStoredProtocol, protocolHash, readProtocol, readDesign, type Protocol } from "./protocol.ts";
-import { buildContainerArgs, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
+import { buildContainerArgs, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
 import { resolveSnapshot, transferSnapshot, transferTask } from "./snapshot.ts";
 import { collectEvaluation as defaultEvaluationCollector, collectStageEvidence as defaultStageCollector, EvidenceError, MetricsError, outputBudget, type StageEvidence } from "./metrics.ts";
 
 export type AttemptStatus = "running" | "succeeded" | "failed" | "cancelled" | "unknown";
-export interface AttemptStage { image: string; argv: string[]; mounts: { target: string; readOnly: boolean }[]; network: "none"; limits: Protocol["limits"]; user: string; containerId?: string; startedAt: string; endedAt?: string; exitCode?: number; evidence?: StageEvidence; evidenceError?: { reason: string; message: string } }
+export interface AttemptStage { image: string; argv: string[]; mounts: { target: string; readOnly: boolean }[]; network: "none"; limits: Protocol["limits"]; user: string; containerId?: string; startedAt: string; endedAt?: string; exitCode?: number; evidence?: StageEvidence; evidenceError?: { reason: string; message: string }; launchPending?: true }
 export interface Evaluation { metrics: { name: string; unit: string; value: number; provenance: "ares-observed" }[]; outputs: { path: string; sha256: string; bytes: number }[] }
 export interface Attempt {
   v: 1; id: string; studyId: string; run: string; protocolHash: string; sealBinding: string; commit: string; treeId: string; snapshotSha256?: string; seed: number; label: string; retryOf?: string;
@@ -236,13 +236,22 @@ function observed(raw: unknown, attempt: Attempt, protocol: Protocol): { id: str
   if (!plain(value) || typeof value.Id !== "string" || !/^[a-f0-9]{64}$/.test(value.Id) || !plain(value.State) || typeof value.State.Running !== "boolean" || !Number.isSafeInteger(value.State.ExitCode) || !plain(value.Config) || !plain(value.HostConfig) || !Array.isArray(value.Mounts)) throw hostError(attempt, "container inspection");
   const expected = attempt.stages[attempt.stage]!, config = value.Config, settings = value.HostConfig;
   const mounts = attempt.stage === "candidate" ? [[attempt.paths.snapshot, "/workspace", false], [attempt.paths.output, "/out", true]] : [[attempt.paths.evaluator, "/eval", false], [attempt.paths.output, "/candidate", false], [attempt.paths.result, "/result", true]];
-  for (const input of Object.values(protocol.inputs ?? {})) if (input.mount[attempt.stage]) mounts.push([input.path!, input.mount[attempt.stage]!, false]);
   const bindMounts = value.Mounts.filter(m => !(plain(m) && m.Type === "tmpfs" && m.Destination === "/tmp"));
+  // Input content was verified at launch. A locator relocation must not invalidate an in-flight mount.
+  const inputs = Object.values(protocol.inputs ?? {}), visible = inputs.filter(input => input.mount[attempt.stage] !== undefined);
+  const privateInputs = inputs.filter(input => input.mount[attempt.stage] === undefined);
+  const workspace = Object.values(attempt.paths);
+  const inputMountsValid = visible.every(input => {
+    const mount = bindMounts.find(m => plain(m) && m.Destination === input.mount[attempt.stage]);
+    if (!plain(mount) || mount.Type !== "bind" || mount.RW !== false || typeof mount.Source !== "string" || !mount.Source.startsWith("/") || /[\0\r\n,"]/.test(mount.Source)) return false;
+    const source = mount.Source;
+    return !workspace.some(path => executionPathsOverlap(source, path)) && !privateInputs.some(other => executionPathsOverlap(source, other.path!));
+  });
   const devices = settings.DeviceRequests;
   const gpuMatches = expected.limits.gpus === 0 ? devices === null || devices === undefined || (Array.isArray(devices) && devices.length === 0) : Array.isArray(devices) && devices.length === 1 && plain(devices[0]) && devices[0].Count === expected.limits.gpus && Array.isArray(devices[0].Capabilities) && devices[0].Capabilities.some(c => Array.isArray(c) && c.includes("gpu"));
   if (!gpuMatches) throw hostError(attempt, "GPU limit verification");
   if (config.Seed !== `ARES_SEED=${attempt.seed}`) throw hostError(attempt, "selected seed verification");
-  if (config.Image !== expected.image || config.User !== expected.user || JSON.stringify(config.Cmd) !== JSON.stringify(expected.argv) || !plain(config.Labels) || config.Labels["ares.study"] !== attempt.studyId || config.Labels["ares.attempt"] !== attempt.id || config.Labels["ares.stage"] !== attempt.stage || settings.NetworkMode !== "none" || settings.ReadonlyRootfs !== true || !Array.isArray(settings.CapDrop) || !settings.CapDrop.some(c => c === "ALL" || c === "all") || !Array.isArray(settings.SecurityOpt) || !settings.SecurityOpt.includes("no-new-privileges") || !plain(settings.Tmpfs) || !("/tmp" in settings.Tmpfs) || settings.Memory !== expected.limits.memoryMb * 1024 * 1024 || settings.PidsLimit !== expected.limits.pidsLimit || settings.NanoCpus !== Math.round(expected.limits.cpus * 1e9) || bindMounts.length !== mounts.length || !mounts.every(([source, target, writable]) => bindMounts.some(m => plain(m) && m.Type === "bind" && m.Source === source && m.Destination === target && m.RW === writable))) throw hostError(attempt, "container isolation verification");
+  if (config.Image !== expected.image || config.User !== expected.user || JSON.stringify(config.Cmd) !== JSON.stringify(expected.argv) || !plain(config.Labels) || config.Labels["ares.study"] !== attempt.studyId || config.Labels["ares.attempt"] !== attempt.id || config.Labels["ares.stage"] !== attempt.stage || settings.NetworkMode !== "none" || settings.ReadonlyRootfs !== true || !Array.isArray(settings.CapDrop) || !settings.CapDrop.some(c => c === "ALL" || c === "all") || !Array.isArray(settings.SecurityOpt) || !settings.SecurityOpt.includes("no-new-privileges") || !plain(settings.Tmpfs) || !("/tmp" in settings.Tmpfs) || settings.Memory !== expected.limits.memoryMb * 1024 * 1024 || settings.PidsLimit !== expected.limits.pidsLimit || settings.NanoCpus !== Math.round(expected.limits.cpus * 1e9) || (!inputMountsValid || bindMounts.length !== mounts.length + visible.length) || !mounts.every(([source, target, writable]) => bindMounts.some(m => plain(m) && m.Type === "bind" && m.Source === source && m.Destination === target && m.RW === writable))) throw hostError(attempt, "container isolation verification");
   if (expected.containerId && value.Id !== expected.containerId) throw hostError(attempt, "container identity verification");
   const finishedAt = typeof value.State.FinishedAt === "string" && Number.isFinite(Date.parse(value.State.FinishedAt)) ? value.State.FinishedAt : undefined;
   const startedAt = typeof value.State.StartedAt === "string" && Number.isFinite(Date.parse(value.State.StartedAt)) ? value.State.StartedAt : undefined;
@@ -297,8 +306,24 @@ async function inspect(dir: string, attempt: Attempt, ctx: AttemptContext) {
   return observed(raw, attempt, protocol);
 }
 async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptContext): Promise<Attempt> {
-  const protocol = executionProtocol(dir, attempt);
-  await verifyExecutorInputs(attempt.executor, protocol, ctx.runner ?? spawnRunner);
+  let protocol: Protocol;
+  try {
+    protocol = executionProtocol(dir, attempt);
+    await verifyExecutorInputs(attempt.executor, protocol, ctx.runner ?? spawnRunner);
+  } catch (error) {
+    if (error instanceof InputVerificationError && attempt.stage === "evaluator" && !attempt.stages.evaluator?.containerId) {
+      await update(dir, attempt.id, ctx, current => {
+        if (current.status !== "running" || current.stage !== "evaluator" || current.stages.evaluator?.containerId) return undefined;
+        current.stages.evaluator!.launchPending = true; delete current.launching;
+        return "attempt.input-unavailable";
+      });
+    }
+    throw error;
+  }
+  if (attempt.stages[attempt.stage]?.launchPending) attempt = await update(dir, attempt.id, ctx, current => {
+    delete current.stages[current.stage]!.launchPending; current.launching = owner(ctx);
+    return "attempt.stage.retry-intent";
+  });
   let startedId: string | undefined;
   try {
     const args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths });
@@ -436,7 +461,11 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
     if (alive(attempt, ctx)) continue;
     try {
       let state = await inspect(dir, attempt, ctx);
-      if (!state) { changed.push(await update(dir, attempt.id, ctx, current => { finish(current, "unknown", "lost", ctx); return "attempt.unknown"; })); continue; }
+      if (!state) {
+        if (attempt.stage === "evaluator" && attempt.stages.evaluator?.launchPending) changed.push(await launch(dir, attempt, attempt.stages.evaluator.user, ctx));
+        else changed.push(await update(dir, attempt.id, ctx, current => { finish(current, "unknown", "lost", ctx); return "attempt.unknown"; }));
+        continue;
+      }
       const recovered = needsReceipt(attempt, state);
       if (recovered) attempt = await recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered");
       const stage = attempt.stages[attempt.stage];

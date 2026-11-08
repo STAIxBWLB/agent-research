@@ -56,6 +56,7 @@ function stage(raw: unknown, what: string, envAllowed: boolean): Protocol["candi
   }
   return { image, command, env: Object.fromEntries(entries) };
 }
+export function canonicalExecutorPath(value: string): string { return posix.normalize(value).replace(/\/+$/, "") || "/"; }
 /** Input locators stay executor-local; only strict read-only /in targets are supported. */
 export function validateProtocolInputs(raw: unknown): Record<string, ProtocolInput> {
   return protocolInputs(raw, false);
@@ -65,6 +66,7 @@ function protocolInputs(raw: unknown, stored: boolean): Record<string, ProtocolI
   if (entries.length > 8) throw new Error("protocol.inputs: invalid count; declare at most 8 named inputs");
   const result: [string, ProtocolInput][] = [];
   for (const [name, descriptor] of entries) {
+    if (["__proto__", "prototype", "constructor"].includes(name)) throw new Error("protocol.inputs: reserved input name; rename __proto__, prototype or constructor before setting the protocol");
     if (!/^[a-z0-9_-]{1,32}$/.test(name)) throw new Error("protocol.inputs: invalid name; use 1..32 lowercase letters, digits, underscores or hyphens");
     if (stored && plain(descriptor) && Object.hasOwn(descriptor, "path")) throw new Error(`stored protocol.inputs.${name}.path: executor locators are forbidden; restore a path-free frozen protocol with sha256 and mount only`);
     const input = object(descriptor, stored ? ["sha256", "mount"] : ["path", "sha256", "mount"], `protocol.inputs.${name}`);
@@ -82,7 +84,7 @@ function protocolInputs(raw: unknown, stored: boolean): Record<string, ProtocolI
       }
       mount[stage] = target;
     }
-    result.push([name, { ...(!stored ? { path: posix.normalize(input.path as string) } : {}), sha256: input.sha256, mount }]);
+    result.push([name, { ...(!stored ? { path: canonicalExecutorPath(input.path as string) } : {}), sha256: input.sha256, mount }]);
   }
   return Object.fromEntries(result);
 }

@@ -6,7 +6,7 @@ import { COMMANDS, findCommand } from "../src/commands-table.ts";
 import { ARES_TOOLS, createAresMcp } from "../src/mcp-tools.ts";
 import { validArguments } from "../src/mcp.ts";
 import { hashExecutorInput, readExecutor } from "../src/exp/executor.ts";
-import { readBytesBounded } from "../src/study.ts";
+import { readBytesBounded, writeAtomic } from "../src/study.ts";
 import { fakeHttp, fakeRunner, tempDir } from "./helpers.ts";
 
 const manifest = { sha256: "a".repeat(64), files: 3, bytes: 42 };
@@ -68,4 +68,16 @@ test("MCP advertises a bounded external-host read and family manifest marks it e
   expect(validArguments({ study: "/synthetic/study", path: "/synthetic/input" }, tool.inputSchema)).toBe(true);
   for (const input of [{ study: "/synthetic/study" }, { study: "/synthetic/study", path: "" }, { study: "/synthetic/study", path: "x".repeat(4097) }, { study: "/synthetic/study", path: "/synthetic/input", extra: true }])
     expect(validArguments(input, tool.inputSchema)).toBe(false);
+});
+
+test("reserved input names refuse with the shared named error in CLI and MCP", async () => {
+  const { metricProtocol } = await import("./metric-fixtures.ts"), f = await fixture(), fake = fakeRunner([]);
+  const server = createAresMcp(f.env, f.ctx.http, { runner: fake.runner });
+  for (const name of ["__proto__", "prototype", "constructor"]) {
+    const protocol = { ...metricProtocol(), inputs: Object.fromEntries([[name, { path: "/synthetic/input", sha256: "a".repeat(64), mount: { candidate: "/in/data" } }]]) };
+    const file = join(tempDir(), "protocol.json"); writeAtomic(file, JSON.stringify(protocol), 65536);
+    await expect(run(["protocol", f.dir, "--file", file, "--json"], f.env, { http: f.ctx.http, runner: fake.runner })).rejects.toThrow("reserved input name");
+    await expect(server.handlers.ares_protocol_set!({ study: f.dir, protocol })).rejects.toThrow("reserved input name");
+  }
+  expect(fake.requests).toHaveLength(0);
 });
