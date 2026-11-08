@@ -49,24 +49,34 @@ export function writeAtomic(path: string, text: string, maxBytes: number, mode =
 
 /** Read a regular file, stopping one byte past `maxBytes`: special files and oversize files are refused without buffering them. */
 export interface ReadOptions { noFollow?: boolean; uid?: number }
-export function readBytesBounded(path: string, maxBytes: number, options: ReadOptions = {}): Buffer {
+function readChunksBounded(path: string, maxBytes: number, options: ReadOptions, consume: (chunk: Buffer) => void): number {
   // Non-blocking open: a FIFO without a writer would otherwise block before the type check.
   const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | (options.noFollow ? constants.O_NOFOLLOW : 0));
   try {
     const info = fstatSync(fd);
     if (!info.isFile()) throw new Error(`${path}: not a regular file`);
     if (options.uid !== undefined && info.uid !== options.uid) throw new Error(`${path}: owned by another user`);
-    const buffer = Buffer.alloc(Math.min(maxBytes + 1, 1 << 20)), parts: Buffer[] = [];
+    const buffer = Buffer.alloc(Math.min(maxBytes + 1, 1 << 20));
     let total = 0;
     for (;;) {
       const n = readSync(fd, buffer, 0, buffer.length, null);
       if (n === 0) break;
       total += n;
       if (total > maxBytes) throw new Error(`${path}: larger than ${maxBytes} bytes`);
-      parts.push(Buffer.from(buffer.subarray(0, n)));
+      consume(buffer.subarray(0, n));
     }
-    return Buffer.concat(parts);
+    return total;
   } finally { closeSync(fd); }
+}
+export function readBytesBounded(path: string, maxBytes: number, options: ReadOptions = {}): Buffer {
+  const parts: Buffer[] = [];
+  readChunksBounded(path, maxBytes, options, chunk => parts.push(Buffer.from(chunk)));
+  return Buffer.concat(parts);
+}
+/** Hash a regular file through the bounded reader without retaining its contents. */
+export function hashFileBounded(path: string, maxBytes: number, options: ReadOptions = {}): {sha256: string; bytes: number} {
+  const hash = createHash("sha256"), bytes = readChunksBounded(path, maxBytes, options, chunk => { hash.update(chunk); });
+  return { sha256: hash.digest("hex"), bytes };
 }
 export function readTextBounded(path: string, maxBytes: number, options: ReadOptions = {}): string {
   try { return new TextDecoder("utf-8", { fatal: true }).decode(readBytesBounded(path, maxBytes, options)); }

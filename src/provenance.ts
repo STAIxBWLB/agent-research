@@ -1,7 +1,9 @@
 import { existsSync, lstatSync, opendirSync, realpathSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
-import { parseLedger, plain, readBytesBounded, sha256, validateStudy, type LedgerEvent, type Study } from "./study.ts";
+import { parseLedger, plain, readBytesBounded, hashFileBounded, sha256, validateStudy, type LedgerEvent, type Study } from "./study.ts";
 import { validateAttemptRecord, type Attempt } from "./exp/attempts.ts";
+import { TASK_BYTES, TASK_FILES } from "./exp/protocol.ts";
+import { validateExecutor } from "./exp/executor.ts";
 import { foldIdeas } from "./exp/ideas.ts";
 import { readClosedInvestigation } from "./exp/investigate.ts";
 import { readClosedFinal } from "./exp/final.ts";
@@ -68,10 +70,12 @@ function capture(dir: string): Snapshot {
   const ledger = get("ledger.jsonl", 64 * 1024 * 1024); if (!ledger) fail("missing-ledger");
   let events: LedgerEvent[]; try { events = parseLedger(decode(ledger.bytes)); } catch (error) { if (error instanceof Error && error.message.includes("unsupported")) return fail("unsupported-ledger"); return fail("malformed-ledger"); }
   if (events.length > PROVENANCE_EVENTS || events.filter(event => event.type === "plan.set").length > 64) fail("ledger-traversal-capped", true);
-  for (const name of ["plan.json", "hypotheses.md", "design/protocol.json", "design/selection.json", "design/final.json", "design/executor.json", "literature/candidates.json"]) get(name, name === "hypotheses.md" ? 2 * 1024 * 1024 : name.startsWith("literature/") ? 8 * 1024 * 1024 : 65_536);
-  for (const name of ["plan.json", "design/protocol.json", "design/selection.json", "design/final.json", "design/executor.json"]) {
+  for (const name of ["plan.json", "hypotheses.md", "design/protocol.json", "design/selection.json", "design/final.json", "executor.json", "literature/candidates.json"]) get(name, name === "hypotheses.md" ? 2 * 1024 * 1024 : name.startsWith("literature/") ? 8 * 1024 * 1024 : 65_536);
+  for (const name of ["plan.json", "design/protocol.json", "design/selection.json", "design/final.json", "executor.json"]) {
     const file = files.get(name); if (file) { const raw = parsed(file); if (!plain(raw)) fail("malformed-source"); if (raw.v !== 1) fail("unsupported-version"); }
   }
+  const executorFile = files.get("executor.json");
+  if (executorFile) { try { validateExecutor(parsed(executorFile)); } catch { fail("malformed-executor"); } }
   for (const run of names("runs")) {
     if (!RUN.test(run)) fail("malformed-attempt-store");
     for (const entry of names(`runs/${run}/attempts`)) { if (!/^[a-f0-9]{16}\.json$/.test(entry)) fail("malformed-attempt-store"); get(`runs/${run}/attempts/${entry}`, 1_048_576); }
@@ -79,21 +83,36 @@ function capture(dir: string): Snapshot {
   }
   // Workdir/output addresses in records are never followed, including a misconfigured private tree nested in task/paper.
   const forbidden: string[] = [];
-  for (const [name, file] of files) if (name === "design/executor.json" || /\/attempts\//.test(name)) {
+  for (const [name, file] of files) if (name === "executor.json" || /\/attempts\//.test(name)) {
     const raw = parsed(file); if (!plain(raw)) continue;
-    const executor = name === "design/executor.json" ? raw : plain(raw.executor) ? raw.executor : {};
-    for (const location of [executor.workdir]) if (typeof location === "string" && location.startsWith("/")) { const inside = relative(dir, resolve(location)); if (inside === "" || inside !== ".." && !inside.startsWith(".." + sep)) forbidden.push(inside.split(sep).join("/")); }
+    const executor = name === "executor.json" ? raw : plain(raw.executor) ? raw.executor : {};
+    for (const location of [executor.workdir]) if (typeof location === "string" && location.startsWith("/")) { let address = resolve(location); try { address = realpathSync(address); } catch { /* An absent workdir has no readable output tree. */ } const inside = relative(dir, address); if (inside === "" || inside !== ".." && !inside.startsWith(".." + sep)) forbidden.push(inside.split(sep).join("/")); }
   }
   const safe = (name: string) => { if (forbidden.some(prefix => !prefix || name === prefix || name.startsWith(prefix + "/"))) fail("executor-overlaps-source"); };
+  const taskHashes: [string, string][] = []; let taskBytes = 0, taskDirectories = 0;
   const task = (name: string, depth: number) => {
-    safe(name); if (depth > 16) fail("source-traversal-capped", true);
-    for (const entry of names(name)) { const child = `${name}/${entry}`; safe(child); const stat = lstatSync(join(dir, child)); if (stat.isSymbolicLink()) fail("non-regular-source"); if (stat.isDirectory()) task(child, depth + 1); else get(child, 64 * 1024 * 1024); }
+    safe(name); if (depth > 64 || ++taskDirectories > 1000) fail("task-traversal-capped", true);
+    const stat = lstatSync(join(dir, name)); if (stat.isSymbolicLink() || !stat.isDirectory()) fail("non-regular-source");
+    directories.push(name); const directory = opendirSync(join(dir, name));
+    try {
+      for (let entry = directory.readSync(); entry; entry = directory.readSync()) {
+        const child = `${name}/${entry.name}`; safe(child); const stat = lstatSync(join(dir, child));
+        if (stat.isSymbolicLink()) fail("non-regular-source");
+        if (stat.isDirectory()) task(child, depth + 1);
+        else {
+          if (!stat.isFile()) fail("non-regular-source");
+          if (taskHashes.length >= TASK_FILES || stat.size > TASK_BYTES - taskBytes) fail("task-traversal-capped", true);
+          let result; try { result = hashFileBounded(join(dir, child), TASK_BYTES - taskBytes, { noFollow: true }); } catch { return fail("unreadable-source"); }
+          taskBytes += result.bytes; taskHashes.push([child, result.sha256]);
+        }
+      }
+    } finally { directory.closeSync(); }
   };
   if (existsSync(join(dir, "task"))) task("task", 0);
   for (const name of ["paper/manuscript.md", "paper/build/manuscript.md", "paper/build/evidence.json"]) { safe(name); get(name, name.endsWith("evidence.json") ? 8 * 1024 * 1024 : 2 * 1024 * 1024); }
   for (const event of events) if (event.type === "skill.proposed" && plain(event.data.proposal) && typeof event.data.proposal.name === "string" && RUN.test(event.data.proposal.name)) get(`proposals/skills/${event.data.proposal.name}.md`, 16_384);
   if (existsSync(join(dir, ".ares.lock"))) fail("write-in-progress");
-  return { files, study, events, ledgerPosition: ledger.bytes.length, hash: sha256(canonical({ directories: directories.sort(), files: [...files].map(([name, file]) => [name, file.sha256]).sort(([a], [b]) => (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0)) })) };
+  return { files, study, events, ledgerPosition: ledger.bytes.length, hash: sha256(canonical({ directories: directories.sort(), files: [...taskHashes, ...[...files].map(([name, file]) => [name, file.sha256])].sort(([a], [b]) => (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0)) })) };
 }
 class TraversalCap extends Error {}
 const key = (ref: ExecutionReferenceV1) => canonical(ref);
@@ -173,14 +192,16 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
     for (const [index, event] of events.entries()) if (event.type === "plan.set" && Number.isSafeInteger(event.data.revision)) {
       const revision = Number(event.data.revision), definition = validatePlan(event.data.definition); definitions.set(revision, definition); revisions.add(revision); const proof = graph.proof(ledger, index), ref = graph.ref("plan-revision", String(revision), { revision: String(revision) }); graph.put({ ref, state: revision === plan?.revision ? "current" : "historical", availability: "available", proof, ...(definition.nodes.some(node => node.kind === "hub") ? { data: { hubState: "declared-unresolved" } } : {}) }); owned(ref, proof);
     }
+    const latestApplied = new Map<string, { output?: unknown; status: string; taskId?: number; hubProject?: string }>();
+    for (const [event, value] of applied) if (typeof event.data.dispatchId === "string") latestApplied.set(event.data.dispatchId, value);
     const dispatches = new Map<string, ExecutionReferenceV1>(), dispatchCommands = new Map<string, string>();
     for (const [index, event] of events.entries()) if (event.type === "node.intent" && applied.has(event) && typeof event.data.dispatchId === "string" && Number.isSafeInteger(event.data.revision)) {
       const revision = Number(event.data.revision), proof = graph.proof(ledger, index), ref = graph.ref("dispatch", event.data.dispatchId);
       dispatches.set(event.data.dispatchId, ref);
       const definition = definitions.get(revision)?.nodes.find(node => node.id === event.data.node);
       if (definition?.kind === "step") dispatchCommands.set(event.data.dispatchId, definition.command);
-      const current = plan?.nodes.find(node => node.dispatchId === event.data.dispatchId), data: NonNullable<ProvenanceNode["data"]> = { status: current?.status ?? "historical", nodeId: text(event.data.node, 256) ? event.data.node : null };
-      if (Number.isSafeInteger(event.data.taskId) && Number(event.data.taskId) > 0) { data.hubTaskId = Number(event.data.taskId); data.hubState = "declared-unresolved"; if (text(event.data.hubProject, 256)) data.hubProject = event.data.hubProject; }
+      const latest = latestApplied.get(event.data.dispatchId)!, current = plan?.nodes.find(node => node.dispatchId === event.data.dispatchId), data: NonNullable<ProvenanceNode["data"]> = { status: latest.status, nodeId: text(event.data.node, 256) ? event.data.node : null };
+      if (Number.isSafeInteger(latest.taskId) && Number(latest.taskId) > 0) { data.hubTaskId = Number(latest.taskId); data.hubState = "declared-unresolved"; if (text(latest.hubProject, 256)) data.hubProject = latest.hubProject; }
       if (definition?.kind === "hub") data.hubState = "declared-unresolved";
       graph.put({ ref, state: current ? "current" : "historical", availability: "available", proof, data });
       if (revisions.has(revision)) graph.edge(graph.ref("plan-revision", String(revision), { revision: String(revision) }), ref, "dispatched", proof);

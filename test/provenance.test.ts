@@ -253,3 +253,44 @@ test("stored artifacts without producer receipts are not closed provenance", asy
   expect(page.issues.some(issue => issue.code === "unreceipted-closed-artifact")).toBe(true); expect(page.edges.some(value => value.relation === "closed")).toBe(false);
   expect(readTextBounded(join(dir, "ledger.jsonl"), LEDGER_BYTES)).toBe(ledger);
 });
+
+test("root executor workdir is refused before any nested task output is opened", () => {
+  const dir = tempDir(), ctx = { actor: { kind: "person" as const }, http: fakeHttp([]).http };
+  ops.init(dir, { question: "Synthetic private workdir" }, ctx);
+  const workdir = join(dir, "task/private-output"); fs.mkdirSync(workdir, { recursive: true });
+  writeAtomic(join(workdir, "private.txt"), "Synthetic private bytes", 1024);
+  writeAtomic(join(dir, "executor.json"), JSON.stringify({ v: 1, kind: "local", workdir }), 65_536);
+  const original = fs.openSync, opened: string[] = [], guard = spyOn(fs, "openSync").mockImplementation(((file: fs.PathLike, ...args: unknown[]) => {
+    if (String(file).includes("/task/private-output/")) { opened.push(String(file)); throw new Error("private output read"); }
+    return Reflect.apply(original, fs, [file, ...args]);
+  }) as typeof fs.openSync);
+  try { const page = readProvenance(dir); expect(page.status).toBe("unavailable"); expect(page.issues[0]?.code).toBe("executor-overlaps-source"); expect(opened).toEqual([]); }
+  finally { guard.mockRestore(); }
+});
+
+test("task hashing admits the native task byte and file limits outside the retained snapshot budget", () => {
+  const dir = tempDir(), ctx = { actor: { kind: "person" as const }, http: fakeHttp([]).http };
+  ops.init(dir, { question: "Synthetic large task" }, ctx); fs.mkdirSync(join(dir, "task"));
+  const fd = fs.openSync(join(dir, "task/large.bin"), "w"); try { fs.ftruncateSync(fd, 64 * 1024 * 1024 - 1); } finally { fs.closeSync(fd); }
+  for (let i = 1; i < 500; i++) writeAtomic(join(dir, `task/empty-${i}`), "", 1);
+  const first = readProvenance(dir); expect(first.status).toBe("ok"); expect(first.nodes).toHaveLength(1);
+  writeAtomic(join(dir, "task/empty-1"), "x", 1);
+  const changed = readProvenance(dir); expect(changed.status).toBe("ok"); expect(changed.sourceSha256).not.toBe(first.sourceSha256);
+  writeAtomic(join(dir, "task/empty-2"), "x", 1);
+  expect(readProvenance(dir).issues[0]?.code).toBe("task-traversal-capped");
+});
+
+test("observed hub bindings survive removal with the native dispatch terminal status", async () => {
+  const dir = tempDir(), ctx = { actor: { kind: "person" as const }, http: fakeHttp([]).http };
+  ops.init(dir, { question: "Synthetic late binding" }, ctx);
+  await ops.planSet(dir, { v: 1, nodes: [{ id: "external", kind: "hub", campaign: "synthetic-campaign", unit: "synthetic-unit" }], edges: [] }, ctx);
+  await ops.planControl(dir, { action: "resume", commandId: "late-binding-resume", expectedRevision: 1 }, ctx);
+  appendEvent(dir, ctx.actor, "node.intent", { revision: 1, node: "external", dispatchId: "1:external:1" });
+  appendEvent(dir, ctx.actor, "node.observed", { revision: 1, node: "external", dispatchId: "1:external:1", status: "done", taskId: 19, hubProject: "synthetic-late-board" });
+  let page = readProvenance(dir); expect(page.status).toBe("ok");
+  expect(node(page, "dispatch", "1:external:1").data).toMatchObject({ status: "done", hubTaskId: 19, hubProject: "synthetic-late-board", hubState: "declared-unresolved" });
+  await ops.planSet(dir, { v: 1, nodes: [{ id: "replacement", kind: "gate", needs: [], binds: [] }], edges: [] }, ctx);
+  page = readProvenance(dir); expect(page.status).toBe("ok");
+  expect(node(page, "dispatch", "1:external:1").state).toBe("historical");
+  expect(node(page, "dispatch", "1:external:1").data).toMatchObject({ status: "done", hubTaskId: 19, hubProject: "synthetic-late-board" });
+});
