@@ -22,13 +22,13 @@ async function fixture(autonomy = "gates", candidateState?: ProbeFixtureProjecti
 const view = (dir: string) => ops.harnessShow(dir, "round-one").rounds[0]!;
 const bytes = (dir: string) => readBytesBounded(join(dir, "ledger.jsonl"), 64 * 1024 * 1024);
 const ref = (dir: string, arm: string) => {const p = view(dir).probes.find(p => p.projection.arm === arm)!; return {probe: p.projection.id, projectionSha256: p.projectionSha256, outputManifestHash: p.projection.outputManifestHash!};};
-const contrast = (dir: string, id = "contrast-one") => ({v: 1, id, fingerprint: view(dir).transitions.fingerprint, arm: "candidate", outcome: "improved", basis: "human-judgment", observations: "Synthetic behavior changed", uncertainty: "No native producer proof", explanations: ["Synthetic task differences may explain it"], evidence: [ref(dir, "baseline"), ref(dir, "candidate")]});
+const contrast = (dir: string, id = "contrast-one") => ({v: 1, id, fingerprint: view(dir).transitions.fingerprint, arm: "candidate", outcome: "improved", basis: "actor-claim", observations: "Synthetic behavior changed", uncertainty: "No native producer proof", explanations: ["Synthetic task differences may explain it"], evidence: [ref(dir, "baseline"), ref(dir, "candidate")]});
 function composition(dir: string, successorSha256: string | null = "9".repeat(64)) {const c = view(dir).transitions.contrasts[0]!; return {v: 1, id: "composition-one", fingerprint: view(dir).transitions.fingerprint, sections: [{section: "Synthetic checks", decision: "revise", contrasts: [{id: c.form.id, sha256: c.sha256}], reason: "Synthetic contrast-backed edit"}], successorSha256};}
-const decision = (dir: string) => ({v: 1, id: "decision-one", fingerprint: view(dir).transitions.fingerprint, decision: "keep-baseline", arm: "baseline", reason: "No independent real correctness evidence", checks: []});
+const decision = (dir: string) => ({v: 1, id: "decision-one", fingerprint: view(dir).transitions.fingerprint, outcome: "baseline-kept", reason: "No independent real correctness evidence"});
 
-async function close(dir: string, form: unknown, ctx: Parameters<typeof ops.harnessAdopt>[4]) {
-  const preview = await ops.harnessAdopt(dir, "round-one", form, undefined, ctx); if (!("needsConfirm" in preview)) throw new Error("preview required");
-  return ops.harnessAdopt(dir, "round-one", form, preview.fingerprint, ctx);
+async function close(dir: string, form: unknown, ctx: Parameters<typeof ops.harnessClose>[4]) {
+  const preview = await ops.harnessClose(dir, "round-one", form, undefined, ctx); if (!("needsConfirm" in preview)) throw new Error("preview required");
+  return ops.harnessClose(dir, "round-one", form, preview.fingerprint, ctx);
 }
 
 test("contrast, per-edit composition and separately executed successor keep experimental evidence separate", async () => {
@@ -40,7 +40,8 @@ test("contrast, per-edit composition and separately executed successor keep expe
   expect(view(f.dir).transitions.successor).toMatchObject({guidanceSha256: "9".repeat(64), execution: "unexecuted"});
   const kept = await close(f.dir, decision(f.dir), f.ctx); expect("record" in kept).toBe(true);
   expect(view(f.dir).transitions.readiness).toEqual({state: "closed", experimental: true, correctness: "unavailable", transfer: "not-demonstrated"});
-  const events = readLedger(f.dir); expect(events.slice(-2).map(e => e.type)).toEqual(["harness.adoption.decided", "harness.round.closed"]); expect(events.at(-1)!.at).toBe(events.at(-2)!.at);
+  const events = readLedger(f.dir); expect(events.at(-1)!.type).toBe("harness.round.closed"); expect(events.some(e => e.type === "harness.adoption.decided")).toBe(false);
+  expect(view(f.dir).transitions.closure).toMatchObject({roundBinding: view(f.dir).binding, evidenceFingerprint: decision(f.dir).fingerprint, outcome: "baseline-kept", actor: f.ctx.actor});
   const successor = {...source("candidate"), id: "successor-probe", arm: "successor", guidanceHash: "9".repeat(64)};
   await ops.harnessImport(f.dir, "round-one", successor, f.ctx);
   expect(view(f.dir).transitions.successor).toMatchObject({execution: "fixture-declared", probeId: "successor-probe"});
@@ -49,23 +50,23 @@ test("contrast, per-edit composition and separately executed successor keep expe
 });
 
 test("adoption preview and stale/incorrect confirmation write nothing, including auto approvals", async () => {
-  const f = await fixture("auto"), form = decision(f.dir), before = bytes(f.dir), preview = await ops.harnessAdopt(f.dir, "round-one", form, undefined, f.ctx);
+  const f = await fixture("auto"), form = decision(f.dir), before = bytes(f.dir), preview = await ops.harnessClose(f.dir, "round-one", form, undefined, f.ctx);
   expect("needsConfirm" in preview && preview.needsConfirm).toBe(true); expect(bytes(f.dir)).toEqual(before);
-  await expect(ops.harnessAdopt(f.dir, "round-one", form, "f".repeat(64), f.ctx)).rejects.toThrow("confirmation differs"); expect(bytes(f.dir)).toEqual(before);
+  await expect(ops.harnessClose(f.dir, "round-one", form, "f".repeat(64), f.ctx)).rejects.toThrow("confirmation differs"); expect(bytes(f.dir)).toEqual(before);
   await ops.harnessContrast(f.dir, "round-one", contrast(f.dir), f.ctx); const saved = bytes(f.dir);
   if (!("needsConfirm" in preview)) throw new Error();
-  await expect(ops.harnessAdopt(f.dir, "round-one", form, preview.fingerprint, f.ctx)).rejects.toThrow("stale evidence fingerprint"); expect(bytes(f.dir)).toEqual(saved);
+  await expect(ops.harnessClose(f.dir, "round-one", form, preview.fingerprint, f.ctx)).rejects.toThrow("stale evidence fingerprint"); expect(bytes(f.dir)).toEqual(saved);
 });
 
 test("changed definitions reopen readiness without rewriting old closure, and duplicate decisions remain no-ops", async () => {
   const f = await fixture(), form = decision(f.dir); const first = await close(f.dir, form, f.ctx), before = bytes(f.dir);
-  const repeated = await ops.harnessAdopt(f.dir, "round-one", form, undefined, f.ctx); expect("duplicate" in repeated && repeated.duplicate).toBe(true); expect(bytes(f.dir)).toEqual(before);
+  const repeated = await ops.harnessClose(f.dir, "round-one", form, undefined, f.ctx); expect("duplicate" in repeated && repeated.duplicate).toBe(true); expect(bytes(f.dir)).toEqual(before);
   if (!("record" in repeated) || !("record" in first)) throw new Error("record receipt required");
   expect(repeated.record).toEqual(first.record);
   await ops.harnessSet(f.dir, {...definition(), hypothesis: {deficiency: "Synthetic new observation", predictedChange: "Synthetic new prediction"}}, f.ctx);
-  expect(view(f.dir).transitions.readiness.state).toBe("open"); expect(view(f.dir).historicalImports).toBe(2);
+  expect(view(f.dir).transitions.readiness.state).toBe("stale"); expect(view(f.dir).transitions.closure?.current).toBe(false); expect(view(f.dir).transitions.closures).toHaveLength(1); expect(view(f.dir).historicalImports).toBe(2);
   expect(readLedger(f.dir).filter(e => e.type === "harness.round.closed")).toHaveLength(1);
-  const old = readLedger(f.dir).find(e => e.type === "harness.round.closed")!; expect(old.data.fingerprint).toBe(form.fingerprint);
+  const old = readLedger(f.dir).find(e => e.type === "harness.round.closed")!; expect((old.data.form as {fingerprint: string}).fingerprint).toBe(form.fingerprint);
 });
 
 test("untested or missing refs cannot become contrast evidence, forged metrics/assurance and duplicate ids refuse before writes", async () => {
@@ -92,7 +93,7 @@ test("failed/unknown declarations remain visible and inconclusive/base preservat
     const f = await fixture("gates", state);
     expect(view(f.dir).probes.find(p => p.projection.arm === "candidate")!.projection.state).toBe(state); await ops.harnessContrast(f.dir, "round-one", {...contrast(f.dir), outcome}, f.ctx);
     await ops.harnessCompose(f.dir, "round-one", composition(f.dir, null), f.ctx);
-    await close(f.dir, {...decision(f.dir), decision: "inconclusive"}, f.ctx);
+    await close(f.dir, {...decision(f.dir), outcome: "inconclusive"}, f.ctx);
     expect(view(f.dir).transitions.successor).toBeNull(); expect(view(f.dir).transitions.readiness.transfer).toBe("not-demonstrated");
   }
 });
@@ -102,7 +103,7 @@ test("controlled authored forms need declared source execution and model identit
   await ops.harnessSet(f.dir, {...raw, authoring: "controlled-lane", sourceExecutions: {proposal1: sourceExecution}}, f.ctx);
   await ops.gateDecide(f.dir, "harness:round-one", "approve", undefined, f.ctx);
   for (const name of ["baseline", "candidate"]) await ops.harnessImport(f.dir, raw.id, {...source(name), id: `controlled-${name}`}, f.ctx);
-  const before = bytes(f.dir), c = {...contrast(f.dir), basis: "model-judgment", model: "synthetic-model"};
+  const before = bytes(f.dir), c = {...contrast(f.dir), basis: "blinded-judgment", judge: "model", model: "synthetic-model"};
   await expect(ops.harnessContrast(f.dir, raw.id, c, f.ctx)).rejects.toThrow("declared source execution"); expect(bytes(f.dir)).toEqual(before);
   await ops.harnessContrast(f.dir, raw.id, {...c, sourceExecution}, f.ctx);
   expect(view(f.dir).comparisons[0]).toMatchObject({matched: false, endToEndEvaluation: "unavailable"}); expect(f.transport.requests).toHaveLength(0);
@@ -115,9 +116,9 @@ test("CLI and MCP share transition validation/previews; actor comes from the sur
   expect(await server.handlers.ares_harness_contrast!({study: f.dir, round: "round-one", contrast: form})).toMatchObject({duplicate: true, record: returned.record});
   const comp = composition(f.dir); await server.handlers.ares_harness_compose!({study: f.dir, round: "round-one", composition: comp}); expect(view(f.dir).transitions.composition?.actor.kind).toBe("agent");
   const raw = decision(f.dir), before = bytes(f.dir);
-  const a = JSON.parse((await run(["harness", "adopt", f.dir, "round-one", "--file", "-", "--json"], f.env, {...f.ctx, readStdin: async () => JSON.stringify(raw)})).text);
-  const b = await server.handlers.ares_harness_adopt!({study: f.dir, round: "round-one", decision: raw}); expect(a).toEqual(b); expect(bytes(f.dir)).toEqual(before);
-  await server.handlers.ares_harness_adopt!({study: f.dir, round: "round-one", decision: raw, confirm: a.fingerprint}); expect(view(f.dir).transitions.closure?.actor.kind).toBe("agent");
+  const a = JSON.parse((await run(["harness", "close", f.dir, "round-one", "--file", "-", "--json"], f.env, {...f.ctx, readStdin: async () => JSON.stringify(raw)})).text);
+  const b = await server.handlers.ares_harness_close!({study: f.dir, round: "round-one", closure: raw}); expect(a).toEqual(b); expect(bytes(f.dir)).toEqual(before);
+  await server.handlers.ares_harness_close!({study: f.dir, round: "round-one", closure: raw, confirm: a.fingerprint}); expect(view(f.dir).transitions.closure?.actor.kind).toBe("agent");
   await expect(ops.harnessContrast(f.dir, "round-one", {...contrast(f.dir, "forged-actor"), actor: {kind: "person"}}, f.ctx)).rejects.toThrow("unknown field");
 });
 
@@ -133,7 +134,7 @@ test("showHarness encoded envelope reports truncation/remaining instead of dropp
     }
     const binding = probes[0]!.binding, bucket = transitionBucket(state, raw.id, binding);
     for (let n = 0; n < 48; n++) {
-      const form = {v: 1, id: `contrast-${index}-${n}`, fingerprint: harnessEvidenceFingerprint(binding, probes, bucket), arm: "candidate", outcome: "inconclusive", basis: "human-judgment", observations: "o".repeat(2000), uncertainty: "u".repeat(2000), explanations: Array(8).fill("e".repeat(1000)), evidence: probes.map(p => ({probe: p.projection.id, projectionSha256: p.projectionSha256}))};
+      const form = {v: 1, id: `contrast-${index}-${n}`, fingerprint: harnessEvidenceFingerprint(binding, probes, bucket), arm: "candidate", outcome: "inconclusive", basis: "actor-claim", observations: "o".repeat(2000), uncertainty: "u".repeat(2000), explanations: Array(8).fill("e".repeat(1000)), evidence: probes.map(p => ({probe: p.projection.id, projectionSha256: p.projectionSha256}))};
       const data = {v: 1, round: raw.id, binding, form, sha256: recordHash(form, f.ctx.actor, binding), sourceStrength: "synthetic-fixture"}, type = "harness.contrast.recorded";
       applyTransition(state, {v: 1, actor: f.ctx.actor, at: new Date(0).toISOString(), type, data}, raw as Parameters<typeof applyTransition>[2], binding, probes); pending.push({actor: f.ctx.actor, type, data});
     }
@@ -146,14 +147,56 @@ test("showHarness encoded envelope reports truncation/remaining instead of dropp
 
 test("malformed/future transition receipts and unapproved writes refuse without false closure or partial approvals", async () => {
   const f = await fixture(), before = bytes(f.dir), base = contrast(f.dir);
-  for (const raw of [{...base, v: 2}, {...base, evidence: null}, {...base, basis: "model-judgment"}, {...base, uncertainty: "x".repeat(2001)}]) {
+  for (const raw of [{...base, v: 2}, {...base, evidence: null}, {...base, basis: "blinded-judgment", judge: "model"}, {...base, uncertainty: "x".repeat(2001)}]) {
     await expect(ops.harnessContrast(f.dir, "round-one", raw, f.ctx)).rejects.toThrow(); expect(bytes(f.dir)).toEqual(before);
   }
   await ops.harnessSet(f.dir, {...definition(), hypothesis: {...definition().hypothesis, predictedChange: "Explicit changed hypothesis"}}, f.ctx);
   const noApproval = bytes(f.dir), form = {...decision(f.dir), id: "changed-gate"};
-  const preview = await ops.harnessAdopt(f.dir, "round-one", form, undefined, f.ctx); if (!("needsConfirm" in preview)) throw new Error();
-  await expect(ops.harnessAdopt(f.dir, "round-one", form, preview.fingerprint, f.ctx)).rejects.toThrow("pending"); expect(bytes(f.dir)).toEqual(noApproval);
-  const malformed = {v: 1, round: "round-one", binding: view(f.dir).binding, fingerprint: form.fingerprint, adoptionSha256: "a".repeat(64), sourceStrength: "synthetic-fixture"};
+  const preview = await ops.harnessClose(f.dir, "round-one", form, undefined, f.ctx); if (!("needsConfirm" in preview)) throw new Error();
+  await expect(ops.harnessClose(f.dir, "round-one", form, preview.fingerprint, f.ctx)).rejects.toThrow("pending"); expect(bytes(f.dir)).toEqual(noApproval);
+  const closed = {v: 1, id: "forged-adoption", fingerprint: form.fingerprint, outcome: "adopted-experimental", reason: "Synthetic missing link", adoptionSha256: "a".repeat(64)};
+  const malformed = {v: 1, round: "round-one", binding: view(f.dir).binding, form: closed, sha256: recordHash(closed, f.ctx.actor, view(f.dir).binding), sourceStrength: "synthetic-fixture"};
   commit(f.dir, [], [{actor: f.ctx.actor, type: "harness.round.closed", data: malformed}]);
   expect(() => ops.harnessShow(f.dir)).toThrow("closure lacks its current adoption");
+});
+
+test("adoption records an unavailable independent check separately and atomically links immutable adopted-experimental closure", async () => {
+  const f = await fixture(), raw = {v: 1, id: "adopt-one", fingerprint: view(f.dir).transitions.fingerprint, decision: "adopt", arm: "candidate", reason: "Synthetic experimental preference, no correctness authority", checks: [ref(f.dir, "candidate")], independentCheck: {state: "unavailable" as const, source: {kind: "unavailable" as const, refs: []}}};
+  const before = bytes(f.dir);
+  for (const independentCheck of [undefined, null, {state: "passed", source: {kind: "deterministic-executable", refs: [ref(f.dir, "candidate")]}}, {state: "failed", source: {kind: "deterministic-executable", refs: [ref(f.dir, "candidate")]}}, {state: "unavailable", source: {kind: "blinded-judgment", refs: []}}, {state: "unavailable", source: {kind: "actor-claim", refs: []}}]) {
+    await expect(ops.harnessAdopt(f.dir, "round-one", {...raw, independentCheck}, undefined, f.ctx)).rejects.toThrow(); expect(bytes(f.dir)).toEqual(before);
+  }
+  const a = await ops.harnessAdopt(f.dir, "round-one", raw, undefined, f.ctx), server = createAresMcp(f.env, f.ctx.http, f.ctx);
+  expect(await server.handlers.ares_harness_adopt!({study: f.dir, round: "round-one", decision: raw})).toEqual(a); expect(bytes(f.dir)).toEqual(before);
+  if (!("needsConfirm" in a)) throw new Error();
+  await server.handlers.ares_harness_adopt!({study: f.dir, round: "round-one", decision: raw, confirm: a.fingerprint});
+  const current = view(f.dir).transitions, tail = readLedger(f.dir).slice(-2);
+  expect(tail.map(event => event.type)).toEqual(["harness.adoption.decided", "harness.round.closed"]); expect(tail[0]!.at).toBe(tail[1]!.at);
+  expect(current.adoption?.form.independentCheck).toEqual(raw.independentCheck);
+  expect(current.closure).toMatchObject({outcome: "adopted-experimental", roundBinding: view(f.dir).binding, evidenceFingerprint: raw.fingerprint, actor: {kind: "agent"}, reason: raw.reason, current: true});
+  expect(current.closure?.form.adoptionSha256).toBe(current.adoption?.sha256);
+  expect(current.readiness).toMatchObject({experimental: true, correctness: "unavailable", transfer: "not-demonstrated"});
+});
+
+test("baseline-kept, inconclusive and withdrawn close without any adoption; current closure cannot be overwritten", async () => {
+  for (const outcome of ["baseline-kept", "inconclusive", "withdrawn"] as const) {
+    const f = await fixture(), form = {...decision(f.dir), outcome}; await close(f.dir, form, f.ctx);
+    const current = view(f.dir).transitions, before = bytes(f.dir);
+    expect(current.adoption).toBeNull(); expect(current.closure?.outcome).toBe(outcome); expect(current.closure?.current).toBe(true); expect(current.closure?.reason).toBe(form.reason);
+    expect(readLedger(f.dir).some(event => event.type === "harness.adoption.decided")).toBe(false);
+    await expect(ops.harnessClose(f.dir, "round-one", {...form, id: "rewrite-closure", outcome: outcome === "withdrawn" ? "inconclusive" : "withdrawn"}, undefined, f.ctx)).rejects.toThrow("immutable closure"); expect(bytes(f.dir)).toEqual(before);
+    await expect(ops.harnessClose(f.dir, "round-one", {...form, id: "fake-adoption", outcome: "adopted-experimental"}, undefined, f.ctx)).rejects.toThrow("use ares harness adopt"); expect(bytes(f.dir)).toEqual(before);
+  }
+});
+
+test("contrast provenance labels do not promote claims or blinded judgments into observed deterministic checks", async () => {
+  const f = await fixture();
+  for (const [index, provenance] of [{basis: "deterministic-check"}, {basis: "actor-claim", model: "synthetic-model"}, {basis: "blinded-judgment", judge: "human"}, {basis: "blinded-judgment", judge: "model", model: "synthetic-model"}].entries()) {
+    await ops.harnessContrast(f.dir, "round-one", {...contrast(f.dir, `provenance-${index}`), ...provenance}, f.ctx);
+    expect(view(f.dir).transitions.contrasts.at(-1)).toMatchObject({form: provenance, sourceStrength: "synthetic-fixture", matched: false});
+  }
+  const before = bytes(f.dir);
+  for (const raw of [{...contrast(f.dir, "bad-judge"), basis: "blinded-judgment"}, {...contrast(f.dir, "bad-model"), basis: "blinded-judgment", judge: "model"}, {...contrast(f.dir, "mixed-provenance"), basis: "deterministic-check", judge: "human"}]) {
+    await expect(ops.harnessContrast(f.dir, "round-one", raw, f.ctx)).rejects.toThrow(); expect(bytes(f.dir)).toEqual(before);
+  }
 });

@@ -1,4 +1,4 @@
-import {transitionState, transitionBucket, transitionView, harnessEvidenceFingerprint, applyTransition, parseContrast, parseComposition, parseAdoption, transitionKey, recordHash, transitionFail, type HarnessAdoption, type HarnessContrast, type HarnessComposition, type Recorded} from "./transitions.ts";
+import {transitionState, transitionBucket, transitionView, harnessEvidenceFingerprint, applyTransition, parseContrast, parseComposition, parseAdoption, parseClosure, closureFromAdoption, transitionKey, recordHash, transitionFail, type HarnessAdoption, type HarnessClosure, type HarnessContrast, type HarnessComposition, type Recorded} from "./transitions.ts";
 import {requireRoundExperiences} from "./experience.ts";
 import {hasHarnessCredential} from "./privacy.ts";
 import {lstatSync} from "node:fs";
@@ -140,7 +140,7 @@ export function showHarness(dirArg: string, roundId?: string) {
   if (roundId !== undefined && !rounds.length) fail("round missing");
   const views = rounds.map(round => {
     const probes = current.probes.filter(probe => probe.round === round.id), active = probes.filter(probe => probe.binding === binding(round)), baseline = active.find(probe => probe.projection.arm === "baseline");
-    return {definition: round, binding: binding(round), transitions: transitionView(round, binding(round), active, transitionBucket(current.transitions, round.id, binding(round))), historicalImports: probes.length - active.length, probes: active, comparisons: active.filter(probe => probe.projection.arm !== "baseline").map(probe => ({arm: probe.projection.arm, ...(baseline ? compareProbeFixtures(baseline.projection, probe.projection) : {compatible: false, matched: false, sourceStrength: "synthetic-fixture", endToEndEvaluation: "unavailable", reasons: ["baseline-unavailable"], confounders: ["producer-unavailable"]})}))};
+    return {definition: round, binding: binding(round), transitions: transitionView(round, binding(round), active, transitionBucket(current.transitions, round.id, binding(round)), current.transitions.closures.get(round.id)), historicalImports: probes.length - active.length, probes: active, comparisons: active.filter(probe => probe.projection.arm !== "baseline").map(probe => ({arm: probe.projection.arm, ...(baseline ? compareProbeFixtures(baseline.projection, probe.projection) : {compatible: false, matched: false, sourceStrength: "synthetic-fixture", endToEndEvaluation: "unavailable", reasons: ["baseline-unavailable"], confounders: ["producer-unavailable"]})}))};
   });
   const result = (visible: typeof views) => ({v: 1, endToEndEvaluation: "unavailable" as const, realImport: "unavailable" as const, rounds: visible, truncated: visible.length !== views.length, remaining: views.length - visible.length});
   const visible: typeof views = [];
@@ -148,30 +148,36 @@ export function showHarness(dirArg: string, roundId?: string) {
   return result(visible);
 }
 
-export type HarnessTransitionResult = {record: Recorded<HarnessContrast | HarnessComposition | HarnessAdoption>; duplicate: boolean; experimental: true; matched: false; endToEndEvaluation: "unavailable"; nextStep: string} | {needsConfirm: true; fingerprint: string; preview: string[]};
+export type HarnessTransitionResult = {record: Recorded<HarnessContrast | HarnessComposition | HarnessAdoption | HarnessClosure>; duplicate: boolean; experimental: true; matched: false; endToEndEvaluation: "unavailable"; nextStep: string} | {needsConfirm: true; fingerprint: string; preview: string[]};
 /** Caller holds the study lock. Preview and unsuccessful validation never emit approvals or transition records. */
-export function recordHarnessTransition(dirArg: string, roundId: string, kind: "contrast" | "composition" | "adoption", raw: unknown, actor: Actor, confirm?: string): HarnessTransitionResult {
+export function recordHarnessTransition(dirArg: string, roundId: string, kind: "contrast" | "composition" | "adoption" | "closure", raw: unknown, actor: Actor, confirm?: string): HarnessTransitionResult {
   const current = read(dirArg), round = current.rounds.find(round => round.id === id(roundId)); if (!round) fail("round missing");
-  const form = kind === "contrast" ? parseContrast(raw) : kind === "composition" ? parseComposition(raw) : parseAdoption(raw);
+  const form = kind === "contrast" ? parseContrast(raw) : kind === "composition" ? parseComposition(raw) : kind === "adoption" ? parseAdoption(raw) : parseClosure(raw);
   if (Buffer.byteLength(canonical(form)) > HARNESS_FORM_BYTES) transitionFail("form exceeds 64 KiB");
   const key = transitionKey(round.id, kind, form.id), previous = current.transitions.records.get(key);
   if (previous) {
     if (canonical(previous.form) !== canonical(form)) transitionFail("transition id reused with changed content");
     return {record: previous, duplicate: true, experimental: true, matched: false, endToEndEvaluation: "unavailable", nextStep: "Inspect ares harness show --json for the current readiness; this receipt is an idempotent historical result"};
   }
+  if (kind === "closure" && (form as HarnessClosure).outcome === "adopted-experimental") transitionFail("use ares harness adopt for an adopted-experimental closure");
   const hash = binding(round), probes = current.probes.filter(probe => probe.round === round.id && probe.binding === hash), bucket = transitionBucket(current.transitions, round.id, hash);
   if (form.fingerprint !== harnessEvidenceFingerprint(hash, probes, bucket)) transitionFail("stale evidence fingerprint");
-  const type = kind === "contrast" ? "harness.contrast.recorded" : kind === "composition" ? "harness.composition.recorded" : "harness.adoption.decided";
+  const type = kind === "contrast" ? "harness.contrast.recorded" : kind === "composition" ? "harness.composition.recorded" : kind === "adoption" ? "harness.adoption.decided" : "harness.round.closed";
   const recordSha = recordHash(form, actor, hash), data = {v: 1, round: round.id, binding: hash, form, sha256: recordSha, sourceStrength: "synthetic-fixture"};
   const event: LedgerEvent = {v: 1, at: new Date(0).toISOString(), actor, type, data};
   applyTransition(current.transitions, event, round, hash, probes);
-  if (Buffer.byteLength(canonical({round, probes, transitions: transitionView(round, hash, probes, bucket)})) > HARNESS_INDEX_BYTES - HARNESS_FORM_BYTES) transitionFail("current round evidence view would exceed its 1 MiB bound; keep the existing round and start a separately identified round/study");
+  const pending = [{actor, type, data}];
+  if (kind === "adoption") {
+    const closed = closureFromAdoption(form as HarnessAdoption, recordSha), closedData = {v: 1, round: round.id, binding: hash, form: closed, sha256: recordHash(closed, actor, hash), sourceStrength: "synthetic-fixture"};
+    const closeEvent: LedgerEvent = {v: 1, at: event.at, actor, type: "harness.round.closed", data: closedData};
+    applyTransition(current.transitions, closeEvent, round, hash, probes); pending.push({actor, type: closeEvent.type, data: closedData});
+  }
+  if (Buffer.byteLength(canonical({round, probes, transitions: transitionView(round, hash, probes, bucket, current.transitions.closures.get(round.id))})) > HARNESS_INDEX_BYTES - HARNESS_FORM_BYTES) transitionFail("current round evidence view would exceed its 1 MiB bound; keep the existing round and start a separately identified round/study");
   const fingerprint = sha256(canonical({binding: hash, form}));
-  if (kind === "adoption" && confirm === undefined) return {needsConfirm: true, fingerprint, preview: ["Experimental fixture-only disposition; correctness and transfer remain unavailable", `Decision ${(form as HarnessAdoption).decision} for ${(form as HarnessAdoption).arm}`, bucket.composition?.form.successorSha256 ? "A new successor needs its own exact execution; identical preserved bytes reuse their receipt" : "No successor execution is inferred", "No native attempt, scientific metric, selection or final authority is created"]};
-  if (kind === "adoption" && confirm !== fingerprint) transitionFail("confirmation differs; open a new harness adoption preview");
+  if ((kind === "adoption" || kind === "closure") && confirm === undefined) return {needsConfirm: true, fingerprint, preview: ["Experimental fixture-only disposition; correctness and transfer remain unavailable", kind === "adoption" ? `Adopt ${(form as HarnessAdoption).arm} with independent check unavailable` : `Close ${(form as HarnessClosure).outcome} without adoption`, bucket.composition?.form.successorSha256 ? "A new successor needs its own exact execution; identical preserved bytes reuse their receipt" : "No successor execution is inferred", "No native attempt, scientific metric, selection or final authority is created"]};
+  if ((kind === "adoption" || kind === "closure") && confirm !== fingerprint) transitionFail("confirmation differs; open a new harness adopt/close preview");
   const approval = requireGate(current.dir, current.study, `harness:${round.id}`, gate => gate === `harness:${round.id}` ? hash : undefined);
-  const written = commit(current.dir, [], [...approval, {actor, type, data}, ...(kind === "adoption" ? [{actor, type: "harness.round.closed", data: {v: 1, round: round.id, binding: hash, adoptionSha256: recordSha, fingerprint: form.fingerprint, sourceStrength: "synthetic-fixture"}}] : [])]);
-  if (kind === "adoption") bucket.closed = recordSha;
+  const written = commit(current.dir, [], [...approval, ...pending]);
   const record = {...current.transitions.records.get(key)!, at: written.find(event => event.type === type)!.at};
-  return {record, duplicate: false, experimental: true, matched: false, endToEndEvaluation: "unavailable", nextStep: transitionView(round, hash, probes, bucket).nextStep};
+  return {record, duplicate: false, experimental: true, matched: false, endToEndEvaluation: "unavailable", nextStep: transitionView(round, hash, probes, bucket, current.transitions.closures.get(round.id)).nextStep};
 }

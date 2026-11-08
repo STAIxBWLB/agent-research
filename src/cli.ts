@@ -212,10 +212,10 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       count(spec, positional, 2); const model = str("--model"), runtime = str("--runtime"); if (!model || !runtime) throw new Error(`usage: ares ${spec.usage}`);
       result = await ops.experienceCheck(positional[0]!, positional[1]!, {model, runtime}, ctx, env); break;
     }
-    case "harness contrast": case "harness compose": case "harness adopt": {
+    case "harness contrast": case "harness compose": case "harness adopt": case "harness close": {
       count(spec, positional, 2); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);
       const form = await readInput(file, io);
-      result = spec.name === "harness contrast" ? await ops.harnessContrast(positional[0]!, positional[1]!, form, ctx) : spec.name === "harness compose" ? await ops.harnessCompose(positional[0]!, positional[1]!, form, ctx) : await ops.harnessAdopt(positional[0]!, positional[1]!, form, str("--confirm"), ctx); break;
+      result = spec.name === "harness contrast" ? await ops.harnessContrast(positional[0]!, positional[1]!, form, ctx) : spec.name === "harness compose" ? await ops.harnessCompose(positional[0]!, positional[1]!, form, ctx) : spec.name === "harness close" ? await ops.harnessClose(positional[0]!, positional[1]!, form, str("--confirm"), ctx) : await ops.harnessAdopt(positional[0]!, positional[1]!, form, str("--confirm"), ctx); break;
     }
     case "harness set": {
       count(spec, positional, 1); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);

@@ -121,6 +121,7 @@ export const experienceCheck = (dir: string, round: string, identity: {model: st
 export const harnessSet = (dir: string, raw: unknown, ctx: Ctx) => withLock(dir, () => setHarnessRound(dir, raw, ctx.actor));
 export const harnessContrast = (dir: string, round: string, raw: unknown, ctx: Ctx) => withLock(dir, () => recordHarnessTransition(dir, round, "contrast", raw, ctx.actor));
 export const harnessCompose = (dir: string, round: string, raw: unknown, ctx: Ctx) => withLock(dir, () => recordHarnessTransition(dir, round, "composition", raw, ctx.actor));
+export const harnessClose = (dir: string, round: string, raw: unknown, confirm: string | undefined, ctx: Ctx) => withLock(dir, () => recordHarnessTransition(dir, round, "closure", raw, ctx.actor, confirm));
 export const harnessAdopt = (dir: string, round: string, raw: unknown, confirm: string | undefined, ctx: Ctx) => withLock(dir, () => recordHarnessTransition(dir, round, "adoption", raw, ctx.actor, confirm));
 export const harnessShow = (dir: string, round?: string) => showHarness(dir, round);
 export const harnessImport = (dir: string, round: string, raw: unknown, ctx: Ctx) => withLock(dir, () => importHarnessFixture(dir, round, raw, ctx.actor));

@@ -295,9 +295,10 @@ export default (host) => {
       if (!contrasts.length) sections.push(ui.empty("No recorded contrasts"));
       for (const entry of contrasts) {
         const form = record(entry.form), evidence = rows(form.evidence).slice(0, 16);
+        const account = form.basis === "actor-claim" ? "Actor claim (not observed evidence)" : form.basis === "blinded-judgment" ? "Recorded blinded judgment" : form.basis === "deterministic-check" ? "Recorded deterministic-check account" : "Recorded account (basis unavailable)";
         sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: `Recorded contrast ${text(form.id)}`}),
-          h("p", {text: `${text(form.arm)} | outcome ${text(form.outcome)} | basis ${text(form.basis)} | model ${text(form.model, "not declared")}`}),
-          h("p", {class: "ares-prose", text: `Observations: ${describe(form.observations)}`}), h("p", {class: "ares-prose", text: `Uncertainty: ${describe(form.uncertainty)}`}),
+          h("p", {text: `${text(form.arm)} | outcome ${text(form.outcome)} | provenance basis ${text(form.basis)}${form.basis === "blinded-judgment" ? ` | judge ${text(form.judge, "not declared")}` : ""} | model ${text(form.model, "not declared")}`}),
+          h("p", {class: "ares-prose", text: `${account}: ${describe(form.observations)}`}), h("p", {class: "ares-prose", text: `Uncertainty: ${describe(form.uncertainty)}`}),
           h("p", {class: "ares-prose", text: `Explanations: ${describe(form.explanations)}`}), h("p", {class: "ares-sub", text: recorded(entry)}),
           ui.table({caption: "Recorded contrast evidence references", columns: [{key: "probe", label: "Probe"}, {key: "projection", label: "Projection SHA-256"}, {key: "output", label: "Output manifest SHA-256"}],
             rows: evidence.map(item => ({probe: typeof item.probe === "string" ? item.probe : text(record(item.probe).id), projection: text(item.projectionSha256), output: text(item.outputManifestHash, "not recorded")}))}),
@@ -312,12 +313,26 @@ export default (host) => {
           rows: edits.map(edit => ({section: text(edit.section), decision: text(edit.decision), contrasts: rows(edit.contrasts).slice(0, 16).map(contrast => `${text(contrast.id)} @ ${text(contrast.sha256)}`).join("; ") || "none recorded", reason: describe(edit.reason)}))}),
         rows(compositionForm.sections).length > edits.length || edits.some(edit => rows(edit.contrasts).length > 16) ? ui.notice("Composition display shortened to bounded sections or contrast references.", "warn") : null));
       else sections.push(ui.empty("No recorded composition"));
+      const adoption = record(transitions.adoption), adoptionForm = record(adoption.form), independent = record(adoptionForm.independentCheck), checkSource = record(independent.source);
+      if (transitions.adoption) sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: `Recorded adoption ${text(adoptionForm.id)}`}),
+        h("p", {text: `${text(adoptionForm.decision)} | arm ${text(adoptionForm.arm)} | ${describe(adoptionForm.reason)}`}), h("p", {class: "ares-sub", text: recorded(adoption)}),
+        ui.chip(`Independent check state: ${text(independent.state, "unavailable")}`, "neutral"), h("p", {text: `Independent check source kind: ${text(checkSource.kind, "unavailable")}`}),
+        ui.notice("Judgment basis and independent-check source/status are separate. Synthetic fixture references do not promote a check into verified correctness or transfer evidence.", "neutral"),
+        ui.table({caption: "Recorded adoption probe references", columns: [{key: "probe", label: "Declared probe"}, {key: "projection", label: "Projection SHA-256"}, {key: "output", label: "Output manifest SHA-256"}], rows: rows(adoptionForm.checks).slice(0, 16).map(ref => ({probe: text(ref.probe), projection: text(ref.projectionSha256), output: text(ref.outputManifestHash, "not recorded")}))}),
+        rows(adoptionForm.checks).length > 16 ? ui.notice("Adoption probe references shortened to sixteen records.", "warn") : null,
+        ui.table({caption: "Recorded independent-check source references", columns: [{key: "probe", label: "Probe"}, {key: "projection", label: "Projection SHA-256"}, {key: "output", label: "Output manifest SHA-256"}], rows: rows(checkSource.refs).slice(0, 16).map(ref => ({probe: text(ref.probe), projection: text(ref.projectionSha256), output: text(ref.outputManifestHash, "not recorded")}))}),
+        rows(checkSource.refs).length > 16 ? ui.notice("Independent-check references shortened to sixteen records.", "warn") : null));
       const closure = record(transitions.closure), closureForm = record(closure.form);
       if (transitions.closure) sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: `Recorded closure ${text(closureForm.id)}`}),
         ui.chip(closure.current === true ? "current closure" : "stale closure", closure.current === true ? "neutral" : "warn"),
-        h("p", {text: `${text(closureForm.decision)} | arm ${text(closureForm.arm)} | ${describe(closureForm.reason)}`}), h("p", {class: "ares-sub", text: recorded(closure)}),
-        ui.notice("A recorded adopt disposition does not activate guidance or demonstrate correctness or transfer.", "neutral")));
-      else sections.push(ui.empty("Round remains open", "No closure disposition is recorded."));
+        h("p", {text: `Recorded outcome: ${text(closureForm.outcome)} | ${describe(closureForm.reason)}`}), h("p", {class: "ares-sub", text: recorded(closure)}),
+        h("p", {text: `Binding ${text(closure.binding)} | synthetic-fixture | matched: false${typeof closureForm.adoptionSha256 === "string" ? ` | adoption SHA-256 ${closureForm.adoptionSha256}` : ""}`}),
+        ui.notice("An adopted-experimental closure does not activate guidance or demonstrate correctness or transfer.", "neutral")));
+      else sections.push(ui.empty("Round remains open", "No immutable closure is recorded."));
+      const history = rows(transitions.closures).slice(0, 16);
+      if (history.length) sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: "Recorded closure history"}),
+        ui.table({caption: "Immutable closure records", columns: [{key: "id", label: "Closure"}, {key: "outcome", label: "Recorded outcome"}, {key: "currency", label: "Binding state"}, {key: "binding", label: "Binding"}, {key: "record", label: "Recorded hash / actor / time"}], rows: history.map(entry => ({id: text(record(entry.form).id), outcome: text(record(entry.form).outcome), currency: entry.current === true ? "current" : entry.current === false ? "stale" : "not asserted", binding: text(entry.binding), record: recorded(entry)}))})));
+      if (rows(transitions.closures).length > history.length) sections.push(ui.notice(`${rows(transitions.closures).length - history.length} more closure records; inspect the complete immutable history with the CLI.`, "warn"));
       const successor = record(transitions.successor);
       if (transitions.successor) sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: "Successor guidance"}),
         h("p", {text: `SHA-256 ${text(successor.guidanceSha256)} | ${text(successor.execution)}${typeof successor.probeId === "string" ? ` | probe ${successor.probeId}` : ""}`}),
