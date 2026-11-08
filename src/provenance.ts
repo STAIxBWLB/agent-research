@@ -86,7 +86,8 @@ function capture(dir: string): Snapshot {
   for (const [name, file] of files) if (name === "executor.json" || /\/attempts\//.test(name)) {
     const raw = parsed(file); if (!plain(raw)) continue;
     const executor = name === "executor.json" ? raw : plain(raw.executor) ? raw.executor : {};
-    for (const location of [executor.workdir]) if (typeof location === "string" && location.startsWith("/")) { let address = resolve(location); try { address = realpathSync(address); } catch { /* An absent workdir has no readable output tree. */ } const inside = relative(dir, address); if (inside === "" || inside !== ".." && !inside.startsWith(".." + sep)) forbidden.push(inside.split(sep).join("/")); }
+    const paths = name !== "executor.json" && plain(raw.paths) ? raw.paths : {};
+    for (const location of [executor.workdir, paths.snapshot, paths.output, paths.result]) if (typeof location === "string" && location.startsWith("/")) { let address = resolve(location); try { address = realpathSync(address); } catch { /* An absent output location has no readable tree. */ } const inside = relative(dir, address); if (inside === "" || inside !== ".." && !inside.startsWith(".." + sep)) forbidden.push(inside.split(sep).join("/")); }
   }
   const safe = (name: string) => { if (forbidden.some(prefix => !prefix || name === prefix || name.startsWith(prefix + "/"))) fail("executor-overlaps-source"); };
   const taskHashes: [string, string][] = []; let taskBytes = 0, taskDirectories = 0;
@@ -147,19 +148,21 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
     if (event.type === "review.added" && typeof event.data.id === "string") reviewIndexes.set(event.data.id, index);
     if (event.type === "skill.proposed" && plain(event.data.proposal) && typeof event.data.proposal.name === "string") skillIndexes.set(event.data.proposal.name, index);
   }
-  const attempts = new Map<string, { value: Attempt; file: string; ref: ExecutionReferenceV1 }>();
+  const attempts = new Map<string, { value: Attempt; file: string; ref: ExecutionReferenceV1 }>(), attemptCounts = new Map<string, number>();
+  for (const file of source.files.keys()) { const id = /^runs\/[^/]+\/attempts\/([a-f0-9]{16})\.json$/.exec(file)?.[1]; if (id) attemptCounts.set(id, (attemptCounts.get(id) ?? 0) + 1); }
   try {
     for (const [file, bytes] of source.files) {
       const path = /^runs\/([A-Za-z0-9][A-Za-z0-9_-]{0,63})\/attempts\/([a-f0-9]{16})\.json$/.exec(file); if (!path) continue;
       const raw = parsed(bytes); let value: Attempt;
       try { value = validateAttemptRecord(raw, path[1]!, path[2]!); } catch (error) { graph.issue(error instanceof Error && error.message.includes("unsupported") ? "unsupported-attempt" : "corrupt-attempt"); continue; }
       const ref = graph.ref("attempt", value.id), proof = graph.proof(file);
-      if (attempts.has(value.id)) { graph.issue("duplicate-attempt-id", ref); continue; }
-      attempts.set(value.id, { value, file, ref });
+      if (!attempts.has(value.id)) attempts.set(value.id, { value, file, ref });
       const latest = latestAttempts.get(value.id);
       const start = starts.get(value.id) ?? [];
       const identity = value.studyId !== source.study.id || typeof value.commit !== "string" || !/^[a-f0-9]{40}$/.test(value.commit) || !Number.isSafeInteger(value.seed);
-      const issue = identity ? "attempt-study-identity-mismatch" : start.length === 0 ? "missing-attempt-start-receipt" : start.length > 1 ? "duplicate-attempt-start-receipt" : start[0]!.data.run !== value.run || start[0]!.data.commit !== value.commit || start[0]!.data.seed !== value.seed ? "attempt-start-identity-mismatch" : latest?.data.status !== undefined && latest.data.status !== value.status ? "attempt-receipt-mismatch" : undefined;
+      const retryInvalid = value.retryOf !== undefined && (typeof value.retryOf !== "string" || !ATTEMPT.test(value.retryOf) || value.retryOf === value.id);
+      const outputsInvalid = !Array.isArray(value.outputs) || value.outputs.length > 500 || value.outputs.some(output => !plain(output) || typeof output.sha256 !== "string" || !HASH.test(output.sha256) || !Number.isSafeInteger(output.bytes) || output.bytes < 0);
+      const issue = (attemptCounts.get(value.id) ?? 0) > 1 ? "duplicate-attempt-id" : retryInvalid ? "corrupt-retry-reference" : outputsInvalid ? "corrupt-output-inventory" : identity ? "attempt-study-identity-mismatch" : start.length === 0 ? "missing-attempt-start-receipt" : start.length > 1 ? "duplicate-attempt-start-receipt" : start[0]!.data.run !== value.run || start[0]!.data.commit !== value.commit || start[0]!.data.seed !== value.seed ? "attempt-start-identity-mismatch" : latest?.data.status !== undefined && latest.data.status !== value.status ? "attempt-receipt-mismatch" : undefined;
       graph.put({ ref, state: issue ? "corrupt" : "current", availability: "available", proof, data: { status: value.status, stage: value.stage, seed: Number.isSafeInteger(value.seed) ? value.seed : null } });
       if (value.studyId === source.study.id) owned(ref, proof);
       if (issue) graph.issue(issue, ref);
@@ -167,11 +170,8 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
     for (const { value, file, ref } of attempts.values()) {
       if (graph.nodes.get(key(ref))?.state !== "current") continue;
       const proof = graph.proof(file);
-      if (value.retryOf !== undefined) { if (typeof value.retryOf !== "string" || !ATTEMPT.test(value.retryOf)) graph.issue("corrupt-retry-reference", ref); else graph.edge(ref, graph.target("attempt", value.retryOf, proof), "retryOf", proof); }
-      if (!Array.isArray(value.outputs)) { graph.issue("corrupt-output-inventory", ref); continue; }
-      if (value.outputs.length > 500) throw new TraversalCap();
+      if (value.retryOf !== undefined) graph.edge(ref, graph.target("attempt", value.retryOf, proof), "retryOf", proof);
       for (const output of value.outputs) { graph.touch();
-        if (!plain(output) || typeof output.sha256 !== "string" || !HASH.test(output.sha256) || !Number.isSafeInteger(output.bytes) || output.bytes < 0) { graph.issue("corrupt-output-inventory", ref); continue; }
         const artifact = graph.ref("artifact", output.sha256, { sha256: output.sha256 });
         graph.put({ ref: artifact, state: "current", availability: "not-read", proof, data: { bytes: output.bytes, bodyRead: false } }); graph.edge(ref, artifact, "produced", proof);
       }
@@ -331,6 +331,7 @@ function empty(status: ProvenancePage["status"], code: string, source?: Snapshot
 }
 /** Lock-free, local, in-process projection. Source readers never repair files or read the executor/hub. */
 export function readProvenance(dirArg: string, options: ProvenanceOptions = {}): ProvenancePage {
+  if (!plain(options as unknown) || Object.keys(options).some(name => !["cursor", "nodeLimit", "edgeLimit", "traversalLimit"].includes(name)) || Object.hasOwn(options, "cursor") && typeof options.cursor !== "string") throw new Error("provenance options: use only cursor (string), nodeLimit, edgeLimit and traversalLimit; correct the options before retrying");
   const nodeLimit = options.nodeLimit ?? PROVENANCE_NODE_LIMIT, edgeLimit = options.edgeLimit ?? PROVENANCE_EDGE_LIMIT, traversal = options.traversalLimit ?? PROVENANCE_TRAVERSAL;
   if (!Number.isSafeInteger(nodeLimit) || nodeLimit < 1 || nodeLimit > PROVENANCE_NODE_LIMIT || !Number.isSafeInteger(edgeLimit) || edgeLimit < 1 || edgeLimit > PROVENANCE_EDGE_LIMIT || !Number.isSafeInteger(traversal) || traversal < 1 || traversal > PROVENANCE_TRAVERSAL) throw new Error("provenance page bounds: use 1..100 nodes, 1..200 edges and traversal 1..1000 before retrying");
   let source: Snapshot, dir: string;

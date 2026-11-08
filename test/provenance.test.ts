@@ -358,3 +358,38 @@ for (const scenario of ["missing", "foreign", "run", "commit", "seed", "duplicat
   expect(page.issues.some(value => value.code === issue && value.ref?.id === id)).toBe(true);
   expect(page.edges.some(value => value.from.kind === "attempt" && value.from.id === id && ["retryOf", "produced"].includes(value.relation))).toBe(false);
 });
+
+for (const location of ["snapshot", "output", "result"] as const) test(`attempt ${location} under task is excluded before opening output bodies`, async () => {
+  const f = await provenanceFixture(), file = join(f.dir, `runs/investigate/attempts/${f.ids.retryAttempt}.json`), record = JSON.parse(readTextBounded(file, ATTEMPT_BYTES));
+  const folder = join(f.dir, "task/private-output"); fs.mkdirSync(folder); writeAtomic(join(folder, "private.bin"), "Synthetic private body", 1024);
+  record.paths[location] = folder; record.executor.workdir = "/synthetic-unrelated-workdir"; writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES);
+  const original = fs.openSync, opened: string[] = [], guard = spyOn(fs, "openSync").mockImplementation(((file: fs.PathLike, ...args: unknown[]) => {
+    if (String(file).includes("/task/private-output/")) { opened.push(String(file)); throw new Error("private output read"); }
+    return Reflect.apply(original, fs, [file, ...args]);
+  }) as typeof fs.openSync);
+  try { const page = readProvenance(f.dir); expect(page.status).toBe("unavailable"); expect(page.issues[0]?.code).toBe("executor-overlaps-source"); expect(opened).toEqual([]); }
+  finally { guard.mockRestore(); }
+});
+
+for (const scenario of ["retry", "inventory", "duplicate"] as const) test(`corrupt ${scenario} quarantines the whole attempt before any output or retry edge`, async () => {
+  const f = await provenanceFixture(), id = f.ids.retryAttempt, file = join(f.dir, `runs/investigate/attempts/${id}.json`), record = JSON.parse(readTextBounded(file, ATTEMPT_BYTES));
+  const unique = sha256(`Synthetic quarantined ${scenario}`); record.outputs.push({ path: "/synthetic-output", sha256: unique, bytes: 1 });
+  if (scenario === "retry") record.retryOf = "invalid-reference";
+  if (scenario === "inventory") record.outputs.push({ path: "/synthetic-output", sha256: "invalid-digest", bytes: 1 });
+  writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES);
+  if (scenario === "duplicate") { record.run = "duplicate"; fs.mkdirSync(join(f.dir, "runs/duplicate/attempts"), { recursive: true }); writeAtomic(join(f.dir, `runs/duplicate/attempts/${id}.json`), JSON.stringify(record), ATTEMPT_BYTES); }
+  const page = readProvenance(f.dir); expect(page.status).toBe("unavailable"); expect(node(page, "attempt", id).state).toBe("corrupt");
+  expect(page.issues.some(issue => issue.code === (scenario === "retry" ? "corrupt-retry-reference" : scenario === "inventory" ? "corrupt-output-inventory" : "duplicate-attempt-id"))).toBe(true);
+  expect(page.edges.filter(link => link.from.kind === "attempt" && link.from.id === id && ["produced", "retryOf"].includes(link.relation))).toEqual([]);
+  expect(page.nodes.some(value => value.ref.kind === "artifact" && value.ref.id === unique)).toBe(false);
+  if (scenario === "duplicate") {
+    const proofs = page.edges.filter(link => link.relation === "contains" && link.to.kind === "attempt" && link.to.id === id).map(link => link.proof.file).sort();
+    expect(proofs).toEqual([`runs/duplicate/attempts/${id}.json`, `runs/investigate/attempts/${id}.json`]);
+  }
+});
+
+test("provenance options refuse unknown keys and non-string cursors before reading sources", () => {
+  for (const options of [{ nodeLimits: 1 }, { cursor: 42 }, { cursor: null }, { cursor: undefined }]) {
+    expect(() => readProvenance("/synthetic-nonexistent-study", options as never)).toThrow("use only cursor (string), nodeLimit, edgeLimit and traversalLimit");
+  }
+});
