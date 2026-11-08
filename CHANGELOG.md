@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fix release clean-install smoke to compare installed schema versions with the checkout's FORMAT_VERSIONS, including study v2; an offline regression runs in the ordinary check (#88).
+
 ## [0.2.0] - 2026-11-07
 
 N-1 compatibility against 0.1.0, the latest published patch of the 0.1 minor line, checked by the `n1` CI job (`bun scripts/n1-check.ts`) on this release commit:

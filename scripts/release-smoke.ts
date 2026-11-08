@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, join, relative, resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
+import { FORMAT_VERSIONS } from "../src/manifest.ts";
 import { readBytesBounded, readTextBounded } from "../src/study.ts";
 import { isolatedEnv, verifyStaged, type ReleaseManifest } from "./release.ts";
 
@@ -44,9 +46,9 @@ function child(command: string, args: string[], cwd: string, env: NodeJS.Process
     proc.stdin.end(input);
   });
 }
-function manifestTools(manifest: ObjectValue, version: string): Map<string, boolean> {
+export function manifestTools(manifest: ObjectValue, version: string): Map<string, boolean> {
   requireValue(manifest.v === 1 && manifest.name === "ares" && manifest.version === version, "installed manifest identity mismatch");
-  requireValue(object(manifest.formats) && manifest.formats.manifest === 1 && Object.values(manifest.formats).every(value => value === 1), "installed manifest formats mismatch");
+  requireValue(object(manifest.formats) && manifest.formats.manifest === 1 && isDeepStrictEqual(manifest.formats, FORMAT_VERSIONS), "installed manifest formats mismatch");
   requireValue(object(manifest.mcp) && manifest.mcp.server === "ares" && Array.isArray(manifest.mcp.tools) && manifest.mcp.tools.length > 0, "installed manifest MCP tools missing");
   const tools = new Map<string, boolean>();
   for (const tool of manifest.mcp.tools) {
