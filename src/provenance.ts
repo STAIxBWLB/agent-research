@@ -21,7 +21,7 @@ export const PROVENANCE_KINDS = KINDS;
 export type ProvenanceKind = typeof KINDS[number];
 export interface ExecutionReferenceV1 { v: 1; tool: "ares"; projectKey: string; kind: ProvenanceKind; id: string; revision?: string; sha256?: string }
 export type ProvenanceState = "current" | "historical" | "corrupt" | "unavailable" | "declared-unresolved";
-export interface ProvenanceProof { file: string; sha256: string; ledgerIndex?: number; recordType?: string; nativeId?: string }
+export interface ProvenanceProof { file: string; sha256: string; ledgerIndex?: number; recordSha256?: string; sourceBindingSha256?: string; recordType?: string; nativeId?: string }
 export interface ProvenanceNode { ref: ExecutionReferenceV1; state: ProvenanceState; availability: "available" | "receipt-only" | "missing" | "not-read"; proof: ProvenanceProof; data?: Record<string, string | number | boolean | null> }
 export type ProvenanceRelation = "contains" | "retryOf" | "parent" | "cites-attempt" | "produced" | "dispatched" | "observed-in" | "expected-attempt" | "observed-attempt" | "observed-output" | "closed" | "reviewed" | "uses-attempt" | "names-idea" | "uses-closed-result" | "uses-source";
 export interface ProvenanceEdge { from: ExecutionReferenceV1; to: ExecutionReferenceV1; relation: ProvenanceRelation; proof: ProvenanceProof }
@@ -142,7 +142,7 @@ class Graph {
   constructor(readonly source: Snapshot, readonly limit: number) {}
   touch() { if (++this.work > this.limit * 16) throw new TraversalCap(); }
   ref(kind: ProvenanceKind, id: string, extra: { revision?: string; sha256?: string } = {}) { this.touch(); return validateExecutionReference({ v: 1, tool: "ares", projectKey: this.source.study.id, kind, id, ...extra }); }
-  proof(file: string, index?: number, nativeId?: string): ProvenanceProof { const source = this.source.files.get(file); if (!source) fail("missing-source-proof"); return { file, sha256: source.sha256, ...(index !== undefined ? { ledgerIndex: index, recordType: this.source.events[index]!.type } : {}), ...(nativeId !== undefined ? { nativeId } : {}) }; }
+  proof(file: string, index?: number, nativeId?: string): ProvenanceProof { const source = this.source.files.get(file); if (!source) fail("missing-source-proof"); return { file, sha256: source.sha256, ...(index !== undefined ? { ledgerIndex: index, recordSha256: sha256(canonical(this.source.events[index]!)), recordType: this.source.events[index]!.type } : {}), ...(nativeId !== undefined ? { nativeId } : {}) }; }
   issue(code: string, ref?: ExecutionReferenceV1) {
     const next = code.startsWith("unsupported") ? "use a compatible ares version, keeping all original bytes unchanged, then retry" : code === "historical-not-current" ? "inspect the historical receipt; use its existing close/build producer only if a current artifact is needed, then retry" : "restore the corresponding valid original record, then retry the read";
     if (this.issues.length < 64) this.issues.push({ code, message: `provenance ${code}; ${next}`, ...(ref ? { ref } : {}) });
@@ -205,7 +205,7 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
       }
     }
     const ideas = foldIdeas(events);
-    for (const idea of ideas) { const index = addedIdeas.get(idea.id)!, proof = graph.proof(ledger, index, idea.id), ref = graph.ref("idea", idea.id); graph.put({ ref, state: "current", availability: "available", proof, data: { status: idea.state } }); owned(ref, proof); }
+    for (const idea of ideas) { const index = addedIdeas.get(idea.id)!, proof = { ...graph.proof(ledger, index, idea.id), sourceBindingSha256: sha256(canonical(idea)) }, ref = graph.ref("idea", idea.id); graph.put({ ref, state: "current", availability: "available", proof, data: { status: idea.state } }); owned(ref, proof); }
     for (const idea of ideas) {
       const ref = graph.ref("idea", idea.id), index = addedIdeas.get(idea.id)!, proof = graph.proof(ledger, index, idea.id);
       if (idea.parent) graph.edge(ref, graph.target("idea", idea.parent, proof), "parent", proof);
@@ -228,10 +228,14 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
       const revision = Number(event.data.revision), definition = validatePlan(event.data.definition); definitions.set(revision, definition); revisions.add(revision); const proof = graph.proof(ledger, index), ref = graph.ref("plan-revision", String(revision), { revision: String(revision) }); graph.put({ ref, state: revision === plan?.revision ? "current" : "historical", availability: "available", proof, ...(definition.nodes.some(node => node.kind === "hub") ? { data: { hubState: "declared-unresolved" } } : {}) }); owned(ref, proof);
     }
     const latestApplied = new Map<string, { output?: unknown; status: string; taskId?: number; hubProject?: string }>();
-    for (const [event, value] of applied) if (typeof event.data.dispatchId === "string") latestApplied.set(event.data.dispatchId, value);
+    const dispatchSources = new Map<string, LedgerEvent[]>();
+    for (const [event, value] of applied) if (typeof event.data.dispatchId === "string") {
+      latestApplied.set(event.data.dispatchId, value);
+      const records = dispatchSources.get(event.data.dispatchId) ?? []; records.push(event); dispatchSources.set(event.data.dispatchId, records);
+    }
     const dispatches = new Map<string, ExecutionReferenceV1>(), dispatchCommands = new Map<string, string>();
     for (const [index, event] of events.entries()) if (event.type === "node.intent" && applied.has(event) && typeof event.data.dispatchId === "string" && Number.isSafeInteger(event.data.revision)) {
-      const revision = Number(event.data.revision), proof = graph.proof(ledger, index), ref = graph.ref("dispatch", event.data.dispatchId);
+      const revision = Number(event.data.revision), proof = { ...graph.proof(ledger, index), sourceBindingSha256: sha256(canonical(dispatchSources.get(event.data.dispatchId))) }, ref = graph.ref("dispatch", event.data.dispatchId);
       dispatches.set(event.data.dispatchId, ref);
       const definition = definitions.get(revision)?.nodes.find(node => node.id === event.data.node);
       if (definition?.kind === "step") dispatchCommands.set(event.data.dispatchId, definition.command);
@@ -264,9 +268,10 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
     for (const skill of foldSkills(events)) {
       const index = skillIndexes.get(skill.name)!, proof = graph.proof(ledger, index, skill.name), ref = graph.ref("skill-proposal", skill.name, { sha256: skill.sha256 }), file = source.files.get(`proposals/skills/${skill.name}.md`);
       const state = !file ? "unavailable" : file.sha256 !== skill.sha256 ? "corrupt" : "current";
-      const unresolved = skill.evidence.some(value => !value.startsWith(`ares:${source.study.id}/attempt:`) || !ATTEMPT.test(value.slice(`ares:${source.study.id}/attempt:`.length)));
+      const evidenceRefs = skill.evidence.map(value => typeof value === "string" ? value : value.tool === "ares" && value.projectKey === source.study.id && value.kind === "attempt" ? `ares:${source.study.id}/attempt:${value.id}` : "unresolved");
+      const unresolved = evidenceRefs.some(value => !value.startsWith(`ares:${source.study.id}/attempt:`) || !ATTEMPT.test(value.slice(`ares:${source.study.id}/attempt:`.length)));
       graph.put({ ref, state, availability: file ? "available" : "missing", proof, data: { status: skill.state, ...(unresolved ? { additionalEvidence: "declared-unresolved" } : {}) } }); owned(ref, proof); if (state !== "current") graph.issue(state === "corrupt" ? "proposal-receipt-mismatch" : "missing-proposal", ref);
-      for (const evidence of skill.evidence) {
+      for (const evidence of evidenceRefs) {
         const prefix = `ares:${source.study.id}/attempt:`, id = evidence.startsWith(prefix) ? evidence.slice(prefix.length) : undefined;
         if (id && ATTEMPT.test(id)) graph.edge(ref, graph.target("attempt", id, proof), "cites-attempt", proof);
       }
@@ -311,7 +316,7 @@ function closures(dir: string, graph: Graph, study: ExecutionReferenceV1): void 
         } else if (record.family === "investigate" && record.ref.id !== selected) state = "historical";
       } catch { state = "corrupt"; graph.issue("malformed-closed-artifact", record.ref); }
     }
-    graph.put({ ref: record.ref, state, availability, proof: record.proof, data: { family: record.family, receiptMatched: matches, ...(record.family === "final" && typeof record.raw?.status === "string" ? { status: record.raw.status } : {}) } });
+    graph.put({ ref: record.ref, state, availability, proof: record.proof, data: { family: record.family, receiptMatched: matches, ...(record.family === "final" && typeof record.raw?.status === "string" ? { status: record.raw.status } : {}), ...(record.family === "investigate" && state === "current" && matches && record.raw && Object.hasOwn(record.raw, "winner") ? { winner: record.raw.winner !== null } : {}) } });
     graph.edge(study, record.ref, "closed", record.proof);
   }
   for (const record of records) {

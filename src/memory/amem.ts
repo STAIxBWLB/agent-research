@@ -95,3 +95,6 @@ export function createAmemClient(cwd: string, runner: ProcessRunner = spawnRunne
     },
   };
 }
+
+// Exact-id evidence reads use the screened MCP contract; existing archive/search CLI behavior stays separate.
+export {readScreenedAmem, supportsScreenedAmem} from "./amem-show.ts";
