@@ -78,6 +78,11 @@ const SELECTION = obj({
 const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), parent: text(64), commit: { type: "string", minLength: 40, maxLength: 40 } }, ["id", "title", "hypothesis"]);
 
 export const ARES_TOOLS: readonly McpTool[] = [
+  { name: "ares_harness_stream_set", description: "Fix an immutable ordered 1..16-task experiment stream before its first harness round. No source reads or execution.", inputSchema: obj({study, stream: {type: "object"}}, ["study", "stream"]), annotations: write },
+  { name: "ares_harness_stream_show", description: "Read the receipted immutable local harness stream without writes or source reads.", inputSchema: obj({study}, ["study"]), annotations: read },
+  { name: "ares_experience_select", description: "Rank existing project lessons; exact-id screen only explicit selections. Nonempty prospective experience remains unavailable until native round closure/lesson receipts exist. Stores no bodies and makes no memory writes.", inputSchema: obj({study, selection: {type: "object"}}, ["study", "selection"]), annotations: {...read, openWorldHint: true} },
+  { name: "ares_experience_freeze", description: "Freeze an immutable body-free context before a round starts. Only empty baseline/no-library controls can freeze until native source closure exists. No automatic activation or memory write.", inputSchema: obj({study, context: {type: "object"}}, ["study", "context"]), annotations: write },
+  { name: "ares_experience_check", description: "Pre-handoff local integrity and model/runtime check plus owning screened exact-id source recheck. Unavailable/changed sources block the frozen context. Does not launch improvement or worker sessions.", inputSchema: obj({study, round: text(64), model: text(128), runtime: text(128)}, ["study", "round", "model", "runtime"]), annotations: {...read, openWorldHint: true} },
   { name: "ares_harness_set", description: "Set an experiment's bounded ares-owned harness round definition; no model/probe launch. Guidance and frozen refs bind a separate harness gate.", inputSchema: obj({study, round: {type: "object"}}, ["study", "round"]), annotations: write },
   { name: "ares_harness_show", description: "Read local harness definitions and synthetic fixture declarations. End-to-end evaluation and real producer import stay unavailable.", inputSchema: obj({study, round: text(64)}, ["study"]), annotations: read },
   { name: "ares_harness_import", description: "Record a declared ares-owned synthetic probe fixture under the round gate. Not producer wire import, host-observed evidence or a matched execution; never starts probes.", inputSchema: obj({study, round: text(64), fixture: {type: "object"}}, ["study", "round", "fixture"]), annotations: write },
@@ -154,6 +159,11 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
   const background = new Map<Promise<void>, () => void>();
   const track = (completion: Promise<void>, terminate: () => void) => { background.set(completion, terminate); void completion.then(() => { background.delete(completion); }); };
   const handlers: Record<string, McpHandler> = {
+    ares_harness_stream_set: a => ops.harnessStreamSet(dir(a), a.stream, ctx),
+    ares_harness_stream_show: a => ops.harnessStreamShow(dir(a)),
+    ares_experience_select: a => ops.experienceSelect(dir(a), a.selection, ctx, memoryEnv),
+    ares_experience_freeze: a => ops.experienceFreeze(dir(a), a.context, ctx),
+    ares_experience_check: a => ops.experienceCheck(dir(a), a.round as string, {model: a.model as string, runtime: a.runtime as string}, ctx, memoryEnv),
     ares_lineage_show: a => ops.lineageShow(dir(a), { ...(a.root === undefined ? {} : { root: a.root as ExecutionReferenceV1 }), ...(a.cursor === undefined ? {} : { cursor: a.cursor as string }) }),
     ares_lineage_compare: a => ops.lineageCompare(dir(a), { ...(a.attempts === undefined ? {} : { attempts: a.attempts as string[] }), ...(a.candidates === undefined ? {} : { candidates: a.candidates as string[] }) }),
     ares_autonomy_show: a => ops.autonomyShow(dir(a)),

@@ -3,6 +3,10 @@ export const PLAYBOOK = `ares research playbook (A1 literature, A2 experiments, 
 
 Before starting a phase, create its study once: ares init <dir> --question "..." [--mode experiment] [--autonomy auto|gates|copilot|step]. Use --mode experiment for experiment phases; reuse the initialized study thereafter. Phase lessons and archive call the amem CLI on PATH (its output parser was written against amem 0.20.3; no amem version is tested live here); these keep the study cwd and agent attribution.
 
+
+Frozen experience controls (#67 T1/T2): before the first harness round, use ares harness stream set with a bounded ordered stream. Freeze an explicit empty baseline/no-library selection with ares experience freeze, then bind its streamSha256/improverContextHash in the round context. Before handoff, ares experience check requires the declared model/runtime and the current screened source digest/version; unavailable/changed blocks use. Workers keep their baseline context separate. Nonempty experience and retrieval-only remain unavailable until native completed-round/lesson/export receipts prove earlier same-study provenance. Lesson ranking and synthetic probes are not that proof. No automatic activation, body cache, source fallback or session launch.
+
+
 Literature workflow
 
 ares lessons <dir> --for "scope and verify the literature"
