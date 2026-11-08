@@ -2,6 +2,8 @@
 export interface CommandSpec { name: string; usage: string; mutates: boolean | "network"; options: Record<string, "flag" | "value"> }
 const json = { "--json": "flag" } as const;
 export const COMMANDS: readonly CommandSpec[] = [
+  { name: "lineage show", usage: "lineage show <dir> [--root KIND --id ID --revision REV --sha256 HASH] [--cursor CURSOR] [--json]", mutates: false, options: { "--root": "value", "--id": "value", "--revision": "value", "--sha256": "value", "--cursor": "value", ...json } },
+  { name: "lineage compare", usage: "lineage compare <dir> (--attempts ID,... | --candidates COMMIT,...) [--json]", mutates: false, options: { "--attempts": "value", "--candidates": "value", ...json } },
   { name: "autonomy show", usage: "autonomy show <dir> [--json]", mutates: false, options: json },
   { name: "autonomy set", usage: "autonomy set <dir> <auto|gates|copilot|step> [--phase PHASE] [--json]", mutates: true, options: { "--phase": "value", ...json } },
   { name: "skill propose", usage: "skill propose <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },

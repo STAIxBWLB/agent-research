@@ -3,7 +3,8 @@ import { findCommand, help, type CommandSpec } from "./commands-table.ts";
 import * as ops from "./commands.ts";
 import { createHttp, type Http } from "./http.ts";
 import { PLAYBOOK } from "./playbook.ts";
-import { detectActor, readTextBounded, releaseStudyLocksForExit } from "./study.ts";
+import { validateExecutionReference } from "./provenance.ts";
+import { detectActor, openStudy, readTextBounded, releaseStudyLocksForExit } from "./study.ts";
 
 const INPUT_BYTES = 65_536;
 export interface Io extends ops.ExperimentRuntime { readStdin?: () => Promise<string>; http?: Http; signal?: AbortSignal }
@@ -56,6 +57,25 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
   let result: unknown, code = 0;
   switch (spec.name) {
+    case "lineage show": {
+      count(spec, positional, 1);
+      const kind = str("--root"), id = str("--id"), revision = str("--revision"), hash = str("--sha256"), cursor = str("--cursor");
+      const hasRoot = [kind, id, revision, hash].some(value => value !== undefined);
+      if (hasRoot && (kind === undefined || id === undefined)) throw new Error("lineage show: partial root reference; pass --root KIND and --id ID together, with optional --revision/--sha256");
+      const root = hasRoot ? validateExecutionReference({ v: 1, tool: "ares", projectKey: openStudy(positional[0]!).study.id, kind, id, ...(revision === undefined ? {} : { revision }), ...(hash === undefined ? {} : { sha256: hash }) }) : undefined;
+      result = ops.lineageShow(positional[0]!, { ...(root === undefined ? {} : { root }), ...(cursor === undefined ? {} : { cursor }) }); break;
+    }
+    case "lineage compare": {
+      count(spec, positional, 1);
+      const attempts = str("--attempts"), candidates = str("--candidates");
+      if (attempts !== undefined && candidates !== undefined) throw new Error("lineage compare: selection flags conflict; pass either --attempts ID,... or --candidates COMMIT,...");
+      const list = (value: string) => {
+        const values = value.split(",");
+        if (values.length < 1 || values.length > 8 || values.some(item => !item.trim())) throw new Error("lineage compare: selection needs 1..8 nonblank ids; pass a comma-separated --attempts or --candidates list");
+        return values;
+      };
+      result = ops.lineageCompare(positional[0]!, { ...(attempts === undefined ? {} : { attempts: list(attempts) }), ...(candidates === undefined ? {} : { candidates: list(candidates) }) }); break;
+    }
     case "console add": count(spec, positional, 1); result = ops.consoleAdd(positional[0]!, env); break;
     case "console remove": count(spec, positional, 1); result = ops.consoleRemove(positional[0]!, env); break;
     case "console list": count(spec, positional, 0); result = ops.consoleList(env); break;

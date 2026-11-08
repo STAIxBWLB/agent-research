@@ -2,10 +2,10 @@ import { existsSync, lstatSync, opendirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseLedger, plain, readBytesBounded, hashFileBounded, sha256, validateStudy, type LedgerEvent, type Study } from "./study.ts";
 import { validateAttemptRecord, type Attempt } from "./exp/attempts.ts";
-import { TASK_BYTES, TASK_FILES } from "./exp/protocol.ts";
+import { TASK_BYTES, TASK_FILES, METRIC_LIMIT, validateProtocol, protocolHash } from "./exp/protocol.ts";
 import { validateExecutor } from "./exp/executor.ts";
 import { foldIdeas } from "./exp/ideas.ts";
-import { readClosedInvestigation } from "./exp/investigate.ts";
+import { readClosedInvestigation, type CommitResult } from "./exp/investigate.ts";
 import { readClosedFinal } from "./exp/final.ts";
 import { readClosedAblate } from "./exp/ablate.ts";
 import { validatePlan } from "./plan/definition.ts";
@@ -17,6 +17,7 @@ import { foldSkills } from "./memory/skills.ts";
 export const PROVENANCE_NODE_LIMIT = 100, PROVENANCE_EDGE_LIMIT = 200, PROVENANCE_PAGE_BYTES = 256 * 1024;
 export const PROVENANCE_SOURCE_FILES = 512, PROVENANCE_SOURCE_BYTES = 16 * 1024 * 1024, PROVENANCE_EVENTS = 5000, PROVENANCE_TRAVERSAL = 1000;
 const KINDS = ["study", "plan-revision", "dispatch", "idea", "attempt", "artifact", "closed-result", "paper-evidence", "skill-proposal"] as const;
+export const PROVENANCE_KINDS = KINDS;
 export type ProvenanceKind = typeof KINDS[number];
 export interface ExecutionReferenceV1 { v: 1; tool: "ares"; projectKey: string; kind: ProvenanceKind; id: string; revision?: string; sha256?: string }
 export type ProvenanceState = "current" | "historical" | "corrupt" | "unavailable" | "declared-unresolved";
@@ -29,7 +30,7 @@ export interface ProvenancePage {
   v: 1; status: "ok" | "changed" | "unavailable" | "capped"; sourceSha256: string | null; ledgerPosition: number | null;
   nodes: ProvenanceNode[]; edges: ProvenanceEdge[]; issues: ProvenanceIssue[]; totals: { nodes: number; edges: number } | null; truncated: boolean; nextCursor?: string;
 }
-export interface ProvenanceOptions { cursor?: string; nodeLimit?: number; edgeLimit?: number; traversalLimit?: number }
+export interface ProvenanceOptions { root?: ExecutionReferenceV1; cursor?: string; nodeLimit?: number; edgeLimit?: number; traversalLimit?: number }
 const HASH = /^[a-f0-9]{64}$/, ATTEMPT = /^[a-f0-9]{16}$/, RUN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 class SourceFailure extends Error { constructor(readonly code: string, readonly capped = false) { super(code); } }
 function fail(code: string, capped = false): never { throw new SourceFailure(code, capped); }
@@ -184,7 +185,7 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
       const start = starts.get(value.id) ?? [];
       const identity = value.studyId !== source.study.id || typeof value.commit !== "string" || !/^[a-f0-9]{40}$/.test(value.commit) || !Number.isSafeInteger(value.seed);
       const retryInvalid = value.retryOf !== undefined && (typeof value.retryOf !== "string" || !ATTEMPT.test(value.retryOf) || value.retryOf === value.id);
-      const outputsInvalid = !Array.isArray(value.outputs) || value.outputs.length > 500 || value.outputs.some(output => !plain(output) || typeof output.sha256 !== "string" || !HASH.test(output.sha256) || !Number.isSafeInteger(output.bytes) || output.bytes < 0);
+      const outputsInvalid = !Array.isArray(value.outputs) || value.outputs.length > 500 || new Set(value.outputs.map(output => plain(output) ? output.path : undefined)).size !== value.outputs.length || value.outputs.some(output => !plain(output) || typeof output.sha256 !== "string" || !HASH.test(output.sha256) || !Number.isSafeInteger(output.bytes) || output.bytes < 0);
       const issue = (attemptCounts.get(value.id) ?? 0) > 1 ? "duplicate-attempt-id" : retryInvalid ? "corrupt-retry-reference" : outputsInvalid ? "corrupt-output-inventory" : identity ? "attempt-study-identity-mismatch" : start.length === 0 ? "missing-attempt-start-receipt" : start.length > 1 ? "duplicate-attempt-start-receipt" : start[0]!.data.run !== value.run || start[0]!.data.commit !== value.commit || start[0]!.data.seed !== value.seed ? "attempt-start-identity-mismatch" : latest?.data.status !== undefined && latest.data.status !== value.status ? "attempt-receipt-mismatch" : undefined;
       graph.put({ ref, state: issue ? "corrupt" : "current", availability: "available", proof, data: { status: value.status, stage: value.stage, seed: Number.isSafeInteger(value.seed) ? value.seed : null } });
       if (value.studyId === source.study.id) owned(ref, proof);
@@ -220,6 +221,7 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
       if (node && node.dispatchId === event.data.dispatchId) applied.set(event, { output: event.type === "node.observed" ? node.lastObserved?.output : undefined, status: node.status, taskId: node.taskId, hubProject: node.hubProject });
     }), revisions = new Set<number>(), definitions = new Map<number, ReturnType<typeof validatePlan>>();
     const planFile = fileJson(source, "plan.json");
+    if (planFile && planFile.revision === undefined) graph.issue("missing-stored-plan-revision");
     if (plan && (!planFile || canonical(validatePlan(planFile)) !== canonical(plan.definition))) graph.issue("plan-receipt-mismatch");
     if (planFile && !plan) graph.issue("missing-plan-receipt");
     for (const [index, event] of events.entries()) if (event.type === "plan.set" && Number.isSafeInteger(event.data.revision)) {
@@ -262,7 +264,7 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
     for (const skill of foldSkills(events)) {
       const index = skillIndexes.get(skill.name)!, proof = graph.proof(ledger, index, skill.name), ref = graph.ref("skill-proposal", skill.name, { sha256: skill.sha256 }), file = source.files.get(`proposals/skills/${skill.name}.md`);
       const state = !file ? "unavailable" : file.sha256 !== skill.sha256 ? "corrupt" : "current";
-      const unresolved = skill.evidence.some(value => !value.startsWith(`ares:${source.study.id}/attempt:`));
+      const unresolved = skill.evidence.some(value => !value.startsWith(`ares:${source.study.id}/attempt:`) || !ATTEMPT.test(value.slice(`ares:${source.study.id}/attempt:`.length)));
       graph.put({ ref, state, availability: file ? "available" : "missing", proof, data: { status: skill.state, ...(unresolved ? { additionalEvidence: "declared-unresolved" } : {}) } }); owned(ref, proof); if (state !== "current") graph.issue(state === "corrupt" ? "proposal-receipt-mismatch" : "missing-proposal", ref);
       for (const evidence of skill.evidence) {
         const prefix = `ares:${source.study.id}/attempt:`, id = evidence.startsWith(prefix) ? evidence.slice(prefix.length) : undefined;
@@ -356,18 +358,40 @@ function continuation(value: string): Cursor | undefined {
 function empty(status: ProvenancePage["status"], code: string, source?: Snapshot): ProvenancePage {
   return { v: 1, status, sourceSha256: source?.hash ?? null, ledgerPosition: source?.ledgerPosition ?? null, nodes: [], edges: [], issues: [{ code, message: status === "capped" ? `provenance ${code}; use bounded producer reads such as ares attempt list/show or plan show; this graph is incomplete` : `provenance ${code}; keep unsupported source bytes unchanged, restore malformed originals or retry after the active command completes; restart pagination from the first page` }], totals: null, truncated: status === "capped" };
 }
+/** Walk source-proven relations without spreading through the study's membership edges. */
+function selectRoot(graph: Graph, root: ExecutionReferenceV1): boolean {
+  const selected = new Set<string>();
+  for (const [id, node] of graph.nodes) if (node.ref.kind === root.kind && node.ref.id === root.id && (root.revision === undefined || node.ref.revision === root.revision) && (root.sha256 === undefined || node.ref.sha256 === root.sha256)) selected.add(id);
+  if (!selected.size) return false;
+  if (root.kind === "study") return true;
+  const adjacency = new Map<string, string[]>();
+  for (const edge of graph.edges.values()) if (edge.relation !== "contains") {
+    const a = key(edge.from), b = key(edge.to); if (edge.from.kind === "study" || edge.to.kind === "study") continue;
+    adjacency.set(a, [...(adjacency.get(a) ?? []), b]); adjacency.set(b, [...(adjacency.get(b) ?? []), a]);
+  }
+  const queue = [...selected];
+  for (let index = 0; index < queue.length; index++) for (const id of adjacency.get(queue[index]!) ?? []) if (!selected.has(id)) { selected.add(id); queue.push(id); }
+  for (const [id, edge] of graph.edges) if (!(selected.has(key(edge.to)) && (selected.has(key(edge.from)) || edge.relation === "contains"))) graph.edges.delete(id);
+  for (const edge of graph.edges.values()) if (edge.relation === "contains") selected.add(key(edge.from));
+  for (const id of graph.nodes.keys()) if (!selected.has(id)) graph.nodes.delete(id);
+  return true;
+}
 /** Lock-free, local, in-process projection. Source readers never repair files or read the executor/hub. */
 export function readProvenance(dirArg: string, options: ProvenanceOptions = {}): ProvenancePage {
-  if (!plain(options as unknown) || Object.keys(options).some(name => !["cursor", "nodeLimit", "edgeLimit", "traversalLimit"].includes(name)) || Object.hasOwn(options, "cursor") && typeof options.cursor !== "string") throw new Error("provenance options: use only cursor (string), nodeLimit, edgeLimit and traversalLimit; correct the options before retrying");
+  if (!plain(options as unknown) || Object.keys(options).some(name => !["cursor", "nodeLimit", "edgeLimit", "traversalLimit", "root"].includes(name)) || Object.hasOwn(options, "cursor") && typeof options.cursor !== "string") throw new Error("provenance options: use only cursor (string), nodeLimit, edgeLimit and traversalLimit, root; correct the options before retrying");
+  const root = options.root === undefined ? undefined : validateExecutionReference(options.root);
   const nodeLimit = options.nodeLimit ?? PROVENANCE_NODE_LIMIT, edgeLimit = options.edgeLimit ?? PROVENANCE_EDGE_LIMIT, traversal = options.traversalLimit ?? PROVENANCE_TRAVERSAL;
   if (!Number.isSafeInteger(nodeLimit) || nodeLimit < 1 || nodeLimit > PROVENANCE_NODE_LIMIT || !Number.isSafeInteger(edgeLimit) || edgeLimit < 1 || edgeLimit > PROVENANCE_EDGE_LIMIT || !Number.isSafeInteger(traversal) || traversal < 1 || traversal > PROVENANCE_TRAVERSAL) throw new Error("provenance page bounds: use 1..100 nodes, 1..200 edges and traversal 1..1000 before retrying");
   let source: Snapshot, dir: string;
   try { dir = realpathSync(resolve(dirArg)); source = capture(dir); }
   catch (error) { const code = error instanceof SourceFailure ? error.code : "unreadable-source"; return empty(error instanceof SourceFailure && error.capped ? "capped" : code === "write-in-progress" ? "changed" : "unavailable", code); }
-  const configuration = canonical([nodeLimit, edgeLimit, traversal]), previous = options.cursor === undefined ? undefined : continuation(options.cursor);
+  const configuration = canonical([nodeLimit, edgeLimit, traversal, root ?? null]), previous = options.cursor === undefined ? undefined : continuation(options.cursor);
   if (options.cursor !== undefined && (!previous || previous.source !== source.hash || previous.ledgerPosition !== source.ledgerPosition || previous.options !== configuration)) return empty("changed", "changed-cursor", source);
   let graph: Graph;
   try { graph = build(dir, source, traversal); } catch { return empty("unavailable", "invalid-source-reference", source); }
+  if (root) {
+    if (root.projectKey !== source.study.id || !selectRoot(graph, root)) return graph.capped ? empty("capped", "traversal-capped", source) : empty("unavailable", "root-unavailable", source);
+  }
   try { const after = capture(dir); if (after.hash !== source.hash || after.ledgerPosition !== source.ledgerPosition) return empty("changed", "source-changed", source); }
   catch { return empty("changed", "source-changed-or-unavailable", source); }
   const nodes = [...graph.nodes.values()].sort((a, b) => (key(a.ref) < key(b.ref) ? -1 : key(a.ref) > key(b.ref) ? 1 : 0)), edges = [...graph.edges.values()].sort((a, b) => (canonical(a) < canonical(b) ? -1 : canonical(a) > canonical(b) ? 1 : 0));
@@ -386,4 +410,95 @@ export function readProvenance(dirArg: string, options: ProvenanceOptions = {}):
     next();
   }
   return page;
+}
+
+export interface AttemptComparison {
+  id: string; code: {commit: string; treeId: string; snapshotSha256: string | null}; protocolHash: string; seed: number; status: Attempt["status"];
+  retryOf: string | null; retryAncestry: string[]; sampleGroup: string;
+  comparabilityReasons: string[]; metrics: Attempt["metrics"]; artifactDigests: string[];
+  costs: {wallMilliseconds: number | "unknown"; storageBytes: number | "unknown"; compute: "unknown"; transfer: "unknown"; verification: "unknown"; retention: "unknown"; materialization: "unknown"; idle: "unknown"; person: "unknown"};
+}
+export interface LineageComparisonRow { kind: "attempt" | "candidate"; id: string; state: "available" | "unavailable"; attempts: AttemptComparison[]; candidate?: CommitResult; reasons: string[] }
+export interface LineageComparison {
+  v: 1; status: ProvenancePage["status"]; sourceSha256: string | null; ledgerPosition: number | null;
+  rows: LineageComparisonRow[]; issues: ProvenanceIssue[]; retriesAreIndependent: false;
+  aggregation: {performed: false; available: false; compatible: boolean; reasons: string[]}; resultAuthority: "existing-investigation-and-final-only";
+}
+function comparisonAttempt(value: Attempt, attempts: Map<string, Attempt>): AttemptComparison {
+  if (!HASH.test(value.protocolHash) || !/^[a-f0-9]{40}$/.test(value.treeId) || !Array.isArray(value.metrics) || value.metrics.length > METRIC_LIMIT || value.metrics.some(metric => !plain(metric) || typeof metric.name !== "string" || typeof metric.unit !== "string" || metric.provenance !== "ares-observed" || typeof metric.value !== "number" || !Number.isFinite(metric.value))) fail("malformed-comparison-attempt");
+  if (value.snapshotSha256 !== undefined && (typeof value.snapshotSha256 !== "string" || !HASH.test(value.snapshotSha256))) fail("malformed-snapshot-sha256");
+  let protocol: ReturnType<typeof validateProtocol>;
+  try { protocol = validateProtocol(value.protocol); } catch { return fail("malformed-comparison-protocol"); }
+  if (protocolHash(protocol) !== value.protocolHash) fail("protocol-hash-mismatch");
+  const metricReasons: string[] = [];
+  if (new Set(value.metrics.map(metric => metric.name)).size !== value.metrics.length) metricReasons.push("duplicate-metric-names");
+  if (value.metrics.some(metric => !protocol.metrics.some(declared => declared.name === metric.name && declared.unit === metric.unit))) metricReasons.push("undeclared-metrics");
+  if (protocol.metrics.some(declared => !value.metrics.some(metric => metric.name === declared.name && metric.unit === declared.unit))) metricReasons.push("missing-declared-metrics");
+  const seen = new Set([value.id]), ancestry: string[] = []; let parent = value.retryOf;
+  while (parent !== undefined) {
+    if (seen.has(parent)) fail("cyclic-retry-ancestry");
+    const ancestor = attempts.get(parent); if (!ancestor) fail("unavailable-retry-ancestor");
+    seen.add(parent); ancestry.push(parent); parent = ancestor.retryOf;
+    if (ancestry.length > PROVENANCE_TRAVERSAL) fail("retry-traversal-capped", true);
+  }
+  const start = Date.parse(value.startedAt), end = value.endedAt === undefined ? NaN : Date.parse(value.endedAt), storage = value.outputs.reduce((sum, output) => sum + output.bytes, 0);
+  return { id: value.id, code: {commit: value.commit, treeId: value.treeId, snapshotSha256: value.snapshotSha256 ?? null}, protocolHash: value.protocolHash, seed: value.seed, status: value.status,
+    retryOf: value.retryOf ?? null, retryAncestry: ancestry, sampleGroup: sha256(canonical([value.commit, value.protocolHash, value.seed])), comparabilityReasons: metricReasons, metrics: value.metrics,
+    artifactDigests: [...new Set(value.outputs.map(output => output.sha256))].sort(), costs: {wallMilliseconds: Number.isFinite(start) && Number.isFinite(end) && end >= start ? end - start : "unknown", storageBytes: (value.status === "succeeded" || value.outputs.length > 0) && Number.isSafeInteger(storage) ? storage : "unknown", compute: "unknown", transfer: "unknown", verification: "unknown", retention: "unknown", materialization: "unknown", idle: "unknown", person: "unknown"} };
+}
+/** Descriptive rows only: no arithmetic, new winner, result receipt, executor reads or effects. */
+export function compareLineage(dirArg: string, options: {attempts?: string[]; candidates?: string[]}): LineageComparison {
+  if (!plain(options as unknown) || Object.keys(options).some(name => !["attempts", "candidates"].includes(name)) || (options.attempts === undefined) === (options.candidates === undefined)) throw new Error("lineage compare: select exactly one of attempts or candidates; pass 1..8 native ids before retrying");
+  const ids = options.attempts ?? options.candidates!, kind = options.attempts ? "attempt" : "candidate";
+  if (!Array.isArray(ids) || ids.length < 1 || ids.length > 8 || new Set(ids).size !== ids.length || ids.some(id => typeof id !== "string" || !(kind === "attempt" ? ATTEMPT : /^[a-f0-9]{40}$/).test(id))) throw new Error("lineage compare: select 1..8 distinct 16-hex attempt ids or 40-hex candidate commits; correct the selection before retrying");
+  const result: LineageComparison = {v: 1, status: "unavailable", sourceSha256: null, ledgerPosition: null, rows: [], issues: [], retriesAreIndependent: false, aggregation: {performed: false, available: false, compatible: false, reasons: []}, resultAuthority: "existing-investigation-and-final-only"};
+  let source: Snapshot | undefined, graphCapped = false;
+  try {
+    const dir = realpathSync(resolve(dirArg)); source = capture(dir); result.sourceSha256 = source.hash; result.ledgerPosition = source.ledgerPosition;
+    const graph = build(dir, source, PROVENANCE_TRAVERSAL), attempts = new Map<string, Attempt>();
+    graphCapped = graph.capped;
+    result.issues = [...graph.issues]; if (graphCapped) result.issues.push({code: "traversal-capped", message: "lineage comparison traversal capped; use bounded producer reads such as ares attempt show; this comparison is incomplete"});
+    result.status = graph.capped ? "capped" : graph.issues.length ? "unavailable" : "ok";
+    for (const [file, bytes] of source.files) {
+      const match = /^runs\/([^/]+)\/attempts\/([a-f0-9]{16})\.json$/.exec(file); if (!match) continue;
+      const ref = graph.ref("attempt", match[2]!); if (graph.nodes.get(key(ref))?.state === "current") attempts.set(match[2]!, validateAttemptRecord(parsed(bytes), match[1]!, match[2]!));
+    }
+    let candidates: CommitResult[] = [];
+    if (kind === "candidate") { const closed = readClosedInvestigation(dir); if (source.files.get(`runs/${closed.result.run}/investigate.json`)?.sha256 !== closed.sha256) fail("closed-source-changed"); candidates = closed.result.candidates; }
+    for (const id of ids) {
+      const candidate = candidates.find(row => row.commit === id), selected = kind === "attempt" ? [id] : candidate ? Object.values(candidate.attempts).flat() : [];
+      const row: LineageComparisonRow = {kind, id, state: "available", attempts: [], reasons: [], ...(candidate ? {candidate} : {})};
+      if (kind === "candidate" && !candidate) { row.state = "unavailable"; row.reasons.push("candidate-not-in-closed-investigation"); }
+      for (const attemptId of selected) {
+        const attempt = attempts.get(attemptId);
+        if (!attempt) { row.state = "unavailable"; row.reasons.push("attempt-unavailable:" + attemptId); continue; }
+        try { row.attempts.push(comparisonAttempt(attempt, attempts)); }
+        catch (error) {
+          if (!(error instanceof SourceFailure) || error.capped) throw error;
+          row.state = "unavailable"; row.reasons.push(error.code);
+          result.issues.push({code: error.code, message: `lineage compare ${error.code}; restore the valid original attempt record before retrying`});
+        }
+      }
+      if (row.state !== "available") { if (!graphCapped) result.status = "unavailable"; result.issues.push({code: "comparison-selection-unavailable", message: "lineage compare selection unavailable; inspect lineage show and choose existing valid records before retrying"}); }
+      result.rows.push(row);
+    }
+    const values = result.rows.flatMap(row => row.attempts), reasons = new Set<string>();
+    for (const value of values) for (const reason of value.comparabilityReasons) reasons.add(reason);
+    if (result.status !== "ok" || result.rows.some(row => row.state !== "available")) reasons.add("source-unavailable");
+    if (values.some(value => value.status !== "succeeded")) reasons.add("non-successful-outcomes-retained");
+    if (new Set(values.map(value => value.protocolHash)).size > 1) reasons.add("protocol-mismatch");
+    if (new Set(values.map(value => value.seed)).size > 1) reasons.add("different-seeds");
+    if (values.some(value => value.retryOf !== null) || new Set(values.map(value => value.sampleGroup)).size < values.length) reasons.add("retries-or-repeated-samples-not-independent");
+    if (new Set(values.map(value => canonical(value.metrics.map(metric => [metric.name, metric.unit]).sort()))).size > 1) reasons.add("incompatible-metrics");
+    if (!values.length || values.some(value => !value.metrics.length)) reasons.add("metrics-unavailable");
+    result.aggregation = {performed: false, available: false, compatible: reasons.size === 0, reasons: [...reasons].sort()};
+    const after = capture(dir); if (after.hash !== source.hash || after.ledgerPosition !== source.ledgerPosition) fail("source-changed");
+    if (Buffer.byteLength(JSON.stringify(result)) > PROVENANCE_PAGE_BYTES) fail("comparison-page-capped", true);
+    return result;
+  } catch (error) {
+    const code = error instanceof SourceFailure ? error.code : "comparison-source-unavailable";
+    result.status = code === "source-changed" || code === "write-in-progress" ? "changed" : graphCapped || error instanceof SourceFailure && error.capped ? "capped" : "unavailable";
+    result.rows = []; result.issues = [...result.issues.filter(issue => issue.code === "traversal-capped"), {code, message: `lineage compare ${code}; inspect lineage show and restore valid source records or retry the read`}];
+    result.aggregation = {performed: false, available: false, compatible: false, reasons: [code]}; return result;
+  }
 }

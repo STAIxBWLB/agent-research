@@ -14,6 +14,7 @@ export interface Protocol {
   seeds: number[]; limits: Limits; network: "none";
   budget: { maxAttempts: number; maxWallHours: number; maxGpuHours: number };
 }
+export const METRIC_LIMIT = 100;
 export const PROTOCOL_BYTES = 65_536, TASK_FILES = 500, TASK_BYTES = 64 * 1024 * 1024;
 export const LIMIT_BOUNDS = { cpus: [0.1, 256], memoryMb: [16, 1_048_576], pidsLimit: [1, 65_536], wallSeconds: [1, 604_800], gpus: [0, 64] } as const;
 function object(raw: unknown, keys: string[], what: string): Record<string, unknown> {
@@ -61,7 +62,7 @@ export function validateProtocol(raw: unknown): Protocol {
   const limitsRaw = object(p.limits, Object.keys(LIMIT_BOUNDS), "protocol.limits");
   const limits = Object.fromEntries(Object.entries(LIMIT_BOUNDS).map(([key, [min, max]]) => [key, number(limitsRaw[key], `protocol.limits.${key}`, min, max, key !== "cpus")])) as unknown as Limits;
   const budget = object(p.budget, ["maxAttempts", "maxWallHours", "maxGpuHours"], "protocol.budget");
-  const metrics = array(p.metrics, "protocol.metrics", 100).map((rawMetric): Protocol["metrics"][number] => {
+  const metrics = array(p.metrics, "protocol.metrics", METRIC_LIMIT).map((rawMetric): Protocol["metrics"][number] => {
     const m = object(rawMetric, ["name", "unit", "direction"], "metric");
     if (m.direction !== "max" && m.direction !== "min") throw new Error("metric.direction: unknown direction; set metric.direction to max or min");
     return { name: literal(m.name, "metric.name", 128).trim(), unit: literal(m.unit, "metric.unit", 64).trim(), direction: m.direction };
