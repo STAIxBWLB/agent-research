@@ -1,0 +1,138 @@
+{
+  "v": 1,
+  "authority": "harness-observed",
+  "kind": "descriptive-baseline-only",
+  "sourceManifest": {
+    "path": "manifest.json",
+    "sha256": "dd0e8949b6c1cabd07b34e89e8e79bac178787ce213c4abbe34a430c0e506840"
+  },
+  "codeCommit": "3f8f373bc8c13176eae3e4b564c54542a7b3e363",
+  "codeSha256": "d86195d060b84f282db94621b7ddb90afddd2e512d2344e910e9eafd26bb9708",
+  "registrationReceiptSha256": "72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20",
+  "denominators": {
+    "diagnose": {
+      "full": 72,
+      "succeeded": 72,
+      "failed": 0,
+      "cancelled": 0,
+      "unknown": 0,
+      "excluded": 0
+    },
+    "reuse": {
+      "full": 72,
+      "succeeded": 72,
+      "failed": 0,
+      "cancelled": 0,
+      "unknown": 0,
+      "excluded": 0
+    }
+  },
+  "automatedSourceResolution": {
+    "correct": 72,
+    "full": 72,
+    "accuracy": 1,
+    "humanTimeToFind": "unknown"
+  },
+  "caseCostStatistics": {
+    "diagnose": {
+      "cold": {
+        "cpuSeconds": {
+          "n": 36,
+          "sum": 0.554415,
+          "median": 0.01534,
+          "p95NearestRank": 0.016763,
+          "minimum": 0.013727,
+          "maximum": 0.01991,
+          "descriptiveSampleVariance": 0.0000010066829928571433
+        },
+        "wallMs": {
+          "n": 36,
+          "sum": 550.1313609999997,
+          "median": 15.279331000000013,
+          "p95NearestRank": 16.151841999999988,
+          "minimum": 13.96757100000002,
+          "maximum": 18.017235,
+          "descriptiveSampleVariance": 0.5548793928575464
+        },
+        "observedMatches": 36
+      },
+      "warm": {
+        "cpuSeconds": {
+          "n": 36,
+          "sum": 0.538406,
+          "median": 0.014954499999999999,
+          "p95NearestRank": 0.015790000000000002,
+          "minimum": 0.013867,
+          "maximum": 0.016094,
+          "descriptiveSampleVariance": 2.7263026349206344e-7
+        },
+        "wallMs": {
+          "n": 36,
+          "sum": 512.4829050000003,
+          "median": 14.305352500000055,
+          "p95NearestRank": 15.117729999999938,
+          "minimum": 13.118087000000003,
+          "maximum": 15.270407999999975,
+          "descriptiveSampleVariance": 0.2947493958782358
+        },
+        "observedMatches": 36
+      }
+    },
+    "reuse": {
+      "cold": {
+        "cpuSeconds": {
+          "n": 36,
+          "sum": 0.560955,
+          "median": 0.015536000000000001,
+          "p95NearestRank": 0.017158,
+          "minimum": 0.0144,
+          "maximum": 0.017867,
+          "descriptiveSampleVariance": 5.430526500000001e-7
+        },
+        "wallMs": {
+          "n": 36,
+          "sum": 565.8588800000002,
+          "median": 15.745973999999933,
+          "p95NearestRank": 17.216428000000178,
+          "minimum": 14.309880999999677,
+          "maximum": 17.343689000000268,
+          "descriptiveSampleVariance": 0.5949475548216209
+        },
+        "observedMatches": 36
+      },
+      "warm": {
+        "cpuSeconds": {
+          "n": 36,
+          "sum": 0.5545039999999999,
+          "median": 0.0153875,
+          "p95NearestRank": 0.015967000000000002,
+          "minimum": 0.014591999999999999,
+          "maximum": 0.016046,
+          "descriptiveSampleVariance": 1.0426633015873032e-7
+        },
+        "wallMs": {
+          "n": 36,
+          "sum": 538.2559740000013,
+          "median": 14.95361800000012,
+          "p95NearestRank": 15.554939999999988,
+          "minimum": 14.110467999999855,
+          "maximum": 15.898439000000053,
+          "descriptiveSampleVariance": 0.18627248097797527
+        },
+        "observedMatches": 36
+      }
+    }
+  },
+  "retainedRawReceiptBytes": 338262,
+  "admissionFailures": {
+    "path": "admission-failures.json",
+    "sha256": "55678268d75b5b99da6f33696f219db3334b20bd2112153a87114afa261b5836",
+    "beforeBaseline": 2,
+    "caseObservations": 0
+  },
+  "treatmentObservations": 0,
+  "supervision": "preregistered-only",
+  "t3ControlReuseAllowed": false,
+  "humanTimeToFind": "unknown",
+  "interpretation": "Rule engine on its development fixtures and fresh arithmetic only; no workflow usability, comparative saving, final/selection/winner/adoption authority or threshold disposition. Missing costs remain unknown."
+}

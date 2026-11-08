@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { readTextBounded } from "../src/study.ts";
-import { baselineSlots, baselineDenominators, runBaseline } from "../scripts/execution-baseline.ts";
-import { freezePreregistration, PREREGISTRATION, PROTOCOL_DOC } from "../scripts/execution-eval.ts";
+import { readTextBounded, sha256, writeAtomic } from "../src/study.ts";
+import { baselineSlots, baselineDenominators, runBaseline, emitBaseline } from "../scripts/execution-baseline.ts";
+import { freezePreregistration, PREREGISTRATION, PROTOCOL_DOC, validateCostRecord } from "../scripts/execution-eval.ts";
 import { tempDir } from "./helpers.ts";
 import { freshValues } from "../scripts/execution-workload.ts";
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -64,4 +64,35 @@ test("baseline admission refuses preregistration drift before any code binding o
   const receipt = join(temp, "docs/verification/execution-eval-frozen.json"); freezePreregistration(temp, receipt);
   const fixture = join(temp, corpus.cases[0].input); writeFileSync(fixture, readTextBounded(fixture, 16_384) + "\n");
   expect(() => runBaseline(temp, join(tempDir(), "unwritten"), "sha256:" + "a".repeat(64))).toThrow("inputSha256 changed since freeze");
+});
+
+test("committed harness observations retain exact hashes, all rows, empty treatment slots and unknown costs", () => {
+  const directory = join(root, "docs/verification/execution-eval-baseline/baseline-3f8f373"), manifestText = readTextBounded(join(directory, "manifest.json"), 65_536), manifest = JSON.parse(manifestText);
+  const summary = JSON.parse(readTextBounded(join(directory, "summary.json"), 65_536));
+  expect(summary.sourceManifest.sha256).toBe(sha256(manifestText));
+  expect(sha256(JSON.stringify(manifest.code.files))).toBe(manifest.code.codeSha256);
+  expect(manifest.code.files.some((file: { path: string }) => file.path === "bin/ares.js")).toBe(true);
+  expect(manifest.code.files.some((file: { path: string }) => file.path === "scripts/execution-baseline.ts")).toBe(true);
+  expect(manifest.registrationReceiptSha256).toBe("72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20");
+  const rows = manifest.files.flatMap((file: { path: string; sha256: string; bytes: number }) => {
+    const text = readTextBounded(join(directory, file.path), 65_536); expect(sha256(text)).toBe(file.sha256); expect(Buffer.byteLength(text)).toBe(file.bytes);
+    const receipt = JSON.parse(text); expect(receipt.authority).toBe("harness-observed"); expect(receipt.codeSha256).toBe(manifest.code.codeSha256); expect(receipt.methodSha256).toBe(manifest.methodSha256);
+    return receipt.observations;
+  });
+  expect(rows).toHaveLength(144); expect(baselineDenominators(rows)).toEqual(manifest.denominators);
+  for (const row of rows) {
+    expect(row.authority).toBe("harness-observed"); expect(row.slotOrder[row.executedSlot]).toBe("baseline"); expect(row.slotOrder.filter((value: unknown) => value === null)).toHaveLength(1);
+    expect(row.humanTimeToFind).toBe("unknown"); expect(row.costs.personMinutes).toBe("unknown"); expect(row.costs.providerTokens).toBe("unknown");
+    expect(row.trial === "diagnose" || row.trial === "reuse").toBe(true); expect(validateCostRecord(row.costs)).toEqual(row.costs);
+  }
+  expect(manifest.environment.cpuLimit).toBe(2); expect(manifest.environment.pidsLimit).toBe(32); expect(manifest.environment.memoryLimitBytes).toBe(256 * 1024 * 1024);
+  expect(manifest.schedule.treatmentObservations).toBe(0); expect(manifest.schedule.supervision).toBe("preregistered-only");
+});
+
+test("baseline bundle publication refuses changed receipt content", () => {
+  const directory = join(root, "docs/verification/execution-eval-baseline/baseline-3f8f373"), temporary = tempDir(), manifest = JSON.parse(readTextBounded(join(directory, "manifest.json"), 65_536));
+  for (const name of ["manifest.json", ...manifest.files.map((file: { path: string }) => file.path)]) writeAtomic(join(temporary, name), readTextBounded(join(directory, name), 65_536), 65_536);
+  expect(Object.keys(JSON.parse(emitBaseline(temporary)).files)).toHaveLength(25);
+  const target = join(temporary, manifest.files[0].path); writeAtomic(target, readTextBounded(target, 65_536) + "\n", 65_536);
+  expect(() => emitBaseline(temporary)).toThrow("baseline receipt hash changed");
 });
