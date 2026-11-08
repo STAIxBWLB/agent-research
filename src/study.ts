@@ -49,24 +49,34 @@ export function writeAtomic(path: string, text: string, maxBytes: number, mode =
 
 /** Read a regular file, stopping one byte past `maxBytes`: special files and oversize files are refused without buffering them. */
 export interface ReadOptions { noFollow?: boolean; uid?: number }
-export function readBytesBounded(path: string, maxBytes: number, options: ReadOptions = {}): Buffer {
+function readChunksBounded(path: string, maxBytes: number, options: ReadOptions, consume: (chunk: Buffer) => void): number {
   // Non-blocking open: a FIFO without a writer would otherwise block before the type check.
   const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | (options.noFollow ? constants.O_NOFOLLOW : 0));
   try {
     const info = fstatSync(fd);
     if (!info.isFile()) throw new Error(`${path}: not a regular file`);
     if (options.uid !== undefined && info.uid !== options.uid) throw new Error(`${path}: owned by another user`);
-    const buffer = Buffer.alloc(Math.min(maxBytes + 1, 1 << 20)), parts: Buffer[] = [];
+    const buffer = Buffer.alloc(Math.min(maxBytes + 1, 1 << 20));
     let total = 0;
     for (;;) {
       const n = readSync(fd, buffer, 0, buffer.length, null);
       if (n === 0) break;
       total += n;
       if (total > maxBytes) throw new Error(`${path}: larger than ${maxBytes} bytes`);
-      parts.push(Buffer.from(buffer.subarray(0, n)));
+      consume(buffer.subarray(0, n));
     }
-    return Buffer.concat(parts);
+    return total;
   } finally { closeSync(fd); }
+}
+export function readBytesBounded(path: string, maxBytes: number, options: ReadOptions = {}): Buffer {
+  const parts: Buffer[] = [];
+  readChunksBounded(path, maxBytes, options, chunk => parts.push(Buffer.from(chunk)));
+  return Buffer.concat(parts);
+}
+/** Hash a regular file through the bounded reader without retaining its contents. */
+export function hashFileBounded(path: string, maxBytes: number, options: ReadOptions = {}): {sha256: string; bytes: number} {
+  const hash = createHash("sha256"), bytes = readChunksBounded(path, maxBytes, options, chunk => { hash.update(chunk); });
+  return { sha256: hash.digest("hex"), bytes };
 }
 export function readTextBounded(path: string, maxBytes: number, options: ReadOptions = {}): string {
   try { return new TextDecoder("utf-8", { fatal: true }).decode(readBytesBounded(path, maxBytes, options)); }
@@ -102,10 +112,10 @@ export function studyFile(dir: string, ...parts: string[]): string { return join
 export function openStudy(dir: string): { dir: string; study: Study } {
   const root = resolve(dir), file = join(root, "study.json");
   if (!existsSync(file)) throw new Error(`${root}: no study.json (run ares init first)`);
-  return { dir: root, study: validStudy(readJsonFile(file, STUDY_BYTES)) };
+  return { dir: root, study: validateStudy(readJsonFile(file, STUDY_BYTES)) };
 }
 
-function validStudy(raw: unknown): Study {
+export function validateStudy(raw: unknown): Study {
   if (plain(raw) && raw.v !== 1 && raw.v !== 2) throw new Error("study.json: unsupported schema version; use an ares version that supports this study, keeping the original file unchanged");
   if (!plain(raw) || (raw.v !== 1 && raw.v !== 2) || typeof raw.id !== "string" || typeof raw.question !== "string" || typeof raw.createdAt !== "string" ||
     !["survey", "experiment"].includes(raw.mode as string)) throw new Error("study.json: malformed");
@@ -212,7 +222,12 @@ export function appendEvent(dir: string, actor: Actor, type: string, data: Recor
 export function readLedger(dir: string): LedgerEvent[] {
   const path = join(dir, "ledger.jsonl");
   if (!existsSync(path)) return [];
-  const lines = readTextBounded(path, LEDGER_BYTES).split("\n");
+  return parseLedger(readTextBounded(path, LEDGER_BYTES));
+}
+/** Shared v1 replay validation for bounded, already captured ledger bytes. */
+export function parseLedger(text: string): LedgerEvent[] {
+  if (Buffer.byteLength(text) > LEDGER_BYTES) throw new Error("ledger.jsonl exceeds its reader bound; restore a bounded ledger before reading");
+  const lines = text.split("\n");
   const events: LedgerEvent[] = [];
   lines.forEach((line, index) => {
     if (!line.trim()) return;
