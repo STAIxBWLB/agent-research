@@ -2,12 +2,13 @@ import { requireCopilotAccept } from "../copilot.ts";
 import { finalSeedsHash } from "./final.ts";
 import { selectionHash } from "./selection.ts";
 import { existsSync, lstatSync, opendirSync } from "node:fs";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { commit, openStudy, plain, readBytesBounded, readJsonFile, readTextBounded, requireExperiment, sha256, type Actor } from "../study.ts";
 
 export interface Limits { cpus: number; memoryMb: number; pidsLimit: number; wallSeconds: number; gpus: number }
+export interface ProtocolInput { path?: string; sha256: string; mount: { candidate?: string; evaluator?: string } }
 export interface Protocol {
-  v: 1; method: string;
+  v: 1; method: string; inputs?: Record<string, ProtocolInput>;
   candidate: { image: string; command: string[]; env?: Record<string, string> };
   evaluator: { image: string; command: string[] };
   metrics: { name: string; unit: string; direction: "max" | "min" }[];
@@ -55,8 +56,42 @@ function stage(raw: unknown, what: string, envAllowed: boolean): Protocol["candi
   }
   return { image, command, env: Object.fromEntries(entries) };
 }
-export function validateProtocol(raw: unknown): Protocol {
-  const p = object(raw, ["v", "method", "candidate", "evaluator", "metrics", "seeds", "limits", "network", "budget"], "protocol");
+/** Input locators stay executor-local; only strict read-only /in targets are supported. */
+export function validateProtocolInputs(raw: unknown): Record<string, ProtocolInput> {
+  return protocolInputs(raw, false);
+}
+function protocolInputs(raw: unknown, stored: boolean): Record<string, ProtocolInput> {
+  const value = object(raw, Object.keys(plain(raw) ? raw : {}), "protocol.inputs"), entries = Object.entries(value);
+  if (entries.length > 8) throw new Error("protocol.inputs: invalid count; declare at most 8 named inputs");
+  const result: [string, ProtocolInput][] = [];
+  for (const [name, descriptor] of entries) {
+    if (!/^[a-z0-9_-]{1,32}$/.test(name)) throw new Error("protocol.inputs: invalid name; use 1..32 lowercase letters, digits, underscores or hyphens");
+    if (stored && plain(descriptor) && Object.hasOwn(descriptor, "path")) throw new Error(`stored protocol.inputs.${name}.path: executor locators are forbidden; restore a path-free frozen protocol with sha256 and mount only`);
+    const input = object(descriptor, stored ? ["sha256", "mount"] : ["path", "sha256", "mount"], `protocol.inputs.${name}`);
+    if (!stored && (typeof input.path !== "string" || input.path.length > 4096 || !input.path.startsWith("/") || /[\0\r\n,"]/.test(input.path))) throw new Error(`protocol.inputs.${name}.path: invalid locator; use an absolute executor path without NUL, newlines, commas or double quotes`);
+    if (typeof input.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(input.sha256)) throw new Error(`protocol.inputs.${name}.sha256: invalid manifest hash; run ares executor inputs hash <dir> <path> and use its 64 lowercase hex digest`);
+    const targets = object(input.mount, ["candidate", "evaluator"], `protocol.inputs.${name}.mount`);
+    if (!Object.keys(targets).length) throw new Error(`protocol.inputs.${name}.mount: missing stage; declare candidate, evaluator or both`);
+    const mount: ProtocolInput["mount"] = {};
+    for (const stage of ["candidate", "evaluator"] as const) if (Object.hasOwn(targets, stage)) {
+      const target = targets[stage];
+      if (typeof target !== "string" || target.length > 256 || !/^\/in\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*$/.test(target) || target.split("/").some(part => part === "." || part === "..")) throw new Error(`protocol.inputs.${name}.mount.${stage}: invalid target; choose a normalized path under /in/ without dot segments`);
+      for (const [, prior] of result) {
+        const other = prior.mount[stage];
+        if (other && (other === target || other.startsWith(`${target}/`) || target.startsWith(`${other}/`))) throw new Error(`protocol.inputs.${name}.mount.${stage}: overlapping targets; use disjoint /in/ targets for each stage`);
+      }
+      mount[stage] = target;
+    }
+    result.push([name, { ...(!stored ? { path: posix.normalize(input.path as string) } : {}), sha256: input.sha256, mount }]);
+  }
+  return Object.fromEntries(result);
+}
+/** Public configuration always requires executor-local locators for declared inputs. */
+export function validateProtocol(raw: unknown): Protocol { return protocolShape(raw, false); }
+/** Frozen attempt records carry identities only, never executor-host locators. */
+export function validateStoredProtocol(raw: unknown): Protocol { return protocolShape(raw, true); }
+function protocolShape(raw: unknown, stored: boolean): Protocol {
+  const p = object(raw, ["v", "method", "candidate", "evaluator", "metrics", "seeds", "limits", "network", "budget", "inputs"], "protocol");
   if (p.v !== 1) throw new Error("protocol.v: unsupported version; set protocol.v to 1");
   if (p.network !== "none") throw new Error('protocol.network: network access is unsupported; set protocol.network to "none"');
   const limitsRaw = object(p.limits, Object.keys(LIMIT_BOUNDS), "protocol.limits");
@@ -75,6 +110,7 @@ export function validateProtocol(raw: unknown): Protocol {
     maxWallHours: number(budget.maxWallHours, "budget.maxWallHours", 0.000001, 1_000_000, false),
     maxGpuHours: number(budget.maxGpuHours, "budget.maxGpuHours", 0, 64_000_000, false),
   } };
+  if (p.inputs !== undefined) protocol.inputs = protocolInputs(p.inputs, stored);
   if (Buffer.byteLength(JSON.stringify(protocol, null, 2) + "\n") > PROTOCOL_BYTES) throw new Error(`protocol: too large; reduce the formatted protocol to at most ${PROTOCOL_BYTES} bytes`);
   return protocol;
 }
@@ -83,9 +119,24 @@ function canonical(value: unknown): string {
   if (plain(value)) return `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`;
   return JSON.stringify(value);
 }
+/** Accept full public or already-frozen records, but never mixed locator/identity descriptors. */
+export function frozenProtocol(protocol: Protocol): Protocol {
+  const hasLocators = plain(protocol.inputs) && Object.values(protocol.inputs).some(input => plain(input) && Object.hasOwn(input, "path"));
+  const normalized = hasLocators ? validateProtocol(protocol) : validateStoredProtocol(protocol);
+  if (normalized.inputs !== undefined) normalized.inputs = Object.fromEntries(Object.entries(normalized.inputs).map(([name, input]) => [name, { sha256: input.sha256, mount: { ...input.mount } }]));
+  return normalized;
+}
 export function protocolHash(protocol: Protocol): string {
-  const { budget: _budget, ...comparable } = validateProtocol(protocol);
+  const { budget: _budget, ...comparable } = frozenProtocol(protocol);
   return sha256(canonical(comparable));
+}
+/** Locator edits do not alter the input identities a frozen attempt consumes. */
+export function sameProtocolInputs(left: Protocol, right: Protocol): boolean {
+  return canonical(frozenProtocol(left).inputs ?? {}) === canonical(frozenProtocol(right).inputs ?? {});
+}
+/** Preserve legacy raw-byte design seals when inputs are absent. */
+function protocolSealHash(protocol: Protocol, sourceText: string): string {
+  return sha256(protocol.inputs === undefined ? sourceText : canonical(frozenProtocol(protocol)));
 }
 export function readProtocol(dir: string): Protocol | undefined {
   const file = join(dir, "design", "protocol.json");
@@ -125,7 +176,7 @@ export function taskTreeHash(dir: string): string {
 export function designBinding(dir: string): string | undefined {
   return readDesign(dir)?.binding;
 }
-/** Capture the validated protocol and its raw-byte seal together for a frozen attempt. */
+/** Capture the validated protocol and design seal; input identities omit locators, legacy bytes stay bound. */
 export function readDesign(dir: string): { protocol: Protocol; treeHash: string; binding: string } | undefined {
   const file = join(dir, "design", "protocol.json");
   if (!existsSync(file)) return undefined;
@@ -133,7 +184,7 @@ export function readDesign(dir: string): { protocol: Protocol; treeHash: string;
   let raw: unknown; try { raw = JSON.parse(text); } catch { throw new Error("protocol: invalid JSON; restore design/protocol.json with a valid ares protocol input"); }
   const protocol = validateProtocol(raw), treeHash = taskTreeHash(dir);
   const selected = selectionHash(dir, protocol), reserved = finalSeedsHash(dir, protocol);
-  return { protocol, treeHash, binding: sha256(JSON.stringify([sha256(text), treeHash, ...(selected !== undefined ? [selected] : []), ...(reserved !== undefined ? [reserved] : [])])) };
+  return { protocol, treeHash, binding: sha256(JSON.stringify([protocolSealHash(protocol, text), treeHash, ...(selected !== undefined ? [selected] : []), ...(reserved !== undefined ? [reserved] : [])])) };
 }
 /** Caller holds the study lock, as with setScope. Validate everything before any write. */
 export function setProtocol(dir: string, raw: unknown, actor: Actor): Protocol {
@@ -144,6 +195,6 @@ export function setProtocol(dir: string, raw: unknown, actor: Actor): Protocol {
   // Never commit a protocol that makes its existing selection unreadable.
   selectionHash(dir, protocol);
   finalSeedsHash(dir, protocol);
-  commit(dir, [[join(dir, "design", "protocol.json"), text, PROTOCOL_BYTES]], [{ actor, type: "protocol.set", data: { sha256: sha256(text), protocolHash: protocolHash(protocol), treeHash } }]);
+  commit(dir, [[join(dir, "design", "protocol.json"), text, PROTOCOL_BYTES]], [{ actor, type: "protocol.set", data: { sha256: sha256(text), ...(protocol.inputs === undefined ? {} : { identitySha256: protocolSealHash(protocol, text) }), protocolHash: protocolHash(protocol), treeHash } }]);
   return protocol;
 }

@@ -38,7 +38,7 @@ import { checkCitations } from "./lit/cite.ts";
 import { cardPath, validateCard } from "./lit/cards.ts";
 import { designBinding, protocolHash, readDesign, setProtocol } from "./exp/protocol.ts";
 import { requireExperiment } from "./study.ts";
-import { checkExecutor, setExecutor } from "./exp/executor.ts";
+import { checkExecutor, setExecutor, readExecutor, hashExecutorInput, type InputManifest } from "./exp/executor.ts";
 import { cancelAttempt, listAttempts, listAttemptSummaries, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type AttemptListOptions, type AttemptOptions } from "./exp/attempts.ts";
 import { readAttemptLogs, type LogOptions } from "./exp/logs.ts";
 
@@ -97,6 +97,13 @@ export async function protocol(dirArg: string, raw: unknown, ctx: Ctx) {
 export async function executorSet(dirArg: string, raw: unknown, ctx: Ctx) {
   const { dir } = openStudy(dirArg);
   return withLock(dir, () => setExecutor(dir, raw, ctx.actor));
+}
+/** Read only configured executor-host inputs; no paths or bodies are recorded in the study. */
+export async function executorInputsHash(dirArg: string, path: string, ctx: Ctx): Promise<InputManifest> {
+  const { dir, study } = openStudy(dirArg); requireExperiment(study);
+  const executor = readExecutor(dir);
+  if (!executor) throw new Error("executor: not configured; run ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH");
+  return hashExecutorInput(executor, path, ctx.runner);
 }
 export const executorCheck = (dir: string, ctx: Ctx) => checkExecutor(dir, ctx.runner);
 export const attemptRun = (dir: string, options: AttemptOptions, ctx: Ctx) => runAttempt(dir, options, ctx);

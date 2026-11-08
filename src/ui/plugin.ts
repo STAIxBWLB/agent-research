@@ -84,7 +84,7 @@ export function gateWaitingTimes(events: LedgerEvent[], inputs: GateInputs, obse
         if (changed) observe("screen", included.size ? [...included].sort() : undefined, event.at); break;
       }
       case "protocol.set":
-        if (typeof data.sha256 === "string" && typeof data.treeHash === "string") protocol = [data.sha256, data.treeHash];
+        if (typeof data.sha256 === "string" && typeof data.treeHash === "string") protocol = [typeof data.identitySha256 === "string" ? data.identitySha256 : data.sha256, data.treeHash];
         experiment(event.at); break;
       case "selection.set": if (typeof data.sha256 === "string") selection = data.sha256; experiment(event.at); break;
       case "final.seeds.set": if (typeof data.sha256 === "string") reserved = data.sha256; experiment(event.at); break;

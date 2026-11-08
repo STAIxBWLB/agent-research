@@ -40,6 +40,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "selection", usage: "selection <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "protocol", usage: "protocol <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "executor set", usage: "executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--json]", mutates: true, options: { "--kind": "value", "--host": "value", "--workdir": "value", ...json } },
+  { name: "executor inputs hash", usage: "executor inputs hash <dir> <path> [--json]", mutates: "network", options: json },
   { name: "executor check", usage: "executor check <dir> [--json]", mutates: "network", options: json },
   { name: "gate list", usage: "gate list <dir> [--json]", mutates: false, options: json },
   { name: "gate approve", usage: "gate approve <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact> [--reason TEXT] [--json]", mutates: true, options: { "--reason": "value", ...json } },
@@ -66,7 +67,8 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "mcp", usage: "mcp", mutates: false, options: {} },
 ];
 export function findCommand(args: string[]): { spec: CommandSpec; rest: string[] } | undefined {
-  for (const words of [2, 1]) {
+  const longest = Math.max(...COMMANDS.map(command => command.name.split(" ").length));
+  for (let words = longest; words >= 1; words--) {
     const name = args.slice(0, words).join(" "), spec = COMMANDS.find(c => c.name === name);
     if (spec) return { spec, rest: args.slice(words) };
   }

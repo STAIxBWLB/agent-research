@@ -8,7 +8,7 @@ import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, CONTROL_FUTURE
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
 import { finalGateBinding } from "../src/exp/final.ts";
-import { readLedger, sha256, withLock, appendEvent, openStudy } from "../src/study.ts";
+import { readTextBounded, readLedger, sha256, withLock, appendEvent, openStudy } from "../src/study.ts";
 import { deferred, fakeHttp, tempDir } from "./helpers.ts";
 import { logCaptureFixtureRunner, metricLogTar, metricTar } from "./metric-fixtures.ts";
 import { collectStageEvidence, EvidenceError, LOG_COPY_BYTES } from "../src/exp/metrics.ts";
@@ -23,12 +23,14 @@ function runtime(dir: string) {
   const requests: ProcessRequest[] = [], containers = new Map<string, FakeContainer>();
   const clock = { value: Date.parse("2030-01-01T00:00:00Z") };
   let beforeResolve: (() => Promise<void>) | undefined, runFailure = false, daemonDown = false, lostStartResponse = false, versionFailure = false;
+  let inputHash = "a".repeat(64);
   let metricsPayload: string | null = '{"score":7}';
   const ok = (stdout = ""): ProcessResult => ({ exitCode: 0, stdout, stderr: "" });
   const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1]!;
   const runner: ProcessRunner = async request => {
     expect(existsSync(join(dir, ".ares.lock"))).toBe(false); requests.push(request);
     const args = request.args;
+    if (request.command === "python3") return ok(args.at(-1)!.startsWith("/") ? JSON.stringify({ sha256: inputHash, files: 2, bytes: 123 }) : "");
     if (request.command === "git") {
       if (args.includes("cat-file")) { const hook = beforeResolve; beforeResolve = undefined; await hook?.(); return ok("commit"); }
       if (args.includes("rev-parse")) return ok(treeId);
@@ -86,7 +88,7 @@ function runtime(dir: string) {
     const log = { path: `/synthetic/${stage}.log`, sha256: sha256(""), bytes: 0, truncated: false };
     return { logs: { stdout: log, stderr: log }, outputs: [] };
   } };
-  return { requests, containers, clock, ctx, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; } };
+  return { requests, containers, clock, ctx, inputHash: (hash: string) => { inputHash = hash; }, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; } };
 }
 async function setup(p = protocol(), autonomy = "gates", approved = true) {
   const dir = tempDir(); init(dir, { question: "Synthetic?", mode: "experiment", autonomy }, { actor });
@@ -624,4 +626,46 @@ for (const [label, skew, reclaimed] of [["slightly future", 1000, false], ["far 
     if (existsSync(lock) && readFileSync(lock, "utf8") === token) fs.unlinkSync(lock);
     if (pending) await Promise.allSettled([pending]); now.mockRestore();
   }
+});
+
+const inputProtocol = (): Protocol => ({ ...protocol(), inputs: {
+  train: { path: "/synthetic/private-training", sha256: "a".repeat(64), mount: { candidate: "/in/train" } },
+  heldout: { path: "/synthetic/private-heldout", sha256: "a".repeat(64), mount: { evaluator: "/in/heldout" } },
+} });
+test("sealed inputs mismatch refuses before any container or attempt record", async () => {
+  const { dir, fake } = await setup(inputProtocol()); fake.inputHash("b".repeat(64));
+  const before = readTextBounded(join(dir, "ledger.jsonl"), 1024 * 1024);
+  await expect(runAttempt(dir, request, fake.ctx)).rejects.toThrow("executor input train: manifest hash mismatch");
+  expect(fake.containers.size).toBe(0); expect(fake.requests.some(r => r.command === "docker")).toBe(false);
+  expect(listAttempts(dir).attempts).toHaveLength(0);
+  expect(readTextBounded(join(dir, "ledger.jsonl"), 1024 * 1024)).toBe(before);
+});
+test("input attempts persist verified identities without locators and survive stage transitions", async () => {
+  const { dir, fake } = await setup(inputProtocol());
+  const first = await runAttempt(dir, request, fake.ctx);
+  expect(first.verifiedInputs).toEqual({ train: "a".repeat(64), heldout: "a".repeat(64) });
+  const text = readTextBounded(join(dir, "runs", "main", "attempts", `${first.id}.json`), 1024 * 1024);
+  expect(text).not.toContain("/synthetic/private-training"); expect(text).not.toContain("/synthetic/private-heldout");
+  expect(first.protocol.inputs?.train).not.toHaveProperty("path");
+  expect(running(fake, "candidate").args.join(" ")).toContain("/in/train,readonly");
+  expect(running(fake, "candidate").args.join(" ")).not.toContain("/synthetic/private-heldout");
+  running(fake, "candidate").running = false;
+  await reconcileAttempts(dir, fake.ctx);
+  expect(running(fake, "evaluator").args.join(" ")).toContain("/in/heldout,readonly");
+  expect(running(fake, "evaluator").args.join(" ")).not.toContain("/synthetic/private-training");
+  running(fake, "evaluator").running = false; await reconcileAttempts(dir, fake.ctx);
+  expect(showAttempt(dir, first.id).status).toBe("succeeded");
+  const { exportBundle } = await import("../src/study-export.ts"), target = join(tempDir(), "bundle");
+  await exportBundle(dir, { bundle: target });
+  const exported = readTextBounded(join(target, "attempts.jsonl"), 1024 * 1024);
+  expect(JSON.parse(exported).inputs).toEqual(first.verifiedInputs);
+  expect(exported).not.toContain("/synthetic/private");
+});
+test("input identity drift on restart refuses with restore guidance before a new stage", async () => {
+  const p = inputProtocol(), { dir, fake } = await setup(p), first = await runAttempt(dir, request, fake.ctx);
+  running(fake, "candidate").running = false;
+  await withLock(dir, () => setProtocol(dir, { ...p, inputs: { ...p.inputs, heldout: { ...p.inputs!.heldout!, sha256: "b".repeat(64) } } }, actor));
+  await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("restore the matching input names, hashes and mounts");
+  expect(showAttempt(dir, first.id).stage).toBe("candidate");
+  expect(fake.containers.size).toBe(1);
 });
