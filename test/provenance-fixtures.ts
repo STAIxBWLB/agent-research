@@ -13,8 +13,8 @@ import { metricAttempt, metricProtocol } from "./metric-fixtures.ts";
 
 const BASE = "a".repeat(40), WIN = "b".repeat(40), SMALL_BYTES = 65_536;
 /** Real native source records, with synthetic attempts only: no executor, Docker, hub or graph producer. */
-export async function provenanceFixture() {
-  const dir = tempDir(), actor = { kind: "person" as const, id: "synthetic-fixture" }, ctx = { actor, http: fakeHttp([]).http };
+export async function provenanceFixture(dir = tempDir()) {
+  const actor = { kind: "person" as const, id: "synthetic-fixture" }, ctx = { actor, http: fakeHttp([]).http };
   const { study } = ops.init(dir, { question: "Does the synthetic refinement improve the paired score?", mode: "experiment", autonomy: "gates" }, ctx);
   const write = (relative: string, text: string, bound = SMALL_BYTES) => {
     const file = join(dir, relative); mkdirSync(dirname(file), { recursive: true }); writeAtomic(file, text, bound); return file;

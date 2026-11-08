@@ -19,7 +19,7 @@ export default (host) => {
   const at = (value) => typeof value === "string" ? value.replace("T", " ").replace(/\.\d+Z$/, " UTC") : "Time unavailable";
   const go = (target, extra = {}) => host.navigate(host.tool, target, extra);
   const tone = (state) => ["accepted", "approved", "qualified", "succeeded", "ready"].includes(state) ? "ok"
-    : ["failed", "unknown", "unavailable"].includes(state) ? "err"
+    : ["failed", "unknown", "unavailable", "corrupt", "missing"].includes(state) ? "err"
       : ["pending", "proposed", "not_qualified", "rejected"].includes(state) ? "warn" : "neutral";
   const decisionNotice = () => ui.notice("Each decision opens a preview. Nothing is written until you confirm.", "neutral");
   const perform = async (input) => {
@@ -107,6 +107,8 @@ export default (host) => {
     const study = snapshot.study;
     if (!study) return [toolbar("Study", true), ui.notice(text(snapshot.error, "Choose a registered study from the studies panel."), "warn")];
     const sections = [toolbar(text(study.question, "Study"), true), decisionNotice()];
+    if (typeof study.dir === "string") sections.push(h("div", { class: "ares-bar" },
+      ui.button("Lineage", () => go("lineage", { study: study.dir })), ui.button("Compare", () => go("compare", { study: study.dir }))));
     if (study.available === false) return [...sections, ui.notice(text(study.reason, "Study unavailable; its registration is retained."), "err"), h("p", { class: "ares-sub", text: text(study.dir, "") })];
     sections.push(h("div", { class: "ares-bar" }, ui.chip(text(study.mode), "neutral"), ui.chip(autonomyLabel(study.autonomy), "neutral")),
       h("p", { class: "ares-sub", text: text(study.dir, "") }), gateRows(study.gates, study.dir), attemptRows(study.attempts));
@@ -145,10 +147,121 @@ export default (host) => {
       ui.rows(errors, ([name, reason]) => ui.row({ title: name, sub: String(reason) }))));
     return sections;
   };
+  const rootParams = () => Object.fromEntries(["rootKind", "rootId", "rootRevision", "rootSha256"].filter(key => typeof params[key] === "string").map(key => [key, params[key]]));
+  const referenceLabel = (value) => {
+    const ref = record(value);
+    return `${text(ref.kind)}: ${text(ref.id)}${typeof ref.revision === "string" ? ` | revision ${ref.revision}` : ""}${typeof ref.sha256 === "string" ? ` | sha256 ${ref.sha256}` : ""}`;
+  };
+  const trace = (study, value) => {
+    const ref = record(value);
+    if (typeof study !== "string" || typeof ref.kind !== "string" || typeof ref.id !== "string") return;
+    go("lineage", { study, rootKind: ref.kind, rootId: ref.id,
+      ...(typeof ref.revision === "string" ? { rootRevision: ref.revision } : {}), ...(typeof ref.sha256 === "string" ? { rootSha256: ref.sha256 } : {}) });
+  };
+  const proofLabel = (value) => {
+    const proof = record(value);
+    return `${text(proof.file)} | sha256 ${text(proof.sha256)}${typeof proof.ledgerIndex === "number" ? ` | ledger index ${proof.ledgerIndex}` : ""}${typeof proof.recordType === "string" ? ` | ${proof.recordType}` : ""}${typeof proof.nativeId === "string" ? ` | native id ${proof.nativeId}` : ""}`;
+  };
+  const chooseStudy = (snapshot, target) => ui.rows(rows(snapshot.studies).slice(0, 200), study => ui.row({
+    title: text(study.question, text(study.id, text(study.dir, "Registered study"))), sub: text(study.dir, ""),
+    ...(typeof study.dir === "string" ? { onOpen: () => go(target, { study: study.dir }) } : {}),
+  })) ?? ui.empty("No registered studies", "Register a study with ares console add <dir>.");
+  const readHeader = (title, snapshot) => {
+    const study = record(snapshot.study), sections = [toolbar(title, true)];
+    if (typeof study.dir === "string") sections.push(h("div", { class: "ares-bar" },
+      ui.button("Study detail", () => go("study", { study: study.dir })),
+      ui.button("Full lineage", () => go("lineage", { study: study.dir })), ui.button("Compare", () => go("compare", { study: study.dir }))));
+    if (snapshot.error) sections.push(ui.notice(String(snapshot.error), "err"));
+    return sections;
+  };
+  const moreNotice = (count, command) => count > 0 ? ui.notice(`${count} more; inspect with ares lineage ${command} <dir> --json`, "warn") : null;
+  const reasonRows = (value, command = "compare") => {
+    const values = rows(value), shown = values.slice(0, 64);
+    return h("div", {}, ui.rows(shown, reason => ui.row({ title: String(reason) })), moreNotice(values.length - shown.length, command));
+  };
+  const readNotices = (value, command = "show") => {
+    const data = record(value), notices = [];
+    if (data.status === "changed") notices.push(ui.notice(command === "compare" ? "Sources changed or a write is in progress; retry the comparison." : "Sources or the root selection changed. Restart from the first page before continuing.", "warn"));
+    else if (data.status === "capped" || data.truncated === true) notices.push(ui.notice(data.status === "capped" ? command === "compare" ? "Traversal capped: this is a partial comparison, not complete evidence." : "Traversal capped: this is a partial graph, not complete provenance." : "This page is partial. Continue to read the remaining source-proven records.", "warn"));
+    if (data.status === "unavailable") notices.push(ui.notice("Some source records are unavailable or corrupt. Retained receipts do not establish current readable results.", "warn"));
+    const issues = rows(data.issues), critical = issue => /capped|changed/.test(text(issue.code, "")) || issue.code === "comparison-selection-unavailable";
+    const important = issues.filter(critical), shown = [...important, ...issues.filter(issue => !critical(issue)).slice(0, Math.max(0, 64 - important.length))];
+    notices.push(...shown.map(issue => ui.notice(`${text(issue.code, "Source issue")}: ${text(issue.message, "Inspect and restore the source record.")}`, "warn")));
+    const omitted = moreNotice(issues.length - shown.length, command); if (omitted) notices.push(omitted);
+    return notices;
+  };
+  const lineageView = (snapshot) => {
+    const sections = readHeader("Execution lineage", snapshot), study = record(snapshot.study), page = snapshot.lineage;
+    if (!study.dir) return [...sections, chooseStudy(snapshot, "lineage")];
+    if (!page) return [...sections, ui.empty("Lineage unavailable", "Choose a registered study or refresh after restoring its source records.")];
+    sections.push(...readNotices(page), h("p", { class: "ares-sub ares-identifiers", text: `Source sha256: ${text(page.sourceSha256)} | ledger bytes: ${number(page.ledgerPosition)} | nodes: ${number(page.totals?.nodes)} | edges: ${number(page.totals?.edges)}` }));
+    if (typeof params.rootKind === "string" && typeof params.rootId === "string") sections.push(h("p", { class: "ares-sub ares-identifiers", text: `Root ${params.rootKind}: ${params.rootId}` }));
+    if (page.status === "changed") sections.push(ui.button("Restart lineage", () => go("lineage", { study: study.dir, ...rootParams() })));
+    sections.push(h("section", { class: "ares-card ares-identifiers" }, h("h3", { text: "Source nodes" }),
+      ui.rows(rows(page.nodes).slice(0, 100), node => ui.row({ title: referenceLabel(node.ref), sub: proofLabel(node.proof),
+        chip: { text: `${text(node.state)} / ${text(node.availability)}`, tone: tone(node.state === "current" ? node.availability : node.state) }, onOpen: () => trace(study.dir, node.ref) })) ?? ui.empty("No source nodes on this page")));
+    sections.push(h("section", { class: "ares-card ares-identifiers" }, h("h3", { text: "Recorded relationships" }),
+      ui.table({ caption: "Source-proven edges", columns: [{ key: "from", label: "From" }, { key: "relation", label: "Relation" }, { key: "to", label: "To" }, { key: "proof", label: "Source proof" }],
+        rows: rows(page.edges).slice(0, 200).map(edge => ({ from: referenceLabel(edge.from), relation: text(edge.relation), to: referenceLabel(edge.to), proof: proofLabel(edge.proof) })) })));
+    sections.push(ui.notice("Current and historical receipts describe their source state. Missing/corrupt sources stay explicit; not-read artifacts show digests only, never output bodies.", "neutral"));
+    if (typeof page.nextCursor === "string") sections.push(ui.button("Next lineage page", () => go("lineage", { study: study.dir, ...rootParams(), graphCursor: page.nextCursor })));
+    return sections;
+  };
+  const compareView = (snapshot) => {
+    const sections = readHeader("Compare execution records", snapshot), study = record(snapshot.study);
+    if (!study.dir) return [...sections, chooseStudy(snapshot, "compare")];
+    const errors = h("div", { "aria-live": "polite" });
+    sections.push(ui.notice("Read-only comparison. Select exactly one list of existing records; this creates no winner, action or result receipt.", "neutral"),
+      ui.form([{ name: "attempts", label: "Attempt ids (comma-separated, at most eight)", value: typeof params.attempts === "string" ? params.attempts : "" }, { name: "candidates", label: "Candidate commits (comma-separated, at most eight)", value: typeof params.candidates === "string" ? params.candidates : "" }], { label: "Compare records", primary: true }, values => {
+        const attempts = text(values.attempts, "").trim(), candidates = text(values.candidates, "").trim();
+        const selected = attempts || candidates, ids = selected.split(",").map(id => id.trim()), pattern = attempts ? /^[a-f0-9]{16}$/ : /^[a-f0-9]{40}$/;
+        if (!!attempts === !!candidates || ids.length < 1 || ids.length > 8 || new Set(ids).size !== ids.length || ids.some(id => !pattern.test(id))) {
+          errors.replaceChildren(ui.notice("Enter exactly one list: one to eight distinct 16-hex attempt ids or full 40-hex candidate commits.", "err")); return;
+        }
+        go("compare", { study: study.dir, ...(attempts ? { attempts: ids.join(",") } : { candidates: ids.join(",") }) });
+      }), errors);
+    const comparison = snapshot.comparison;
+    if (!comparison) return [...sections, ui.empty("Choose records to compare", "Failed and unknown attempts remain visible; retries are not independent samples.")];
+    sections.push(...readNotices(comparison, "compare"), h("p", { class: "ares-sub ares-identifiers", text: `Source sha256: ${text(comparison.sourceSha256)} | ledger bytes: ${number(comparison.ledgerPosition)}` }), ui.notice("Aggregation unavailable; performed: false. These descriptive rows do not pool retries or create a verdict. Existing closed investigation and fresh final remain the result authorities.", "neutral"));
+    const aggregation = record(comparison.aggregation);
+    sections.push(h("section", { class: "ares-card" }, h("h3", { text: "Input compatibility" }),
+      ui.chip(aggregation.compatible === true ? "compatible inputs" : "compatibility unavailable or restricted", aggregation.compatible === true ? "neutral" : "warn"),
+      reasonRows(aggregation.reasons)));
+    for (const row of rows(comparison.rows).slice(0, 8)) {
+      const attempts = rows(row.attempts).slice(0, 128), columns = [
+        ["id", "Attempt"], ["code", "Code commit / tree / snapshot"], ["protocol", "Protocol hash"], ["seed", "Seed"], ["status", "Status"], ["retry", "Retry ancestry / sample group"], ["metrics", "Metrics and units"], ["digests", "Artifact digests (not read)"], ["wall", "Wall ms (recorded)"], ["bytes", "Output bytes"], ["other", "Other costs"],
+      ].map(([key, label]) => ({ key, label, ...(["seed", "wall", "bytes"].includes(key) ? { align: "end" } : {}) }));
+      const cost = value => typeof value === "number" && Number.isFinite(value) ? value : "unknown";
+      const tableRows = attempts.map(attempt => {
+        const code = record(attempt.code), costs = record(attempt.costs);
+        return { id: text(attempt.id), code: [text(code.commit), text(code.treeId), text(code.snapshotSha256, "unknown")].join(" / "), protocol: text(attempt.protocolHash), seed: number(attempt.seed), status: text(attempt.status),
+          retry: `${text(attempt.retryOf, "none")} | ancestry: ${rows(attempt.retryAncestry).join(" -> ") || "none"} | sample group: ${text(attempt.sampleGroup, "unknown")}`,
+          metrics: rows(attempt.metrics).slice(0, 32).map(metric => `${text(metric.name)}: ${number(metric.value)} ${text(metric.unit, "unit unavailable")}`).join("; ") || "unknown",
+          digests: rows(attempt.artifactDigests).slice(0, 64).join("; ") || "none recorded", wall: cost(costs.wallMilliseconds), bytes: cost(costs.storageBytes),
+          other: ["compute", "transfer", "verification", "retention", "materialization", "idle", "person"].map(name => `${name}: ${cost(costs[name])}`).join("; ") };
+      });
+      const candidate = record(row.candidate), perSeed = rows(candidate.perSeed).slice(0, 128);
+      const recorded = value => typeof value === "number" && Number.isFinite(value) ? value : value === null ? "null (not recorded)" : "unknown";
+      const candidateSummary = row.candidate && typeof row.candidate === "object" ? h("section", { class: "ares-card" },
+        h("h3", { text: "Recorded closed candidate summary" }),
+        ui.notice("Existing closed investigation values only: no recalculation or new eligibility judgment.", "neutral"),
+        ui.table({ caption: "Recorded closed candidate summary", columns: [{ key: "reason", label: "Recorded reason" }, { key: "eligible", label: "Recorded eligible" }, { key: "mean", label: "Recorded mean" }, { key: "baselineMean", label: "Recorded baseline mean" }, { key: "delta", label: "Recorded delta" }],
+          rows: [{ reason: text(candidate.reason, "unknown"), eligible: typeof candidate.eligible === "boolean" ? String(candidate.eligible) : "unknown", mean: recorded(candidate.mean), baselineMean: recorded(candidate.baselineMean), delta: recorded(candidate.delta) }] }),
+        ui.table({ caption: "Recorded per-seed values", columns: [{ key: "seed", label: "Seed", align: "end" }, { key: "attempt", label: "Attempt" }, { key: "value", label: "Recorded value", align: "end" }],
+          rows: perSeed.map(sample => ({ seed: recorded(sample.seed), attempt: text(sample.attempt), value: recorded(sample.value) })) }),
+        rows(candidate.perSeed).length > perSeed.length ? ui.notice("Per-seed display shortened to the first 128 records. Inspect the complete closed investigation with the ares CLI.", "warn") : null) : null;
+      sections.push(h("section", { class: "ares-card ares-identifiers" }, h("h3", { text: `${text(row.kind)}: ${text(row.id)}` }), ui.chip(text(row.state), tone(row.state)), candidateSummary,
+        reasonRows(row.reasons),
+        ui.table({ caption: "Recorded attempt comparison", columns, rows: tableRows }),
+        ui.rows(attempts, attempt => ui.row({ title: `Trace attempt ${text(attempt.id)}`, sub: rows(attempt.comparabilityReasons).join("; "), onOpen: () => trace(study.dir, { kind: "attempt", id: attempt.id }) })),
+        rows(row.attempts).length > attempts.length || attempts.some(attempt => rows(attempt.metrics).length > 32 || rows(attempt.artifactDigests).length > 64) ? ui.notice("Display shortened to bounded rows or inventories. Inspect the full read-only comparison with the ares CLI.", "warn") : null));
+    }
+    return sections;
+  };
   const render = (snapshot) => {
     if (destroyed || !visible || snapshot.changed === false) return;
     last = { key: viewKey(), snapshot };
-    const body = snapshot.error && panel !== "study" ? [ui.notice(String(snapshot.error), "err")]
+    const body = panel === "lineage" ? lineageView(snapshot) : panel === "compare" ? compareView(snapshot) : snapshot.error && panel !== "study" ? [ui.notice(String(snapshot.error), "err")]
       : panel === "studies" ? studies(snapshot) : panel === "study" ? studyView(snapshot) : [ui.empty("Unknown research panel", "Choose Studies from the console.")];
     root.replaceChildren(...body.filter(Boolean));
   };

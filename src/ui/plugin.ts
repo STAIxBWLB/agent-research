@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { version } from "../../package.json";
 import * as ops from "../commands.ts";
+import { validateExecutionReference } from "../provenance.ts";
 import { foldPlan, canonical, PLAN_GATE_BYTES } from "../plan/state.ts";
 import { readRegistry, MAX_REGISTERED_STUDIES } from "../console/registry.ts";
 import { readAttemptRecords, type Attempt } from "../exp/attempts.ts";
@@ -273,9 +274,35 @@ function boundAction(value: Selection) {
   if (value.reason) preview.push(`Reason: ${value.reason}`);
   return { fingerprint: sha256(canonical({ selection: value, study: identity, binding })), preview, archiveFingerprint };
 }
+const LINEAGE_PARAMS = ["rootKind", "rootId", "rootRevision", "rootSha256", "graphCursor", "attempts", "candidates"] as const;
+function readParam(input: Args, name: typeof LINEAGE_PARAMS[number]): string | undefined {
+  const value = input[name]; if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.includes("\0") || Buffer.byteLength(value) > 4096) throw new Error(`console ${name}: bounded text required; correct the view parameters and retry`);
+  return value;
+}
+/** Explicit read panels only; the ordinary overview/inbox polling paths never call these operations. */
+function executionPanel(dir: string, input: Args): Args {
+  if (input.panel === "compare") {
+    if (["rootKind", "rootId", "rootRevision", "rootSha256", "graphCursor"].some(name => input[name] !== undefined)) throw new Error("console compare: use only attempts or candidates selection parameters; clear lineage filters and retry");
+    const attempts = readParam(input, "attempts"), candidates = readParam(input, "candidates");
+    if (attempts === undefined && candidates === undefined) return {comparison: null};
+    return {comparison: ops.lineageCompare(dir, {...(attempts === undefined ? {} : {attempts: attempts.split(",")}), ...(candidates === undefined ? {} : {candidates: candidates.split(",")})})};
+  }
+  if (input.attempts !== undefined || input.candidates !== undefined) throw new Error("console lineage: use root fields and graphCursor; clear comparison selectors and retry");
+  const kind = readParam(input, "rootKind"), id = readParam(input, "rootId"), revision = readParam(input, "rootRevision"), hash = readParam(input, "rootSha256"), cursor = readParam(input, "graphCursor");
+  const rooted = [kind, id, revision, hash].some(value => value !== undefined);
+  if (rooted && (kind === undefined || id === undefined)) throw new Error("console lineage: partial root; pass rootKind and rootId together and retry");
+  let root;
+  if (rooted) {
+    root = validateExecutionReference({v: 1, tool: "ares", projectKey: "pending-study-identity", kind, id, ...(revision === undefined ? {} : {revision}), ...(hash === undefined ? {} : {sha256: hash})});
+    try { root = {...root, projectKey: openStudy(dir).study.id}; }
+    catch { return {lineage: ops.lineageShow(dir)}; }
+  }
+  return {lineage: ops.lineageShow(dir, {...(root === undefined ? {} : {root}), ...(cursor === undefined ? {} : {cursor})})};
+}
 export function createPlugin(runtime: Runtime = {}) { return {
   manifest: { api: 1 as const, tool: "ares", version, title: "Research", icon: "agents", pollMs: 15000,
-    panels: [{ id: "studies", title: "Studies", order: 1 }, { id: "study", title: "Study", order: 2 }],
+    panels: [{ id: "studies", title: "Studies", order: 1 }, { id: "study", title: "Study", order: 2 }, { id: "lineage", title: "Lineage", order: 3 }, { id: "compare", title: "Compare attempts", order: 4 }],
     capabilities: { actions: Object.keys(ACTIONS), confirm: true, inbox: true, multiProject: false, search: false } },
   async open(ctx: Context): Promise<Provider> {
     const assets = { js: readTextBounded(fileURLToPath(new URL("./panel.js", import.meta.url)), 262144), css: readTextBounded(fileURLToPath(new URL("./panel.css", import.meta.url)), 262144) };
@@ -285,11 +312,15 @@ export function createPlugin(runtime: Runtime = {}) { return {
     return {
       assets,
       async snapshot(input) {
+        if (input.panel === "lineage" || input.panel === "compare") {
+          const allowed = ["panel", "study", "after", ...LINEAGE_PARAMS], extra = Object.keys(input).find(name => !allowed.includes(name));
+          if (extra !== undefined) return {cursor: 0, changed: true, study: null, lineage: null, comparison: null, error: `console read snapshot: unknown field ${line(extra, 80)}; allowed fields: ${allowed.join(", ")}; correct the view parameters and retry`};
+        }
         const registry = readRegistry(ctx.home);
         const cursor = registry.studies.reduce((sum, dir) => {
           try { const info = statSync(join(dir, "ledger.jsonl")); return sum + (info.isFile() ? info.size : 0); } catch { return sum; }
         }, 0);
-        const view = `${input.panel}:${str(input.study) ?? str(input.id) ?? ""}`;
+        const view = canonical([input.panel, str(input.study) ?? str(input.id) ?? "", ...LINEAGE_PARAMS.map(name => typeof input[name] === "string" ? sha256(input[name] as string) : typeof input[name])]);
         const deliver = (payload: Args): Args => {
           const hash = sha256(canonical(payload));
           if (input.after === cursor && seen.get(view) === hash) return { cursor, changed: false };
@@ -297,6 +328,15 @@ export function createPlugin(runtime: Runtime = {}) { return {
           seen.set(view, hash);
           return { ...payload, changed: true };
         };
+        if (input.panel === "lineage" || input.panel === "compare") {
+          const choices = registry.studies.map(dir => ({dir})), selected = str(input.study);
+          if (!selected || !registry.studies.includes(selected)) return deliver({cursor, studies: choices, study: null, lineage: null, comparison: null, error: selected ? "Requested study is not registered; use ares console add or choose a registered study" : "Choose a registered study"});
+          let summary: Args = {dir: selected};
+          try { const {study} = openStudy(selected); summary = {...summary, id: study.id, question: study.question, mode: study.mode, available: true}; }
+          catch { summary = {...summary, available: false, reason: "Study metadata unavailable; restore valid study.json and refresh"}; }
+          try { return deliver({cursor, studies: choices, study: summary, ...executionPanel(selected, input)}); }
+          catch (cause) { return deliver({cursor, studies: choices, study: summary, lineage: null, comparison: null, error: error(cause)}); }
+        }
         const registered = new Set(registry.studies); for (const dir of lastAt.keys()) if (!registered.has(dir)) lastAt.delete(dir);
         if (input.panel === "inbox") targets.clear();
         const studies: Args[] = [], details = new Map<string, Args>(), items: Item[] = [];
