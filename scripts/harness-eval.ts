@@ -35,16 +35,31 @@ function parsed(text: string): unknown {try {return JSON.parse(text);} catch {re
 function readReceipt(file: string, bound: number, kind: "frozen" | "control"): unknown {
   let content: string;
   try {content = readTextBounded(file, bound, {noFollow: true});}
-  catch {return fail(`${kind} receipt is missing, unreadable or over-bound`, kind === "frozen" ? "restore the registered receipt or run bun scripts/harness-eval.ts freeze for a reviewed registration, then retry" : "restore the original control receipt or record controls to a new absolute output file, then retry");}
-  return parsed(content);
+  catch {return fail(`${kind} receipt ${file}: missing, unreadable, linked, non-regular, invalid UTF-8 or over-bound (${bound} bytes)`, kind === "frozen" ? "restore the registered receipt bytes or re-register a reviewed experiment with bun scripts/harness-eval.ts freeze, then retry" : "restore the registered control receipt bytes or record controls to a new absolute output file, then retry");}
+  try {return parsed(content);}
+  catch {return fail(`${kind} receipt ${file}: invalid JSON`, "restore the registered receipt bytes or re-register a separately reviewed experiment before retrying");}
 }
 const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
 function snapshot(root: string): Snapshot {
   const files: HashFile[] = []; let total = 0;
+  const source = (path: string, limit: number): Buffer => {
+    let file: string, bytes: Buffer;
+    try {file = filePath(root, path);}
+    catch {return fail(`source ${path}: missing, unreadable, unsafe, linked or non-regular path`, "restore the registered bytes at this source path or re-register a separately reviewed experiment before retrying");}
+    try {bytes = readBytesBounded(file, limit, {noFollow: true});}
+    catch {return fail(`source ${path}: unreadable or over-bound (${limit} bytes)`, "restore the registered bounded source bytes or re-register a separately reviewed experiment before retrying");}
+    total += bytes.length;
+    if (total > TOTAL_BYTES || files.length >= 160) fail(`source ${path}: aggregate source byte/file bound exceeded`);
+    files.push({path, sha256: sha256(bytes), bytes: bytes.length}); return bytes;
+  };
+  const utf8 = (bytes: Buffer, path: string): string => {
+    try {return decode(bytes);}
+    catch {return fail(`source ${path}: invalid UTF-8`, "restore the registered UTF-8 source bytes or re-register a separately reviewed experiment before retrying");}
+  };
   const read = (path: string, limit: number): unknown => {
-    const bytes = readBytesBounded(filePath(root, path), limit, {noFollow: true}); total += bytes.length;
-    if (total > TOTAL_BYTES || files.length >= 160) fail("source bound exceeded");
-    files.push({path, sha256: sha256(bytes), bytes: bytes.length}); return parsed(decode(bytes));
+    const content = utf8(source(path, limit), path);
+    try {return parsed(content);}
+    catch {return fail(`source ${path}: invalid JSON`, "restore the registered JSON source bytes or re-register a separately reviewed experiment before retrying");}
   };
   const p = object(read(HARNESS_PROTOCOL, DOCUMENT_BYTES), ["v", "id", "status", "scope", "authority", "corpus", "orders", "conditions", "budgets", "metrics", "denominators", "thresholds", "costs", "reporting", "stopConditions"], "protocol");
   if (p.v !== 1 || p.status !== "proposed-not-measured") fail("unsupported protocol version/status");
@@ -90,7 +105,7 @@ function snapshot(root: string): Snapshot {
   if (new Set(orders.map(row => row.id)).size !== orders.length) fail("duplicate order identity");
   const faultPath = text(index.faults, 240); if (!faultPath.startsWith("test/fixtures/harness/") || usedPaths.has(faultPath)) fail("fault fixture path invalid");
   const faults = object(read(faultPath, FIXTURE_BYTES), ["v", "cases"], "fault fixtures"); if (faults.v !== 1 || !Array.isArray(faults.cases) || faults.cases.length < 5 || faults.cases.length > 64 || faults.cases.some(row => !plain(row))) fail("deterministic fault fixtures missing");
-  const doc = readBytesBounded(filePath(root, HARNESS_METHOD), DOCUMENT_BYTES, {noFollow: true}); total += doc.length; if (total > TOTAL_BYTES) fail("source bound exceeded"); files.push({path: HARNESS_METHOD, sha256: sha256(doc), bytes: doc.length});
+  const doc = source(HARNESS_METHOD, DOCUMENT_BYTES); utf8(doc, HARNESS_METHOD);
   const bindings = {protocolSha256: files[0]!.sha256, methodSha256: sha256(doc), corpusSha256: sha256(canonical(index)), inputSha256: sha256(canonical(inputs)), expectedSha256: sha256(canonical(expected)), controlSha256: sha256(canonical(controls)), orderedStreamSha256: sha256(canonical(orders)), learningSourceSha256: sha256(canonical(learning)), thresholdsSha256: sha256(canonical(p.thresholds)), denominatorsSha256: sha256(canonical(p.denominators))};
   const body = {v: 1 as const, status: "preregistered-not-measured" as const, bindings, files};
   return {protocol: p, cases, orders, conditions, learning, heldout, faults: faults.cases as Record<string, unknown>[], seal: {...body, receiptSha256: sha256(canonical(body))}};
@@ -118,18 +133,21 @@ export function librarySnapshot(cases: HarnessCase[], order: Order, targetId: st
   const entries = order.taskIds.slice(0, position).filter(id => learning.includes(id)).map(id => {const source = cases.find(row => row.id === id); if (!source || source.split !== "learning") return fail("non-learning library source denied"); return {sourceTaskId: id, text: source.control.reflection.text, sha256: sha256(source.control.reflection.text)};});
   const frozen = Object.freeze(entries.map(entry => Object.freeze(entry))); LIBRARIES.set(frozen, {targetId, hash: sha256(canonical(frozen))}); return frozen;
 }
-export interface RoleValidationContext {targetId: string; taskIds: readonly string[]; learningSourceIds: readonly string[]; input: {prompt: string; data: Record<string, unknown>}; learningTextSha256: Readonly<Record<string, string>>}
+export interface RoleValidationContext {targetId: string; condition: Condition; librarySnapshot: readonly Experience[]; taskIds: readonly string[]; learningSourceIds: readonly string[]; input: {prompt: string; data: Record<string, unknown>}; learningTextSha256: Readonly<Record<string, string>>}
 /** Only the outer fixture adapter gets this context; it never enters a role DTO. */
-export function makeRoleValidationContext(cases: HarnessCase[], order: Order, targetId: string, learning: readonly string[]): RoleValidationContext {
+export function makeRoleValidationContext(cases: HarnessCase[], order: Order, targetId: string, learning: readonly string[], condition: Condition): RoleValidationContext {
   const task = cases.find(row => row.id === targetId); if (!task || !order.taskIds.includes(targetId)) fail("role target absent from frozen stream");
+  if (!(CONDITIONS as readonly unknown[]).includes(condition)) fail("role condition absent from registration");
   const hashes = Object.fromEntries(learning.map(id => {const source = cases.find(row => row.id === id); if (!source || source.split !== "learning") fail("role learning-source set contains a non-learning task"); return [id, sha256(source.control.reflection.text)];}));
-  return Object.freeze({targetId, taskIds: Object.freeze([...order.taskIds]), learningSourceIds: Object.freeze([...learning]), input: JSON.parse(canonical({prompt: task.input.prompt, data: task.input.data})) as RoleValidationContext["input"], learningTextSha256: Object.freeze(hashes)});
+  const registered = librarySnapshot(cases, order, targetId, learning);
+  const active = ["retrieval-only", "contrastive-prior"].includes(condition) ? registered : Object.freeze([] as Experience[]);
+  return Object.freeze({targetId, condition, librarySnapshot: active, taskIds: Object.freeze([...order.taskIds]), learningSourceIds: Object.freeze([...learning]), input: JSON.parse(canonical({prompt: task.input.prompt, data: task.input.data})) as RoleValidationContext["input"], learningTextSha256: Object.freeze(hashes)});
 }
 const ROLE_FIELDS: Record<Role, readonly string[]> = {proposer: ["guidance", "outputs"], worker: ["guidance"], composer: ["proposal", "outputs"], selector: ["candidates"], reflector: ["guidance", "selectedOutput"]};
 export function validateRolePayload(role: Role, raw: unknown, context: RoleValidationContext): void {
   if (!(ROLES as readonly unknown[]).includes(role)) fail("unknown role");
   const value = object(raw, ["v", "role", "taskId", "prompt", "data", "library", "librarySha256", ...ROLE_FIELDS[role]], "role payload");
-  if (!context || !Array.isArray(context.taskIds) || !Array.isArray(context.learningSourceIds)) fail("frozen role validation context required");
+  if (!context || !Array.isArray(context.taskIds) || !Array.isArray(context.learningSourceIds) || !(CONDITIONS as readonly unknown[]).includes(context.condition) || !Array.isArray(context.librarySnapshot)) fail("frozen condition-bound role validation context required");
   const position = context.taskIds.indexOf(context.targetId);
   if (position < 0 || value.v !== 1 || value.role !== role || value.taskId !== context.targetId || value.prompt !== context.input.prompt || !same(value.data, context.input.data) || !Array.isArray(value.library) || value.library.length > context.learningSourceIds.length || value.librarySha256 !== sha256(canonical(value.library))) fail("role payload identity, public input or library mismatch");
   const sources = new Set<string>();
@@ -141,6 +159,7 @@ export function validateRolePayload(role: Role, raw: unknown, context: RoleValid
     if (!Object.hasOwn(context.learningTextSha256, sourceId) || context.learningTextSha256[sourceId] !== entry.sha256) fail("library source content changed from frozen experience");
     sources.add(sourceId);
   }
+  if (!same(value.library, context.librarySnapshot)) fail("role library differs from the registered snapshot for condition and target");
   const outputs = (rawOutputs: unknown, name: string) => {
     if (!Array.isArray(rawOutputs) || !rawOutputs.length || rawOutputs.length > 7) fail(`${name}: bounded output list required`);
     const ids = new Set<string>();
@@ -152,6 +171,7 @@ export function validateRolePayload(role: Role, raw: unknown, context: RoleValid
   publicValue(value); if (Buffer.byteLength(canonical(value)) > DOCUMENT_BYTES) fail("role payload byte bound");
 }
 export function buildRoleInputs(task: HarnessCase, condition: Condition, library: readonly Experience[], context: RoleValidationContext): Record<Role, Record<string, unknown>> {
+  if (context.condition !== condition) fail("role condition differs from the registered context");
   const registration = LIBRARIES.get(library); if (!registration || registration.targetId !== task.id || registration.hash !== sha256(canonical(library))) fail("unregistered or changed round library");
   const active = ["retrieval-only", "contrastive-prior"].includes(condition) ? library : [], frozen = JSON.parse(canonical(active)) as Experience[], librarySha256 = sha256(canonical(frozen));
   const outputs = task.control.baseOutputs.map((output, index) => ({id: sha256(canonical([task.inputSha256, index])).slice(0, 16), output}));
@@ -167,7 +187,7 @@ export function requireFixturePolicy(status: unknown): void {if (status !== "all
 export function requireResumeBinding(registered: unknown, resumed: unknown): void {if (typeof registered !== "string" || !/^[a-f0-9]{64}$/.test(registered) || registered !== resumed) fail("resume input hash changed");}
 interface FaultObservation {id: string; kind: string; role: Role; outcome: "blocked" | "insufficient-evidence"; cause: string}
 function faultControls(source: Snapshot): FaultObservation[] {
-  const task = source.cases.at(-1)!, order = source.orders[0]!, library = librarySnapshot(source.cases, order, task.id, source.learning), context = makeRoleValidationContext(source.cases, order, task.id, source.learning), prepared = buildRoleInputs(task, "contrastive-prior", library, context);
+  const task = source.cases.at(-1)!, order = source.orders[0]!, library = librarySnapshot(source.cases, order, task.id, source.learning), context = makeRoleValidationContext(source.cases, order, task.id, source.learning, "contrastive-prior"), prepared = buildRoleInputs(task, "contrastive-prior", library, context);
   return source.faults.map(fault => {
     const row = object(fault, ["id", "kind", "role", "payload"], "fault case"), id = text(row.id, 64), kind = text(row.kind, 64), role = row.role as Role;
     if (!(ROLES as readonly unknown[]).includes(role) || !plain(row.payload)) fail("invalid fault role or payload");
@@ -177,10 +197,16 @@ function faultControls(source: Snapshot): FaultObservation[] {
       if (["denied", "policy-revocation"].includes(kind)) requireFixturePolicy(plain(row.payload.policy) ? row.payload.policy.status : undefined);
       else if (kind === "changed-resume") requireResumeBinding(row.payload.registeredInputSha256, row.payload.resumedInputSha256);
       else if (kind === "within-round-library-change") {const changed = JSON.parse(canonical(prepared)) as typeof prepared; changed.composer.librarySha256 = row.payload.compositionLibrarySha256; validateRoundInputs(changed, context);}
+      else if (["registered-library-empty", "registered-library-subset", "registered-library-reordered"].includes(kind)) {
+        const changed = JSON.parse(canonical(prepared)) as typeof prepared;
+        const replacement = kind === "registered-library-empty" ? [] : kind === "registered-library-subset" ? library.slice(1) : [...library].reverse();
+        for (const name of ROLES) {changed[name].library = replacement; changed[name].librarySha256 = sha256(canonical(replacement));}
+        validateRoundInputs(changed, context);
+      }
       else validateRolePayload(role, {...prepared[role], ...row.payload}, context);
     } catch {blocked = true;}
     if (!blocked) fail("fault fixture unexpectedly allowed private input or invalid state");
-    return {id, kind, role, outcome: "blocked", cause: ["denied", "policy-revocation"].includes(kind) ? "condition-invalidated" : kind === "changed-resume" ? "resume-binding-refusal" : kind === "within-round-library-change" ? "library-mismatch" : "role-boundary-refusal"};
+    return {id, kind, role, outcome: "blocked", cause: ["denied", "policy-revocation"].includes(kind) ? "condition-invalidated" : kind === "changed-resume" ? "resume-binding-refusal" : kind === "within-round-library-change" ? "library-mismatch" : kind.startsWith("registered-library-") ? "registered-snapshot-refusal" : "role-boundary-refusal"};
   });
 }
 export function runHarnessFaults(root: string): FaultObservation[] {verifyHarnessPreregistration(root); return faultControls(snapshot(resolve(root)));}
@@ -194,7 +220,7 @@ function controls(root: string, code: RunCodeBinding): HarnessControlReceipt {
   if (!["bin/ares.js", "scripts/harness-eval.ts", "scripts/execution-eval.ts", "package.json", "bun.lock"].every(name => code.files.some(file => file.path === name))) fail("run code binding lacks required bootstrap or harness");
   const rows: Record<string, unknown>[] = [];
   for (const order of source.orders) for (const plan of source.conditions) for (const taskId of order.taskIds) {
-    const task = source.cases.find(row => row.id === taskId)!, library = librarySnapshot(source.cases, order, task.id, source.learning), context = makeRoleValidationContext(source.cases, order, task.id, source.learning), inputs = buildRoleInputs(task, plan.id, library, context), candidates = inputs.selector.candidates as {id: string; output: string}[];
+    const task = source.cases.find(row => row.id === taskId)!, library = librarySnapshot(source.cases, order, task.id, source.learning), context = makeRoleValidationContext(source.cases, order, task.id, source.learning, plan.id), inputs = buildRoleInputs(task, plan.id, library, context), candidates = inputs.selector.candidates as {id: string; output: string}[];
     validateRoundInputs(inputs, context);
     const slot = plan.stageCalls.selection ? task.control.selection.selectedSlot : 0;
     if (!candidates[slot]) fail("prerecorded selection outside blinded slots");

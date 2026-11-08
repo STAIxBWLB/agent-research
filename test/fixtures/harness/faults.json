@@ -228,6 +228,24 @@
           }
         ]
       }
+    },
+    {
+      "id": "round-library-empty",
+      "kind": "registered-library-empty",
+      "role": "worker",
+      "payload": {}
+    },
+    {
+      "id": "round-library-subset",
+      "kind": "registered-library-subset",
+      "role": "worker",
+      "payload": {}
+    },
+    {
+      "id": "round-library-reordered",
+      "kind": "registered-library-reordered",
+      "role": "worker",
+      "payload": {}
     }
   ]
 }
