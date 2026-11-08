@@ -76,3 +76,18 @@ test("compatibility strings normalize to typed v2 addresses and amem receipts re
   expect(validateSkillProposalV2(input).inspections[0]?.integrity).toBe("screened");
   for (const changed of [{...observed, sourceVersion: {reference: 1, amem: "0.22.0"}}, {...observed, observedAt: undefined}, {...observed, state: "unavailable"}, {...observed, body: "private note body"}, {...observed, integrity: "record", outcome: {status: "succeeded", success: true}}]) expect(() => validateSkillProposalV2({...input, inspections: [changed]})).toThrow("skill v2");
 });
+
+for (const field of ["limitations", "counterevidence"] as const) test(`v2 ${field} defaults only when omitted and refuses hashed null on replay`, () => {
+  const dir = tempDir(), {study} = ops.init(dir, {question: "Synthetic strict optional arrays"}, ctx);
+  const omitted = {...proposal(study.id), [field]: undefined}, normalized = validateSkillProposalV2(omitted);
+  expect(normalized[field]).toEqual([]);
+  const content = skillMarkdownV2(normalized), malformed = {...omitted, [field]: null};
+  expect(() => validateSkillProposalV2(malformed)).toThrow("skill v2");
+  const file = join(dir, "proposals", "skills", normalized.name + ".md");
+  commit(dir, [[file, content, SKILL_BYTES]], [{actor: ctx.actor, type: "skill.proposed", data: {skillProposal: 2, proposal: malformed, sha256: sha256(content)}}]);
+  const ledger = join(dir, "ledger.jsonl"), before = [readBytesBounded(ledger, 1024 * 1024), readBytesBounded(file, SKILL_BYTES)];
+  expect(() => foldSkills(readLedger(dir))).toThrow("skill v2");
+  expect(() => ops.skillList(dir)).toThrow("skill v2");
+  expect(readBytesBounded(ledger, 1024 * 1024)).toEqual(before[0]!);
+  expect(readBytesBounded(file, SKILL_BYTES)).toEqual(before[1]!);
+});
