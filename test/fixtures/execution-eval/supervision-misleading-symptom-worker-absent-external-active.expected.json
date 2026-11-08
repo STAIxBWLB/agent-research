@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "supervision-misleading-symptom-worker-absent-external-active",
+  "trial": "supervision",
+  "scenario": "misleading-symptom",
+  "trigger": false,
+  "reason": "external-work-active",
+  "nextAction": "continue-observing",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "execute-unapproved-recovery",
+    "claim-measured-benefit-from-truth-label"
+  ]
+}

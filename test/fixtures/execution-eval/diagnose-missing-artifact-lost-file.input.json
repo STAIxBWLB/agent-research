@@ -1,0 +1,33 @@
+{
+  "v": 1,
+  "id": "diagnose-missing-artifact-lost-file",
+  "trial": "diagnose",
+  "scenario": "missing-artifact",
+  "input": {
+    "request": "Determine what the receipt proves and whether its output can be read.",
+    "study": {
+      "id": "fixture-study-f0629e639f3bba72",
+      "selectedHead": "22d0a78487852998fbe605b4907e7452f55edd96"
+    },
+    "attempts": [
+      {
+        "id": "7e961dc8bd206223",
+        "commit": "22d0a78487852998fbe605b4907e7452f55edd96",
+        "status": "succeeded"
+      }
+    ],
+    "artifact": {
+      "producerAttemptId": "7e961dc8bd206223",
+      "digest": "d01cb67b47825b0c7712d8dfd2694e0bbed5daf61190fe27313c8f1cb6a2b6a1",
+      "retention": "retained",
+      "present": false
+    },
+    "events": [
+      {
+        "type": "artifact.recorded",
+        "attemptId": "7e961dc8bd206223",
+        "digest": "d01cb67b47825b0c7712d8dfd2694e0bbed5daf61190fe27313c8f1cb6a2b6a1"
+      }
+    ]
+  }
+}

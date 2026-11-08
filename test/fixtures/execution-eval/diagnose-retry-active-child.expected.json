@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "id": "diagnose-retry-active-child",
+  "trial": "diagnose",
+  "scenario": "retry",
+  "provenance": {
+    "attemptId": "a6e76bd802f536a8",
+    "head": "25499b00625368d2c9b0b4cd1f7f62df4661825a",
+    "selectedHead": "25499b00625368d2c9b0b4cd1f7f62df4661825a",
+    "status": "running",
+    "completeness": "pending"
+  },
+  "retryOf": "61432d023ec6a6c8",
+  "independentSamples": 1,
+  "nextAction": "await-retry-result",
+  "mustNot": [
+    "count-retry-as-independent-seed",
+    "attribute-child-output-to-parent"
+  ]
+}

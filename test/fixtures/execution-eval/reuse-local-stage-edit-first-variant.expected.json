@@ -1,0 +1,63 @@
+{
+  "v": 1,
+  "id": "reuse-local-stage-edit-first-variant",
+  "trial": "reuse",
+  "scenario": "local-stage-edit",
+  "validity": {
+    "sourceStatus": "succeeded",
+    "artifactIntegrity": "valid"
+  },
+  "eligibility": {
+    "reuseStages": [
+      "prepare"
+    ],
+    "freshStages": [
+      "transform",
+      "evaluate"
+    ],
+    "finalMustRunFresh": true
+  },
+  "invalidation": {
+    "reason": "transform-input-changed",
+    "stages": [
+      "transform",
+      "evaluate"
+    ]
+  },
+  "freshExecution": {
+    "seeds": [
+      3,
+      11,
+      19
+    ],
+    "stages": [
+      "prepare",
+      "transform",
+      "evaluate"
+    ],
+    "outputs": [
+      {
+        "seed": 3,
+        "prepare": 18,
+        "transform": 41,
+        "evaluate": 1684
+      },
+      {
+        "seed": 11,
+        "prepare": 26,
+        "transform": 57,
+        "evaluate": 3260
+      },
+      {
+        "seed": 19,
+        "prepare": 34,
+        "transform": 73,
+        "evaluate": 5348
+      }
+    ]
+  },
+  "mustNot": [
+    "count-reuse-as-independent-sample",
+    "use-unverified-stage-output"
+  ]
+}

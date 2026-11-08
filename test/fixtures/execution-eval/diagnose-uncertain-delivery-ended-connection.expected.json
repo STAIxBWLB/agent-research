@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "diagnose-uncertain-delivery-ended-connection",
+  "trial": "diagnose",
+  "scenario": "uncertain-delivery",
+  "provenance": {
+    "attemptId": "da5e4d54b248d1d4",
+    "head": "111396518738ba6f77b67b04413b3a48fb395576",
+    "selectedHead": "111396518738ba6f77b67b04413b3a48fb395576",
+    "status": "unknown",
+    "completeness": "delivery-unresolved"
+  },
+  "nextAction": "reconcile-dispatch-before-retry",
+  "mustNot": [
+    "blindly-redispatch",
+    "infer-no-effect-from-missing-ack"
+  ]
+}

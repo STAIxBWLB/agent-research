@@ -1,0 +1,27 @@
+{
+  "v": 1,
+  "id": "supervision-true-trigger-conflicting-owner-constraints",
+  "trial": "supervision",
+  "scenario": "true-trigger",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "task": {
+      "id": "fixture-task-9cc5b7afaecb373b",
+      "observed": {
+        "state": "blocked",
+        "constraints": [
+          {
+            "id": "synthetic-cap",
+            "maxCandidates": 10
+          },
+          {
+            "id": "synthetic-required",
+            "minimumCandidates": 20
+          }
+        ],
+        "ownerDecisionRecorded": false,
+        "proposalsAlreadyRecorded": []
+      }
+    }
+  }
+}

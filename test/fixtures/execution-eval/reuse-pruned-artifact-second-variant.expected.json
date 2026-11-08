@@ -1,0 +1,63 @@
+{
+  "v": 1,
+  "id": "reuse-pruned-artifact-second-variant",
+  "trial": "reuse",
+  "scenario": "pruned-artifact",
+  "validity": {
+    "sourceStatus": "succeeded",
+    "artifactIntegrity": "pruned"
+  },
+  "eligibility": {
+    "reuseStages": [],
+    "freshStages": [
+      "prepare",
+      "transform",
+      "evaluate"
+    ],
+    "finalMustRunFresh": true
+  },
+  "invalidation": {
+    "reason": "artifact-not-retained",
+    "stages": [
+      "prepare",
+      "transform",
+      "evaluate"
+    ]
+  },
+  "freshExecution": {
+    "seeds": [
+      4,
+      12,
+      20
+    ],
+    "stages": [
+      "prepare",
+      "transform",
+      "evaluate"
+    ],
+    "outputs": [
+      {
+        "seed": 4,
+        "prepare": 19,
+        "transform": 59,
+        "evaluate": 3485
+      },
+      {
+        "seed": 12,
+        "prepare": 27,
+        "transform": 83,
+        "evaluate": 6901
+      },
+      {
+        "seed": 20,
+        "prepare": 35,
+        "transform": 107,
+        "evaluate": 11469
+      }
+    ]
+  },
+  "mustNot": [
+    "count-reuse-as-independent-sample",
+    "use-unverified-stage-output"
+  ]
+}

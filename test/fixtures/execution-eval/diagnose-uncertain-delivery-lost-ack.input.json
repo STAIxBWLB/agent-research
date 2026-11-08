@@ -1,0 +1,31 @@
+{
+  "v": 1,
+  "id": "diagnose-uncertain-delivery-lost-ack",
+  "trial": "diagnose",
+  "scenario": "uncertain-delivery",
+  "input": {
+    "request": "Choose a safe next action when dispatch acknowledgement is inconclusive.",
+    "study": {
+      "id": "fixture-study-6899ea5090b90c51",
+      "selectedHead": "478666d85d59f95f94fdb718acc80ac782f7aa77"
+    },
+    "attempts": [
+      {
+        "id": "b876a7634130a654",
+        "commit": "478666d85d59f95f94fdb718acc80ac782f7aa77",
+        "status": "unknown",
+        "dispatchId": "synthetic-dispatch-0"
+      }
+    ],
+    "delivery": {
+      "acknowledged": false,
+      "effectObserved": null,
+      "lastTransportState": "ack-lost"
+    },
+    "artifact": {
+      "producerAttemptId": "b876a7634130a654",
+      "present": false
+    },
+    "retryRequests": 0
+  }
+}

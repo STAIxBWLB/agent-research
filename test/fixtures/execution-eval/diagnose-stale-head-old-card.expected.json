@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "diagnose-stale-head-old-card",
+  "trial": "diagnose",
+  "scenario": "stale-head",
+  "provenance": {
+    "attemptId": "11984c66dca10cc7",
+    "head": "8421f37f7249da878e88b3edbec5e8b497e5e8f8",
+    "selectedHead": "d1aa1efa2a59648cb7963ef324dd6305c9f85edd",
+    "status": "succeeded",
+    "completeness": "complete"
+  },
+  "nextAction": "run-fresh-selected-head",
+  "mustNot": [
+    "attribute-old-artifact-to-selected-head",
+    "count-reuse-as-fresh-final"
+  ]
+}

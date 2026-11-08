@@ -1,0 +1,657 @@
+{
+  "v": 1,
+  "status": "preregistered-not-measured",
+  "bindings": {
+    "protocolSha256": "149bd23e47709115258c9b0e07ec2f3ea6e55b0d4eeaca0a17000f89627a57dd",
+    "methodSha256": "aa2d1451e6e618fb36aa902da50b0ad3975f8e9574d0f5fd1b6e57c8f0c063f2",
+    "thresholdsSha256": "7f4ac614c71f8ab97e5b10454b091b15feaf9caf20e7011f4b166c59ea867b72",
+    "denominatorsSha256": "fb66698580a5a9c945eba8ea6bb1eb3c729b8e765ba1133bb19e62534e006955",
+    "codeSha256": "dbd0bc1019047133033a5a75dfda0692c7ef6e8cbba1346f61724b2db8b4dc50",
+    "inputSha256": "c5e2869ead79c15253cae65f149ff4f291a0a9cbeeed11b164d8e22d0bf4f617",
+    "expectedSha256": "30ceddce8081026f52aff1678fb0c26cdb7f627cae077ee75a87f3ed62cebf95"
+  },
+  "methodFiles": [
+    {
+      "path": "docs/verification/execution-eval-preregistration.json",
+      "sha256": "149bd23e47709115258c9b0e07ec2f3ea6e55b0d4eeaca0a17000f89627a57dd",
+      "bytes": 13205
+    },
+    {
+      "path": "docs/verification/execution-eval-protocol.md",
+      "sha256": "c811fbe712e649bacd16262efdab4ffcc7a3c1a441120d7ea376d7566947071b",
+      "bytes": 12583
+    }
+  ],
+  "codeFiles": [
+    {
+      "path": "scripts/execution-eval.ts",
+      "sha256": "59c06173b157753a7e4b57bd235ef0b1192fefbf38a1609b595854933b49719e",
+      "bytes": 14766
+    },
+    {
+      "path": "package.json",
+      "sha256": "16ac8ee0ede145c7a5530e12bb7592566690479d39d982b7e878862e333f9644",
+      "bytes": 1211
+    },
+    {
+      "path": "src/autonomy.ts",
+      "sha256": "68a37285bcf947558e6a372426f9d24c6212db2176409e8bfc3ae456761240dd",
+      "bytes": 3206
+    },
+    {
+      "path": "src/cli.ts",
+      "sha256": "c9f60708722e11b5a5b62eee735161b46932b56d0df339ff8293f20864c45b6f",
+      "bytes": 20332
+    },
+    {
+      "path": "src/commands-table.ts",
+      "sha256": "811d7e2ad765b29cb7659089019867dc406b38af241b918724e65a91322027fc",
+      "bytes": 9367
+    },
+    {
+      "path": "src/commands.ts",
+      "sha256": "c073506d70ce98013ba5358ba15f87efb0d3cb58996d756ae8b25c8d123ebec6",
+      "bytes": 36813
+    },
+    {
+      "path": "src/console/registry.ts",
+      "sha256": "62ff227043f60ef34b4dbb38b2989c07674688c52a1e809af4335bd8e0ddae40",
+      "bytes": 6577
+    },
+    {
+      "path": "src/copilot.ts",
+      "sha256": "2fbeab5ebd8f4749e95ed4a3e918a44cb0b10bd63389ecaa934053939330859a",
+      "bytes": 6116
+    },
+    {
+      "path": "src/exp/ablate.ts",
+      "sha256": "fce6eff1a8cb117847d58efe918cb71f1f4dba85e3a0a226cb76e9fd25531f10",
+      "bytes": 11110
+    },
+    {
+      "path": "src/exp/artifacts.ts",
+      "sha256": "2a00d3cbb263b1d49310961019e732e6b87b5bc5aa3743a82df9df868d5085f3",
+      "bytes": 14670
+    },
+    {
+      "path": "src/exp/attempts.ts",
+      "sha256": "771dd672c454c167dada3358614411c64c5ee6610ddc0af19d9e2bf23fac24c4",
+      "bytes": 44646
+    },
+    {
+      "path": "src/exp/executor.ts",
+      "sha256": "755ad9943c0511f352e885ed53c40a2d7a2e6c7049327b317ec096f5403565d6",
+      "bytes": 15789
+    },
+    {
+      "path": "src/exp/final.ts",
+      "sha256": "737d4914d73257a7e3d2c8ddc3132c1c5b77b210d7b8104fb68b4247b8f9a2fa",
+      "bytes": 17191
+    },
+    {
+      "path": "src/exp/ideas.ts",
+      "sha256": "eed1a0204f87105bff49ab05ccdfa465e88186ac16025537331203acd67a9b07",
+      "bytes": 8974
+    },
+    {
+      "path": "src/exp/investigate.ts",
+      "sha256": "54a82fffa26ad78b3557a3aac1f56817082e9190cdcf4a6f2f3c445fb72dfaab",
+      "bytes": 15041
+    },
+    {
+      "path": "src/exp/logs.ts",
+      "sha256": "9553469b214d05220116ab23bb291842b82f09156d046582b349a68a0a80bd0b",
+      "bytes": 5541
+    },
+    {
+      "path": "src/exp/metrics.ts",
+      "sha256": "2ae934be2bbc2773814ccbd3f6a876c0062191631b3ef196f25fbb6aa8c44fe8",
+      "bytes": 11067
+    },
+    {
+      "path": "src/exp/protocol.ts",
+      "sha256": "84bc1ee794ee5e00155f8a2f3fc33405fc41ebb14378d0ee11937fb3e591a939",
+      "bytes": 11556
+    },
+    {
+      "path": "src/exp/selection.ts",
+      "sha256": "ed5dc431e4464b15d540ad8c5575f5f07c8834b23685cdb3f5190ce4d69cd065",
+      "bytes": 4543
+    },
+    {
+      "path": "src/exp/snapshot.ts",
+      "sha256": "4b5475982a22ea56345fce619942efe01ec046321911ae367868c00e12368370",
+      "bytes": 11005
+    },
+    {
+      "path": "src/http.ts",
+      "sha256": "4a8a24238f918858f5e5e23c2d2b90a14f440c2e3cb140b97f052ebb8c295696",
+      "bytes": 4983
+    },
+    {
+      "path": "src/index.ts",
+      "sha256": "05e0d2e4c0b60347d82a0435d757159df4eb12dba94985bf8d1636176166c5b1",
+      "bytes": 295
+    },
+    {
+      "path": "src/lit/bibtex.ts",
+      "sha256": "3575eb146139aae916d3490ba3efa432937de5c646387ab58c8a46a4ab87b914",
+      "bytes": 3621
+    },
+    {
+      "path": "src/lit/candidates.ts",
+      "sha256": "de112f7336ea67c8629a998612f72e60227e5760c8c9aac960385f216ffa3a46",
+      "bytes": 8385
+    },
+    {
+      "path": "src/lit/cards.ts",
+      "sha256": "ea612c4249401e6d26d8b412e6a2a71139aa1887686359092f2e55b3fd918945",
+      "bytes": 1242
+    },
+    {
+      "path": "src/lit/cite.ts",
+      "sha256": "ba6a6cf685247205af6177baa7ffa8365e8a660c2cc1535a573c0b306173b342",
+      "bytes": 1647
+    },
+    {
+      "path": "src/lit/sources.ts",
+      "sha256": "7e3e5cbf78d5a049e47e9e9189c7efe0dc303837c95fd74a0fe5f783ff359ff4",
+      "bytes": 7662
+    },
+    {
+      "path": "src/lit/verify.ts",
+      "sha256": "9b26cedfe42d630b75416cfca60363bb163618ddca5c7fab65248dcdc81e99fc",
+      "bytes": 7512
+    },
+    {
+      "path": "src/lit/watch.ts",
+      "sha256": "18b0a8e5376c41c2354761a22ba247fee190d595861c744b7b4c0dbfcc269afc",
+      "bytes": 9693
+    },
+    {
+      "path": "src/manifest.ts",
+      "sha256": "2637ecab4f875db4db577865bd5de3e094a1785b19360722edc1145c1a736c9b",
+      "bytes": 1565
+    },
+    {
+      "path": "src/mcp-tools.ts",
+      "sha256": "b570983d110d310b850c11d3af670cbf799d06e3df839199e1933e3d56bf3178",
+      "bytes": 34206
+    },
+    {
+      "path": "src/mcp.ts",
+      "sha256": "2dc9df7028634e597c43b7fa1639a0e61c1c24e8a4bcf199bf7d9724ccd007b9",
+      "bytes": 8312
+    },
+    {
+      "path": "src/memory/amem.ts",
+      "sha256": "4c2e6efd4302d18ae993c2187362c272131348c3ecbf7b65d20f6a7fcf756dac",
+      "bytes": 6904
+    },
+    {
+      "path": "src/memory/archive.ts",
+      "sha256": "6f8fb986bda80017e08d0127725b4152567a2165ad985a6e9b77ba1a34ed8aae",
+      "bytes": 4311
+    },
+    {
+      "path": "src/memory/lessons.ts",
+      "sha256": "d224a6e99fe66c29aaa1e74c2f475680a50fb220895b17aebabf1aff4c47723d",
+      "bytes": 6873
+    },
+    {
+      "path": "src/memory/skills.ts",
+      "sha256": "5a464627698c8426671f38adc597048371743e2247f03c80106d1fe7cd9e1805",
+      "bytes": 8259
+    },
+    {
+      "path": "src/paper/build.ts",
+      "sha256": "1368495158afb45208a69a1298fbc22e0aecb4f603781178aba623d54d2f313e",
+      "bytes": 5628
+    },
+    {
+      "path": "src/paper/check.ts",
+      "sha256": "358ec06751c1b5d907ce1bd74a938e3c2369b73e6424294a5826ac175523f488",
+      "bytes": 13353
+    },
+    {
+      "path": "src/paper/placeholders.ts",
+      "sha256": "e14d9d6a00f177486440217f98dfda1a97dd171823b01ea9cc8e76d7de2ad884",
+      "bytes": 11168
+    },
+    {
+      "path": "src/paper/review.ts",
+      "sha256": "a5cc6c6d44b478fa6c1e7b3acf49b87955a71754955325a5b5aa86a502d54c5b",
+      "bytes": 12479
+    },
+    {
+      "path": "src/plan/controller.ts",
+      "sha256": "042fb48603eb0d153ac788b47c22c9cdcea6bd3233ace53d78f2ae28d19c517b",
+      "bytes": 17146
+    },
+    {
+      "path": "src/plan/definition.ts",
+      "sha256": "3e58520aa486dfa946d071522bd04aa6b9b484fd7ba2ff52fc0beb0b3775c06c",
+      "bytes": 10681
+    },
+    {
+      "path": "src/plan/hub.ts",
+      "sha256": "5d1807fae5dd6702e01320815db34226a92c1f41099b131ed5481bdef18a0d6b",
+      "bytes": 5351
+    },
+    {
+      "path": "src/plan/state.ts",
+      "sha256": "e19d810ece5c44f7069cce15d39e5d90c9f5c420957a8e0c0989f0ea7cd82061",
+      "bytes": 21450
+    },
+    {
+      "path": "src/playbook.ts",
+      "sha256": "a81512ed1fe0004eb24faf09671c0cde5847cfd1f48d8b0efb4856ebd72e31a2",
+      "bytes": 32867
+    },
+    {
+      "path": "src/scope.ts",
+      "sha256": "cea74c91e73fc10cff14849ae8792ae6b971d945f5e181044754583f60f933d8",
+      "bytes": 2989
+    },
+    {
+      "path": "src/setup.ts",
+      "sha256": "22e9e97b2519376f2db06e53f1eed78009f5653eaa8b49e160c793d2735bed28",
+      "bytes": 23907
+    },
+    {
+      "path": "src/study-export.ts",
+      "sha256": "a0335293a940e6768d88aed01869756947db30a534b851199baaa8bccbb56605",
+      "bytes": 20155
+    },
+    {
+      "path": "src/study.ts",
+      "sha256": "670a6467640c58d7e56fc70bdbcdbecba29756d61ca1e97e7b5536a66f3c910c",
+      "bytes": 21921
+    },
+    {
+      "path": "src/ui/panel.css",
+      "sha256": "bf155c811e7d8f9705ab6e01264d8803d89e4e684a1a7448c426f37569eb3c59",
+      "bytes": 1151
+    },
+    {
+      "path": "src/ui/panel.js",
+      "sha256": "5cf6c121e700b281c5b59b6c81dfa724b91396acd68e986de57d4dc4cec47a0d",
+      "bytes": 14866
+    },
+    {
+      "path": "src/ui/plugin.ts",
+      "sha256": "f8734c532cf9ab311a3e508d1724740238e1b7a5ca275d651c693480010d2a83",
+      "bytes": 32094
+    }
+  ],
+  "inputFiles": [
+    {
+      "path": "test/fixtures/execution-eval/corpus.json",
+      "sha256": "45f2e032ffa3403f82ba2a7c9c03dda3959cbf7986419393632a5f10daf29617",
+      "bytes": 12064
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-stale-head-old-card.input.json",
+      "sha256": "68165a5bdcbfcf6dc361dff407d94394b5c4adf195faba96470376dd3aca7577",
+      "bytes": 1134
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-stale-head-changed-selection.input.json",
+      "sha256": "89c70a4691e78cacb6232c416c685aecffe6ffb24ace3722e6ae2a87531d59fe",
+      "bytes": 1146
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-missing-artifact-lost-file.input.json",
+      "sha256": "819b7d59f0dcd20e244fd12984931621174d0eb15e06c06104b73c635ab492c9",
+      "bytes": 934
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-missing-artifact-pruned-file.input.json",
+      "sha256": "c7793ead12d6d963a2f8d3da66eed56c64e248e9c480535593eb66c34540dc1a",
+      "bytes": 934
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-retry-terminal-child.input.json",
+      "sha256": "49cf0ccd5ab490f25c522db6b3f04b0d3b6b8270b9753ea576a35fecdd23722e",
+      "bytes": 1000
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-retry-active-child.input.json",
+      "sha256": "1feebd558e8a93f65879f2ea8d10924335d41e38b594f00cb89148bf614690f7",
+      "bytes": 998
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-uncertain-delivery-lost-ack.input.json",
+      "sha256": "540998f2c9ab2c2c231ca10aef56df3f651b8d0dca42b5415f426cfb72348769",
+      "bytes": 814
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-uncertain-delivery-ended-connection.input.json",
+      "sha256": "f6e506908f28a4dddcd3100860528f48e8d2e1160e536212b67b49b3afa9af73",
+      "bytes": 830
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-privacy-gap-withheld-source.input.json",
+      "sha256": "3f3e5ba94b6808d539f7e1e5ed5ecb6ee1573d0b51fc65a17ccca54104bc182b",
+      "bytes": 832
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-privacy-gap-partial-summary.input.json",
+      "sha256": "35db2d5c714a0230a91ad1e54439c1a1587bb251ed72d075b354d7afca4d5cb6",
+      "bytes": 902
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-corrupt-source-truncated-json.input.json",
+      "sha256": "6a6e7c8befdff54405294b577ff9d66299e615de9f2ce7c09d7f6a100ed21c20",
+      "bytes": 757
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-corrupt-source-unsupported-version.input.json",
+      "sha256": "fda64040a675ac277761222a386fecbdf4885e8717197f153469a490ff2c1e69",
+      "bytes": 788
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-local-stage-edit-first-variant.input.json",
+      "sha256": "eb28c3f6ad84d78bb5298b0d48c17f97885cb867849cb2c9b3195241e10109fe",
+      "bytes": 2489
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-local-stage-edit-second-variant.input.json",
+      "sha256": "d487d8d35139376aca459c17b1dcddc6de2ef4f1e30cda4b878bc546078bf454",
+      "bytes": 2495
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-global-code-change-first-variant.input.json",
+      "sha256": "6db4c162f874fbf7186a58ca0bb366199c06fc3433a286534f133383943e0ac2",
+      "bytes": 2493
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-global-code-change-second-variant.input.json",
+      "sha256": "1c24864ca14f347791d8c690316534838707e311132914c038bf28f45a30021b",
+      "bytes": 2494
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-no-hit-first-variant.input.json",
+      "sha256": "c23b96d596889d8a4c9461f042694c807999e6a212ee4715e2ffe0f286e6cf01",
+      "bytes": 1026
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-no-hit-second-variant.input.json",
+      "sha256": "772a97522428918e4087644bcb563299cb730d7aea1c88e9958592323fbf354b",
+      "bytes": 1027
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-corrupt-artifact-first-variant.input.json",
+      "sha256": "ed9a5d2aa39a2eb707c893043823e936bc2b452d0ca1cbcfa610e0684c6d563f",
+      "bytes": 2489
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-corrupt-artifact-second-variant.input.json",
+      "sha256": "f94ac4cbb097f28a402073a614f7a1f0460454d056a6b5e2c6875ffae9960a79",
+      "bytes": 2490
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-pruned-artifact-first-variant.input.json",
+      "sha256": "10c1f711e40b2873cb364ff28bc6262f5f4385a474293a274d445c366e81e5e8",
+      "bytes": 1994
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-pruned-artifact-second-variant.input.json",
+      "sha256": "458b456e68e755a568fdb3edd1839827d042948598d0147f224fae266f71e8c7",
+      "bytes": 1995
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-interrupted-source-first-variant.input.json",
+      "sha256": "9a03eabc0de9a5a8a356150421d2901cef92770b0c72620560ffd75f5b3e9324",
+      "bytes": 2493
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-interrupted-source-second-variant.input.json",
+      "sha256": "008400fe40e3795554e9bf5f35fbb2250abf7f6417aeae30237006f34fbdb8b2",
+      "bytes": 2492
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-stage-transition.input.json",
+      "sha256": "49c8428e1f2a18255d0cc85a0b6af333d3677da8c711231d91c0db7189559d26",
+      "bytes": 811
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-bounded-human-wait.input.json",
+      "sha256": "5f3defc2111b758e7c1899016249929e43172fbb63b23ce1833e223d53a0fd8c",
+      "bytes": 608
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-successful-retry.input.json",
+      "sha256": "4e9dedef13b1e04e813f67c5960589836373c6f8eeb3d121e65e3a004eea151c",
+      "bytes": 686
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-completed-output.input.json",
+      "sha256": "97b35225ef85bbc04c3de38164b77ac3f68606a52ce1a499e60aa827b3ee12c3",
+      "bytes": 510
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-exhausted-retries.input.json",
+      "sha256": "8dc40cdcd8a282e82b9741eb4845b359dccd6f3ce66654d006b5f296641c6cca",
+      "bytes": 847
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-conflicting-owner-constraints.input.json",
+      "sha256": "949a93a8c9e23023d760440a0f2eb268ced7a5f1733424d2230c4bd78875a0d9",
+      "bytes": 698
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-unresolved-delivery.input.json",
+      "sha256": "453fd47f3530487b2d4888efd5059b3220e3d460a35e0139d6490642c563164b",
+      "bytes": 634
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-exhausted-budget.input.json",
+      "sha256": "d922aa8bbe26e8b09e08bc1d2173b28ec835556316aa18beed6ae620c5457868",
+      "bytes": 636
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-long-wall-progress.input.json",
+      "sha256": "036b786c8350720af5e29f0a7c6c5470fb71500274097958c88b5ae4c9268407",
+      "bytes": 804
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-rate-limit-scheduled.input.json",
+      "sha256": "876937d7e6fe94dc44fd76efe90d7d7704780de9d3cc886f13ac6d38a0200d3b",
+      "bytes": 581
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-worker-absent-external-active.input.json",
+      "sha256": "bc8c96494854cef7bde24934a50915048d8594e348784e7b73062dc4c68f506f",
+      "bytes": 619
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-artifact-not-yet-due.input.json",
+      "sha256": "7876f25353b57f7d677cf31c412850da767b6b0c424dac6a5e34bd749eea7a21",
+      "bytes": 661
+    }
+  ],
+  "expectedFiles": [
+    {
+      "path": "test/fixtures/execution-eval/diagnose-stale-head-old-card.expected.json",
+      "sha256": "e1187a3ebf282b2125d2d0a640c0ab97af0ad06efcfb63fc7fdb6e164b5d4b49",
+      "bytes": 485
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-stale-head-changed-selection.expected.json",
+      "sha256": "cedffc91bcdc8e7b781662893b1913d352ecafb1bff38a30d86aca9048dbae85",
+      "bytes": 494
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-missing-artifact-lost-file.expected.json",
+      "sha256": "a3e54f86e687226ab5ca2fc6da6e2b3eac37093b2beae5634862259819c1552d",
+      "bytes": 509
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-missing-artifact-pruned-file.expected.json",
+      "sha256": "ff7f62d073cd38e86769ff2a47bb25598fb50905a67d46d17f3a219c904c7b0b",
+      "bytes": 510
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-retry-terminal-child.expected.json",
+      "sha256": "3a6d8d76ab2cc4c0805c9a3a63ed305b3aa0d311ff9d06689928a86babae7525",
+      "bytes": 541
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-retry-active-child.expected.json",
+      "sha256": "572325e9966465229353eb4c8f6dc4e3154ee041e4251a8df8f194e0ff35d093",
+      "bytes": 529
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-uncertain-delivery-lost-ack.expected.json",
+      "sha256": "4d3e74e9c11500720cac2ef17b4389d4497d3c12988695d6fd2f5cda229676db",
+      "bytes": 503
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-uncertain-delivery-ended-connection.expected.json",
+      "sha256": "bde504c220a8333e7524e221b28e880fffe1afb5f2bb1c5c4146470e6143a1b4",
+      "bytes": 511
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-privacy-gap-withheld-source.expected.json",
+      "sha256": "41533b3d3974b0498ef0519d83a362f4c030d60e74a9e4f55baba598d001b37d",
+      "bytes": 464
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-privacy-gap-partial-summary.expected.json",
+      "sha256": "151573a0336287f0a47fa392c47b7fef7b04647f1339f870cbbd71fa7201cb0e",
+      "bytes": 464
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-corrupt-source-truncated-json.expected.json",
+      "sha256": "eeaae1c757eb8bf8eeecf7eee1292b3139cf917a0bae60767aa0c3d91407e6f7",
+      "bytes": 459
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-corrupt-source-unsupported-version.expected.json",
+      "sha256": "23782807f890f299e3ad4873d5cba8c604d137eded3e11315c552139301556eb",
+      "bytes": 474
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-local-stage-edit-first-variant.expected.json",
+      "sha256": "ddf11c8f0d2972ca08d00ffec750cb8260f0e8fb457baac745d457cd2409c78d",
+      "bytes": 1087
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-local-stage-edit-second-variant.expected.json",
+      "sha256": "e2234ee438c58f2578a0afca837220dc16ce1861f64f781918acb3a82fda5d3f",
+      "bytes": 1070
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-global-code-change-first-variant.expected.json",
+      "sha256": "5ee35ecc6928a5568b4683468b8d5af4f70e970ad6013d46afdf3e90171bcf16",
+      "bytes": 1100
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-global-code-change-second-variant.expected.json",
+      "sha256": "dc4649222b6762d4cc63e047582f0878ca5a8d53ba030b5673917ede06cf9d47",
+      "bytes": 1103
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-no-hit-first-variant.expected.json",
+      "sha256": "b4d3ff584b957a099970dbefd36451ff5fc3d91299b2299524309b42386fff61",
+      "bytes": 1065
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-no-hit-second-variant.expected.json",
+      "sha256": "b0be1d2b047fb9cf62ee01d37c23a1ff3b7002c5dd102f50b9aab0bda47cd39b",
+      "bytes": 1068
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-corrupt-artifact-first-variant.expected.json",
+      "sha256": "9834b133a9bf426792ad825cd797af64e9ff4dac5714406f8f09e333421f2662",
+      "bytes": 1103
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-corrupt-artifact-second-variant.expected.json",
+      "sha256": "2902889cb40075da5d8d2d5bae23c7389470e1bc3236ee443d5282f217ffa12e",
+      "bytes": 1106
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-pruned-artifact-first-variant.expected.json",
+      "sha256": "6cd873e06ef81af7773220bdc2bf45b9b269682bedcdfd8bfaff29733479bf1b",
+      "bytes": 1097
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-pruned-artifact-second-variant.expected.json",
+      "sha256": "89bb1084ea2d2a5659de922c3d70747e70d9a77a6d28f93785cd0d84b4184818",
+      "bytes": 1100
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-interrupted-source-first-variant.expected.json",
+      "sha256": "763b2c49c93f68069327fc4570b36aa88c21e75ff364149ccc024270233d3ea0",
+      "bytes": 1106
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-interrupted-source-second-variant.expected.json",
+      "sha256": "8c30df211e9c3b9cf61eac67f93214096424bc02954b6156c18bf9500d7c6482",
+      "bytes": 1107
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-stage-transition.expected.json",
+      "sha256": "deeb22c72ce47b99c3f32a493accf61c069ebaf7f177cdaab36ad04470b8f191",
+      "bytes": 357
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-bounded-human-wait.expected.json",
+      "sha256": "25a2428b97c5561ec1c1007a429ca66d3db1dd0ac295ce900a33c3cc23cf5fdd",
+      "bytes": 370
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-successful-retry.expected.json",
+      "sha256": "5c77c072d752a39f64abe63c28ec3db5ae5378134ec153c67e662c8082acb325",
+      "bytes": 362
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-completed-output.expected.json",
+      "sha256": "9397ac5796cd29e6c6461f54b020a5744c9f09a6d5b7475b36a6cb1c8791721d",
+      "bytes": 372
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-exhausted-retries.expected.json",
+      "sha256": "4b56271b6c8b641fa124bd908e0f40d01b58f22eb4cd73639fca49112c3891df",
+      "bytes": 357
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-conflicting-owner-constraints.expected.json",
+      "sha256": "ae753a24cd36ff9c9032c10337e95cf63fd1587c04300f19d06d5b210ef4dc1d",
+      "bytes": 363
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-unresolved-delivery.expected.json",
+      "sha256": "461e5225cfff787d0870a0979cae3b3e7d31cbc6df04d81c815290f056052be0",
+      "bytes": 355
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-exhausted-budget.expected.json",
+      "sha256": "6c159e55c9e726fbc6e708ae0b459ec167caeac232d3b9ed4ffb2a5228db0f62",
+      "bytes": 350
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-long-wall-progress.expected.json",
+      "sha256": "4f8e589d1abfc53811a2020f5d7dcee633409a4cadf9fc195baea71df6123ffb",
+      "bytes": 361
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-rate-limit-scheduled.expected.json",
+      "sha256": "4c67a044e7eee8cb563d9e2a77b9fd8a13b3ad901f5a86a7650ea5fab4b491af",
+      "bytes": 361
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-worker-absent-external-active.expected.json",
+      "sha256": "5709d751965e7b805500e573ca97b64d8f4ecc6b9e69836d0d82e3288fab2078",
+      "bytes": 375
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-artifact-not-yet-due.expected.json",
+      "sha256": "fc2f4146639e61bfd47b4b8146c580ebb79ae073d16d78129f0b9da33548932b",
+      "bytes": 362
+    }
+  ],
+  "receiptSha256": "62eba0f6541949883e9d33b50fdcf4853ac80452d0b5eabd1dfe76a6d614e420"
+}

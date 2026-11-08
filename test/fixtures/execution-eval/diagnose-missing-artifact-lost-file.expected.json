@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "diagnose-missing-artifact-lost-file",
+  "trial": "diagnose",
+  "scenario": "missing-artifact",
+  "provenance": {
+    "attemptId": "7e961dc8bd206223",
+    "head": "22d0a78487852998fbe605b4907e7452f55edd96",
+    "selectedHead": "22d0a78487852998fbe605b4907e7452f55edd96",
+    "status": "succeeded",
+    "completeness": "artifact-missing"
+  },
+  "nextAction": "restore-or-reexecute-artifact",
+  "mustNot": [
+    "infer-readable-artifact-from-receipt",
+    "fabricate-artifact-content"
+  ]
+}

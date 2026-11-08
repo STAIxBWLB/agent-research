@@ -1,0 +1,27 @@
+{
+  "v": 1,
+  "id": "supervision-ordinary-progress-successful-retry",
+  "trial": "supervision",
+  "scenario": "ordinary-progress",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "task": {
+      "id": "fixture-task-f5db6df01fc3df65",
+      "observed": {
+        "state": "running",
+        "attempts": [
+          {
+            "id": "synthetic-old",
+            "status": "failed"
+          },
+          {
+            "id": "synthetic-child",
+            "status": "succeeded",
+            "retryOf": "synthetic-old"
+          }
+        ],
+        "acceptedOutcomePending": true
+      }
+    }
+  }
+}

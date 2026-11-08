@@ -1,0 +1,28 @@
+{
+  "v": 1,
+  "id": "diagnose-corrupt-source-unsupported-version",
+  "trial": "diagnose",
+  "scenario": "corrupt-source",
+  "input": {
+    "request": "Identify the record boundary that prevents a provenance conclusion.",
+    "study": {
+      "id": "fixture-study-d66b375fedad8a58",
+      "selectedHead": "bf9d54237a44b8e5a7b75834be1eca5f978e5ef2"
+    },
+    "source": {
+      "reference": "fixture-source-d66b375fedad8a58",
+      "present": true,
+      "bytes": "{\"v\":99,\"attemptId\":\"synthetic-unreadable\"}"
+    },
+    "artifact": {
+      "present": true,
+      "digest": "043f6c706e7fedb9ca0515361297ceedc2436bd59c84b8a319755b9c1d6e69f3"
+    },
+    "events": [
+      {
+        "type": "source.referenced",
+        "reference": "fixture-source-d66b375fedad8a58"
+      }
+    ]
+  }
+}

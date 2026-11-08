@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "id": "supervision-misleading-symptom-rate-limit-scheduled",
+  "trial": "supervision",
+  "scenario": "misleading-symptom",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "task": {
+      "id": "fixture-task-2b37dbd301bdab17",
+      "observed": {
+        "state": "waiting",
+        "lastStatus": 429,
+        "retry": {
+          "scheduledAtMinute": 6,
+          "currentMinute": 5,
+          "remainingBudget": 2
+        },
+        "progressBeforeWait": true
+      }
+    }
+  }
+}

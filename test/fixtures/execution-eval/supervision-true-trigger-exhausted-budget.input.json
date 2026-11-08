@@ -1,0 +1,25 @@
+{
+  "v": 1,
+  "id": "supervision-true-trigger-exhausted-budget",
+  "trial": "supervision",
+  "scenario": "true-trigger",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "task": {
+      "id": "fixture-task-7c397fbdfbca1f20",
+      "observed": {
+        "state": "blocked",
+        "budget": {
+          "used": 20,
+          "limit": 20,
+          "unit": "synthetic-work-units"
+        },
+        "remainingStages": [
+          "evaluate"
+        ],
+        "ownerExtensionRecorded": false,
+        "proposalsAlreadyRecorded": []
+      }
+    }
+  }
+}

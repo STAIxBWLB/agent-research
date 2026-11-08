@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "supervision-misleading-symptom-rate-limit-scheduled",
+  "trial": "supervision",
+  "scenario": "misleading-symptom",
+  "trigger": false,
+  "reason": "bounded-wait",
+  "nextAction": "await-scheduled-retry",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "execute-unapproved-recovery",
+    "claim-measured-benefit-from-truth-label"
+  ]
+}

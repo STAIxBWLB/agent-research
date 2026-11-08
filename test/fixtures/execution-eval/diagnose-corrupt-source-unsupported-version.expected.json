@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "diagnose-corrupt-source-unsupported-version",
+  "trial": "diagnose",
+  "scenario": "corrupt-source",
+  "provenance": {
+    "attemptId": null,
+    "head": null,
+    "selectedHead": "bf9d54237a44b8e5a7b75834be1eca5f978e5ef2",
+    "status": "unknown",
+    "completeness": "unsupported-source-version"
+  },
+  "nextAction": "use-compatible-source-reader",
+  "mustNot": [
+    "parse-partial-source-as-authority",
+    "infer-producer-from-nearby-record"
+  ]
+}

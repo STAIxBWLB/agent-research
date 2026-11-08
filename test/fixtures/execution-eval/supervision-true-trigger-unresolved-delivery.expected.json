@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "supervision-true-trigger-unresolved-delivery",
+  "trial": "supervision",
+  "scenario": "true-trigger",
+  "trigger": true,
+  "reason": "delivery-unresolved",
+  "nextAction": "request-reconciliation",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "execute-unapproved-recovery",
+    "claim-measured-benefit-from-truth-label"
+  ]
+}

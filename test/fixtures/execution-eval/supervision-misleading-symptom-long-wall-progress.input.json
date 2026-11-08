@@ -1,0 +1,34 @@
+{
+  "v": 1,
+  "id": "supervision-misleading-symptom-long-wall-progress",
+  "trial": "supervision",
+  "scenario": "misleading-symptom",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "task": {
+      "id": "fixture-task-c9d46ee729f21bad",
+      "observed": {
+        "state": "running",
+        "fixtureClockMinute": 30,
+        "events": [
+          {
+            "minute": 28,
+            "kind": "progress",
+            "completed": 80,
+            "total": 100
+          },
+          {
+            "minute": 29,
+            "kind": "progress",
+            "completed": 90,
+            "total": 100
+          }
+        ],
+        "budget": {
+          "used": 30,
+          "limit": 60
+        }
+      }
+    }
+  }
+}

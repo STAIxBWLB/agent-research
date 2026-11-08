@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "diagnose-uncertain-delivery-lost-ack",
+  "trial": "diagnose",
+  "scenario": "uncertain-delivery",
+  "provenance": {
+    "attemptId": "b876a7634130a654",
+    "head": "478666d85d59f95f94fdb718acc80ac782f7aa77",
+    "selectedHead": "478666d85d59f95f94fdb718acc80ac782f7aa77",
+    "status": "unknown",
+    "completeness": "delivery-unresolved"
+  },
+  "nextAction": "reconcile-dispatch-before-retry",
+  "mustNot": [
+    "blindly-redispatch",
+    "infer-no-effect-from-missing-ack"
+  ]
+}

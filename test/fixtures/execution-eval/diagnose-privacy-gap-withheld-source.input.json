@@ -1,0 +1,30 @@
+{
+  "v": 1,
+  "id": "diagnose-privacy-gap-withheld-source",
+  "trial": "diagnose",
+  "scenario": "privacy-gap",
+  "input": {
+    "request": "State only the provenance supported by the visible, deliberately bounded record.",
+    "study": {
+      "id": "fixture-study-26c94cf526e046b4",
+      "selectedHead": "a637afc70baea4ccf96e2f3b58e0f7797c3870d0"
+    },
+    "source": {
+      "reference": "fixture-source-26c94cf526e046b4",
+      "visibility": "withheld",
+      "publicSummary": null
+    },
+    "artifact": {
+      "present": true,
+      "digest": "d91ec01cfbbddc313a79a4e26c67f0213dc6fabaeadcad950010b90e404fd05d",
+      "producerAttemptId": null
+    },
+    "events": [
+      {
+        "type": "reference.recorded",
+        "visibility": "private",
+        "safeReference": "fixture-source-26c94cf526e046b4"
+      }
+    ]
+  }
+}

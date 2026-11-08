@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "supervision-true-trigger-exhausted-retries",
+  "trial": "supervision",
+  "scenario": "true-trigger",
+  "trigger": true,
+  "reason": "retry-budget-exhausted",
+  "nextAction": "stop-retries-and-report",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "execute-unapproved-recovery",
+    "claim-measured-benefit-from-truth-label"
+  ]
+}

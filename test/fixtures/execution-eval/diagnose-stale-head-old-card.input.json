@@ -1,0 +1,39 @@
+{
+  "v": 1,
+  "id": "diagnose-stale-head-old-card",
+  "trial": "diagnose",
+  "scenario": "stale-head",
+  "input": {
+    "request": "Identify the artifact-producing attempt and safe next action from these records.",
+    "study": {
+      "id": "fixture-study-9f9c00bd0e373950",
+      "selectedHead": "d1aa1efa2a59648cb7963ef324dd6305c9f85edd"
+    },
+    "attempts": [
+      {
+        "id": "11984c66dca10cc7",
+        "commit": "8421f37f7249da878e88b3edbec5e8b497e5e8f8",
+        "status": "succeeded",
+        "run": "investigate"
+      }
+    ],
+    "artifact": {
+      "producerAttemptId": "11984c66dca10cc7",
+      "commit": "8421f37f7249da878e88b3edbec5e8b497e5e8f8",
+      "present": true,
+      "digest": "de026cbbbd05db5500f42e332001db6bca33b9a20aa50897531cb5499f60f9d9"
+    },
+    "events": [
+      {
+        "type": "selection.set",
+        "commit": "d1aa1efa2a59648cb7963ef324dd6305c9f85edd"
+      },
+      {
+        "type": "artifact.recorded",
+        "attemptId": "11984c66dca10cc7",
+        "commit": "8421f37f7249da878e88b3edbec5e8b497e5e8f8"
+      }
+    ],
+    "surface": "an earlier result card remains visible"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "supervision-ordinary-progress-stage-transition",
+  "trial": "supervision",
+  "scenario": "ordinary-progress",
+  "trigger": false,
+  "reason": "ordinary-progress",
+  "nextAction": "continue-observing",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "execute-unapproved-recovery",
+    "claim-measured-benefit-from-truth-label"
+  ]
+}
