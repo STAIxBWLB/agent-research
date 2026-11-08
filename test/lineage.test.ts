@@ -71,3 +71,38 @@ test("unknown attempts remain in comparison even when they invalidate a prior cl
   const result = compareLineage(f.dir, {attempts: [record.id, f.ids.retryAttempt]});
   expect(result.rows).toHaveLength(2); expect(result.rows[0]!.attempts[0]!.status).toBe("unknown"); expect(result.rows[0]!.attempts[0]!.costs.storageBytes).toBe("unknown"); expect(result.aggregation.compatible).toBe(false);
 });
+
+test("comparison supports the native protocol's full 100-metric limit", async () => {
+  const {tempDir, fakeHttp} = await import("./helpers.ts"), {metricAttempt, metricProtocol} = await import("./metric-fixtures.ts"), {validateProtocol, protocolHash, METRIC_LIMIT} = await import("../src/exp/protocol.ts"), {appendEvent, openStudy} = await import("../src/study.ts"), {validateMetrics} = await import("../src/exp/metrics.ts");
+  const dir = tempDir(), ctx = {actor: {kind: "person" as const}, http: fakeHttp([]).http}; ops.init(dir, {question: "Synthetic metric boundary"}, ctx);
+  const protocol = metricProtocol(); protocol.metrics = Array.from({length: METRIC_LIMIT}, (_, index) => ({name: `metric-${index}`, unit: "points", direction: "max"}));
+  const valid = validateProtocol(protocol), attempt = metricAttempt(); Object.assign(attempt, {studyId: openStudy(dir).study.id, protocol: valid, protocolHash: protocolHash(valid), status: "succeeded", endedAt: attempt.startedAt, metrics: validateMetrics(Object.fromEntries(valid.metrics.map((metric, index) => [metric.name, index])), valid)});
+  fs.mkdirSync(join(dir, "runs/main/attempts"), {recursive: true}); writeAtomic(join(dir, `runs/main/attempts/${attempt.id}.json`), JSON.stringify(attempt), ATTEMPT_BYTES);
+  appendEvent(dir, ctx.actor, "attempt.started", {id: attempt.id, run: attempt.run, commit: attempt.commit, seed: attempt.seed}); appendEvent(dir, ctx.actor, "attempt.succeeded", {id: attempt.id, status: "succeeded"});
+  const result = compareLineage(dir, {attempts: [attempt.id]}); expect(METRIC_LIMIT).toBe(100); expect(result.status).toBe("ok"); expect(result.rows[0]!.attempts[0]!.metrics).toHaveLength(100); expect(result.aggregation.compatible).toBe(true);
+});
+
+test("a root not reached before the graph cap stays capped, not falsely missing", async () => {
+  const f = await provenanceFixture(), {commit} = await import("../src/study.ts");
+  commit(f.dir, [], Array.from({length: 998}, (_, index) => ({actor: f.ctx.actor, type: "idea.added", data: {idea: {id: `bounded-${index}`, title: "Synthetic", hypothesis: "Synthetic"}}})));
+  const page = readProvenance(f.dir, {root: {v: 1, tool: "ares", projectKey: f.studyId, kind: "plan-revision", id: "1", revision: "1"}});
+  expect(page.status).toBe("capped"); expect(page.truncated).toBe(true); expect(page.totals).toBeNull(); expect(page.issues[0]?.code).toBe("traversal-capped"); expect(page.issues[0]?.message).toContain("bounded producer reads");
+});
+
+test("a malformed present snapshot hash makes the selected row unavailable", async () => {
+  const f = await provenanceFixture(), file = join(f.dir, `runs/final/attempts/${f.ids.finalWinnerAttempt}.json`), record = JSON.parse(readTextBounded(file, ATTEMPT_BYTES)); record.snapshotSha256 = "invalid"; writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES);
+  const result = compareLineage(f.dir, {attempts: [record.id]}); expect(result.status).toBe("unavailable"); expect(result.rows[0]!.state).toBe("unavailable"); expect(result.issues.some(issue => issue.code === "malformed-snapshot-sha256")).toBe(true);
+});
+
+for (const kind of ["duplicate", "undeclared"] as const) test(`${kind} metrics carry an explicit incompatibility reason`, async () => {
+  const f = await provenanceFixture(), file = join(f.dir, `runs/final/attempts/${f.ids.finalWinnerAttempt}.json`), record = JSON.parse(readTextBounded(file, ATTEMPT_BYTES));
+  if (kind === "duplicate") record.metrics.push({...record.metrics[0]}); else record.metrics[0].name = "not-in-protocol";
+  writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES); const result = compareLineage(f.dir, {attempts: [record.id]});
+  expect(result.aggregation.compatible).toBe(false); expect(result.aggregation.reasons).toContain(kind === "duplicate" ? "duplicate-metric-names" : "undeclared-metrics");
+});
+
+test("duplicate output paths quarantine inventory instead of inflating storage", async () => {
+  const f = await provenanceFixture(), file = join(f.dir, `runs/investigate/attempts/${f.ids.retryAttempt}.json`), record = JSON.parse(readTextBounded(file, ATTEMPT_BYTES)); record.outputs.push({...record.outputs[0]}); writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES);
+  const graph = readProvenance(f.dir), result = compareLineage(f.dir, {attempts: [record.id]});
+  expect(graph.nodes.find(node => node.ref.kind === "attempt" && node.ref.id === record.id)?.state).toBe("corrupt"); expect(result.rows[0]!.state).toBe("unavailable"); expect(result.issues.some(issue => issue.code === "corrupt-output-inventory")).toBe(true);
+});

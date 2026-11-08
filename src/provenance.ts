@@ -2,7 +2,7 @@ import { existsSync, lstatSync, opendirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseLedger, plain, readBytesBounded, hashFileBounded, sha256, validateStudy, type LedgerEvent, type Study } from "./study.ts";
 import { validateAttemptRecord, type Attempt } from "./exp/attempts.ts";
-import { TASK_BYTES, TASK_FILES } from "./exp/protocol.ts";
+import { TASK_BYTES, TASK_FILES, METRIC_LIMIT } from "./exp/protocol.ts";
 import { validateExecutor } from "./exp/executor.ts";
 import { foldIdeas } from "./exp/ideas.ts";
 import { readClosedInvestigation, type CommitResult } from "./exp/investigate.ts";
@@ -185,7 +185,7 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
       const start = starts.get(value.id) ?? [];
       const identity = value.studyId !== source.study.id || typeof value.commit !== "string" || !/^[a-f0-9]{40}$/.test(value.commit) || !Number.isSafeInteger(value.seed);
       const retryInvalid = value.retryOf !== undefined && (typeof value.retryOf !== "string" || !ATTEMPT.test(value.retryOf) || value.retryOf === value.id);
-      const outputsInvalid = !Array.isArray(value.outputs) || value.outputs.length > 500 || value.outputs.some(output => !plain(output) || typeof output.sha256 !== "string" || !HASH.test(output.sha256) || !Number.isSafeInteger(output.bytes) || output.bytes < 0);
+      const outputsInvalid = !Array.isArray(value.outputs) || value.outputs.length > 500 || new Set(value.outputs.map(output => plain(output) ? output.path : undefined)).size !== value.outputs.length || value.outputs.some(output => !plain(output) || typeof output.sha256 !== "string" || !HASH.test(output.sha256) || !Number.isSafeInteger(output.bytes) || output.bytes < 0);
       const issue = (attemptCounts.get(value.id) ?? 0) > 1 ? "duplicate-attempt-id" : retryInvalid ? "corrupt-retry-reference" : outputsInvalid ? "corrupt-output-inventory" : identity ? "attempt-study-identity-mismatch" : start.length === 0 ? "missing-attempt-start-receipt" : start.length > 1 ? "duplicate-attempt-start-receipt" : start[0]!.data.run !== value.run || start[0]!.data.commit !== value.commit || start[0]!.data.seed !== value.seed ? "attempt-start-identity-mismatch" : latest?.data.status !== undefined && latest.data.status !== value.status ? "attempt-receipt-mismatch" : undefined;
       graph.put({ ref, state: issue ? "corrupt" : "current", availability: "available", proof, data: { status: value.status, stage: value.stage, seed: Number.isSafeInteger(value.seed) ? value.seed : null } });
       if (value.studyId === source.study.id) owned(ref, proof);
@@ -390,7 +390,7 @@ export function readProvenance(dirArg: string, options: ProvenanceOptions = {}):
   let graph: Graph;
   try { graph = build(dir, source, traversal); } catch { return empty("unavailable", "invalid-source-reference", source); }
   if (root) {
-    if (root.projectKey !== source.study.id || !selectRoot(graph, root)) return empty("unavailable", "root-unavailable", source);
+    if (root.projectKey !== source.study.id || !selectRoot(graph, root)) return graph.capped ? empty("capped", "traversal-capped", source) : empty("unavailable", "root-unavailable", source);
   }
   try { const after = capture(dir); if (after.hash !== source.hash || after.ledgerPosition !== source.ledgerPosition) return empty("changed", "source-changed", source); }
   catch { return empty("changed", "source-changed-or-unavailable", source); }
@@ -415,7 +415,7 @@ export function readProvenance(dirArg: string, options: ProvenanceOptions = {}):
 export interface AttemptComparison {
   id: string; code: {commit: string; treeId: string; snapshotSha256: string | null}; protocolHash: string; seed: number; status: Attempt["status"];
   retryOf: string | null; retryAncestry: string[]; sampleGroup: string;
-  metrics: Attempt["metrics"]; artifactDigests: string[];
+  comparabilityReasons: string[]; metrics: Attempt["metrics"]; artifactDigests: string[];
   costs: {wallMilliseconds: number | "unknown"; storageBytes: number | "unknown"; compute: "unknown"; transfer: "unknown"; verification: "unknown"; retention: "unknown"; materialization: "unknown"; idle: "unknown"; person: "unknown"};
 }
 export interface LineageComparisonRow { kind: "attempt" | "candidate"; id: string; state: "available" | "unavailable"; attempts: AttemptComparison[]; candidate?: CommitResult; reasons: string[] }
@@ -425,7 +425,12 @@ export interface LineageComparison {
   aggregation: {performed: false; available: false; compatible: boolean; reasons: string[]}; resultAuthority: "existing-investigation-and-final-only";
 }
 function comparisonAttempt(value: Attempt, attempts: Map<string, Attempt>): AttemptComparison {
-  if (!HASH.test(value.protocolHash) || !/^[a-f0-9]{40}$/.test(value.treeId) || !Array.isArray(value.metrics) || value.metrics.length > 64 || value.metrics.some(metric => !plain(metric) || typeof metric.name !== "string" || typeof metric.unit !== "string" || metric.provenance !== "ares-observed" || typeof metric.value !== "number" || !Number.isFinite(metric.value))) fail("malformed-comparison-attempt");
+  if (!HASH.test(value.protocolHash) || !/^[a-f0-9]{40}$/.test(value.treeId) || !Array.isArray(value.metrics) || value.metrics.length > METRIC_LIMIT || value.metrics.some(metric => !plain(metric) || typeof metric.name !== "string" || typeof metric.unit !== "string" || metric.provenance !== "ares-observed" || typeof metric.value !== "number" || !Number.isFinite(metric.value))) fail("malformed-comparison-attempt");
+  if (value.snapshotSha256 !== undefined && (typeof value.snapshotSha256 !== "string" || !HASH.test(value.snapshotSha256))) fail("malformed-snapshot-sha256");
+  if (!plain(value.protocol) || !Array.isArray(value.protocol.metrics)) fail("malformed-comparison-protocol");
+  const metricReasons: string[] = [];
+  if (new Set(value.metrics.map(metric => metric.name)).size !== value.metrics.length) metricReasons.push("duplicate-metric-names");
+  if (value.metrics.some(metric => !value.protocol.metrics.some(declared => plain(declared) && declared.name === metric.name && declared.unit === metric.unit))) metricReasons.push("undeclared-metrics");
   const seen = new Set([value.id]), ancestry: string[] = []; let parent = value.retryOf;
   while (parent !== undefined) {
     if (seen.has(parent)) fail("cyclic-retry-ancestry");
@@ -434,9 +439,9 @@ function comparisonAttempt(value: Attempt, attempts: Map<string, Attempt>): Atte
     if (ancestry.length > PROVENANCE_TRAVERSAL) fail("retry-traversal-capped", true);
   }
   const start = Date.parse(value.startedAt), end = value.endedAt === undefined ? NaN : Date.parse(value.endedAt), storage = value.outputs.reduce((sum, output) => sum + output.bytes, 0);
-  return { id: value.id, code: {commit: value.commit, treeId: value.treeId, snapshotSha256: value.snapshotSha256 && HASH.test(value.snapshotSha256) ? value.snapshotSha256 : null}, protocolHash: value.protocolHash, seed: value.seed, status: value.status,
-    retryOf: value.retryOf ?? null, retryAncestry: ancestry, sampleGroup: sha256(canonical([value.commit, value.protocolHash, value.seed])), metrics: value.metrics,
-    artifactDigests: value.outputs.map(output => output.sha256).sort(), costs: {wallMilliseconds: Number.isFinite(start) && Number.isFinite(end) && end >= start ? end - start : "unknown", storageBytes: (value.status === "succeeded" || value.outputs.length > 0) && Number.isSafeInteger(storage) ? storage : "unknown", compute: "unknown", transfer: "unknown", verification: "unknown", retention: "unknown", materialization: "unknown", idle: "unknown", person: "unknown"} };
+  return { id: value.id, code: {commit: value.commit, treeId: value.treeId, snapshotSha256: value.snapshotSha256 ?? null}, protocolHash: value.protocolHash, seed: value.seed, status: value.status,
+    retryOf: value.retryOf ?? null, retryAncestry: ancestry, sampleGroup: sha256(canonical([value.commit, value.protocolHash, value.seed])), comparabilityReasons: metricReasons, metrics: value.metrics,
+    artifactDigests: [...new Set(value.outputs.map(output => output.sha256))].sort(), costs: {wallMilliseconds: Number.isFinite(start) && Number.isFinite(end) && end >= start ? end - start : "unknown", storageBytes: (value.status === "succeeded" || value.outputs.length > 0) && Number.isSafeInteger(storage) ? storage : "unknown", compute: "unknown", transfer: "unknown", verification: "unknown", retention: "unknown", materialization: "unknown", idle: "unknown", person: "unknown"} };
 }
 /** Descriptive rows only: no arithmetic, new winner, result receipt, executor reads or effects. */
 export function compareLineage(dirArg: string, options: {attempts?: string[]; candidates?: string[]}): LineageComparison {
@@ -462,12 +467,18 @@ export function compareLineage(dirArg: string, options: {attempts?: string[]; ca
       for (const attemptId of selected) {
         const attempt = attempts.get(attemptId);
         if (!attempt) { row.state = "unavailable"; row.reasons.push("attempt-unavailable:" + attemptId); continue; }
-        row.attempts.push(comparisonAttempt(attempt, attempts));
+        try { row.attempts.push(comparisonAttempt(attempt, attempts)); }
+        catch (error) {
+          if (!(error instanceof SourceFailure) || error.capped) throw error;
+          row.state = "unavailable"; row.reasons.push(error.code);
+          result.issues.push({code: error.code, message: `lineage compare ${error.code}; restore the valid original attempt record before retrying`});
+        }
       }
       if (row.state !== "available") { result.status = "unavailable"; result.issues.push({code: "comparison-selection-unavailable", message: "lineage compare selection unavailable; inspect lineage show and choose existing valid records before retrying"}); }
       result.rows.push(row);
     }
     const values = result.rows.flatMap(row => row.attempts), reasons = new Set<string>();
+    for (const value of values) for (const reason of value.comparabilityReasons) reasons.add(reason);
     if (result.status !== "ok" || result.rows.some(row => row.state !== "available")) reasons.add("source-unavailable");
     if (values.some(value => value.status !== "succeeded")) reasons.add("non-successful-outcomes-retained");
     if (new Set(values.map(value => value.protocolHash)).size > 1) reasons.add("protocol-mismatch");
