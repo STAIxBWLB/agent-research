@@ -22,7 +22,7 @@ interface Order {id: string; repetition: number; taskIds: string[]}
 interface ConditionPlan {id: Condition; stageCalls: Record<typeof STAGES[number], number>}
 interface Snapshot {protocol: Record<string, unknown>; cases: HarnessCase[]; orders: Order[]; conditions: ConditionPlan[]; learning: string[]; heldout: string[]; seal: HarnessSeal; faults: Record<string, unknown>[]}
 export interface HarnessSeal {v: 1; status: "preregistered-not-measured"; bindings: Record<string, string>; files: HashFile[]; receiptSha256: string}
-function fail(cause: string): never {throw new Error(`harness eval ${cause}; restore the registered files or preregister a separately reviewed experiment before retrying`);}
+function fail(cause: string, next = "restore the registered files or preregister a separately reviewed experiment before retrying"): never {throw new Error(`harness eval ${cause}; ${next}`);}
 function object(raw: unknown, keys: readonly string[], label: string): Record<string, unknown> {
   if (!plain(raw) || Object.keys(raw).some(key => !keys.includes(key))) fail(`${label}: invalid shape or unknown field`); return raw;
 }
@@ -32,6 +32,12 @@ function strings(raw: unknown, max: number, label: string): string[] {
 }
 function decode(bytes: Uint8Array): string {try {return new TextDecoder("utf-8", {fatal: true}).decode(bytes);} catch {return fail("invalid UTF-8 source");}}
 function parsed(text: string): unknown {try {return JSON.parse(text);} catch {return fail("invalid JSON source");}}
+function readReceipt(file: string, bound: number, kind: "frozen" | "control"): unknown {
+  let content: string;
+  try {content = readTextBounded(file, bound, {noFollow: true});}
+  catch {return fail(`${kind} receipt is missing, unreadable or over-bound`, kind === "frozen" ? "restore the registered receipt or run bun scripts/harness-eval.ts freeze for a reviewed registration, then retry" : "restore the original control receipt or record controls to a new absolute output file, then retry");}
+  return parsed(content);
+}
 const same = (a: unknown, b: unknown) => canonical(a) === canonical(b);
 function snapshot(root: string): Snapshot {
   const files: HashFile[] = []; let total = 0;
@@ -90,7 +96,7 @@ function snapshot(root: string): Snapshot {
   return {protocol: p, cases, orders, conditions, learning, heldout, faults: faults.cases as Record<string, unknown>[], seal: {...body, receiptSha256: sha256(canonical(body))}};
 }
 export function verifyHarnessPreregistration(root: string, receipt = join(root, HARNESS_FROZEN)): HarnessSeal {
-  const current = snapshot(resolve(root)).seal, stored = parsed(readTextBounded(receipt, DOCUMENT_BYTES, {noFollow: true}));
+  const current = snapshot(resolve(root)).seal, stored = readReceipt(receipt, DOCUMENT_BYTES, "frozen");
   if (!plain(stored) || !plain(stored.bindings)) fail("malformed frozen receipt");
   for (const [key, value] of Object.entries(current.bindings)) if (stored.bindings[key] !== value) fail(`${key} changed since freeze`);
   if (!same(stored, current)) fail("frozen receipt content changed"); return current;
@@ -202,7 +208,7 @@ function controls(root: string, code: RunCodeBinding): HarnessControlReceipt {
   return {...body, receiptSha256: sha256(canonical(body))};
 }
 export function verifyControlReceipt(root: string, file: string): HarnessControlReceipt {
-  const stored = parsed(readTextBounded(file, RECEIPT_BYTES, {noFollow: true})); if (!plain(stored) || !plain(stored.code)) fail("invalid control receipt");
+  const stored = readReceipt(file, RECEIPT_BYTES, "control"); if (!plain(stored) || !plain(stored.code)) fail("invalid control receipt");
   verifyRunCodeCommit(root, stored.code as unknown as RunCodeBinding);
   const code = bindRunCode(root);
   if (stored.code.codeSha256 !== code.codeSha256 || !same(stored.code.files, code.files)) fail("control run code changed since receipt");

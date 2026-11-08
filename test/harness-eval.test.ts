@@ -122,10 +122,10 @@ function committedCliFixture() {
   };
   const paths = git(sourceRoot, "ls-files", "-z", "--", "bin/ares.js", "package.json", "bun.lock", "src", "scripts").split("\0").filter(Boolean); let total = 0;
   expect(paths.length).toBeLessThanOrEqual(256);
-  for (const path of paths) {const value = readTextBounded(join(sourceRoot, path), 1024 * 1024, {noFollow: true}); total += Buffer.byteLength(value); expect(total).toBeLessThanOrEqual(16 * 1024 * 1024); fs.mkdirSync(dirname(join(f.root, path)), {recursive: true}); writeAtomic(join(f.root, path), value, 1024 * 1024);}
+  for (const path of paths) {const value = readTextBounded(join(sourceRoot, path), 1024 * 1024, {noFollow: true}); total += Buffer.byteLength(value); expect(total).toBeLessThanOrEqual(16 * 1024 * 1024); fs.mkdirSync(dirname(join(f.root, path)), {recursive: true}); writeAtomic(join(f.root, path), value, 1024 * 1024, fs.statSync(join(sourceRoot, path)).mode & 0o777);}
   freezeHarnessPreregistration(f.root, join(f.root, HARNESS_FROZEN)); git(f.root, "init", "--quiet"); git(f.root, "add", "--all"); git(f.root, "commit", "--quiet", "-m", "Synthetic code binding fixture");
   const cli = (...args: string[]) => {const value = spawnSync(process.execPath, [join(f.root, "scripts/harness-eval.ts"), ...args], {cwd: f.root, env, encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 10000}); if (value.error) throw value.error; return value;};
-  return {...f, cli};
+  return {...f, cli, git: (...args: string[]) => git(f.root, ...args)};
 }
 
 test("temporary committed CLI controls have complete independent end-to-end costs and refuse forged history", () => {
@@ -177,4 +177,22 @@ test("nested role DTOs reject held-out/future libraries, mismatched text hashes 
   expect(() => validateRolePayload("worker", {...valid.worker, guidance: {method: "contrastive-prior"}}, context)).toThrow();
   expect(() => validateRolePayload("composer", {...valid.composer, proposal: {text: "proposal"}}, context)).toThrow();
   expect(() => validateRolePayload("reflector", {...valid.reflector, selectedOutput: {text: "private"}}, context)).toThrow();
+});
+
+test("a committed executable-mode change refuses control receipt resume without changing codeSha256 format", async () => {
+  const f = committedCliFixture(), output = join(f.root, "mode-controls.json"), bootstrap = join(f.root, "bin/ares.js");
+  fs.chmodSync(bootstrap, 0o755); f.git("add", "--", "bin/ares.js"); if (!f.git("status", "--porcelain").trim()) expect(f.git("ls-tree", "HEAD", "bin/ares.js")).toContain("100755"); else f.git("commit", "--quiet", "-m", "Synthetic executable fixture");
+  expect(f.cli("controls", output).status).toBe(0); const before = readTextBounded(output, 8 * 1024 * 1024), receipt = JSON.parse(before);
+  fs.chmodSync(bootstrap, 0o644); f.git("add", "--", "bin/ares.js"); f.git("commit", "--quiet", "-m", "Synthetic mode-only change");
+  const {bindRunCode} = await import("../scripts/execution-code-binding.ts"); expect(bindRunCode(f.root).codeSha256).toBe(receipt.code.codeSha256);
+  const result = f.cli("controls", output); expect(result.status).toBe(1); expect(result.stderr).toContain("stored/current source mode mismatch"); expect(result.stderr).toContain("restore the original run receipt"); expect(readTextBounded(output, 8 * 1024 * 1024)).toBe(before);
+});
+
+test("CLI receipt read failures name the cause and a recovery step without raw fs errors", () => {
+  const f = committedCliFixture(), missing = join(f.root, "missing-receipt.json"), directory = join(f.root, "directory-receipt"); fs.mkdirSync(directory);
+  for (const file of [missing, directory]) {
+    const result = f.cli("verify", file); expect(result.status).toBe(1); expect(result.stderr).toContain("frozen receipt is missing, unreadable or over-bound"); expect(result.stderr).toContain("restore the registered receipt or run bun scripts/harness-eval.ts freeze"); expect(result.stderr).not.toContain("ENOENT"); expect(result.stderr).not.toContain("EISDIR");
+  }
+  const control = f.cli("controls", directory); expect(control.status).toBe(1); expect(control.stderr).toContain("control receipt is missing, unreadable or over-bound"); expect(control.stderr).toContain("restore the original control receipt"); expect(control.stderr).not.toContain("EISDIR");
+  expect(() => verifyControlReceipt(f.root, missing)).toThrow("control receipt is missing, unreadable or over-bound");
 });

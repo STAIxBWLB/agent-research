@@ -97,7 +97,7 @@ export function bindRunCode(root: string): RunCodeBinding {
   });
 }
 function historyFail(cause: string): never {throw new CodeBindingError(`execution code binding: ${cause}; restore the original run receipt and committed source history, then retry receipt verification`);}
-/** Validate historical source identity against the local object database, never a self-hash alone. */
+/** Validate historical source identity and unchanged resume modes, never a self-hash alone. */
 export function verifyRunCodeCommit(root: string, binding: RunCodeBinding): void {
   const oid = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/, digest = /^[a-f0-9]{64}$/;
   if (!plain(binding as unknown) || Object.keys(binding).some(key => !["commit", "tree", "codeSha256", "files"].includes(key)) || !oid.test(binding.commit) || !oid.test(binding.tree) || !digest.test(binding.codeSha256) || !Array.isArray(binding.files) || !binding.files.length || binding.files.length > RUN_CODE_FILES) historyFail("malformed stored run identity");
@@ -114,6 +114,8 @@ export function verifyRunCodeCommit(root: string, binding: RunCodeBinding): void
     if (text("merge-base", binding.commit, head) !== binding.commit) historyFail("stored run commit is not an ancestor of HEAD");
     const tracked = names(git(["ls-tree", "-r", "-z", binding.commit, "--", ...ROOTS]).toString("utf8"), true, historyFail);
     if (tracked.size !== files.length || files.some(file => !tracked.has(file.path)) || REQUIRED.some(name => !tracked.has(name))) historyFail("stored commit source inventory mismatch");
+    const current = names(git(["ls-tree", "-r", "-z", head, "--", ...ROOTS]).toString("utf8"), true, historyFail);
+    if (files.some(file => tracked.get(file.path)!.mode !== current.get(file.path)?.mode)) historyFail("stored/current source mode mismatch");
     const hashes = files.map(file => tracked.get(file.path)!.hash), bytes = git(["cat-file", "--batch"], RUN_CODE_TOTAL_BYTES + RUN_CODE_FILES * 160, hashes.join("\n") + "\n");
     let offset = 0;
     for (const [index, file] of files.entries()) {
