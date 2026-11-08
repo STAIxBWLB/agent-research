@@ -119,6 +119,7 @@ export function applyTransition(state: TransitionState, event: LedgerEvent, roun
     admitted(contrast.evidence, probes);
     const evidenceIds = new Set(contrast.evidence.map(ref => ref.probe));
     if (contrast.outcome !== "inconclusive" && !["baseline", contrast.arm].every(arm => probes.some(probe => probe.projection.arm === arm && evidenceIds.has(probe.projection.id)))) transitionFail("a non-inconclusive contrast needs its baseline and arm execution refs");
+    if (probes.some(probe => evidenceIds.has(probe.projection.id) && probe.projection.arm !== "baseline" && probe.projection.arm !== contrast.arm)) transitionFail("contrast evidence belongs to an unrelated arm; cite only baseline and the contrast arm, or record a separate contrast");
     bucket.contrasts.set(form.id, record as Recorded<HarnessContrast>);
   } else if (kind === "composition") {
     const composition = form as HarnessComposition;

@@ -60,6 +60,9 @@ function matchesRound(round: HarnessRound, projection: ProbeFixtureProjectionV1,
   const expected = projection.arm === "baseline" ? round.baseline.guidanceSha256 : projection.arm === "successor" ? successor : round.candidates.find(candidate => candidate.id === projection.arm)?.guidanceSha256;
   return !!expected && projection.taskId === round.task.id && projection.taskInputHash === round.task.inputSha256 && projection.guidanceHash === expected && projection.baselineHash === round.baseline.guidanceSha256;
 }
+function requireDistinctSuccessor(projection: ProbeFixtureProjectionV1, active: readonly DeclaredProbe[]): void {
+  if (active.some(probe => (projection.arm === "successor" || probe.projection.arm === "successor") && probe.projection.guidanceHash === projection.guidanceHash)) fail("this guidance already has an execution; reference it rather than count another sample");
+}
 export const harnessRoundBinding = (round: HarnessRound) => sha256(canonical(round));
 const binding = harnessRoundBinding;
 const path = (dir: string) => join(dir, "design", "harness.json");
@@ -80,6 +83,7 @@ function replay(events: LedgerEvent[], studyId: string) {
       if (!round || !matchesRound(round, projection, bucket?.composition?.form.successorSha256) || event.data.binding !== binding(round) || event.data.projectionSha256 !== sha256(canonical(projection)) || event.data.sourceStrength !== "synthetic-fixture") fail("declared probe receipt mismatch");
       const projectionKey = canonical([round.id, projection.id]), armKey = canonical([round.id, binding(round), projection.arm]);
       if (projectionIds.has(projectionKey) || roundArms.has(armKey)) fail("duplicate declared probe journal event");
+      requireDistinctSuccessor(projection, activeProbes.get(canonical([round.id, binding(round)])) ?? []);
       projectionIds.add(projectionKey); roundArms.add(armKey);
       const probe: DeclaredProbe = {round: round.id, binding: binding(round), projectionSha256: event.data.projectionSha256 as string, sourceStrength: "synthetic-fixture", projection};
       probes.push(probe); const activeKey = canonical([round.id, binding(round)]), active = activeProbes.get(activeKey) ?? []; active.push(probe); activeProbes.set(activeKey, active);
@@ -135,7 +139,7 @@ export function importHarnessFixture(dirArg: string, roundId: string, raw: unkno
   if (!matchesRound(round, projection, bucket.composition?.form.successorSha256)) fail("declared probe arm/task/guidance differs from the bound round");
   if (current.probes.some(value => value.round === round.id && value.binding === binding(round) && value.projection.arm === projection.arm)) fail("an arm already has its declared execution; create a separately identified experiment rather than count it twice");
   if (current.probes.filter(value => value.round === round.id && value.binding === binding(round)).length >= 4) fail("this round already has its baseline, candidates and successor declarations");
-  if (projection.arm === "successor" && current.probes.some(probe => probe.round === round.id && probe.binding === binding(round) && probe.projection.guidanceHash === projection.guidanceHash)) fail("this guidance already has an execution; reference it rather than count another sample");
+  requireDistinctSuccessor(projection, current.probes.filter(probe => probe.round === round.id && probe.binding === binding(round)));
   const prospective: DeclaredProbe = {round: round.id, binding: binding(round), projectionSha256: hash, sourceStrength: "synthetic-fixture", projection};
   requireEvidenceViewCapacity(current, round, [...current.probes.filter(probe => probe.round === round.id && probe.binding === binding(round)), prospective]);
   const approval = requireGate(current.dir, current.study, `harness:${round.id}`, name => name === `harness:${round.id}` ? binding(round) : undefined);

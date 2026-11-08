@@ -235,7 +235,8 @@ test("malformed transition source execution guidance targets the transition inpu
 });
 
 test("a near-limit successor import refuses before any gate/ledger write and leaves the selected round readable", async () => {
-  const f = await fixture("auto"), execution = {v: 1, tool: "ahub", projectKey: "p".repeat(256), kind: "k".repeat(128), id: "i".repeat(256), revision: "r".repeat(128), sha256: "a".repeat(64)};
+  const f = await fixture("auto"); f.ctx.actor.id = "synthetic-actor-".padEnd(128, "a");
+  const execution = {v: 1, tool: "ahub", projectKey: "p".repeat(256), kind: "k".repeat(128), id: "i".repeat(256), revision: "r".repeat(128), sha256: "a".repeat(64)};
   const raw = {...definition(), candidates: [{id: "one", guidanceSha256: source("candidate").guidanceHash}, {id: "two", guidanceSha256: "8".repeat(64)}], hypothesis: {deficiency: "d".repeat(2000), predictedChange: "p".repeat(2000)}, experience: Array.from({length: 16}, (_, i) => ({ref: {v: 1, tool: "amem", id: i.toString(16).padStart(32, "0")}, digest: "a".repeat(64)})), sourceExecutions: {proposal1: execution, proposal2: execution, composition: execution, selection: execution, reflection: execution}};
   await ops.harnessSet(f.dir, raw, f.ctx);
   for (const arm of ["baseline", "one", "two"]) {
@@ -248,7 +249,7 @@ test("a near-limit successor import refuses before any gate/ledger write and lea
   const compositionFor = (length: number) => parseComposition({v: 1, id: "near-cap-composition", fingerprint: harnessEvidenceFingerprint(binding, probes, bucket), sections: Array.from({length: 32}, (_, i) => ({section: `section-${i}-`.padEnd(256, "s"), decision: "revise", contrasts: [...bucket.contrasts.values()].slice(0, 4).map(record => ({id: record.form.id, sha256: record.sha256})), reason: "r".repeat(length)})), successorSha256: "9".repeat(64)});
   const size = (form: ReturnType<typeof parseComposition>) => Buffer.byteLength(canonical({round, probes, transitions: transitionView(round, binding, probes, {...bucket, composition: {form, actor: f.ctx.actor, at: new Date(0).toISOString(), binding, sha256: recordHash(form, f.ctx.actor, binding), sourceStrength: "synthetic-fixture", matched: false}})}));
   for (let n = 0; n < 64; n++) {
-    const form = {v: 1, id: `large-${n}-`.padEnd(64, "c"), fingerprint: harnessEvidenceFingerprint(binding, probes, bucket), arm: "one", outcome: "inconclusive", basis: "actor-claim", model: "m".repeat(256), sourceExecution: execution, observations: "o".repeat(2000), uncertainty: "u".repeat(2000), explanations: Array(8).fill("e".repeat(1000)), evidence: probes.map(probe => ({probe: probe.projection.id, projectionSha256: probe.projectionSha256, outputManifestHash: probe.projection.outputManifestHash!}))};
+    const form = {v: 1, id: `large-${n}-`.padEnd(64, "c"), fingerprint: harnessEvidenceFingerprint(binding, probes, bucket), arm: "one", outcome: "inconclusive", basis: "actor-claim", model: "m".repeat(256), sourceExecution: execution, observations: "o".repeat(2000), uncertainty: "u".repeat(2000), explanations: Array(8).fill("e".repeat(1000)), evidence: probes.filter(probe => ["baseline", "one"].includes(probe.projection.arm)).map(probe => ({probe: probe.projection.id, projectionSha256: probe.projectionSha256, outputManifestHash: probe.projection.outputManifestHash!}))};
     const type = "harness.contrast.recorded", data = {v: 1, round: round.id, binding, form, sha256: recordHash(form, f.ctx.actor, binding), sourceStrength: "synthetic-fixture"};
     applyTransition(state, {v: 1, actor: f.ctx.actor, at: new Date(0).toISOString(), type, data}, round, binding, probes); pending.push({actor: f.ctx.actor, type, data});
     if (bucket.contrasts.size < 4) continue;
@@ -298,4 +299,30 @@ test("identical-byte successor adoption cites the reused candidate execution wit
   await ops.harnessAdopt(f.dir, "round-one", raw, preview.fingerprint, f.ctx);
   const after = view(f.dir); expect(after.transitions.closure?.outcome).toBe("adopted-experimental"); expect(after.probes).toEqual(before.probes);
   expect(after.transitions.adoption?.form.checks[0]?.probe).toBe(source("candidate").id); expect(after.transitions.readiness).toMatchObject({correctness: "unavailable", transfer: "not-demonstrated"});
+});
+
+test("successor-first then identical candidate refuses a duplicate sample in write and replay", async () => {
+  const f = await fixture(), raw = {...definition(), candidates: [...definition().candidates, {id: "later-candidate", guidanceSha256: "8".repeat(64)}]};
+  await ops.harnessSet(f.dir, raw, f.ctx); await ops.gateDecide(f.dir, "harness:round-one", "approve", undefined, f.ctx);
+  for (const name of ["baseline", "candidate"]) await ops.harnessImport(f.dir, raw.id, {...source(name), id: `reverse-${name}`}, f.ctx);
+  await ops.harnessContrast(f.dir, raw.id, contrast(f.dir), f.ctx); await ops.harnessCompose(f.dir, raw.id, composition(f.dir, "8".repeat(64)), f.ctx);
+  await ops.harnessImport(f.dir, raw.id, {...source("candidate"), id: "reverse-successor", arm: "successor", guidanceHash: "8".repeat(64)}, f.ctx);
+  const late = {...source("candidate"), id: "reverse-late-candidate", arm: "later-candidate", guidanceHash: "8".repeat(64)}, before = bytes(f.dir), count = view(f.dir).probes.length;
+  await expect(ops.harnessImport(f.dir, raw.id, late, f.ctx)).rejects.toThrow("reference it rather than count another sample"); expect(bytes(f.dir)).toEqual(before); expect(view(f.dir).probes).toHaveLength(count);
+  commit(f.dir, [], [{actor: f.ctx.actor, type: "harness.probe.declared", data: {v: 1, round: raw.id, binding: view(f.dir).binding, projection: late, projectionSha256: sha256(canonical(late)), sourceStrength: "synthetic-fixture"}}]);
+  expect(() => ops.harnessShow(f.dir)).toThrow("reference it rather than count another sample");
+});
+
+test("inconclusive contrasts may be incomplete but cannot cite another candidate's evidence", async () => {
+  const f = await fixture(), raw = {...definition(), candidates: [...definition().candidates, {id: "other", guidanceSha256: "8".repeat(64)}]};
+  await ops.harnessSet(f.dir, raw, f.ctx); await ops.gateDecide(f.dir, "harness:round-one", "approve", undefined, f.ctx);
+  for (const name of ["baseline", "candidate"]) await ops.harnessImport(f.dir, raw.id, {...source(name), id: `incomplete-${name}`}, f.ctx);
+  await ops.harnessImport(f.dir, raw.id, {...source("candidate"), id: "incomplete-other", arm: "other", guidanceHash: "8".repeat(64)}, f.ctx);
+  const form = {...contrast(f.dir, "incomplete"), outcome: "inconclusive"}, before = bytes(f.dir);
+  for (const evidence of [[ref(f.dir, "other")], [ref(f.dir, "baseline"), ref(f.dir, "other")], [ref(f.dir, "candidate"), ref(f.dir, "other")]]) {
+    await expect(ops.harnessContrast(f.dir, raw.id, {...form, evidence}, f.ctx)).rejects.toThrow("unrelated arm"); expect(bytes(f.dir)).toEqual(before);
+  }
+  await ops.harnessContrast(f.dir, raw.id, {...form, evidence: [ref(f.dir, "baseline")]}, f.ctx);
+  await ops.harnessContrast(f.dir, raw.id, {...contrast(f.dir, "incomplete-own"), outcome: "inconclusive", evidence: [ref(f.dir, "candidate")]}, f.ctx);
+  expect(view(f.dir).transitions.contrasts.map(record => record.form.evidence.length)).toEqual([1, 1]);
 });
