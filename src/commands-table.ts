@@ -2,6 +2,9 @@
 export interface CommandSpec { name: string; usage: string; mutates: boolean | "network"; options: Record<string, "flag" | "value"> }
 const json = { "--json": "flag" } as const;
 export const COMMANDS: readonly CommandSpec[] = [
+  { name: "harness set", usage: "harness set <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
+  { name: "harness show", usage: "harness show <dir> [--round ID] [--json]", mutates: false, options: { "--round": "value", ...json } },
+  { name: "harness import", usage: "harness import <dir> <round> --file FIXTURE_PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "lineage show", usage: "lineage show <dir> [--root KIND --id ID --revision REV --sha256 HASH] [--cursor CURSOR] [--json]", mutates: false, options: { "--root": "value", "--id": "value", "--revision": "value", "--sha256": "value", "--cursor": "value", ...json } },
   { name: "lineage compare", usage: "lineage compare <dir> (--attempts ID,... | --candidates COMMIT,...) [--json]", mutates: false, options: { "--attempts": "value", "--candidates": "value", ...json } },
   { name: "autonomy show", usage: "autonomy show <dir> [--json]", mutates: false, options: json },

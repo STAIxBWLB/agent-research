@@ -13,7 +13,7 @@ test("manifest CLI and MCP publish the package version, all commands and impleme
   expect(expected.v).toBe(1); expect(expected.version).toBe(version);
   expect(expected.commands).toEqual(COMMANDS.map(({ name, usage }) => ({ name, usage })));
   expect(expected.mcp).toEqual({ server: "ares", tools: ARES_TOOLS.map(tool => ({ name: tool.name, readOnly: tool.annotations.readOnlyHint === true && tool.annotations.openWorldHint !== true })) });
-  expect(expected.formats).toEqual({ manifest: 1, study: 2, paperEvidence: 1, skillProposal: 2, studyRegistry: 1, watchConfig: 1, studyPlan: 1, ledgerEvent: 1, experimentProtocol: 1, experimentSelection: 1, experimentFinalSeeds: 1, ablateResult: 1, finalResult: 1, investigateResult: 1, executor: 1, experimentAttempt: 1, studyBundle: 1 });
+  expect(expected.formats).toEqual({ manifest: 1, harnessRound: 1, harnessFixtureProjection: 1, study: 2, paperEvidence: 1, skillProposal: 2, studyRegistry: 1, watchConfig: 1, studyPlan: 1, ledgerEvent: 1, experimentProtocol: 1, experimentSelection: 1, experimentFinalSeeds: 1, ablateResult: 1, finalResult: 1, investigateResult: 1, executor: 1, experimentAttempt: 1, studyBundle: 1 });
   const forbidden = async () => { throw new Error("manifest must not start a process"); };
   const cli = await run(["manifest", "--json"], {}, { http: fakeHttp([]).http, runner: forbidden });
   expect(cli.code).toBe(0); expect(JSON.parse(cli.text)).toEqual(expected);

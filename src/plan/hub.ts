@@ -1,3 +1,4 @@
+import {realHubProbeUnavailable} from "../harness/receipts.ts";
 import { isAbsolute, resolve } from "node:path";
 import { spawnRunner, type ProcessRunner } from "../exp/executor.ts";
 import { plain, sha256, type LedgerEvent } from "../study.ts";
@@ -53,4 +54,9 @@ export function createHubClient(project: string, runner: ProcessRunner = spawnRu
 /** The first known binding of this node/revision remains pinned through retries. */
 export function boundHubTask(events: LedgerEvent[], revision: number, node: string): number | undefined {
   return events.find(e => (e.type === "node.intent" || e.type === "node.observed") && e.data.revision === revision && e.data.node === node && task(e.data.taskId))?.data.taskId as number | undefined;
+}
+
+/** Producer #1225/#1226 has not shipped an admitted receipt reader; no guessed CLI or wire fallback. */
+export async function readHarnessProbeSource(_address: unknown) {
+  return realHubProbeUnavailable(_address);
 }

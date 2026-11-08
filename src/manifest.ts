@@ -5,6 +5,8 @@ import { ARES_TOOLS } from "./mcp-tools.ts";
 /** Implemented family-readable records only; private inputs and future integrations are not contracts. */
 export const FORMAT_VERSIONS = {
   manifest: 1,
+  harnessRound: 1,
+  harnessFixtureProjection: 1,
   study: 2,
   paperEvidence: 1,
   skillProposal: 2,
@@ -24,7 +26,7 @@ export const FORMAT_VERSIONS = {
 } as const;
 export const MEMORY_LEDGER_EVENTS = ["archive.exported", "skill.proposed", "skill.decided"] as const;
 export const WATCH_LEDGER_EVENTS = ["watch.set", "watch.ran"] as const;
-export const LEDGER_EVENTS = [...MEMORY_LEDGER_EVENTS, ...WATCH_LEDGER_EVENTS, "autonomy.set"] as const;
+export const LEDGER_EVENTS = [...MEMORY_LEDGER_EVENTS, ...WATCH_LEDGER_EVENTS, "autonomy.set", "harness.round.set", "harness.probe.declared"] as const;
 export interface Manifest {
   v: 1;
   name: "ares";
