@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, opendirSync, realpathSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseLedger, plain, readBytesBounded, hashFileBounded, sha256, validateStudy, type LedgerEvent, type Study } from "./study.ts";
 import { validateAttemptRecord, type Attempt } from "./exp/attempts.ts";
 import { TASK_BYTES, TASK_FILES } from "./exp/protocol.ts";
@@ -51,9 +51,20 @@ function capture(dir: string): Snapshot {
   const exclude = (name: string, file: SourceFile) => {
     if (name !== "executor.json" && !/\/attempts\//.test(name)) return;
     const raw = parsed(file); if (!plain(raw)) return;
-    if (name === "executor.json") { if (raw.v !== 1) fail("unsupported-version"); try { validateExecutor(raw); } catch { fail("malformed-executor"); } }
+    if (name === "executor.json" && raw.v !== 1) fail("unsupported-version");
+    if (name !== "executor.json" && (Object.hasOwn(raw, "executor") && !plain(raw.executor) || Object.hasOwn(raw, "paths") && !plain(raw.paths))) fail("malformed-execution-path");
     const executor = name === "executor.json" ? raw : plain(raw.executor) ? raw.executor : {}, paths = name !== "executor.json" && plain(raw.paths) ? raw.paths : {};
-    for (const location of [executor.workdir, paths.snapshot, paths.output, paths.result]) if (typeof location === "string" && location.startsWith("/")) {
+    const evidencePaths: unknown[] = [];
+    const outputPaths = (rows: unknown) => { if (Array.isArray(rows)) for (const row of rows) if (plain(row) && Object.hasOwn(row, "path")) evidencePaths.push(row.path); };
+    outputPaths(raw.outputs);
+    if (plain(raw.stages)) for (const stage of Object.values(raw.stages)) if (plain(stage) && plain(stage.evidence)) {
+      outputPaths(stage.evidence.outputs);
+      if (plain(stage.evidence.logs)) for (const log of Object.values(stage.evidence.logs)) if (plain(log) && Object.hasOwn(log, "path")) evidencePaths.push(log.path);
+    }
+    // Validate host paths, including evaluator inputs; container mount targets/argv are not host locations.
+    for (const location of [...(Object.hasOwn(executor, "workdir") ? [executor.workdir] : []), ...Object.values(paths), ...evidencePaths]) if (typeof location !== "string" || !isAbsolute(location) || location.includes("\0")) fail("malformed-execution-path");
+    if (name === "executor.json") { try { validateExecutor(raw); } catch { fail("malformed-executor"); } }
+    for (const location of [executor.workdir, paths.snapshot, paths.output, paths.result, ...evidencePaths]) if (typeof location === "string") {
       let address = resolve(location); try { address = realpathSync(address); } catch { /* An absent output location has no readable tree. */ }
       const inside = relative(dir, address); if (inside === "" || inside !== ".." && !inside.startsWith(".." + sep)) forbidden.push(inside.split(sep).join("/"));
     }
@@ -149,7 +160,10 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
   const events = source.events;
   const addedIdeas = new Map<string, number>(), decisions = new Map<string, number[]>(), latestAttempts = new Map<string, LedgerEvent>(), attemptReceipts = new Map<string, { index: number; event: LedgerEvent }>(), starts = new Map<string, LedgerEvent[]>(), reviewIndexes = new Map<string, number>(), skillIndexes = new Map<string, number>();
   for (const [index, event] of events.entries()) {
-    if (event.type.startsWith("attempt.") && typeof event.data.id === "string" && ATTEMPT.test(event.data.id) && !attemptReceipts.has(event.data.id)) attemptReceipts.set(event.data.id, { index, event });
+    if (event.type.startsWith("attempt.")) {
+      if (typeof event.data.id !== "string" || !ATTEMPT.test(event.data.id)) graph.issue("malformed-attempt-receipt");
+      else if (!attemptReceipts.has(event.data.id)) attemptReceipts.set(event.data.id, { index, event });
+    }
     if (event.type === "attempt.started" && typeof event.data.id === "string") starts.set(event.data.id, [...(starts.get(event.data.id) ?? []), event]);
     if (event.type.startsWith("attempt.") && typeof event.data.id === "string" && typeof event.data.status === "string") latestAttempts.set(event.data.id, event);
     if (event.type === "idea.added" && plain(event.data.idea) && typeof event.data.idea.id === "string") addedIdeas.set(event.data.idea.id, index);

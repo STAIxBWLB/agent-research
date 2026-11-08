@@ -416,3 +416,46 @@ test("ledger attempts whose files are missing remain explicit unavailable eviden
   expect(page.issues.some(issue => issue.code === "missing-attempt-record" && issue.ref?.id === id)).toBe(true);
   expect(page.edges.some(link => link.from.id === id)).toBe(false);
 });
+
+for (const field of ["snapshot", "output", "result", "evaluator", "workdir"] as const) for (const invalid of ["task/private-output", 42, null]) test(`malformed ${field} path ${typeof invalid} refuses before private source reads`, async () => {
+  const f = await provenanceFixture(), file = join(f.dir, `runs/investigate/attempts/${f.ids.retryAttempt}.json`), record = JSON.parse(readTextBounded(file, ATTEMPT_BYTES));
+  const privateDir = join(f.dir, "task/private-output"); fs.mkdirSync(privateDir); writeAtomic(join(privateDir, "private.bin"), "Synthetic private body", 1024);
+  if (field === "workdir") record.executor.workdir = invalid; else record.paths[field] = invalid;
+  writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES);
+  const original = fs.openSync, opened: string[] = [], guard = spyOn(fs, "openSync").mockImplementation(((file: fs.PathLike, ...args: unknown[]) => {
+    if (String(file).includes("/task/") || String(file).includes("/paper/")) { opened.push(String(file)); throw new Error("private source opened"); }
+    return Reflect.apply(original, fs, [file, ...args]);
+  }) as typeof fs.openSync);
+  try { const page = readProvenance(f.dir); expect(page.status).toBe("unavailable"); expect(page.issues[0]?.code).toBe("malformed-execution-path"); expect(opened).toEqual([]); }
+  finally { guard.mockRestore(); }
+});
+
+test("a root executor relative workdir fails with the general path metadata refusal", () => {
+  const dir = tempDir(), ctx = { actor: { kind: "person" as const }, http: fakeHttp([]).http };
+  ops.init(dir, { question: "Synthetic malformed executor path" }, ctx);
+  writeAtomic(join(dir, "executor.json"), JSON.stringify({ v: 1, kind: "local", workdir: "task/private-output" }), 65_536);
+  expect(readProvenance(dir).issues[0]?.code).toBe("malformed-execution-path");
+});
+
+for (const type of ["attempt.started", "attempt.succeeded", "attempt.stage.changed", "attempt.executor-error"]) for (const invalid of ["not-a-native-attempt-id", null, 42, undefined]) test(`${type} malformed or missing id ${typeof invalid} cannot produce complete history`, () => {
+  const dir = tempDir(), ctx = { actor: { kind: "person" as const }, http: fakeHttp([]).http };
+  ops.init(dir, { question: "Synthetic malformed attempt receipt" }, ctx);
+  appendEvent(dir, ctx.actor, type, { ...(invalid === undefined ? {} : { id: invalid }), status: "succeeded" });
+  const page = readProvenance(dir); expect(page.status).toBe("unavailable"); expect(page.totals).toBeNull();
+  expect(page.issues.some(issue => issue.code === "malformed-attempt-receipt")).toBe(true);
+});
+
+for (const source of ["inventory", "stage-output", "stage-log"] as const) for (const relative of [true, false]) test(`${source} host paths are validated and excluded`, async () => {
+  const f = await provenanceFixture(), file = join(f.dir, `runs/investigate/attempts/${f.ids.retryAttempt}.json`), record = JSON.parse(readTextBounded(file, ATTEMPT_BYTES));
+  const folder = join(f.dir, "task/private-output"); fs.mkdirSync(folder); writeAtomic(join(folder, "private.bin"), "Synthetic private bytes", 1024);
+  const metadata = { path: relative ? "task/private-output/private.bin" : join(folder, "private.bin"), sha256: "c".repeat(64), bytes: 1 };
+  if (source === "inventory") record.outputs.push(metadata);
+  else { record.stages.candidate.evidence = source === "stage-output" ? { outputs: [metadata] } : { logs: { stdout: metadata } }; }
+  writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES);
+  const original = fs.openSync, opened: string[] = [], guard = spyOn(fs, "openSync").mockImplementation(((file: fs.PathLike, ...args: unknown[]) => {
+    if (String(file).includes("/task/private-output/")) { opened.push(String(file)); throw new Error("private output read"); }
+    return Reflect.apply(original, fs, [file, ...args]);
+  }) as typeof fs.openSync);
+  try { const page = readProvenance(f.dir); expect(page.status).toBe("unavailable"); expect(page.issues[0]?.code).toBe(relative ? "malformed-execution-path" : "executor-overlaps-source"); expect(opened).toEqual([]); }
+  finally { guard.mockRestore(); }
+});
