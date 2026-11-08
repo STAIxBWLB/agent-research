@@ -1,0 +1,103 @@
+{
+  "v": 1,
+  "evidence": "resource-controller-admission-log-metadata",
+  "actualBaselineObservations": 0,
+  "attempts": [
+    {
+      "phase": "admission-checkout",
+      "exitCode": 128,
+      "baselineStarted": false,
+      "observations": 0,
+      "cause": "git-pack-thread-limit",
+      "logSha256": "14b02ff2cda8a75eaf7d0a9cf546dc113731c12ccbf666fc69163a92096867d6",
+      "logBytes": 638,
+      "action": "keep32PIDbudget;useGitpack/indexthreads1duringcheckout",
+      "cpuSeconds": "unknown",
+      "wallElapsedMs": "unknown",
+      "imageDigest": "unknown",
+      "costs": {
+        "cpuSeconds": "unknown",
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": "unknown",
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": "unknown",
+        "verificationWallMs": "unknown",
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": "unknown",
+        "materializationWallMs": "unknown",
+        "materializationTransferBytes": "unknown",
+        "failureCpuSeconds": "unknown",
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": "unknown",
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      }
+    },
+    {
+      "phase": "admission-checkout",
+      "exitCode": 128,
+      "baselineStarted": false,
+      "observations": 0,
+      "cause": "git-pack-thread-limit",
+      "logSha256": "14b02ff2cda8a75eaf7d0a9cf546dc113731c12ccbf666fc69163a92096867d6",
+      "logBytes": 638,
+      "action": "avoid pack-objects by shared local clone of the exact admitted commit; keep32PIDcap",
+      "cpuSeconds": "unknown",
+      "wallElapsedMs": "unknown",
+      "imageDigest": "unknown",
+      "costs": {
+        "cpuSeconds": "unknown",
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": "unknown",
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": "unknown",
+        "verificationWallMs": "unknown",
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": "unknown",
+        "materializationWallMs": "unknown",
+        "materializationTransferBytes": "unknown",
+        "failureCpuSeconds": "unknown",
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": "unknown",
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      }
+    }
+  ],
+  "successfulTransport": {
+    "sha256": "84d3796bb480de7584289b3c6e4c83ed8aae8d070ef8096d095ba62ebec8edf5",
+    "bytes": 375805
+  },
+  "codeCommitRequested": "3f8f373bc8c13176eae3e4b564c54542a7b3e363",
+  "preregistrationVerification": "not-started-for-failed-admissions",
+  "resultAuthorityLinks": [],
+  "resultAuthorityLinksReason": "synthetic corpus, no ares study; harness-observed only",
+  "resultAuthorityDecision": {
+    "issue": 63,
+    "date": "2026-11-08",
+    "scope": "observation-only T2a adapter"
+  },
+  "metadataClarification": {
+    "kind": "post-capture-authority-clarification",
+    "originalCaptureSha256": "55678268d75b5b99da6f33696f219db3334b20bd2112153a87114afa261b5836",
+    "originalReceiptGitCommit": "35b905f404a54d7306341b530454fb07893a4c6c",
+    "observationsSha256": null,
+    "recordedExecutionCodeCommit": "3f8f373bc8c13176eae3e4b564c54542a7b3e363",
+    "measurementRepeated": false,
+    "note": "Only receipt metadata changed after capture; observations, costs, timestamps and execution code binding are unchanged. Future emitter now includes the decision explicitly."
+  }
+}

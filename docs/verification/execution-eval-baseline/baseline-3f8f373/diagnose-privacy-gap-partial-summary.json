@@ -1,0 +1,453 @@
+{
+  "v": 1,
+  "authority": "harness-observed",
+  "registrationReceiptSha256": "72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20",
+  "codeSha256": "d86195d060b84f282db94621b7ddb90afddd2e512d2344e910e9eafd26bb9708",
+  "methodSha256": "84e4aabb8178299ceb84c45711c150228a328d9c6acfc2a83735514f1e8fcd62",
+  "inputFileSha256": "35db2d5c714a0230a91ad1e54439c1a1587bb251ed72d075b354d7afca4d5cb6",
+  "expectedFileSha256": "151573a0336287f0a47fa392c47b7fef7b04647f1339f870cbbd71fa7201cb0e",
+  "observations": [
+    {
+      "authority": "harness-observed",
+      "caseId": "diagnose-privacy-gap-partial-summary",
+      "trial": "diagnose",
+      "arm": "current-workflow",
+      "repetition": 0,
+      "seed": 3,
+      "condition": "cold",
+      "slotOrder": [
+        null,
+        "baseline"
+      ],
+      "executedSlot": 1,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "v": 1,
+        "kind": "automated-source-resolution",
+        "authority": "harness-observed",
+        "provenance": {
+          "attemptId": null,
+          "head": null,
+          "selectedHead": "3db7490a7f22a6e85678687e0f54a3ed7a19c22c",
+          "status": "unknown",
+          "completeness": "privacy-gap"
+        },
+        "nextAction": "request-safe-provenance-summary"
+      },
+      "processWallMs": 14.81165599999997,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.015501000000000001,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 15.564393999999993,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000153,
+        "verificationWallMs": 0.12491099999999733,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000075,
+        "materializationWallMs": 0.6020019999999704,
+        "materializationTransferBytes": 589,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "8c978a09fc7fb7d031d68ac6ba61a9930acc0cf49ddd52ebfcca6180877d2f8d",
+          "bytes": 327
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "diagnose-privacy-gap-partial-summary",
+      "trial": "diagnose",
+      "arm": "current-workflow",
+      "repetition": 0,
+      "seed": 3,
+      "condition": "warm",
+      "slotOrder": [
+        null,
+        "baseline"
+      ],
+      "executedSlot": 1,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "v": 1,
+        "kind": "automated-source-resolution",
+        "authority": "harness-observed",
+        "provenance": {
+          "attemptId": null,
+          "head": null,
+          "selectedHead": "3db7490a7f22a6e85678687e0f54a3ed7a19c22c",
+          "status": "unknown",
+          "completeness": "privacy-gap"
+        },
+        "nextAction": "request-safe-provenance-summary"
+      },
+      "processWallMs": 14.667999999999893,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.015170999999999999,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 14.873024999999984,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000153,
+        "verificationWallMs": 0.12340999999992164,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000048,
+        "materializationWallMs": 0.04921300000000883,
+        "materializationTransferBytes": 0,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "8c978a09fc7fb7d031d68ac6ba61a9930acc0cf49ddd52ebfcca6180877d2f8d",
+          "bytes": 327
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "diagnose-privacy-gap-partial-summary",
+      "trial": "diagnose",
+      "arm": "current-workflow",
+      "repetition": 1,
+      "seed": 11,
+      "condition": "cold",
+      "slotOrder": [
+        "baseline",
+        null
+      ],
+      "executedSlot": 0,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "v": 1,
+        "kind": "automated-source-resolution",
+        "authority": "harness-observed",
+        "provenance": {
+          "attemptId": null,
+          "head": null,
+          "selectedHead": "3db7490a7f22a6e85678687e0f54a3ed7a19c22c",
+          "status": "unknown",
+          "completeness": "privacy-gap"
+        },
+        "nextAction": "request-safe-provenance-summary"
+      },
+      "processWallMs": 14.393847999999934,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.015458,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 15.60922400000004,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000108,
+        "verificationWallMs": 0.11080799999990631,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000169,
+        "materializationWallMs": 1.0800390000000561,
+        "materializationTransferBytes": 589,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "8c978a09fc7fb7d031d68ac6ba61a9930acc0cf49ddd52ebfcca6180877d2f8d",
+          "bytes": 327
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "diagnose-privacy-gap-partial-summary",
+      "trial": "diagnose",
+      "arm": "current-workflow",
+      "repetition": 1,
+      "seed": 11,
+      "condition": "warm",
+      "slotOrder": [
+        "baseline",
+        null
+      ],
+      "executedSlot": 0,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "v": 1,
+        "kind": "automated-source-resolution",
+        "authority": "harness-observed",
+        "provenance": {
+          "attemptId": null,
+          "head": null,
+          "selectedHead": "3db7490a7f22a6e85678687e0f54a3ed7a19c22c",
+          "status": "unknown",
+          "completeness": "privacy-gap"
+        },
+        "nextAction": "request-safe-provenance-summary"
+      },
+      "processWallMs": 14.125495999999885,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.014936999999999999,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 14.310711000000083,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000141,
+        "verificationWallMs": 0.11414799999988645,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000046,
+        "materializationWallMs": 0.04756800000018302,
+        "materializationTransferBytes": 0,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "8c978a09fc7fb7d031d68ac6ba61a9930acc0cf49ddd52ebfcca6180877d2f8d",
+          "bytes": 327
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "diagnose-privacy-gap-partial-summary",
+      "trial": "diagnose",
+      "arm": "current-workflow",
+      "repetition": 2,
+      "seed": 19,
+      "condition": "cold",
+      "slotOrder": [
+        null,
+        "baseline"
+      ],
+      "executedSlot": 1,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "v": 1,
+        "kind": "automated-source-resolution",
+        "authority": "harness-observed",
+        "provenance": {
+          "attemptId": null,
+          "head": null,
+          "selectedHead": "3db7490a7f22a6e85678687e0f54a3ed7a19c22c",
+          "status": "unknown",
+          "completeness": "privacy-gap"
+        },
+        "nextAction": "request-safe-provenance-summary"
+      },
+      "processWallMs": 13.133597999999893,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.014213,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 14.323190999999952,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000089,
+        "verificationWallMs": 0.09235999999987143,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000172,
+        "materializationWallMs": 1.0713969999999335,
+        "materializationTransferBytes": 589,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "8c978a09fc7fb7d031d68ac6ba61a9930acc0cf49ddd52ebfcca6180877d2f8d",
+          "bytes": 327
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "diagnose-privacy-gap-partial-summary",
+      "trial": "diagnose",
+      "arm": "current-workflow",
+      "repetition": 2,
+      "seed": 19,
+      "condition": "warm",
+      "slotOrder": [
+        null,
+        "baseline"
+      ],
+      "executedSlot": 1,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "v": 1,
+        "kind": "automated-source-resolution",
+        "authority": "harness-observed",
+        "provenance": {
+          "attemptId": null,
+          "head": null,
+          "selectedHead": "3db7490a7f22a6e85678687e0f54a3ed7a19c22c",
+          "status": "unknown",
+          "completeness": "privacy-gap"
+        },
+        "nextAction": "request-safe-provenance-summary"
+      },
+      "processWallMs": 14.244275000000016,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.015181,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 14.416897000000063,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000099,
+        "verificationWallMs": 0.1035349999999653,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000044,
+        "materializationWallMs": 0.04473699999994096,
+        "materializationTransferBytes": 0,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "8c978a09fc7fb7d031d68ac6ba61a9930acc0cf49ddd52ebfcca6180877d2f8d",
+          "bytes": 327
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    }
+  ],
+  "resultAuthorityLinks": [],
+  "resultAuthorityLinksReason": "synthetic corpus, no ares study; harness-observed only",
+  "resultAuthorityDecision": {
+    "issue": 63,
+    "date": "2026-11-08",
+    "scope": "observation-only T2a adapter"
+  },
+  "metadataClarification": {
+    "kind": "post-capture-authority-clarification",
+    "originalCaptureSha256": "ebaea7fbd1fb14e7f72d8be87e17b3b08d7da0209864161c96f007d42a415e20",
+    "originalReceiptGitCommit": "35b905f404a54d7306341b530454fb07893a4c6c",
+    "observationsSha256": "1df1e3f10a89f7f58e72b2249128949ac3b71438e5e4783f75bab9a1bf0bedc8",
+    "recordedExecutionCodeCommit": "3f8f373bc8c13176eae3e4b564c54542a7b3e363",
+    "measurementRepeated": false,
+    "note": "Only receipt metadata changed after capture; observations, costs, timestamps and execution code binding are unchanged. Future emitter now includes the decision explicitly."
+  }
+}

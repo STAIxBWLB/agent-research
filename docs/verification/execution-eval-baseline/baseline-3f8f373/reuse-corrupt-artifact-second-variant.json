@@ -1,0 +1,411 @@
+{
+  "v": 1,
+  "authority": "harness-observed",
+  "registrationReceiptSha256": "72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20",
+  "codeSha256": "d86195d060b84f282db94621b7ddb90afddd2e512d2344e910e9eafd26bb9708",
+  "methodSha256": "84e4aabb8178299ceb84c45711c150228a328d9c6acfc2a83735514f1e8fcd62",
+  "inputFileSha256": "81d21ceef8bd3e93430ed12c82eec1d86c7eff8c24a9d900cd381223e4f2023b",
+  "expectedFileSha256": "2902889cb40075da5d8d2d5bae23c7389470e1bc3236ee443d5282f217ffa12e",
+  "observations": [
+    {
+      "authority": "harness-observed",
+      "caseId": "reuse-corrupt-artifact-second-variant",
+      "trial": "reuse",
+      "arm": "fresh",
+      "repetition": 0,
+      "seed": 4,
+      "condition": "cold",
+      "slotOrder": [
+        null,
+        "baseline"
+      ],
+      "executedSlot": 1,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "seed": 4,
+        "prepare": 19,
+        "transform": 59,
+        "evaluate": 3485
+      },
+      "processWallMs": 14.4979679999999,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.015619999999999998,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 15.550271000000066,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000112,
+        "verificationWallMs": 0.08020599999986189,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000109,
+        "materializationWallMs": 0.9371879999998782,
+        "materializationTransferBytes": 1549,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "9fea540d3fc9d0c55ba8614c521ed36b4265bc27d4353a5b97b8c6144b5682e3",
+          "bytes": 55
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "reuse-corrupt-artifact-second-variant",
+      "trial": "reuse",
+      "arm": "fresh",
+      "repetition": 0,
+      "seed": 4,
+      "condition": "warm",
+      "slotOrder": [
+        null,
+        "baseline"
+      ],
+      "executedSlot": 1,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "seed": 4,
+        "prepare": 19,
+        "transform": 59,
+        "evaluate": 3485
+      },
+      "processWallMs": 15.399552999999969,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.015538,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 15.554939999999988,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.00008,
+        "verificationWallMs": 0.08310600000004342,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.00005,
+        "materializationWallMs": 0.050072000000000116,
+        "materializationTransferBytes": 0,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "9fea540d3fc9d0c55ba8614c521ed36b4265bc27d4353a5b97b8c6144b5682e3",
+          "bytes": 55
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "reuse-corrupt-artifact-second-variant",
+      "trial": "reuse",
+      "arm": "fresh",
+      "repetition": 1,
+      "seed": 12,
+      "condition": "cold",
+      "slotOrder": [
+        "baseline",
+        null
+      ],
+      "executedSlot": 0,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "seed": 12,
+        "prepare": 27,
+        "transform": 83,
+        "evaluate": 6901
+      },
+      "processWallMs": 14.83421199999998,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.016361999999999998,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 16.48843499999998,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000744,
+        "verificationWallMs": 0.6084169999999176,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000219,
+        "materializationWallMs": 1.0255070000000615,
+        "materializationTransferBytes": 1549,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "77152f164510f3f0aa13c642a13974d9d9d5da5289803f8599ead3ade55080ef",
+          "bytes": 56
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "reuse-corrupt-artifact-second-variant",
+      "trial": "reuse",
+      "arm": "fresh",
+      "repetition": 1,
+      "seed": 12,
+      "condition": "warm",
+      "slotOrder": [
+        "baseline",
+        null
+      ],
+      "executedSlot": 0,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "seed": 12,
+        "prepare": 27,
+        "transform": 83,
+        "evaluate": 6901
+      },
+      "processWallMs": 14.680877999999893,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.015573,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 14.868796999999859,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000116,
+        "verificationWallMs": 0.08901600000012877,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.00005,
+        "materializationWallMs": 0.051261000000067725,
+        "materializationTransferBytes": 0,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "77152f164510f3f0aa13c642a13974d9d9d5da5289803f8599ead3ade55080ef",
+          "bytes": 56
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "reuse-corrupt-artifact-second-variant",
+      "trial": "reuse",
+      "arm": "fresh",
+      "repetition": 2,
+      "seed": 20,
+      "condition": "cold",
+      "slotOrder": [
+        null,
+        "baseline"
+      ],
+      "executedSlot": 1,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "seed": 20,
+        "prepare": 35,
+        "transform": 107,
+        "evaluate": 11469
+      },
+      "processWallMs": 13.81508400000007,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.015592,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 14.640177999999878,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000105,
+        "verificationWallMs": 0.10758899999996174,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000214,
+        "materializationWallMs": 0.6945240000000013,
+        "materializationTransferBytes": 1549,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "3c69415554e6b5a157bdb4d0cf18b3d749f3ce8e4534bff712e0450675284c7d",
+          "bytes": 58
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "reuse-corrupt-artifact-second-variant",
+      "trial": "reuse",
+      "arm": "fresh",
+      "repetition": 2,
+      "seed": 20,
+      "condition": "warm",
+      "slotOrder": [
+        null,
+        "baseline"
+      ],
+      "executedSlot": 1,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "seed": 20,
+        "prepare": 35,
+        "transform": 107,
+        "evaluate": 11469
+      },
+      "processWallMs": 14.16281200000003,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.015312000000000001,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 14.32465000000002,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000116,
+        "verificationWallMs": 0.08800499999983913,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000076,
+        "materializationWallMs": 0.05265600000006998,
+        "materializationTransferBytes": 0,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "3c69415554e6b5a157bdb4d0cf18b3d749f3ce8e4534bff712e0450675284c7d",
+          "bytes": 58
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    }
+  ],
+  "resultAuthorityLinks": [],
+  "resultAuthorityLinksReason": "synthetic corpus, no ares study; harness-observed only",
+  "resultAuthorityDecision": {
+    "issue": 63,
+    "date": "2026-11-08",
+    "scope": "observation-only T2a adapter"
+  },
+  "metadataClarification": {
+    "kind": "post-capture-authority-clarification",
+    "originalCaptureSha256": "84efc20d991a8e691853aad43f51cbfd0ae0dd8981ee7ec43bbe9b5092f5ae69",
+    "originalReceiptGitCommit": "35b905f404a54d7306341b530454fb07893a4c6c",
+    "observationsSha256": "8873f2f27af5847a472b7caddf41110a35c06a45d2f45551f8832b433cca88b6",
+    "recordedExecutionCodeCommit": "3f8f373bc8c13176eae3e4b564c54542a7b3e363",
+    "measurementRepeated": false,
+    "note": "Only receipt metadata changed after capture; observations, costs, timestamps and execution code binding are unchanged. Future emitter now includes the decision explicitly."
+  }
+}

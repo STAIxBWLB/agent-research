@@ -1,0 +1,453 @@
+{
+  "v": 1,
+  "authority": "harness-observed",
+  "registrationReceiptSha256": "72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20",
+  "codeSha256": "d86195d060b84f282db94621b7ddb90afddd2e512d2344e910e9eafd26bb9708",
+  "methodSha256": "84e4aabb8178299ceb84c45711c150228a328d9c6acfc2a83735514f1e8fcd62",
+  "inputFileSha256": "c7793ead12d6d963a2f8d3da66eed56c64e248e9c480535593eb66c34540dc1a",
+  "expectedFileSha256": "ff7f62d073cd38e86769ff2a47bb25598fb50905a67d46d17f3a219c904c7b0b",
+  "observations": [
+    {
+      "authority": "harness-observed",
+      "caseId": "diagnose-missing-artifact-pruned-file",
+      "trial": "diagnose",
+      "arm": "current-workflow",
+      "repetition": 0,
+      "seed": 3,
+      "condition": "cold",
+      "slotOrder": [
+        null,
+        "baseline"
+      ],
+      "executedSlot": 1,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "v": 1,
+        "kind": "automated-source-resolution",
+        "authority": "harness-observed",
+        "provenance": {
+          "attemptId": "8d8039aeea9a5a1e",
+          "head": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+          "selectedHead": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+          "status": "succeeded",
+          "completeness": "artifact-missing"
+        },
+        "nextAction": "reexecute-from-frozen-inputs"
+      },
+      "processWallMs": 14.054524999999956,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.014745000000000001,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 14.673846000000026,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000119,
+        "verificationWallMs": 0.0925680000000284,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.00007,
+        "materializationWallMs": 0.508057000000008,
+        "materializationTransferBytes": 614,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "ba22028f8e768cf90a97eb96931e653bde98fdb90e9038fc2bd8b50cf26b9113",
+          "bytes": 383
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "diagnose-missing-artifact-pruned-file",
+      "trial": "diagnose",
+      "arm": "current-workflow",
+      "repetition": 0,
+      "seed": 3,
+      "condition": "warm",
+      "slotOrder": [
+        null,
+        "baseline"
+      ],
+      "executedSlot": 1,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "v": 1,
+        "kind": "automated-source-resolution",
+        "authority": "harness-observed",
+        "provenance": {
+          "attemptId": "8d8039aeea9a5a1e",
+          "head": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+          "selectedHead": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+          "status": "succeeded",
+          "completeness": "artifact-missing"
+        },
+        "nextAction": "reexecute-from-frozen-inputs"
+      },
+      "processWallMs": 13.451217999999983,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.014337,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 13.611092000000042,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000093,
+        "verificationWallMs": 0.09588699999994788,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000045,
+        "materializationWallMs": 0.04505499999999074,
+        "materializationTransferBytes": 0,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "ba22028f8e768cf90a97eb96931e653bde98fdb90e9038fc2bd8b50cf26b9113",
+          "bytes": 383
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "diagnose-missing-artifact-pruned-file",
+      "trial": "diagnose",
+      "arm": "current-workflow",
+      "repetition": 1,
+      "seed": 11,
+      "condition": "cold",
+      "slotOrder": [
+        "baseline",
+        null
+      ],
+      "executedSlot": 0,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "v": 1,
+        "kind": "automated-source-resolution",
+        "authority": "harness-observed",
+        "provenance": {
+          "attemptId": "8d8039aeea9a5a1e",
+          "head": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+          "selectedHead": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+          "status": "succeeded",
+          "completeness": "artifact-missing"
+        },
+        "nextAction": "reexecute-from-frozen-inputs"
+      },
+      "processWallMs": 13.028783999999973,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.013727,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 13.96757100000002,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000103,
+        "verificationWallMs": 0.10611999999997579,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000161,
+        "materializationWallMs": 0.8144889999999805,
+        "materializationTransferBytes": 614,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "ba22028f8e768cf90a97eb96931e653bde98fdb90e9038fc2bd8b50cf26b9113",
+          "bytes": 383
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "diagnose-missing-artifact-pruned-file",
+      "trial": "diagnose",
+      "arm": "current-workflow",
+      "repetition": 1,
+      "seed": 11,
+      "condition": "warm",
+      "slotOrder": [
+        "baseline",
+        null
+      ],
+      "executedSlot": 0,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "v": 1,
+        "kind": "automated-source-resolution",
+        "authority": "harness-observed",
+        "provenance": {
+          "attemptId": "8d8039aeea9a5a1e",
+          "head": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+          "selectedHead": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+          "status": "succeeded",
+          "completeness": "artifact-missing"
+        },
+        "nextAction": "reexecute-from-frozen-inputs"
+      },
+      "processWallMs": 13.514961000000028,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.014419,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 13.694713000000036,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.00015,
+        "verificationWallMs": 0.11063900000004878,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000044,
+        "materializationWallMs": 0.043978999999978896,
+        "materializationTransferBytes": 0,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "ba22028f8e768cf90a97eb96931e653bde98fdb90e9038fc2bd8b50cf26b9113",
+          "bytes": 383
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "diagnose-missing-artifact-pruned-file",
+      "trial": "diagnose",
+      "arm": "current-workflow",
+      "repetition": 2,
+      "seed": 19,
+      "condition": "cold",
+      "slotOrder": [
+        null,
+        "baseline"
+      ],
+      "executedSlot": 1,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "v": 1,
+        "kind": "automated-source-resolution",
+        "authority": "harness-observed",
+        "provenance": {
+          "attemptId": "8d8039aeea9a5a1e",
+          "head": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+          "selectedHead": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+          "status": "succeeded",
+          "completeness": "artifact-missing"
+        },
+        "nextAction": "reexecute-from-frozen-inputs"
+      },
+      "processWallMs": 14.649473,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.015607999999999999,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 15.823851000000047,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000138,
+        "verificationWallMs": 0.10708200000010493,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.000171,
+        "materializationWallMs": 1.0436599999999885,
+        "materializationTransferBytes": 614,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "ba22028f8e768cf90a97eb96931e653bde98fdb90e9038fc2bd8b50cf26b9113",
+          "bytes": 383
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    },
+    {
+      "authority": "harness-observed",
+      "caseId": "diagnose-missing-artifact-pruned-file",
+      "trial": "diagnose",
+      "arm": "current-workflow",
+      "repetition": 2,
+      "seed": 19,
+      "condition": "warm",
+      "slotOrder": [
+        null,
+        "baseline"
+      ],
+      "executedSlot": 1,
+      "status": "succeeded",
+      "matched": true,
+      "observed": {
+        "v": 1,
+        "kind": "automated-source-resolution",
+        "authority": "harness-observed",
+        "provenance": {
+          "attemptId": "8d8039aeea9a5a1e",
+          "head": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+          "selectedHead": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+          "status": "succeeded",
+          "completeness": "artifact-missing"
+        },
+        "nextAction": "reexecute-from-frozen-inputs"
+      },
+      "processWallMs": 14.473226000000068,
+      "humanTimeToFind": "unknown",
+      "costs": {
+        "cpuSeconds": 0.015049,
+        "gpuDeviceSeconds": "unknown",
+        "providerTokens": "unknown",
+        "providerRequests": "unknown",
+        "wallElapsedMs": 14.68265299999996,
+        "storagePeakBytes": "unknown",
+        "storageByteSeconds": "unknown",
+        "transferBytes": "unknown",
+        "verificationCpuSeconds": 0.000167,
+        "verificationWallMs": 0.13863800000001447,
+        "retentionBytes": "unknown",
+        "retentionByteSeconds": "unknown",
+        "materializationCpuSeconds": 0.00006,
+        "materializationWallMs": 0.04797500000006494,
+        "materializationTransferBytes": 0,
+        "failureCpuSeconds": 0,
+        "failureGpuDeviceSeconds": "unknown",
+        "failureWallMs": 0,
+        "failureTransferBytes": "unknown",
+        "idleWallMs": "unknown",
+        "personMinutes": "unknown",
+        "monetaryEstimateUsd": "unknown"
+      },
+      "artifacts": [
+        {
+          "sha256": "ba22028f8e768cf90a97eb96931e653bde98fdb90e9038fc2bd8b50cf26b9113",
+          "bytes": 383
+        }
+      ],
+      "logs": {
+        "stdout": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        },
+        "stderr": {
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "bytes": 0
+        }
+      }
+    }
+  ],
+  "resultAuthorityLinks": [],
+  "resultAuthorityLinksReason": "synthetic corpus, no ares study; harness-observed only",
+  "resultAuthorityDecision": {
+    "issue": 63,
+    "date": "2026-11-08",
+    "scope": "observation-only T2a adapter"
+  },
+  "metadataClarification": {
+    "kind": "post-capture-authority-clarification",
+    "originalCaptureSha256": "d1c15b79422f80bb00f6f3b214233bfaf3de8cab5a8df17b5bc11f787053c2f1",
+    "originalReceiptGitCommit": "35b905f404a54d7306341b530454fb07893a4c6c",
+    "observationsSha256": "0180310932bea331359d4c479d8fec907af7eabf8242833e0d1388e346156f4b",
+    "recordedExecutionCodeCommit": "3f8f373bc8c13176eae3e4b564c54542a7b3e363",
+    "measurementRepeated": false,
+    "note": "Only receipt metadata changed after capture; observations, costs, timestamps and execution code binding are unchanged. Future emitter now includes the decision explicitly."
+  }
+}

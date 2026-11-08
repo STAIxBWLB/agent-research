@@ -1,6 +1,6 @@
 import { existsSync, linkSync, lstatSync, unlinkSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { plain, readBytesBounded, readTextBounded, sha256, writeAtomic } from "../src/study.ts";
 
@@ -141,11 +141,21 @@ export function freezePreregistration(rootArg: string, receiptFile: string): Fro
   return receipt;
 }
 if (import.meta.main) {
+  void (async () => {
   const [command, output, ...extra] = process.argv.slice(2), root = fileURLToPath(new URL("..", import.meta.url));
   try {
-    if (extra.length || !["freeze", "verify"].includes(command ?? "")) fail("usage is bun scripts/execution-eval.ts freeze|verify [receipt.json]; T1 runs no trials");
-    const file = resolve(output ?? join(root, FROZEN_RECEIPT));
-    const receipt = command === "freeze" ? freezePreregistration(root, file) : verifyPreregistration(root, file);
-    console.log(JSON.stringify({ command, status: receipt.status, receiptSha256: receipt.receiptSha256 }));
+    if (command === "baseline") {
+      if (!output || output.startsWith("-") || !isAbsolute(output) || extra.some(value => value !== "--emit") || extra.length > 1) fail("baseline arguments require an absolute output operand followed only by optional --emit", "use bun scripts/execution-eval.ts baseline /absolute/fresh-directory [--emit]; no other flags are supported");
+      const { runBaseline, emitBaseline, BASELINE_BUNDLE_PREFIX } = await import("./execution-baseline.ts");
+      const receipt = runBaseline(root, output, process.env.EXECUTION_EVAL_IMAGE_DIGEST ?? "");
+      if (extra.includes("--emit")) console.log(BASELINE_BUNDLE_PREFIX + emitBaseline(output));
+      else console.log(JSON.stringify({ authority: receipt.authority, codeSha256: receipt.code.codeSha256, registrationReceiptSha256: receipt.registrationReceiptSha256, denominators: receipt.denominators }));
+    } else {
+      if (extra.length || !["freeze", "verify"].includes(command ?? "")) fail("usage is bun scripts/execution-eval.ts freeze|verify [receipt.json], or baseline OUTSIDE_DIR [--emit]; no treatment or supervision command");
+      const file = resolve(output ?? join(root, FROZEN_RECEIPT));
+      const receipt = command === "freeze" ? freezePreregistration(root, file) : verifyPreregistration(root, file);
+      console.log(JSON.stringify({ command, status: receipt.status, receiptSha256: receipt.receiptSha256 }));
+    }
   } catch (error) { console.error(error instanceof Error ? error.message : "execution eval: verification failed; restore the frozen protocol before any run"); process.exitCode = 1; }
+  })();
 }
