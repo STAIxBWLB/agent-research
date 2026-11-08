@@ -2,7 +2,7 @@ import { existsSync, lstatSync, opendirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseLedger, plain, readBytesBounded, hashFileBounded, sha256, validateStudy, type LedgerEvent, type Study } from "./study.ts";
 import { validateAttemptRecord, type Attempt } from "./exp/attempts.ts";
-import { TASK_BYTES, TASK_FILES, METRIC_LIMIT } from "./exp/protocol.ts";
+import { TASK_BYTES, TASK_FILES, METRIC_LIMIT, validateProtocol, protocolHash } from "./exp/protocol.ts";
 import { validateExecutor } from "./exp/executor.ts";
 import { foldIdeas } from "./exp/ideas.ts";
 import { readClosedInvestigation, type CommitResult } from "./exp/investigate.ts";
@@ -427,10 +427,13 @@ export interface LineageComparison {
 function comparisonAttempt(value: Attempt, attempts: Map<string, Attempt>): AttemptComparison {
   if (!HASH.test(value.protocolHash) || !/^[a-f0-9]{40}$/.test(value.treeId) || !Array.isArray(value.metrics) || value.metrics.length > METRIC_LIMIT || value.metrics.some(metric => !plain(metric) || typeof metric.name !== "string" || typeof metric.unit !== "string" || metric.provenance !== "ares-observed" || typeof metric.value !== "number" || !Number.isFinite(metric.value))) fail("malformed-comparison-attempt");
   if (value.snapshotSha256 !== undefined && (typeof value.snapshotSha256 !== "string" || !HASH.test(value.snapshotSha256))) fail("malformed-snapshot-sha256");
-  if (!plain(value.protocol) || !Array.isArray(value.protocol.metrics)) fail("malformed-comparison-protocol");
+  let protocol: ReturnType<typeof validateProtocol>;
+  try { protocol = validateProtocol(value.protocol); } catch { return fail("malformed-comparison-protocol"); }
+  if (protocolHash(protocol) !== value.protocolHash) fail("protocol-hash-mismatch");
   const metricReasons: string[] = [];
   if (new Set(value.metrics.map(metric => metric.name)).size !== value.metrics.length) metricReasons.push("duplicate-metric-names");
-  if (value.metrics.some(metric => !value.protocol.metrics.some(declared => plain(declared) && declared.name === metric.name && declared.unit === metric.unit))) metricReasons.push("undeclared-metrics");
+  if (value.metrics.some(metric => !protocol.metrics.some(declared => declared.name === metric.name && declared.unit === metric.unit))) metricReasons.push("undeclared-metrics");
+  if (protocol.metrics.some(declared => !value.metrics.some(metric => metric.name === declared.name && metric.unit === declared.unit))) metricReasons.push("missing-declared-metrics");
   const seen = new Set([value.id]), ancestry: string[] = []; let parent = value.retryOf;
   while (parent !== undefined) {
     if (seen.has(parent)) fail("cyclic-retry-ancestry");
@@ -449,11 +452,13 @@ export function compareLineage(dirArg: string, options: {attempts?: string[]; ca
   const ids = options.attempts ?? options.candidates!, kind = options.attempts ? "attempt" : "candidate";
   if (!Array.isArray(ids) || ids.length < 1 || ids.length > 8 || new Set(ids).size !== ids.length || ids.some(id => typeof id !== "string" || !(kind === "attempt" ? ATTEMPT : /^[a-f0-9]{40}$/).test(id))) throw new Error("lineage compare: select 1..8 distinct 16-hex attempt ids or 40-hex candidate commits; correct the selection before retrying");
   const result: LineageComparison = {v: 1, status: "unavailable", sourceSha256: null, ledgerPosition: null, rows: [], issues: [], retriesAreIndependent: false, aggregation: {performed: false, available: false, compatible: false, reasons: []}, resultAuthority: "existing-investigation-and-final-only"};
-  let source: Snapshot | undefined;
+  let source: Snapshot | undefined, graphCapped = false;
   try {
     const dir = realpathSync(resolve(dirArg)); source = capture(dir); result.sourceSha256 = source.hash; result.ledgerPosition = source.ledgerPosition;
     const graph = build(dir, source, PROVENANCE_TRAVERSAL), attempts = new Map<string, Attempt>();
-    result.issues = [...graph.issues]; result.status = graph.capped ? "capped" : graph.issues.length ? "unavailable" : "ok";
+    graphCapped = graph.capped;
+    result.issues = [...graph.issues]; if (graphCapped) result.issues.push({code: "traversal-capped", message: "lineage comparison traversal capped; use bounded producer reads such as ares attempt show; this comparison is incomplete"});
+    result.status = graph.capped ? "capped" : graph.issues.length ? "unavailable" : "ok";
     for (const [file, bytes] of source.files) {
       const match = /^runs\/([^/]+)\/attempts\/([a-f0-9]{16})\.json$/.exec(file); if (!match) continue;
       const ref = graph.ref("attempt", match[2]!); if (graph.nodes.get(key(ref))?.state === "current") attempts.set(match[2]!, validateAttemptRecord(parsed(bytes), match[1]!, match[2]!));
@@ -474,7 +479,7 @@ export function compareLineage(dirArg: string, options: {attempts?: string[]; ca
           result.issues.push({code: error.code, message: `lineage compare ${error.code}; restore the valid original attempt record before retrying`});
         }
       }
-      if (row.state !== "available") { result.status = "unavailable"; result.issues.push({code: "comparison-selection-unavailable", message: "lineage compare selection unavailable; inspect lineage show and choose existing valid records before retrying"}); }
+      if (row.state !== "available") { if (!graphCapped) result.status = "unavailable"; result.issues.push({code: "comparison-selection-unavailable", message: "lineage compare selection unavailable; inspect lineage show and choose existing valid records before retrying"}); }
       result.rows.push(row);
     }
     const values = result.rows.flatMap(row => row.attempts), reasons = new Set<string>();
@@ -492,8 +497,8 @@ export function compareLineage(dirArg: string, options: {attempts?: string[]; ca
     return result;
   } catch (error) {
     const code = error instanceof SourceFailure ? error.code : "comparison-source-unavailable";
-    result.status = error instanceof SourceFailure && error.capped ? "capped" : code === "source-changed" || code === "write-in-progress" ? "changed" : "unavailable";
-    result.rows = []; result.issues = [{code, message: `lineage compare ${code}; inspect lineage show and restore valid source records or retry the read`}];
+    result.status = code === "source-changed" || code === "write-in-progress" ? "changed" : graphCapped || error instanceof SourceFailure && error.capped ? "capped" : "unavailable";
+    result.rows = []; result.issues = [...result.issues.filter(issue => issue.code === "traversal-capped"), {code, message: `lineage compare ${code}; inspect lineage show and restore valid source records or retry the read`}];
     result.aggregation = {performed: false, available: false, compatible: false, reasons: [code]}; return result;
   }
 }

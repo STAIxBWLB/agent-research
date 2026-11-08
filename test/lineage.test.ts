@@ -106,3 +106,22 @@ test("duplicate output paths quarantine inventory instead of inflating storage",
   const graph = readProvenance(f.dir), result = compareLineage(f.dir, {attempts: [record.id]});
   expect(graph.nodes.find(node => node.ref.kind === "attempt" && node.ref.id === record.id)?.state).toBe("corrupt"); expect(result.rows[0]!.state).toBe("unavailable"); expect(result.issues.some(issue => issue.code === "corrupt-output-inventory")).toBe(true);
 });
+
+test("comparison preserves capped status and guidance when a selection is unavailable", async () => {
+  const f = await provenanceFixture(), {commit} = await import("../src/study.ts");
+  commit(f.dir, [], Array.from({length: 998}, (_, index) => ({actor: f.ctx.actor, type: "idea.added", data: {idea: {id: `compare-cap-${index}`, title: "Synthetic", hypothesis: "Synthetic"}}})));
+  const result = compareLineage(f.dir, {attempts: ["f".repeat(16)]});
+  expect(result.status).toBe("capped"); expect(result.rows[0]!.state).toBe("unavailable"); expect(result.issues.some(issue => issue.code === "traversal-capped" && issue.message.includes("bounded producer reads"))).toBe(true); expect(result.aggregation.compatible).toBe(false);
+});
+
+test("a missing recorded metric is incompatible with the exact declared set", async () => {
+  const f = await provenanceFixture(), file = join(f.dir, `runs/final/attempts/${f.ids.finalWinnerAttempt}.json`), record = JSON.parse(readTextBounded(file, ATTEMPT_BYTES)); record.metrics = [];
+  writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES); const result = compareLineage(f.dir, {attempts: [record.id]});
+  expect(result.rows[0]!.attempts).toHaveLength(1); expect(result.aggregation.compatible).toBe(false); expect(result.aggregation.reasons).toContain("missing-declared-metrics");
+});
+
+test("embedded protocols cannot share a forged stored protocol hash", async () => {
+  const f = await provenanceFixture(), file = join(f.dir, `runs/final/attempts/${f.ids.finalWinnerAttempt}.json`), record = JSON.parse(readTextBounded(file, ATTEMPT_BYTES)); record.protocol.method = "Synthetic changed method";
+  writeAtomic(file, JSON.stringify(record), ATTEMPT_BYTES); const result = compareLineage(f.dir, {attempts: [f.ids.retryAttempt, record.id]});
+  expect(result.rows[0]!.state).toBe("available"); expect(result.rows[1]!.state).toBe("unavailable"); expect(result.issues.some(issue => issue.code === "protocol-hash-mismatch")).toBe(true); expect(result.aggregation.compatible).toBe(false);
+});
