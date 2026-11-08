@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as child from "node:child_process";
 import {join} from "node:path";
 import {parseVariantFixture, parseProbeFixture, compareProbeFixtures, realHubProbeUnavailable, HARNESS_FIXTURE_BYTES, type ProbeFixtureProjectionV1} from "../src/harness/receipts.ts";
+import {hasHarnessCredential} from "../src/harness/privacy.ts";
 import {readTextBounded} from "../src/study.ts";
 const read = (name: string) => readTextBounded(join(import.meta.dir, "fixtures", "harness-rounds", `${name}.json`), HARNESS_FIXTURE_BYTES);
 const variant = () => parseVariantFixture(read("variant"));
@@ -86,4 +87,13 @@ test("worker effective input identity is retained separately from editor library
 test("credential-like bearer text in an otherwise permitted field is not imported", () => {
   expect(() => parseProbeFixture({...baseline(), requestedModel: "Bearer synthetic-secret-token"})).toThrow("fixture");
   expect(() => parseVariantFixture({...variant(), author: "Bearer synthetic-secret-token"})).toThrow("fixture");
+});
+
+test("round and fixture privacy use the union of the shared credential markers", () => {
+  for (const value of ["API_KEY=synthetic", "secret=synthetic", "password=synthetic", "token=synthetic", "ACCESS_TOKEN=synthetic", "credential=synthetic", "Bearer abcdefgh", "sk-abcdefgh", "xsk-abcdefghijklmnop"]) {
+    expect(hasHarnessCredential(value)).toBe(true);
+    expect(() => parseVariantFixture({...variant(), author: value})).toThrow("fixture");
+    expect(() => parseProbeFixture({...baseline(), requestedModel: value})).toThrow("fixture");
+  }
+  for (const value of ["credential review", "synthetic model", "token budget", "sk-short"]) expect(hasHarnessCredential(value)).toBe(false);
 });

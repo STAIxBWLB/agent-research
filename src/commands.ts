@@ -1,4 +1,4 @@
-import {harnessBinding, readHarnessRounds, setHarnessRound, showHarness, importHarnessFixture} from "./harness/rounds.ts";
+import {harnessRoundBinding, readHarnessRounds, type HarnessRound, setHarnessRound, showHarness, importHarnessFixture} from "./harness/rounds.ts";
 import { readProvenance, compareLineage, type ProvenanceOptions, type ProvenancePage, type LineageComparison } from "./provenance.ts";
 import { validateAutonomyMode, validatePhase, PHASES, ACCEPT_ARTIFACTS, resolveAutonomy, type AcceptArtifact, type Autonomy } from "./autonomy.ts";
 import { copilotBinding, requireCopilotAccept } from "./copilot.ts";
@@ -47,8 +47,13 @@ export type ExperimentRuntime = Omit<AttemptContext, "actor">;
 export interface Ctx extends ExperimentRuntime { actor: Actor; http: Http; signal?: AbortSignal }
 const MAX_IDS = 200, DRAFT_BYTES = 2 * 1024 * 1024, BIB_BYTES = 16 * 1024 * 1024, CARD_BYTES = 65_536;
 
-export function binder(dir: string): Binder {
-  return gate => isHarnessGate(gate) ? harnessBinding(dir, gate.slice(8)) : gate.startsWith("accept:") ? copilotBinding(dir, gate.slice(7) as AcceptArtifact) : gate === "review" ? reviewBinding(dir) : gate === "final" ? finalGateBinding(dir) : gate.startsWith("plan:") ? planGateBinding(readPlanState(dir, readLedger(dir)), gate) : gate === "scope" ? scopeHash(dir) : gate === "design" ? designBinding(dir) : includedHash(loadCandidates(dir));
+export function binder(dir: string, rounds?: readonly HarnessRound[]): Binder {
+  let harness = rounds === undefined ? undefined : new Map(rounds.map(round => [round.id, harnessRoundBinding(round)]));
+  const harnessHash = (id: string) => {
+    harness ??= new Map(readHarnessRounds(dir).map(round => [round.id, harnessRoundBinding(round)]));
+    return harness.get(id);
+  };
+  return gate => isHarnessGate(gate) ? harnessHash(gate.slice(8)) : gate.startsWith("accept:") ? copilotBinding(dir, gate.slice(7) as AcceptArtifact) : gate === "review" ? reviewBinding(dir) : gate === "final" ? finalGateBinding(dir) : gate.startsWith("plan:") ? planGateBinding(readPlanState(dir, readLedger(dir)), gate) : gate === "scope" ? scopeHash(dir) : gate === "design" ? designBinding(dir) : includedHash(loadCandidates(dir));
 }
 function gateName(value: string): GateName {
   if (!GATES.includes(value as GateName) && !ACCEPT_ARTIFACTS.some(artifact => value === `accept:${artifact}`) && !value.startsWith("plan:") && !isHarnessGate(value)) throw new Error("unknown gate: unsupported name; run ares gate list <dir> and choose a listed gate before approval or rejection");
@@ -150,10 +155,11 @@ export async function scope(dirArg: string, raw: unknown, ctx: Ctx) {
 }
 
 export function gateList(dirArg: string) {
-  const { dir, study } = openStudy(dirArg), events = readLedger(dir), bind = binder(dir);
+  const { dir, study } = openStudy(dirArg), events = readLedger(dir);
+  const harness = study.mode === "experiment" ? readHarnessRounds(dir, events) : [], bind = binder(dir, harness);
   const plan = foldPlan(events);
   const accepts = ACCEPT_ARTIFACTS.filter(artifact => resolveAutonomy(study.autonomy, `accept:${artifact}`) === "copilot").map(artifact => `accept:${artifact}` as GateName);
-  const gates: GateName[] = [...accepts, ...GATES.filter(g => (g !== "design" && g !== "final") || study.mode === "experiment"), ...(plan?.nodes.filter(n => n.kind === "gate").map(n => `plan:${n.id}` as GateName) ?? []), ...(study.mode === "experiment" ? readHarnessRounds(dir).map(round => `harness:${round.id}` as GateName) : [])];
+  const gates: GateName[] = [...accepts, ...GATES.filter(g => (g !== "design" && g !== "final") || study.mode === "experiment"), ...(plan?.nodes.filter(n => n.kind === "gate").map(n => `plan:${n.id}` as GateName) ?? []), ...harness.map(round => `harness:${round.id}` as GateName)];
   return gates.map(g => gateState(g, events, bind));
 }
 

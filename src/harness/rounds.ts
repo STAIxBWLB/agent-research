@@ -1,3 +1,4 @@
+import {hasHarnessCredential} from "./privacy.ts";
 import {lstatSync} from "node:fs";
 import {join} from "node:path";
 import {commit, openStudy, requireExperiment, readTextBounded, readLedger, onlyKeys, plain, sha256, requireGate, isHarnessGate, type Actor, type LedgerEvent} from "../study.ts";
@@ -19,7 +20,7 @@ interface DeclaredProbe {round: string; binding: string; projectionSha256: strin
 function fail(cause: string): never {throw new Error(`harness: ${cause}; inspect ares harness show, restore the recorded definition or revise it explicitly before retrying`);}
 function object(raw: unknown, keys: string[], label: string): Record<string, unknown> {if (!plain(raw)) fail(`${label} object required`); try {onlyKeys(raw, keys, label);} catch {fail(`${label} has an unknown field`);} return raw;}
 function text(raw: unknown, bound: number, label: string): string {
-  if (typeof raw !== "string" || !raw.trim() || raw.includes("\0") || Buffer.byteLength(raw) > bound || /(?:bearer\s+[a-z0-9._-]{8,}|sk-[a-z0-9_-]{16,}|(?:api[_-]?key|secret|password|(?:access[_-]?)?token)\s*[:=]\s*\S+)/i.test(raw)) fail(`${label} must be bounded nonblank text without credentials or NUL`); return raw;
+  if (typeof raw !== "string" || !raw.trim() || raw.includes("\0") || Buffer.byteLength(raw) > bound || hasHarnessCredential(raw)) fail(`${label} must be bounded nonblank text without credentials or NUL`); return raw;
 }
 function checkMetadata(value: unknown): void {
   if (typeof value === "string") {text(value, HARNESS_FORM_BYTES, "round metadata"); return;}
@@ -54,7 +55,8 @@ function matchesRound(round: HarnessRound, projection: ProbeFixtureProjectionV1)
   const expected = projection.arm === "baseline" ? round.baseline.guidanceSha256 : round.candidates.find(candidate => candidate.id === projection.arm)?.guidanceSha256;
   return !!expected && projection.taskId === round.task.id && projection.taskInputHash === round.task.inputSha256 && projection.guidanceHash === expected && projection.baselineHash === round.baseline.guidanceSha256;
 }
-const binding = (round: HarnessRound) => sha256(canonical(round));
+export const harnessRoundBinding = (round: HarnessRound) => sha256(canonical(round));
+const binding = harnessRoundBinding;
 const path = (dir: string) => join(dir, "design", "harness.json");
 function replay(events: LedgerEvent[], studyId: string) {
   const rounds = new Map<string, HarnessRound>(), tasks = new Map<string, string>(), probes: DeclaredProbe[] = [];
@@ -75,9 +77,9 @@ function replay(events: LedgerEvent[], studyId: string) {
   }
   return {rounds: [...rounds.values()], probes};
 }
-function read(dirArg: string) {
+function read(dirArg: string, providedEvents?: LedgerEvent[]) {
   const {dir, study} = openStudy(dirArg); requireExperiment(study);
-  const events = readLedger(dir), folded = replay(events, study.id), file = path(dir);
+  const events = providedEvents === undefined ? readLedger(dir) : providedEvents, folded = replay(events, study.id), file = path(dir);
   let stat;
   try {
     const design = lstatSync(join(dir, "design"), {throwIfNoEntry: false});
@@ -92,7 +94,7 @@ function read(dirArg: string) {
   if (!Array.isArray(raw.rounds) || raw.rounds.length > HARNESS_ROUNDS || canonical(raw.rounds.map(row => validateHarnessRound(row, study.id))) !== canonical(folded.rounds)) fail("harness index differs from its recorded definitions");
   return {dir, study, events, ...folded};
 }
-export function readHarnessRounds(dir: string): HarnessRound[] {return read(dir).rounds;}
+export function readHarnessRounds(dir: string, events?: LedgerEvent[]): HarnessRound[] {return read(dir, events).rounds;}
 export function harnessBinding(dir: string, roundId: string): string | undefined {const name = id(roundId), round = read(dir).rounds.find(round => round.id === name); return round && binding(round);}
 /** Caller holds the study lock. Definition updates preserve the prior events and reopen only this round's gate. */
 export function setHarnessRound(dirArg: string, raw: unknown, actor: Actor): HarnessRound {

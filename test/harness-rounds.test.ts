@@ -1,5 +1,6 @@
-import {expect, test} from "bun:test";
+import {expect, spyOn, test} from "bun:test";
 import {join} from "node:path";
+import * as fs from "node:fs";
 import {existsSync, mkdirSync, symlinkSync} from "node:fs";
 import * as ops from "../src/commands.ts";
 import {run} from "../src/cli.ts";
@@ -128,4 +129,30 @@ test("credentials hidden in typed reference metadata refuse before a record is w
   const f = fixture(), raw = definition(), sourceRef = {v: 1, tool: "ahub", projectKey: "synthetic-project", kind: "guidance-probe", id: "API_KEY=synthetic-secret", sha256: "b".repeat(64)};
   await expect(ops.harnessSet(f.dir, {...raw, authoring: "controlled-lane", sourceExecutions: {proposal1: sourceRef}}, f.ctx)).rejects.toThrow("credentials");
   expect(existsSync(join(f.dir, "design"))).toBe(false); expect(readLedger(f.dir)).toHaveLength(1);
+});
+
+test("shared credential markers refuse both round and nested ref metadata before index/ledger writes", async () => {
+  const f = fixture(), raw = definition(), before = readBytesBounded(join(f.dir, "ledger.jsonl"), HARNESS_INDEX_BYTES);
+  const sourceRef = {v: 1, tool: "ahub", projectKey: "synthetic-project", kind: "guidance-probe", id: "credential=synthetic-secret", sha256: "b".repeat(64)};
+  for (const candidate of [{...raw, hypothesis: {...raw.hypothesis, deficiency: "credential=synthetic-secret"}}, {...raw, authoring: "controlled-lane", sourceExecutions: {proposal1: sourceRef}}]) {
+    await expect(ops.harnessSet(f.dir, candidate, f.ctx)).rejects.toThrow("credentials");
+    expect(existsSync(join(f.dir, "design", "harness.json"))).toBe(false);
+    expect(readBytesBounded(join(f.dir, "ledger.jsonl"), HARNESS_INDEX_BYTES)).toEqual(before);
+  }
+});
+test("sixteen harness gates share one ledger fold per gate list or binder snapshot", async () => {
+  const f = fixture(), raw = definition();
+  for (let index = 0; index < 16; index++) await ops.harnessSet(f.dir, {...raw, id: `round-${index}`, task: {...raw.task, id: `task-${index}`}}, f.ctx);
+  const open = fs.openSync; let ledgerOpens = 0;
+  const spy = spyOn(fs, "openSync").mockImplementation(((file, flags, mode) => {if (String(file) === join(f.dir, "ledger.jsonl")) ledgerOpens++; return open(file, flags, mode);}) as typeof fs.openSync);
+  try {
+    const list = ops.gateList(f.dir).filter(gate => gate.gate.startsWith("harness:"));
+    expect(list).toHaveLength(16); expect(list.every(gate => gate.state === "pending" && !!gate.current)).toBe(true); expect(ledgerOpens).toBe(1);
+    ledgerOpens = 0; const bind = ops.binder(f.dir);
+    for (let index = 0; index < 16; index++) expect(bind(`harness:round-${index}`)).toBe(list[index]!.current!);
+    expect(ledgerOpens).toBe(1);
+  } finally {spy.mockRestore();}
+  const old = ops.gateList(f.dir).find(gate => gate.gate === "harness:round-0")!.current;
+  await ops.harnessSet(f.dir, {...raw, id: "round-0", task: {...raw.task, id: "task-0"}, hypothesis: {...raw.hypothesis, predictedChange: "Synthetic fresh binding"}}, f.ctx);
+  expect(ops.gateList(f.dir).find(gate => gate.gate === "harness:round-0")!.current).not.toBe(old);
 });

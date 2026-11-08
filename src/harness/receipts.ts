@@ -1,3 +1,4 @@
+import {hasHarnessCredential} from "./privacy.ts";
 /** Ares-owned synthetic fixture projections, not the wire schemas or assurance receipts of agent-hub producers. */
 import {plain} from "../study.ts";
 import {validateExecutionReference, type ExecutionReferenceV1} from "../provenance.ts";
@@ -24,7 +25,7 @@ function object(raw: unknown, fields: string[], kind: string): Record<string, un
   return value;
 }
 function text(raw: unknown, field: string, bound = 256): string {
-  if (typeof raw !== "string" || !raw.trim() || Buffer.byteLength(raw) > bound || raw.includes("\0") || /bearer\s+[A-Za-z0-9._-]{8,}|(?:api[_-]?key|secret|password|token|credential)\s*[:=]\s*\S+|(?:^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{8,}/i.test(raw)) fail(field);
+  if (typeof raw !== "string" || !raw.trim() || Buffer.byteLength(raw) > bound || raw.includes("\0") || hasHarnessCredential(raw)) fail(field);
   return raw;
 }
 function hash(raw: unknown, field: string): string {if (typeof raw !== "string" || !/^[a-f0-9]{64}$/.test(raw)) fail(field); return raw;}
