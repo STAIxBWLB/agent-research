@@ -5,8 +5,8 @@ import * as ops from "../src/commands.ts";
 import {run} from "../src/cli.ts";
 import {createAresMcp} from "../src/mcp-tools.ts";
 import {parseProbeFixture, type ProbeFixtureProjectionV1} from "../src/harness/receipts.ts";
-import {harnessRoundBinding, HARNESS_INDEX_BYTES, type DeclaredProbe} from "../src/harness/rounds.ts";
-import {transitionState, transitionBucket, applyTransition, harnessEvidenceFingerprint, recordHash} from "../src/harness/transitions.ts";
+import {harnessRoundBinding, validateHarnessRound, HARNESS_INDEX_BYTES, HARNESS_FORM_BYTES, type DeclaredProbe} from "../src/harness/rounds.ts";
+import {transitionState, transitionBucket, transitionView, parseComposition, applyTransition, harnessEvidenceFingerprint, recordHash} from "../src/harness/transitions.ts";
 import {readTextBounded, readBytesBounded, readLedger, commit, sha256, type PendingEvent} from "../src/study.ts";
 import {canonical} from "../src/plan/state.ts";
 import {fakeHttp, fakeRunner, tempDir} from "./helpers.ts";
@@ -86,6 +86,7 @@ test("keeping existing candidate bytes references its execution instead of count
   const before = bytes(f.dir);
   await expect(ops.harnessImport(f.dir, "round-one", {...source("candidate"), id: "duplicated-sample", arm: "successor"}, f.ctx)).rejects.toThrow("reference it rather than count"); expect(bytes(f.dir)).toEqual(before);
   await expect(ops.harnessCompose(f.dir, "round-one", {...composition(f.dir), id: "second-successor"}, f.ctx)).rejects.toThrow("one successor"); expect(bytes(f.dir)).toEqual(before);
+  await expect(ops.harnessContrast(f.dir, "round-one", {...contrast(f.dir, "successor-alias"), arm: "successor"}, f.ctx)).rejects.toThrow("baseline and arm execution refs"); expect(bytes(f.dir)).toEqual(before);
 });
 
 test("failed/unknown declarations remain visible and inconclusive/base preservation are normal closures", async () => {
@@ -199,4 +200,69 @@ test("contrast provenance labels do not promote claims or blinded judgments into
   for (const raw of [{...contrast(f.dir, "bad-judge"), basis: "blinded-judgment"}, {...contrast(f.dir, "bad-model"), basis: "blinded-judgment", judge: "model"}, {...contrast(f.dir, "mixed-provenance"), basis: "deterministic-check", judge: "human"}]) {
     await expect(ops.harnessContrast(f.dir, "round-one", raw, f.ctx)).rejects.toThrow(); expect(bytes(f.dir)).toEqual(before);
   }
+});
+
+test("hash collisions across candidates/baseline cannot stand in for the contrast arm's execution", async () => {
+  for (const sharedWithBaseline of [false, true]) {
+    const f = await fixture(), shared = sharedWithBaseline ? source("baseline").guidanceHash : source("candidate").guidanceHash;
+    const raw = {...definition(), candidates: [{id: "one", guidanceSha256: shared}, {id: "two", guidanceSha256: shared}]};
+    await ops.harnessSet(f.dir, raw, f.ctx); await ops.gateDecide(f.dir, "harness:round-one", "approve", undefined, f.ctx);
+    await ops.harnessImport(f.dir, raw.id, {...source("baseline"), id: "collision-baseline"}, f.ctx);
+    await ops.harnessImport(f.dir, raw.id, {...source("candidate"), id: "collision-one", arm: "one", guidanceHash: shared}, f.ctx);
+    const current = view(f.dir), form = {v: 1, id: "collision", fingerprint: current.transitions.fingerprint, arm: "two", outcome: "improved", basis: "actor-claim", observations: "Synthetic collision", uncertainty: "No target-arm execution", explanations: [], evidence: current.probes.map(probe => ({probe: probe.projection.id, projectionSha256: probe.projectionSha256}))};
+    const before = bytes(f.dir); await expect(ops.harnessContrast(f.dir, raw.id, form, f.ctx)).rejects.toThrow("baseline and arm execution refs"); expect(bytes(f.dir)).toEqual(before);
+    await ops.harnessImport(f.dir, raw.id, {...source("candidate"), id: "collision-two", arm: "two", guidanceHash: shared}, f.ctx);
+    const admitted = view(f.dir), evidence = admitted.probes.filter(probe => ["baseline", "two"].includes(probe.projection.arm)).map(probe => ({probe: probe.projection.id, projectionSha256: probe.projectionSha256}));
+    await ops.harnessContrast(f.dir, raw.id, {...form, fingerprint: admitted.transitions.fingerprint, evidence}, f.ctx);
+    expect(view(f.dir).transitions.contrasts.at(-1)?.form.arm).toBe("two");
+  }
+});
+
+test("malformed transition source execution guidance targets the transition input, not the round definition", async () => {
+  const f = await fixture(), malformed = {v: 1, tool: "wrong", projectKey: "synthetic", kind: "guidance-probe", id: "synthetic", sha256: "a".repeat(64)}, before = bytes(f.dir);
+  const comp = {v: 1, id: "malformed-compose", fingerprint: view(f.dir).transitions.fingerprint, sections: [{section: "Synthetic", decision: "keep", contrasts: [{id: "synthetic-ref", sha256: "a".repeat(64)}], reason: "Synthetic"}], successorSha256: null, sourceExecution: malformed};
+  const adopt = {v: 1, id: "malformed-adopt", fingerprint: view(f.dir).transitions.fingerprint, decision: "adopt", arm: "candidate", reason: "Synthetic", checks: [], independentCheck: {state: "unavailable", source: {kind: "unavailable", refs: []}}, sourceExecution: malformed};
+  const operations = [
+    ["contrast", () => ops.harnessContrast(f.dir, "round-one", {...contrast(f.dir), sourceExecution: malformed}, f.ctx)],
+    ["compose", () => ops.harnessCompose(f.dir, "round-one", comp, f.ctx)],
+    ["adopt", () => ops.harnessAdopt(f.dir, "round-one", adopt, undefined, f.ctx)],
+    ["close", () => ops.harnessClose(f.dir, "round-one", {...decision(f.dir), sourceExecution: malformed}, undefined, f.ctx)],
+  ] as const;
+  for (const [name, operation] of operations) {
+    let message = ""; try {await operation();} catch (cause) {message = (cause as Error).message;}
+    expect(message).toContain(`correct sourceExecution in the ${name} input form`); expect(message).not.toContain("round definition"); expect(bytes(f.dir)).toEqual(before);
+  }
+});
+
+test("a near-limit successor import refuses before any gate/ledger write and leaves the selected round readable", async () => {
+  const f = await fixture("auto"), execution = {v: 1, tool: "ahub", projectKey: "p".repeat(256), kind: "k".repeat(128), id: "i".repeat(256), revision: "r".repeat(128), sha256: "a".repeat(64)};
+  const raw = {...definition(), candidates: [{id: "one", guidanceSha256: source("candidate").guidanceHash}, {id: "two", guidanceSha256: "8".repeat(64)}], hypothesis: {deficiency: "d".repeat(2000), predictedChange: "p".repeat(2000)}, experience: Array.from({length: 16}, (_, i) => ({ref: {v: 1, tool: "amem", id: i.toString(16).padStart(32, "0")}, digest: "a".repeat(64)})), sourceExecutions: {proposal1: execution, proposal2: execution, composition: execution, selection: execution, reflection: execution}};
+  await ops.harnessSet(f.dir, raw, f.ctx);
+  for (const arm of ["baseline", "one", "two"]) {
+    const projection = {...source(arm === "baseline" ? "baseline" : "candidate"), id: `${arm}-`.padEnd(256, "x"), arm, guidanceHash: arm === "two" ? "8".repeat(64) : source(arm === "baseline" ? "baseline" : "candidate").guidanceHash};
+    await ops.harnessImport(f.dir, raw.id, projection, f.ctx);
+  }
+  const round = validateHarnessRound(raw), binding = harnessRoundBinding(round), probes = view(f.dir).probes, state = transitionState(), bucket = transitionBucket(state, round.id, binding), pending: PendingEvent[] = [];
+  const limit = HARNESS_INDEX_BYTES - HARNESS_FORM_BYTES, goal = limit - 100;
+  let found: ReturnType<typeof parseComposition> | undefined, largest = 0;
+  const compositionFor = (length: number) => parseComposition({v: 1, id: "near-cap-composition", fingerprint: harnessEvidenceFingerprint(binding, probes, bucket), sections: Array.from({length: 32}, (_, i) => ({section: `section-${i}-`.padEnd(256, "s"), decision: "revise", contrasts: [...bucket.contrasts.values()].slice(0, 4).map(record => ({id: record.form.id, sha256: record.sha256})), reason: "r".repeat(length)})), successorSha256: "9".repeat(64)});
+  const size = (form: ReturnType<typeof parseComposition>) => Buffer.byteLength(canonical({round, probes, transitions: transitionView(round, binding, probes, {...bucket, composition: {form, actor: f.ctx.actor, at: new Date(0).toISOString(), binding, sha256: recordHash(form, f.ctx.actor, binding), sourceStrength: "synthetic-fixture", matched: false}})}));
+  for (let n = 0; n < 64; n++) {
+    const form = {v: 1, id: `large-${n}-`.padEnd(64, "c"), fingerprint: harnessEvidenceFingerprint(binding, probes, bucket), arm: "one", outcome: "inconclusive", basis: "actor-claim", model: "m".repeat(256), sourceExecution: execution, observations: "o".repeat(2000), uncertainty: "u".repeat(2000), explanations: Array(8).fill("e".repeat(1000)), evidence: probes.map(probe => ({probe: probe.projection.id, projectionSha256: probe.projectionSha256, outputManifestHash: probe.projection.outputManifestHash!}))};
+    const type = "harness.contrast.recorded", data = {v: 1, round: round.id, binding, form, sha256: recordHash(form, f.ctx.actor, binding), sourceStrength: "synthetic-fixture"};
+    applyTransition(state, {v: 1, actor: f.ctx.actor, at: new Date(0).toISOString(), type, data}, round, binding, probes); pending.push({actor: f.ctx.actor, type, data});
+    if (bucket.contrasts.size < 4) continue;
+    largest = size(compositionFor(1000));
+    if (size(compositionFor(1)) <= goal && largest >= goal) {
+      let lo = 1, hi = 1000;
+      while (lo <= hi) {const mid = Math.floor((lo + hi) / 2), candidate = compositionFor(mid); if (size(candidate) <= goal) {found = candidate; lo = mid + 1;} else hi = mid - 1;}
+      break;
+    }
+  }
+  if (!found) throw new Error(`synthetic near-limit fixture could not reach ${goal}; largest ${largest}`);
+  expect(size(found)).toBeGreaterThan(goal - 33); expect(size(found)).toBeLessThanOrEqual(goal);
+  commit(f.dir, [], pending); await ops.harnessCompose(f.dir, raw.id, found, f.ctx);
+  const before = bytes(f.dir), selected = ops.harnessShow(f.dir, raw.id); expect(selected.truncated).toBe(false); expect(selected.rounds).toHaveLength(1);
+  await expect(ops.harnessImport(f.dir, raw.id, {...source("candidate"), id: "near-cap-successor".padEnd(256, "x"), arm: "successor", guidanceHash: "9".repeat(64)}, f.ctx)).rejects.toThrow("evidence view would exceed its 1 MiB bound");
+  expect(bytes(f.dir)).toEqual(before); expect(ops.harnessShow(f.dir, raw.id)).toEqual(selected);
 });

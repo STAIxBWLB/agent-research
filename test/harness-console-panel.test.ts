@@ -106,3 +106,24 @@ test("blinded judgment provenance stays distinct from unavailable independent ch
   const rendered = content(f.root); expect(rendered).toContain("provenance basis blinded-judgment | judge model | model synthetic-judge");
   expect(rendered).toContain("Recorded blinded judgment"); expect(rendered).toContain("Independent check state: unavailable"); expect(rendered).toContain("Independent check source kind: unavailable"); expect(f.actions()).toBe(0);
 });
+
+test("closure history reports both server omissions and additional local row slicing", async () => {
+  const f = await mount(), value = round();
+  for (const visible of [16, 17]) {
+    const closures = Array.from({length: visible}, (_, i) => ({...value.transitions.closure, form: {...value.transitions.closure.form, id: `server-history-${i}`}}));
+    f.panel.show("harness", {study: study.dir});
+    f.emit(snapshot([{...value, transitions: {...value.transitions, closures, remainingClosures: 9}}]));
+    const rendered = content(f.root); expect(rendered).toContain(`${9 + visible - 16} more closure records`); expect(rendered).toContain("displayed history is incomplete");
+    const table = descendants(f.root).find(node => node.tag === "table" && node.props.caption === "Immutable closure records")!;
+    expect(table.props.rows as unknown[]).toHaveLength(16);
+  }
+});
+
+test("string-array and character cuts explicitly mark incomplete descriptions", async () => {
+  const f = await mount(), value = round(), contrast = value.transitions.contrasts[0]!;
+  const explanations = [...Array.from({length: 16}, (_, i) => `visible-explanation-${i}`), "omitted-explanation-tail"];
+  f.panel.show("harness", {study: study.dir});
+  f.emit(snapshot([{...value, transitions: {...value.transitions, contrasts: [{...contrast, form: {...contrast.form, explanations, observations: "Q".repeat(4001) + "omitted-character-tail"}}]}}]));
+  const rendered = content(f.root); expect(rendered).toContain("visible-explanation-15"); expect(rendered).not.toContain("omitted-explanation-tail");
+  expect(rendered).toContain("1 more entries; display incomplete"); expect(rendered).toContain("text display incomplete"); expect(rendered).not.toContain("omitted-character-tail"); expect(f.actions()).toBe(0);
+});

@@ -272,8 +272,10 @@ export default (host) => {
     const selected = roundViews.filter(view => typeof params.round === "string" ? record(view.definition).id === params.round : roundViews.length === 1);
     if (!selected.length && roundViews.length) sections.push(ui.notice("Choose a round to inspect its recorded comparison and edit-to-evidence chain.", "neutral"));
     const describe = value => {
-      const raw = Array.isArray(value) ? value.filter(item => typeof item === "string").slice(0, 16).join("; ") : text(value, "Not recorded");
-      return raw.length > 4000 ? raw.slice(0, 4000) + "... (display shortened)" : raw;
+      const items = Array.isArray(value) ? value.filter(item => typeof item === "string") : null;
+      const omitted = items ? value.length - Math.min(items.length, 16) : 0;
+      const raw = items ? items.slice(0, 16).join("; ") : text(value, "Not recorded");
+      return (raw.length > 4000 ? raw.slice(0, 4000) + "... (text display incomplete)" : raw) + (omitted > 0 ? ` (${omitted} more entries; display incomplete)` : "");
     };
     const actorLabel = value => {const actor = record(value); return `${text(actor.kind, "actor unavailable")}${typeof actor.id === "string" ? `: ${actor.id}` : ""}`;};
     const recorded = entry => `${text(entry.sha256)} | ${actorLabel(entry.actor)} | ${at(entry.at)}`;
@@ -332,7 +334,8 @@ export default (host) => {
       const history = rows(transitions.closures).slice(0, 16);
       if (history.length) sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: "Recorded closure history"}),
         ui.table({caption: "Immutable closure records", columns: [{key: "id", label: "Closure"}, {key: "outcome", label: "Recorded outcome"}, {key: "currency", label: "Binding state"}, {key: "binding", label: "Binding"}, {key: "record", label: "Recorded hash / actor / time"}], rows: history.map(entry => ({id: text(record(entry.form).id), outcome: text(record(entry.form).outcome), currency: entry.current === true ? "current" : entry.current === false ? "stale" : "not asserted", binding: text(entry.binding), record: recorded(entry)}))})));
-      if (rows(transitions.closures).length > history.length) sections.push(ui.notice(`${rows(transitions.closures).length - history.length} more closure records; inspect the complete immutable history with the CLI.`, "warn"));
+      const remainingClosures = (Number.isSafeInteger(transitions.remainingClosures) && transitions.remainingClosures >= 0 ? transitions.remainingClosures : 0) + rows(transitions.closures).length - history.length;
+      if (remainingClosures > 0) sections.push(ui.notice(`${remainingClosures} more closure records; displayed history is incomplete. Inspect the complete immutable history with the CLI.`, "warn"));
       const successor = record(transitions.successor);
       if (transitions.successor) sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: "Successor guidance"}),
         h("p", {text: `SHA-256 ${text(successor.guidanceSha256)} | ${text(successor.execution)}${typeof successor.probeId === "string" ? ` | probe ${successor.probeId}` : ""}`}),

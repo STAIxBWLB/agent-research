@@ -36,14 +36,16 @@ function refs(raw: unknown): ProbeRef[] {
   const result = list(raw, 16).map(raw => {const row = object(raw, ["probe", "projectionSha256", "outputManifestHash"]); return {probe: text(row.probe, 256), projectionSha256: digest(row.projectionSha256), ...(row.outputManifestHash !== undefined ? {outputManifestHash: digest(row.outputManifestHash)} : {})};});
   if (new Set(result.map(ref => ref.probe)).size !== result.length) transitionFail("duplicate probe ref"); return result;
 }
-function base(row: Record<string, unknown>): Form {
+function base(row: Record<string, unknown>, input: "contrast" | "compose" | "adopt" | "close"): Form {
   if (row.v !== 1) transitionFail("unsupported form version; keep original bytes and use a supporting version");
-  return {v: 1, id: id(row.id), fingerprint: digest(row.fingerprint), ...(row.model !== undefined ? {model: text(row.model, 256)} : {}), ...(row.sourceExecution !== undefined ? {sourceExecution: validateHarnessExecution(row.sourceExecution)} : {})};
+  let sourceExecution: DeclaredExecutionRef | undefined;
+  if (row.sourceExecution !== undefined) {try {sourceExecution = validateHarnessExecution(row.sourceExecution);} catch {throw new Error(`harness ${input} sourceExecution: malformed or unsafe; correct sourceExecution in the ${input} input form, then retry with the current fingerprint from ares harness show --json`);}}
+  return {v: 1, id: id(row.id), fingerprint: digest(row.fingerprint), ...(row.model !== undefined ? {model: text(row.model, 256)} : {}), ...(sourceExecution ? {sourceExecution} : {})};
 }
 export function parseContrast(raw: unknown): HarnessContrast {
   const row = object(raw, ["v", "id", "fingerprint", "arm", "outcome", "basis", "judge", "model", "sourceExecution", "observations", "uncertainty", "explanations", "evidence"]);
   if (!["improved", "unchanged", "regressed", "inconclusive"].includes(row.outcome as string) || !["deterministic-check", "blinded-judgment", "actor-claim"].includes(row.basis as string)) transitionFail("invalid contrast outcome/basis");
-  const form = {...base(row), arm: id(row.arm), outcome: row.outcome as HarnessContrast["outcome"], basis: row.basis as HarnessContrast["basis"], ...(row.judge !== undefined ? {judge: row.judge as "human" | "model"} : {}), observations: text(row.observations), uncertainty: text(row.uncertainty), explanations: list(row.explanations, 8).map(value => text(value, 1000)), evidence: refs(row.evidence)};
+  const form = {...base(row, "contrast"), arm: id(row.arm), outcome: row.outcome as HarnessContrast["outcome"], basis: row.basis as HarnessContrast["basis"], ...(row.judge !== undefined ? {judge: row.judge as "human" | "model"} : {}), observations: text(row.observations), uncertainty: text(row.uncertainty), explanations: list(row.explanations, 8).map(value => text(value, 1000)), evidence: refs(row.evidence)};
   if (!form.evidence.length || form.basis === "blinded-judgment" && !["human", "model"].includes(String(form.judge)) || form.basis !== "blinded-judgment" && form.judge !== undefined || form.judge === "model" && !form.model) transitionFail("contrast needs admitted evidence and blinded judgments need a human/model identity (model name when applicable)"); return form;
 }
 export function parseComposition(raw: unknown): HarnessComposition {
@@ -56,12 +58,12 @@ export function parseComposition(raw: unknown): HarnessComposition {
     return {section: text(section.section, 256), decision: section.decision as "keep" | "drop" | "revise", contrasts, reason: text(section.reason, 1000)};
   });
   if (new Set(sections.map(section => section.section)).size !== sections.length) transitionFail("duplicate section");
-  return {...base(row), sections, successorSha256: row.successorSha256 === null ? null : digest(row.successorSha256)};
+  return {...base(row, "compose"), sections, successorSha256: row.successorSha256 === null ? null : digest(row.successorSha256)};
 }
 export function parseAdoption(raw: unknown): HarnessAdoption {
   const row = object(raw, ["v", "id", "fingerprint", "decision", "arm", "reason", "checks", "independentCheck", "model", "sourceExecution"]);
   if (row.decision !== "adopt") transitionFail("invalid adoption decision");
-  return {...base(row), decision: row.decision as HarnessAdoption["decision"], arm: id(row.arm), reason: text(row.reason), checks: refs(row.checks), independentCheck: parseIndependentCheck(row.independentCheck)};
+  return {...base(row, "adopt"), decision: row.decision as HarnessAdoption["decision"], arm: id(row.arm), reason: text(row.reason), checks: refs(row.checks), independentCheck: parseIndependentCheck(row.independentCheck)};
 }
 function parseIndependentCheck(raw: unknown): IndependentCheck {
   const row = object(raw, ["state", "source"]), source = object(row.source, ["kind", "refs"]);
@@ -73,7 +75,7 @@ function parseIndependentCheck(raw: unknown): IndependentCheck {
 export function parseClosure(raw: unknown): HarnessClosure {
   const row = object(raw, ["v", "id", "fingerprint", "outcome", "reason", "adoptionSha256", "model", "sourceExecution"]);
   if (!["adopted-experimental", "baseline-kept", "inconclusive", "withdrawn"].includes(row.outcome as string)) transitionFail("invalid closure outcome");
-  return {...base(row), outcome: row.outcome as ClosureOutcome, reason: text(row.reason), ...(row.adoptionSha256 !== undefined ? {adoptionSha256: digest(row.adoptionSha256)} : {})};
+  return {...base(row, "close"), outcome: row.outcome as ClosureOutcome, reason: text(row.reason), ...(row.adoptionSha256 !== undefined ? {adoptionSha256: digest(row.adoptionSha256)} : {})};
 }
 export function closureFromAdoption(form: HarnessAdoption, adoptionSha256?: string): HarnessClosure {
   return {v: 1, id: form.id, fingerprint: form.fingerprint, outcome: "adopted-experimental", reason: form.reason, ...(form.model ? {model: form.model} : {}), ...(form.sourceExecution ? {sourceExecution: form.sourceExecution} : {}), ...(adoptionSha256 ? {adoptionSha256} : {})};
@@ -116,8 +118,7 @@ export function applyTransition(state: TransitionState, event: LedgerEvent, roun
     if (contrast.arm === "baseline" || !round.candidates.some(candidate => candidate.id === contrast.arm) && !(contrast.arm === "successor" && bucket.composition?.form.successorSha256)) transitionFail("contrast arm is not declared");
     admitted(contrast.evidence, probes);
     const evidenceIds = new Set(contrast.evidence.map(ref => ref.probe));
-    const expected = contrast.arm === "successor" ? bucket.composition?.form.successorSha256 : round.candidates.find(candidate => candidate.id === contrast.arm)?.guidanceSha256;
-    if (contrast.outcome !== "inconclusive" && ![round.baseline.guidanceSha256, expected].every(hash => probes.some(probe => probe.projection.guidanceHash === hash && evidenceIds.has(probe.projection.id)))) transitionFail("a non-inconclusive contrast needs its baseline and arm execution refs");
+    if (contrast.outcome !== "inconclusive" && !["baseline", contrast.arm].every(arm => probes.some(probe => probe.projection.arm === arm && evidenceIds.has(probe.projection.id)))) transitionFail("a non-inconclusive contrast needs its baseline and arm execution refs");
     bucket.contrasts.set(form.id, record as Recorded<HarnessContrast>);
   } else if (kind === "composition") {
     const composition = form as HarnessComposition;

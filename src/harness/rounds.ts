@@ -120,6 +120,11 @@ export function setHarnessRound(dirArg: string, raw: unknown, actor: Actor): Har
   const rounds = old ? current.rounds.map(value => value.id === round.id ? round : value) : [...current.rounds, round];
   commit(current.dir, [[path(current.dir), JSON.stringify({v: 1, rounds}, null, 2) + "\n", HARNESS_INDEX_BYTES]], [{actor, type: "harness.round.set", data: {v: 1, round, binding: binding(round)}}]); return round;
 }
+/** One preflight for every evidence mutation; reserve header/closure space within the 1 MiB read envelope. */
+function requireEvidenceViewCapacity(current: ReturnType<typeof read>, round: HarnessRound, probes: DeclaredProbe[]): void {
+  const hash = binding(round), bucket = transitionBucket(current.transitions, round.id, hash);
+  if (Buffer.byteLength(canonical({round, probes, transitions: transitionView(round, hash, probes, bucket, current.transitions.closures.get(round.id))})) > HARNESS_INDEX_BYTES - HARNESS_FORM_BYTES) transitionFail("current round evidence view would exceed its 1 MiB bound; keep the existing round and start a separately identified round/study");
+}
 /** Local fixture import is a declaration only. It can never be a real producer resolution or matched comparison. */
 export function importHarnessFixture(dirArg: string, roundId: string, raw: unknown, actor: Actor) {
   const current = read(dirArg), round = current.rounds.find(value => value.id === id(roundId)); if (!round) fail("round missing");
@@ -131,6 +136,8 @@ export function importHarnessFixture(dirArg: string, roundId: string, raw: unkno
   if (current.probes.some(value => value.round === round.id && value.binding === binding(round) && value.projection.arm === projection.arm)) fail("an arm already has its declared execution; create a separately identified experiment rather than count it twice");
   if (current.probes.filter(value => value.round === round.id && value.binding === binding(round)).length >= 4) fail("this round already has its baseline, candidates and successor declarations");
   if (projection.arm === "successor" && current.probes.some(probe => probe.round === round.id && probe.binding === binding(round) && probe.projection.guidanceHash === projection.guidanceHash)) fail("this guidance already has an execution; reference it rather than count another sample");
+  const prospective: DeclaredProbe = {round: round.id, binding: binding(round), projectionSha256: hash, sourceStrength: "synthetic-fixture", projection};
+  requireEvidenceViewCapacity(current, round, [...current.probes.filter(probe => probe.round === round.id && probe.binding === binding(round)), prospective]);
   const approval = requireGate(current.dir, current.study, `harness:${round.id}`, name => name === `harness:${round.id}` ? binding(round) : undefined);
   commit(current.dir, [], [...approval, {actor, type: "harness.probe.declared", data: {v: 1, round: round.id, binding: binding(round), projectionSha256: hash, sourceStrength: "synthetic-fixture", projection}}]);
   return {round: round.id, binding: binding(round), projectionSha256: hash, sourceStrength: "synthetic-fixture" as const, matched: false as const, endToEndEvaluation: "unavailable" as const, projection};
@@ -172,7 +179,7 @@ export function recordHarnessTransition(dirArg: string, roundId: string, kind: "
     const closeEvent: LedgerEvent = {v: 1, at: event.at, actor, type: "harness.round.closed", data: closedData};
     applyTransition(current.transitions, closeEvent, round, hash, probes); pending.push({actor, type: closeEvent.type, data: closedData});
   }
-  if (Buffer.byteLength(canonical({round, probes, transitions: transitionView(round, hash, probes, bucket, current.transitions.closures.get(round.id))})) > HARNESS_INDEX_BYTES - HARNESS_FORM_BYTES) transitionFail("current round evidence view would exceed its 1 MiB bound; keep the existing round and start a separately identified round/study");
+  requireEvidenceViewCapacity(current, round, probes);
   const fingerprint = sha256(canonical({binding: hash, form}));
   if ((kind === "adoption" || kind === "closure") && confirm === undefined) return {needsConfirm: true, fingerprint, preview: ["Experimental fixture-only disposition; correctness and transfer remain unavailable", kind === "adoption" ? `Adopt ${(form as HarnessAdoption).arm} with independent check unavailable` : `Close ${(form as HarnessClosure).outcome} without adoption`, bucket.composition?.form.successorSha256 ? "A new successor needs its own exact execution; identical preserved bytes reuse their receipt" : "No successor execution is inferred", "No native attempt, scientific metric, selection or final authority is created"]};
   if ((kind === "adoption" || kind === "closure") && confirm !== fingerprint) transitionFail("confirmation differs; open a new harness adopt/close preview");
