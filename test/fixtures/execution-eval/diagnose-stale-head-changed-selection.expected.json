@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "diagnose-stale-head-changed-selection",
+  "trial": "diagnose",
+  "scenario": "stale-head",
+  "provenance": {
+    "attemptId": "356711593697b794",
+    "head": "6f36ef667c8fceceafd464be6c516a399a6eb3f0",
+    "selectedHead": "733720dc85c2f3ff84cb5e6818d2f61223495c95",
+    "status": "succeeded",
+    "completeness": "complete"
+  },
+  "nextAction": "run-fresh-selected-head",
+  "mustNot": [
+    "attribute-old-artifact-to-selected-head",
+    "count-reuse-as-fresh-final"
+  ]
+}

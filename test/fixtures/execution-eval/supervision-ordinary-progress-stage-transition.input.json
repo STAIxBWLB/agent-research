@@ -1,0 +1,35 @@
+{
+  "v": 1,
+  "id": "supervision-ordinary-progress-stage-transition",
+  "trial": "supervision",
+  "scenario": "ordinary-progress",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "task": {
+      "id": "fixture-task-066c545a1fe7c9c8",
+      "observed": {
+        "state": "running",
+        "events": [
+          {
+            "minute": 0,
+            "kind": "started"
+          },
+          {
+            "minute": 2,
+            "kind": "stage-completed",
+            "stage": "prepare"
+          },
+          {
+            "minute": 3,
+            "kind": "stage-started",
+            "stage": "transform"
+          }
+        ],
+        "budget": {
+          "used": 3,
+          "limit": 20
+        }
+      }
+    }
+  }
+}

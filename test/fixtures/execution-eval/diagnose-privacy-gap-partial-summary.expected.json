@@ -1,0 +1,19 @@
+{
+  "v": 1,
+  "id": "diagnose-privacy-gap-partial-summary",
+  "trial": "diagnose",
+  "scenario": "privacy-gap",
+  "provenance": {
+    "attemptId": null,
+    "head": null,
+    "selectedHead": "3db7490a7f22a6e85678687e0f54a3ed7a19c22c",
+    "status": "unknown",
+    "completeness": "privacy-gap"
+  },
+  "nextAction": "request-safe-provenance-summary",
+  "mustNot": [
+    "invent-hidden-provenance",
+    "expand-private-source",
+    "treat-withheld-as-missing"
+  ]
+}

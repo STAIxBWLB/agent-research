@@ -1,0 +1,27 @@
+{
+  "v": 1,
+  "id": "supervision-misleading-symptom-artifact-not-yet-due",
+  "trial": "supervision",
+  "scenario": "misleading-symptom",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "task": {
+      "id": "fixture-task-d6780180b259f1a7",
+      "observed": {
+        "state": "running",
+        "stage": "transform",
+        "completedStages": [
+          "prepare"
+        ],
+        "artifact": {
+          "present": false,
+          "producedAfterStage": "evaluate"
+        },
+        "budget": {
+          "used": 2,
+          "limit": 10
+        }
+      }
+    }
+  }
+}

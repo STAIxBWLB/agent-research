@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "supervision-ordinary-progress-completed-output",
+  "trial": "supervision",
+  "scenario": "ordinary-progress",
+  "trigger": false,
+  "reason": "ordinary-completion",
+  "nextAction": "record-outcome-without-proposal",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "execute-unapproved-recovery",
+    "claim-measured-benefit-from-truth-label"
+  ]
+}

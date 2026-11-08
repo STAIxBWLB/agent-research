@@ -1,0 +1,63 @@
+{
+  "v": 1,
+  "id": "reuse-interrupted-source-first-variant",
+  "trial": "reuse",
+  "scenario": "interrupted-source",
+  "validity": {
+    "sourceStatus": "cancelled",
+    "artifactIntegrity": "untrusted"
+  },
+  "eligibility": {
+    "reuseStages": [],
+    "freshStages": [
+      "prepare",
+      "transform",
+      "evaluate"
+    ],
+    "finalMustRunFresh": true
+  },
+  "invalidation": {
+    "reason": "source-not-successful",
+    "stages": [
+      "prepare",
+      "transform",
+      "evaluate"
+    ]
+  },
+  "freshExecution": {
+    "seeds": [
+      3,
+      11,
+      19
+    ],
+    "stages": [
+      "prepare",
+      "transform",
+      "evaluate"
+    ],
+    "outputs": [
+      {
+        "seed": 3,
+        "prepare": 18,
+        "transform": 37,
+        "evaluate": 1372
+      },
+      {
+        "seed": 11,
+        "prepare": 26,
+        "transform": 53,
+        "evaluate": 2820
+      },
+      {
+        "seed": 19,
+        "prepare": 34,
+        "transform": 69,
+        "evaluate": 4780
+      }
+    ]
+  },
+  "mustNot": [
+    "count-reuse-as-independent-sample",
+    "use-unverified-stage-output"
+  ]
+}

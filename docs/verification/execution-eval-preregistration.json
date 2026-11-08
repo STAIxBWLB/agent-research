@@ -1,0 +1,332 @@
+{
+  "v": 1,
+  "id": "execution-eval-t1-2026-11-08",
+  "status": "proposed-not-measured",
+  "scope": {
+    "task": "#63 T1 only",
+    "executions": 0,
+    "enabledCommands": [
+      "freeze",
+      "verify"
+    ],
+    "baseline": "current workflow, fresh execution, current hub rules, no lineage or reuse",
+    "disabled": [
+      "treatment feature",
+      "treatment run",
+      "lineage/reuse implementation",
+      "live/native/account run",
+      "automatic rollout"
+    ],
+    "separateAuthorization": [
+      "T2b treatment integration",
+      "T3 treatment runs",
+      "supervision arm execution",
+      "live/account execution"
+    ],
+    "baselineFollowup": "Owner approved T2a baseline execution, but it is a separate task; only Diagnose and Reuse, not Supervision."
+  },
+  "authority": {
+    "selection": "src/exp/selection.ts",
+    "investigation": "src/exp/investigate.ts",
+    "final": "src/exp/final.ts",
+    "rule": "Use existing sealed selection and fresh final readers only; this harness produces no attempt/result/winner/adoption decision and writes no study ledger."
+  },
+  "corpus": "test/fixtures/execution-eval/corpus.json",
+  "trials": [
+    {
+      "id": "diagnose",
+      "repetitions": 3,
+      "arms": [
+        "current-workflow",
+        "H1-A1-C1-lineage-view"
+      ],
+      "authorizedNow": "preregistration-only",
+      "baselineFollowup": "T2a",
+      "order": "paired AB/BA by parity of corpus index plus repetition",
+      "coldWarm": "record cold and warm observations separately; never relabel warm as cold"
+    },
+    {
+      "id": "reuse",
+      "repetitions": 3,
+      "arms": [
+        "fresh",
+        "eligible-reuse"
+      ],
+      "authorizedNow": "preregistration-only",
+      "baselineFollowup": "T2a",
+      "order": "paired AB/BA by parity of corpus index plus repetition",
+      "coldWarm": "record cold and warm observations separately; never relabel warm as cold"
+    },
+    {
+      "id": "supervision",
+      "repetitions": 6,
+      "arms": [
+        "current-hub-rules",
+        "H2-shadow",
+        "advisory-separately-authorized"
+      ],
+      "authorizedNow": "preregistration-only",
+      "baselineFollowup": "agent-hub separate authorization",
+      "order": "six permutations of baseline/shadow/advisory; advisory still unauthorized",
+      "coldWarm": "record cold and warm observations separately; never relabel warm as cold"
+    }
+  ],
+  "design": {
+    "population": "fixed synthetic local fixtures only; no account/model/native calls",
+    "plannedCases": {
+      "diagnose": 12,
+      "reuse": 12,
+      "supervision": 12
+    },
+    "order": "Use corpus order, not directory enumeration. AB for even (caseIndex+repetitionIndex), BA for odd; 12 paired cases x 3 repetitions balances totals. Do not execute an unauthorized arm. Supervision six orders are ABC, ACB, BAC, BCA, CAB, CBA.",
+    "versions": {
+      "bun": "1.4.2",
+      "source": "Preregistration does not seal evolving code. Every T2a/T3 run receipt must bind the exact code snapshot it executed, including bin/ares.js, package identity, harness/adapter/instrumentation and runtime dependencies, alongside this frozen method/input/expected seal.",
+      "environment": "record exact OS, CPU/hardware, Bun and any container digest in the run admission receipt; mismatches invalidate the paired comparison",
+      "registrationPackage": "0.2.1"
+    },
+    "humanTiming": "distinct participants see each incident once; counterbalance incident assignment across arms. No human participants or sessions are authorized by T1/T2a. Automated source-resolution timings are separate, and cannot substitute for human time-to-find.",
+    "expectedVisibility": "Only the input object within *.input.json is candidate-visible. Wrapper id/trial/scenario, corpus index and *.expected.json stay evaluator-only, never copied into candidate outputs.",
+    "trustLimit": "sealed evaluator is a same-user integrity boundary, not hostile same-UID isolation",
+    "final": "final decisive acceptance always fresh; reuse is not an independent seed/sample",
+    "seedSets": {
+      "firstVariant": [
+        3,
+        11,
+        19
+      ],
+      "secondVariant": [
+        4,
+        12,
+        20
+      ]
+    },
+    "seedAssignment": "Use each frozen Reuse input.workload.seeds in repetition order, unchanged across arms; the two synthetic variants use the two declared triplets.",
+    "artifactDigestRule": "sha256(canonical JSON: recursively sorted object keys, preserved array order, UTF-8, no whitespace); hash artifact.payload only, excluding digestRule and digest metadata"
+  },
+  "budgets": {
+    "proposed": true,
+    "parallelAttemptsPerStudy": 1,
+    "cpuWorkers": 2,
+    "gpuDevices": 0,
+    "caseWallMs": 60000,
+    "caseCpuSeconds": 60,
+    "caseMemoryMiB": 256,
+    "casePids": 32,
+    "trialWallMs": 7200000,
+    "trialCpuSeconds": 7200,
+    "trialRetainedBytes": 16777216,
+    "trialTransferBytes": 16777216,
+    "receiptBytes": 65536,
+    "fixtureFileBytes": 16384,
+    "aggregateInputBytes": 3145728,
+    "maxCases": 48,
+    "coldWarm": "three seeded paired repetitions per condition for Diagnose/Reuse; cold resets only private fixture state, warm reuse still unauthorized",
+    "overrun": "stop the independent trial, retain failed/cancelled/unknown denominators and available costs; no automatic budget increase",
+    "resourceAdmission": "existing host admission; one active attempt per study; no concurrency expansion",
+    "maxAttemptsPerCaseArmSeedCondition": 1,
+    "caseBudgetUnit": "one scheduled case/arm/seed/cold-or-warm condition, no retries beyond the single attempt; totals include all such units"
+  },
+  "metrics": {
+    "acceptedOutcomeRate": "correct outcomes accepted by existing selection/final machinery divided by full scheduled cases; failed/cancelled/unknown/excluded remain visible; report completed-only sensitivity separately",
+    "diagnoseAccuracy": "correct provenance AND correct next action against sealed expected labels divided by full incident presentations; also report each component",
+    "diagnoseTiming": "human monotonic time from presentation to submitted provenance/next action; automated source-resolution time is separately named",
+    "provenanceCompleteness": "required provenance links present and correct / all required links, with invalid or unreadable links counted missing",
+    "falseReuse": "count reused outputs whose sealed expected validity or current semantic inputs disagree; no reuse attempted in T1",
+    "eligibleComputeReduction": "paired median CPU-process-seconds reduction across eligible cases with same environment/seeds/budget; GPU/provider clocks separately reported, never summed",
+    "noHitOverhead": "nearest-rank p95 of per-case paired CPU overhead on preregistered no-hit cases; zero/unknown fresh denominator yields insufficient evidence",
+    "supervision": "helpful, false, missed, duplicate proposals, extra person decisions and accepted outcomes against full truth-labeled tasks; simulated labels do not measure person benefit",
+    "uncertainty": "report sample sizes and per-case paired distributions; median interval from fixed seed 101 bootstrap 1000 resamples if samples exist; p95 reports sample size and nearest-rank convention; no broad superiority claim"
+  },
+  "denominators": [
+    "full",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "unknown",
+    "excluded"
+  ],
+  "thresholds": {
+    "status": "proposed-not-measured",
+    "faultSuite": {
+      "maxFalseReuse": 0,
+      "maxProvenanceViolations": 0,
+      "maxPrivacyViolations": 0,
+      "maxGateViolations": 0
+    },
+    "lineage": {
+      "minMedianHumanTimeToFindReductionPct": 20,
+      "maxAccuracyLossPercentagePoints": 0
+    },
+    "reuse": {
+      "minMedianEligibleComputeReductionPct": 20,
+      "maxNoHitP95OverheadPct": 5
+    },
+    "supervision": {
+      "improvedAcceptedOutcomeRateOrRecoveryReduction": true,
+      "minRecoveryTimeReductionPct": 20,
+      "maxTotalCostIncrease": 0,
+      "maxPersonDecisionIncrease": 0,
+      "otherwise": "retain shadow/off"
+    },
+    "missingEvidence": "unmeasurable human timing or missing cost denominators yields insufficient evidence, never pass"
+  },
+  "costs": {
+    "fields": {
+      "cpuSeconds": {
+        "category": "compute",
+        "unit": "process CPU seconds",
+        "accounting": "total",
+        "unknown": "unknown"
+      },
+      "gpuDeviceSeconds": {
+        "category": "compute",
+        "unit": "device-active seconds",
+        "accounting": "separate-clock",
+        "unknown": "unknown"
+      },
+      "providerTokens": {
+        "category": "provider",
+        "unit": "tokens",
+        "accounting": "separate-unit",
+        "unknown": "unknown"
+      },
+      "providerRequests": {
+        "category": "provider",
+        "unit": "requests",
+        "accounting": "separate-unit",
+        "unknown": "unknown"
+      },
+      "wallElapsedMs": {
+        "category": "wall",
+        "unit": "monotonic elapsed milliseconds",
+        "accounting": "total",
+        "unknown": "unknown"
+      },
+      "storagePeakBytes": {
+        "category": "storage",
+        "unit": "bytes",
+        "accounting": "peak",
+        "unknown": "unknown"
+      },
+      "storageByteSeconds": {
+        "category": "storage",
+        "unit": "byte-seconds",
+        "accounting": "integral",
+        "unknown": "unknown"
+      },
+      "transferBytes": {
+        "category": "transfer",
+        "unit": "bytes",
+        "accounting": "total",
+        "unknown": "unknown"
+      },
+      "verificationCpuSeconds": {
+        "category": "verification",
+        "unit": "process CPU seconds",
+        "accounting": "subset-of-cpuSeconds",
+        "unknown": "unknown"
+      },
+      "verificationWallMs": {
+        "category": "verification",
+        "unit": "monotonic elapsed milliseconds",
+        "accounting": "subset-of-wallElapsedMs",
+        "unknown": "unknown"
+      },
+      "retentionBytes": {
+        "category": "retention",
+        "unit": "bytes",
+        "accounting": "separate-snapshot",
+        "unknown": "unknown"
+      },
+      "retentionByteSeconds": {
+        "category": "retention",
+        "unit": "byte-seconds",
+        "accounting": "subset-of-storageByteSeconds",
+        "unknown": "unknown"
+      },
+      "materializationCpuSeconds": {
+        "category": "materialization",
+        "unit": "process CPU seconds",
+        "accounting": "subset-of-cpuSeconds",
+        "unknown": "unknown"
+      },
+      "materializationWallMs": {
+        "category": "materialization",
+        "unit": "monotonic elapsed milliseconds",
+        "accounting": "subset-of-wallElapsedMs",
+        "unknown": "unknown"
+      },
+      "materializationTransferBytes": {
+        "category": "materialization",
+        "unit": "bytes",
+        "accounting": "subset-of-transferBytes",
+        "unknown": "unknown"
+      },
+      "failureCpuSeconds": {
+        "category": "failure-overhead",
+        "unit": "process CPU seconds",
+        "accounting": "subset-of-cpuSeconds",
+        "unknown": "unknown"
+      },
+      "failureGpuDeviceSeconds": {
+        "category": "failure-overhead",
+        "unit": "device-active seconds",
+        "accounting": "subset-of-gpuDeviceSeconds",
+        "unknown": "unknown"
+      },
+      "failureWallMs": {
+        "category": "failure-overhead",
+        "unit": "monotonic elapsed milliseconds",
+        "accounting": "subset-of-wallElapsedMs",
+        "unknown": "unknown"
+      },
+      "failureTransferBytes": {
+        "category": "failure-overhead",
+        "unit": "bytes",
+        "accounting": "subset-of-transferBytes",
+        "unknown": "unknown"
+      },
+      "idleWallMs": {
+        "category": "idle",
+        "unit": "monotonic elapsed milliseconds",
+        "accounting": "separate",
+        "unknown": "unknown"
+      },
+      "personMinutes": {
+        "category": "person",
+        "unit": "person minutes",
+        "accounting": "separate",
+        "unknown": "unknown"
+      },
+      "monetaryEstimateUsd": {
+        "category": "estimate",
+        "unit": "USD estimate",
+        "accounting": "separate-not-measured-cost",
+        "unknown": "unknown"
+      }
+    },
+    "instrumentation": "process CPU resource usage, monotonic wall timers, explicit storage/transfer byte counters and retention interval; record instrumentation unavailable as unknown. Provider usage only from measured provider receipts, estimates separately. No instrumentation is executed in T1.",
+    "aggregation": "No scalar total across CPU/device/wall/idle/person clocks or bytes/tokens/currency. Total cost is a vector of measured dimensions; subset categories annotate totals and are never added twice. Missing any required comparison dimension is insufficient evidence.",
+    "unknown": "unknown is a literal value, never zero or an inferred estimate"
+  },
+  "reporting": {
+    "currentDisposition": "not measured; no adopt/restrict/defer verdict yet",
+    "futureDispositions": [
+      "adopt",
+      "restrict",
+      "defer"
+    ],
+    "independence": "each trial independently stoppable; failure does not block unrelated read-only utility",
+    "required": [
+      "exact code/method/input/expected hashes",
+      "full and per-status denominators",
+      "failed/negative/unknown outcomes",
+      "cold/warm split",
+      "cost vector and missing dimensions",
+      "limitations and bounded scope",
+      "separate source/fixture, hosted CI, and native/live evidence labels"
+    ],
+    "baselineAuthority": "T2a receipts link existing study/attempt/closed comparison refs; this preregistration receipt is not a second result authority"
+  }
+}

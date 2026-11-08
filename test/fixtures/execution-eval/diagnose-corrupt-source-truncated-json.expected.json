@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "diagnose-corrupt-source-truncated-json",
+  "trial": "diagnose",
+  "scenario": "corrupt-source",
+  "provenance": {
+    "attemptId": null,
+    "head": null,
+    "selectedHead": "55652338855c3d6fa2ed49fa97d685e7ac968200",
+    "status": "unknown",
+    "completeness": "unreadable-source"
+  },
+  "nextAction": "restore-valid-source-record",
+  "mustNot": [
+    "parse-partial-source-as-authority",
+    "infer-producer-from-nearby-record"
+  ]
+}

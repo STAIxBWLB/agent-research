@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "supervision-ordinary-progress-successful-retry",
+  "trial": "supervision",
+  "scenario": "ordinary-progress",
+  "trigger": false,
+  "reason": "ordinary-progress",
+  "nextAction": "inspect-terminal-result",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "execute-unapproved-recovery",
+    "claim-measured-benefit-from-truth-label"
+  ]
+}

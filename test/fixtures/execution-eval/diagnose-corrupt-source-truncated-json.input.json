@@ -1,0 +1,28 @@
+{
+  "v": 1,
+  "id": "diagnose-corrupt-source-truncated-json",
+  "trial": "diagnose",
+  "scenario": "corrupt-source",
+  "input": {
+    "request": "Identify the record boundary that prevents a provenance conclusion.",
+    "study": {
+      "id": "fixture-study-8bb4c751f666c775",
+      "selectedHead": "55652338855c3d6fa2ed49fa97d685e7ac968200"
+    },
+    "source": {
+      "reference": "fixture-source-8bb4c751f666c775",
+      "present": true,
+      "bytes": "{\"v\":1,\"attemptId\":"
+    },
+    "artifact": {
+      "present": true,
+      "digest": "829151a43cb0c91ba3cd2363716731f26d666caafa27e9fde0c2583e343936e3"
+    },
+    "events": [
+      {
+        "type": "source.referenced",
+        "reference": "fixture-source-8bb4c751f666c775"
+      }
+    ]
+  }
+}

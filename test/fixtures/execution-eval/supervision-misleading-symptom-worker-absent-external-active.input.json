@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "id": "supervision-misleading-symptom-worker-absent-external-active",
+  "trial": "supervision",
+  "scenario": "misleading-symptom",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "task": {
+      "id": "fixture-task-24dd4dfcee7c1a24",
+      "observed": {
+        "state": "running",
+        "localWorkerPresent": false,
+        "externalTask": {
+          "id": "synthetic-remote-task",
+          "state": "in-progress",
+          "lastProgressMinute": 9
+        },
+        "fixtureClockMinute": 10
+      }
+    }
+  }
+}

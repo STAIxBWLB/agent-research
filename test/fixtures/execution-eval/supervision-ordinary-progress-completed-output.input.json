@@ -1,0 +1,20 @@
+{
+  "v": 1,
+  "id": "supervision-ordinary-progress-completed-output",
+  "trial": "supervision",
+  "scenario": "ordinary-progress",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "task": {
+      "id": "fixture-task-1f9af81fe22d38c6",
+      "observed": {
+        "state": "done",
+        "output": {
+          "present": true,
+          "verifiedDigest": true
+        },
+        "unresolvedDecisions": []
+      }
+    }
+  }
+}

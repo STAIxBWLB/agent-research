@@ -1,0 +1,39 @@
+{
+  "v": 1,
+  "id": "diagnose-retry-terminal-child",
+  "trial": "diagnose",
+  "scenario": "retry",
+  "input": {
+    "request": "Trace the retry relationship without treating it as another independent sample.",
+    "study": {
+      "id": "fixture-study-b77f616eb7485895",
+      "selectedHead": "6bdc01077038a02b193248130b9dd189aaaf894e"
+    },
+    "attempts": [
+      {
+        "id": "0f70b4a373568c6d",
+        "commit": "6bdc01077038a02b193248130b9dd189aaaf894e",
+        "status": "failed",
+        "seed": 7
+      },
+      {
+        "id": "957c8bded1581645",
+        "parentAttemptId": "0f70b4a373568c6d",
+        "commit": "6bdc01077038a02b193248130b9dd189aaaf894e",
+        "status": "succeeded",
+        "seed": 7
+      }
+    ],
+    "events": [
+      {
+        "type": "retry.requested",
+        "sourceAttemptId": "0f70b4a373568c6d",
+        "childAttemptId": "957c8bded1581645"
+      }
+    ],
+    "artifact": {
+      "producerAttemptId": "957c8bded1581645",
+      "present": true
+    }
+  }
+}

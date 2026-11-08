@@ -1,0 +1,83 @@
+{
+  "v": 1,
+  "id": "reuse-pruned-artifact-first-variant",
+  "trial": "reuse",
+  "scenario": "pruned-artifact",
+  "input": {
+    "request": "Run the stated deterministic workload fresh; separately classify any source reuse prerequisites without executing reuse.",
+    "workload": {
+      "values": [
+        2,
+        5,
+        8
+      ],
+      "seeds": [
+        3,
+        11,
+        19
+      ],
+      "stages": [
+        {
+          "id": "prepare",
+          "operation": "sum-input-plus-seed"
+        },
+        {
+          "id": "transform",
+          "operation": "multiply-plus-offset",
+          "multiplier": 2,
+          "offset": 1
+        },
+        {
+          "id": "evaluate",
+          "operation": "square-plus-seed"
+        }
+      ]
+    },
+    "currentContext": {
+      "globalCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
+      "method": "synthetic-integer-pipeline-v1",
+      "executorClass": "synthetic-local"
+    },
+    "source": {
+      "attemptId": "9f314481878da115",
+      "status": "succeeded",
+      "globalCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
+      "method": "synthetic-integer-pipeline-v1",
+      "executorClass": "synthetic-local",
+      "workload": {
+        "values": [
+          2,
+          5,
+          8
+        ],
+        "seeds": [
+          3,
+          11,
+          19
+        ],
+        "stages": [
+          {
+            "id": "prepare",
+            "operation": "sum-input-plus-seed"
+          },
+          {
+            "id": "transform",
+            "operation": "multiply-plus-offset",
+            "multiplier": 2,
+            "offset": 1
+          },
+          {
+            "id": "evaluate",
+            "operation": "square-plus-seed"
+          }
+        ]
+      },
+      "artifact": {
+        "present": false,
+        "digest": "9c7eaadfad054fb6ddc80f0c77fbcf165cb5aa1f16cf88efba3f03ca71bf192b",
+        "digestRule": "sha256(canonical JSON: recursively sorted object keys, preserved array order, UTF-8, no whitespace)"
+      }
+    },
+    "requiredAcceptance": "fresh-final"
+  }
+}

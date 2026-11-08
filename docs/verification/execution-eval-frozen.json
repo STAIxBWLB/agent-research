@@ -1,0 +1,394 @@
+{
+  "v": 1,
+  "status": "preregistered-not-measured",
+  "bindings": {
+    "protocolSha256": "32a28ae8ecacd2eee83802bdc70301d0b82a1291597aec4ca9365428857a46ae",
+    "methodSha256": "84e4aabb8178299ceb84c45711c150228a328d9c6acfc2a83735514f1e8fcd62",
+    "thresholdsSha256": "7f4ac614c71f8ab97e5b10454b091b15feaf9caf20e7011f4b166c59ea867b72",
+    "denominatorsSha256": "fb66698580a5a9c945eba8ea6bb1eb3c729b8e765ba1133bb19e62534e006955",
+    "inputSha256": "c0c7c97d0bd6d5bc588141836cb9af1b9854f40c2a974c15cdda85716274677d",
+    "expectedSha256": "30ceddce8081026f52aff1678fb0c26cdb7f627cae077ee75a87f3ed62cebf95"
+  },
+  "methodFiles": [
+    {
+      "path": "docs/verification/execution-eval-preregistration.json",
+      "sha256": "32a28ae8ecacd2eee83802bdc70301d0b82a1291597aec4ca9365428857a46ae",
+      "bytes": 13644
+    },
+    {
+      "path": "docs/verification/execution-eval-protocol.md",
+      "sha256": "0903897938df02ec35390966404fd2ab7858c61b27060834535257b868f75edb",
+      "bytes": 13405
+    }
+  ],
+  "inputFiles": [
+    {
+      "path": "test/fixtures/execution-eval/corpus.json",
+      "sha256": "45f2e032ffa3403f82ba2a7c9c03dda3959cbf7986419393632a5f10daf29617",
+      "bytes": 12064
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-stale-head-old-card.input.json",
+      "sha256": "68165a5bdcbfcf6dc361dff407d94394b5c4adf195faba96470376dd3aca7577",
+      "bytes": 1134
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-stale-head-changed-selection.input.json",
+      "sha256": "89c70a4691e78cacb6232c416c685aecffe6ffb24ace3722e6ae2a87531d59fe",
+      "bytes": 1146
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-missing-artifact-lost-file.input.json",
+      "sha256": "819b7d59f0dcd20e244fd12984931621174d0eb15e06c06104b73c635ab492c9",
+      "bytes": 934
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-missing-artifact-pruned-file.input.json",
+      "sha256": "c7793ead12d6d963a2f8d3da66eed56c64e248e9c480535593eb66c34540dc1a",
+      "bytes": 934
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-retry-terminal-child.input.json",
+      "sha256": "49cf0ccd5ab490f25c522db6b3f04b0d3b6b8270b9753ea576a35fecdd23722e",
+      "bytes": 1000
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-retry-active-child.input.json",
+      "sha256": "1feebd558e8a93f65879f2ea8d10924335d41e38b594f00cb89148bf614690f7",
+      "bytes": 998
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-uncertain-delivery-lost-ack.input.json",
+      "sha256": "540998f2c9ab2c2c231ca10aef56df3f651b8d0dca42b5415f426cfb72348769",
+      "bytes": 814
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-uncertain-delivery-ended-connection.input.json",
+      "sha256": "f6e506908f28a4dddcd3100860528f48e8d2e1160e536212b67b49b3afa9af73",
+      "bytes": 830
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-privacy-gap-withheld-source.input.json",
+      "sha256": "3f3e5ba94b6808d539f7e1e5ed5ecb6ee1573d0b51fc65a17ccca54104bc182b",
+      "bytes": 832
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-privacy-gap-partial-summary.input.json",
+      "sha256": "35db2d5c714a0230a91ad1e54439c1a1587bb251ed72d075b354d7afca4d5cb6",
+      "bytes": 902
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-corrupt-source-truncated-json.input.json",
+      "sha256": "6a6e7c8befdff54405294b577ff9d66299e615de9f2ce7c09d7f6a100ed21c20",
+      "bytes": 757
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-corrupt-source-unsupported-version.input.json",
+      "sha256": "fda64040a675ac277761222a386fecbdf4885e8717197f153469a490ff2c1e69",
+      "bytes": 788
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-local-stage-edit-first-variant.input.json",
+      "sha256": "6cfde66983426aada18e61908030908a756f5cfd27fdba37138623547a325af3",
+      "bytes": 2614
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-local-stage-edit-second-variant.input.json",
+      "sha256": "1f3e3bf29b382e23287d5ad752b3d862a1c93aba2beb77a6aae7d37531cc7618",
+      "bytes": 2620
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-global-code-change-first-variant.input.json",
+      "sha256": "0b954c87a5b588e47d8ab21621fe17c07f54e7ba2850adabea7a95153aa6741b",
+      "bytes": 2618
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-global-code-change-second-variant.input.json",
+      "sha256": "7f0d055f27702b7f1873711e4631a37b03e8e4db1fc6d4edc86356fd488a08ef",
+      "bytes": 2619
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-no-hit-first-variant.input.json",
+      "sha256": "c23b96d596889d8a4c9461f042694c807999e6a212ee4715e2ffe0f286e6cf01",
+      "bytes": 1026
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-no-hit-second-variant.input.json",
+      "sha256": "772a97522428918e4087644bcb563299cb730d7aea1c88e9958592323fbf354b",
+      "bytes": 1027
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-corrupt-artifact-first-variant.input.json",
+      "sha256": "4bc5a84146460c654ef7a8eedc8f19b502c6733978b09d2f9d80a977c1b6e994",
+      "bytes": 2614
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-corrupt-artifact-second-variant.input.json",
+      "sha256": "81d21ceef8bd3e93430ed12c82eec1d86c7eff8c24a9d900cd381223e4f2023b",
+      "bytes": 2615
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-pruned-artifact-first-variant.input.json",
+      "sha256": "3c4e833f036a466371ea9de6d12d7175a87fe9809e58efd4f0bb9c656a12933c",
+      "bytes": 2119
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-pruned-artifact-second-variant.input.json",
+      "sha256": "59a1be599a6ad4a993856e8b1ca5bdf2384b656144d30352eac10f250e7a0e66",
+      "bytes": 2120
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-interrupted-source-first-variant.input.json",
+      "sha256": "4d3b244127b6b42c610280e1f4a73acc544a5d671d4c60327d6294ff467765ad",
+      "bytes": 2618
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-interrupted-source-second-variant.input.json",
+      "sha256": "3b5d7d901c32d37da0c337c03457a0710b285c8c1a6581ade133b962f88035e8",
+      "bytes": 2617
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-stage-transition.input.json",
+      "sha256": "49c8428e1f2a18255d0cc85a0b6af333d3677da8c711231d91c0db7189559d26",
+      "bytes": 811
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-bounded-human-wait.input.json",
+      "sha256": "5f3defc2111b758e7c1899016249929e43172fbb63b23ce1833e223d53a0fd8c",
+      "bytes": 608
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-successful-retry.input.json",
+      "sha256": "4e9dedef13b1e04e813f67c5960589836373c6f8eeb3d121e65e3a004eea151c",
+      "bytes": 686
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-completed-output.input.json",
+      "sha256": "97b35225ef85bbc04c3de38164b77ac3f68606a52ce1a499e60aa827b3ee12c3",
+      "bytes": 510
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-exhausted-retries.input.json",
+      "sha256": "8dc40cdcd8a282e82b9741eb4845b359dccd6f3ce66654d006b5f296641c6cca",
+      "bytes": 847
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-conflicting-owner-constraints.input.json",
+      "sha256": "949a93a8c9e23023d760440a0f2eb268ced7a5f1733424d2230c4bd78875a0d9",
+      "bytes": 698
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-unresolved-delivery.input.json",
+      "sha256": "453fd47f3530487b2d4888efd5059b3220e3d460a35e0139d6490642c563164b",
+      "bytes": 634
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-exhausted-budget.input.json",
+      "sha256": "d922aa8bbe26e8b09e08bc1d2173b28ec835556316aa18beed6ae620c5457868",
+      "bytes": 636
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-long-wall-progress.input.json",
+      "sha256": "036b786c8350720af5e29f0a7c6c5470fb71500274097958c88b5ae4c9268407",
+      "bytes": 804
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-rate-limit-scheduled.input.json",
+      "sha256": "876937d7e6fe94dc44fd76efe90d7d7704780de9d3cc886f13ac6d38a0200d3b",
+      "bytes": 581
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-worker-absent-external-active.input.json",
+      "sha256": "bc8c96494854cef7bde24934a50915048d8594e348784e7b73062dc4c68f506f",
+      "bytes": 619
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-artifact-not-yet-due.input.json",
+      "sha256": "7876f25353b57f7d677cf31c412850da767b6b0c424dac6a5e34bd749eea7a21",
+      "bytes": 661
+    }
+  ],
+  "expectedFiles": [
+    {
+      "path": "test/fixtures/execution-eval/diagnose-stale-head-old-card.expected.json",
+      "sha256": "e1187a3ebf282b2125d2d0a640c0ab97af0ad06efcfb63fc7fdb6e164b5d4b49",
+      "bytes": 485
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-stale-head-changed-selection.expected.json",
+      "sha256": "cedffc91bcdc8e7b781662893b1913d352ecafb1bff38a30d86aca9048dbae85",
+      "bytes": 494
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-missing-artifact-lost-file.expected.json",
+      "sha256": "a3e54f86e687226ab5ca2fc6da6e2b3eac37093b2beae5634862259819c1552d",
+      "bytes": 509
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-missing-artifact-pruned-file.expected.json",
+      "sha256": "ff7f62d073cd38e86769ff2a47bb25598fb50905a67d46d17f3a219c904c7b0b",
+      "bytes": 510
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-retry-terminal-child.expected.json",
+      "sha256": "3a6d8d76ab2cc4c0805c9a3a63ed305b3aa0d311ff9d06689928a86babae7525",
+      "bytes": 541
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-retry-active-child.expected.json",
+      "sha256": "572325e9966465229353eb4c8f6dc4e3154ee041e4251a8df8f194e0ff35d093",
+      "bytes": 529
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-uncertain-delivery-lost-ack.expected.json",
+      "sha256": "4d3e74e9c11500720cac2ef17b4389d4497d3c12988695d6fd2f5cda229676db",
+      "bytes": 503
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-uncertain-delivery-ended-connection.expected.json",
+      "sha256": "bde504c220a8333e7524e221b28e880fffe1afb5f2bb1c5c4146470e6143a1b4",
+      "bytes": 511
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-privacy-gap-withheld-source.expected.json",
+      "sha256": "41533b3d3974b0498ef0519d83a362f4c030d60e74a9e4f55baba598d001b37d",
+      "bytes": 464
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-privacy-gap-partial-summary.expected.json",
+      "sha256": "151573a0336287f0a47fa392c47b7fef7b04647f1339f870cbbd71fa7201cb0e",
+      "bytes": 464
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-corrupt-source-truncated-json.expected.json",
+      "sha256": "eeaae1c757eb8bf8eeecf7eee1292b3139cf917a0bae60767aa0c3d91407e6f7",
+      "bytes": 459
+    },
+    {
+      "path": "test/fixtures/execution-eval/diagnose-corrupt-source-unsupported-version.expected.json",
+      "sha256": "23782807f890f299e3ad4873d5cba8c604d137eded3e11315c552139301556eb",
+      "bytes": 474
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-local-stage-edit-first-variant.expected.json",
+      "sha256": "ddf11c8f0d2972ca08d00ffec750cb8260f0e8fb457baac745d457cd2409c78d",
+      "bytes": 1087
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-local-stage-edit-second-variant.expected.json",
+      "sha256": "e2234ee438c58f2578a0afca837220dc16ce1861f64f781918acb3a82fda5d3f",
+      "bytes": 1070
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-global-code-change-first-variant.expected.json",
+      "sha256": "5ee35ecc6928a5568b4683468b8d5af4f70e970ad6013d46afdf3e90171bcf16",
+      "bytes": 1100
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-global-code-change-second-variant.expected.json",
+      "sha256": "dc4649222b6762d4cc63e047582f0878ca5a8d53ba030b5673917ede06cf9d47",
+      "bytes": 1103
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-no-hit-first-variant.expected.json",
+      "sha256": "b4d3ff584b957a099970dbefd36451ff5fc3d91299b2299524309b42386fff61",
+      "bytes": 1065
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-no-hit-second-variant.expected.json",
+      "sha256": "b0be1d2b047fb9cf62ee01d37c23a1ff3b7002c5dd102f50b9aab0bda47cd39b",
+      "bytes": 1068
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-corrupt-artifact-first-variant.expected.json",
+      "sha256": "9834b133a9bf426792ad825cd797af64e9ff4dac5714406f8f09e333421f2662",
+      "bytes": 1103
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-corrupt-artifact-second-variant.expected.json",
+      "sha256": "2902889cb40075da5d8d2d5bae23c7389470e1bc3236ee443d5282f217ffa12e",
+      "bytes": 1106
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-pruned-artifact-first-variant.expected.json",
+      "sha256": "6cd873e06ef81af7773220bdc2bf45b9b269682bedcdfd8bfaff29733479bf1b",
+      "bytes": 1097
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-pruned-artifact-second-variant.expected.json",
+      "sha256": "89bb1084ea2d2a5659de922c3d70747e70d9a77a6d28f93785cd0d84b4184818",
+      "bytes": 1100
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-interrupted-source-first-variant.expected.json",
+      "sha256": "763b2c49c93f68069327fc4570b36aa88c21e75ff364149ccc024270233d3ea0",
+      "bytes": 1106
+    },
+    {
+      "path": "test/fixtures/execution-eval/reuse-interrupted-source-second-variant.expected.json",
+      "sha256": "8c30df211e9c3b9cf61eac67f93214096424bc02954b6156c18bf9500d7c6482",
+      "bytes": 1107
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-stage-transition.expected.json",
+      "sha256": "deeb22c72ce47b99c3f32a493accf61c069ebaf7f177cdaab36ad04470b8f191",
+      "bytes": 357
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-bounded-human-wait.expected.json",
+      "sha256": "25a2428b97c5561ec1c1007a429ca66d3db1dd0ac295ce900a33c3cc23cf5fdd",
+      "bytes": 370
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-successful-retry.expected.json",
+      "sha256": "5c77c072d752a39f64abe63c28ec3db5ae5378134ec153c67e662c8082acb325",
+      "bytes": 362
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-ordinary-progress-completed-output.expected.json",
+      "sha256": "9397ac5796cd29e6c6461f54b020a5744c9f09a6d5b7475b36a6cb1c8791721d",
+      "bytes": 372
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-exhausted-retries.expected.json",
+      "sha256": "4b56271b6c8b641fa124bd908e0f40d01b58f22eb4cd73639fca49112c3891df",
+      "bytes": 357
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-conflicting-owner-constraints.expected.json",
+      "sha256": "ae753a24cd36ff9c9032c10337e95cf63fd1587c04300f19d06d5b210ef4dc1d",
+      "bytes": 363
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-unresolved-delivery.expected.json",
+      "sha256": "461e5225cfff787d0870a0979cae3b3e7d31cbc6df04d81c815290f056052be0",
+      "bytes": 355
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-true-trigger-exhausted-budget.expected.json",
+      "sha256": "6c159e55c9e726fbc6e708ae0b459ec167caeac232d3b9ed4ffb2a5228db0f62",
+      "bytes": 350
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-long-wall-progress.expected.json",
+      "sha256": "4f8e589d1abfc53811a2020f5d7dcee633409a4cadf9fc195baea71df6123ffb",
+      "bytes": 361
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-rate-limit-scheduled.expected.json",
+      "sha256": "4c67a044e7eee8cb563d9e2a77b9fd8a13b3ad901f5a86a7650ea5fab4b491af",
+      "bytes": 361
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-worker-absent-external-active.expected.json",
+      "sha256": "5709d751965e7b805500e573ca97b64d8f4ecc6b9e69836d0d82e3288fab2078",
+      "bytes": 375
+    },
+    {
+      "path": "test/fixtures/execution-eval/supervision-misleading-symptom-artifact-not-yet-due.expected.json",
+      "sha256": "fc2f4146639e61bfd47b4b8146c580ebb79ae073d16d78129f0b9da33548932b",
+      "bytes": 362
+    }
+  ],
+  "receiptSha256": "72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20"
+}

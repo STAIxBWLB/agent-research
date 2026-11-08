@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "supervision-ordinary-progress-bounded-human-wait",
+  "trial": "supervision",
+  "scenario": "ordinary-progress",
+  "trigger": false,
+  "reason": "recorded-gate-wait",
+  "nextAction": "await-recorded-gate-decision",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "execute-unapproved-recovery",
+    "claim-measured-benefit-from-truth-label"
+  ]
+}

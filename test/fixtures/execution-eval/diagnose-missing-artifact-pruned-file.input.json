@@ -1,0 +1,33 @@
+{
+  "v": 1,
+  "id": "diagnose-missing-artifact-pruned-file",
+  "trial": "diagnose",
+  "scenario": "missing-artifact",
+  "input": {
+    "request": "Determine what the receipt proves and whether its output can be read.",
+    "study": {
+      "id": "fixture-study-50dc052fab0ffb99",
+      "selectedHead": "0312c7210a61de610ba7d99cf864ab31c981ce26"
+    },
+    "attempts": [
+      {
+        "id": "8d8039aeea9a5a1e",
+        "commit": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+        "status": "succeeded"
+      }
+    ],
+    "artifact": {
+      "producerAttemptId": "8d8039aeea9a5a1e",
+      "digest": "849811f0eb290ef71218c4d9598801babcd2f03510b373f0683224af75fc62c6",
+      "retention": "pruned",
+      "present": false
+    },
+    "events": [
+      {
+        "type": "artifact.recorded",
+        "attemptId": "8d8039aeea9a5a1e",
+        "digest": "849811f0eb290ef71218c4d9598801babcd2f03510b373f0683224af75fc62c6"
+      }
+    ]
+  }
+}

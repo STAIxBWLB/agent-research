@@ -1,0 +1,18 @@
+{
+  "v": 1,
+  "id": "diagnose-missing-artifact-pruned-file",
+  "trial": "diagnose",
+  "scenario": "missing-artifact",
+  "provenance": {
+    "attemptId": "8d8039aeea9a5a1e",
+    "head": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+    "selectedHead": "0312c7210a61de610ba7d99cf864ab31c981ce26",
+    "status": "succeeded",
+    "completeness": "artifact-missing"
+  },
+  "nextAction": "reexecute-from-frozen-inputs",
+  "mustNot": [
+    "infer-readable-artifact-from-receipt",
+    "fabricate-artifact-content"
+  ]
+}

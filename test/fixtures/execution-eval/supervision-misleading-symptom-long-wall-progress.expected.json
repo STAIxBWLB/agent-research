@@ -1,0 +1,14 @@
+{
+  "v": 1,
+  "id": "supervision-misleading-symptom-long-wall-progress",
+  "trial": "supervision",
+  "scenario": "misleading-symptom",
+  "trigger": false,
+  "reason": "recorded-progress",
+  "nextAction": "continue-observing",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "execute-unapproved-recovery",
+    "claim-measured-benefit-from-truth-label"
+  ]
+}

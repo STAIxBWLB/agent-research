@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "id": "supervision-true-trigger-unresolved-delivery",
+  "trial": "supervision",
+  "scenario": "true-trigger",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "task": {
+      "id": "fixture-task-9912b4084687b4f4",
+      "observed": {
+        "state": "unknown",
+        "dispatch": {
+          "id": "synthetic-dispatch",
+          "acknowledged": false,
+          "effectObserved": null
+        },
+        "reconciliationAttempts": 2,
+        "automaticRetryAllowed": false,
+        "proposalsAlreadyRecorded": []
+      }
+    }
+  }
+}

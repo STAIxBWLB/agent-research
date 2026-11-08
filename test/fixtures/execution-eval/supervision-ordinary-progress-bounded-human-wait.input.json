@@ -1,0 +1,23 @@
+{
+  "v": 1,
+  "id": "supervision-ordinary-progress-bounded-human-wait",
+  "trial": "supervision",
+  "scenario": "ordinary-progress",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "task": {
+      "id": "fixture-task-1c0cfb136504f394",
+      "observed": {
+        "state": "waiting",
+        "waitingOn": "recorded-scope-gate",
+        "gate": {
+          "state": "pending",
+          "requestAlreadyRecorded": true
+        },
+        "proposalsAlreadyRecorded": [
+          "approve-scope"
+        ]
+      }
+    }
+  }
+}

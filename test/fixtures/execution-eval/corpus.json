@@ -1,0 +1,257 @@
+{
+  "v": 1,
+  "cases": [
+    {
+      "id": "diagnose-stale-head-old-card",
+      "trial": "diagnose",
+      "scenario": "stale-head",
+      "input": "test/fixtures/execution-eval/diagnose-stale-head-old-card.input.json",
+      "expected": "test/fixtures/execution-eval/diagnose-stale-head-old-card.expected.json"
+    },
+    {
+      "id": "diagnose-stale-head-changed-selection",
+      "trial": "diagnose",
+      "scenario": "stale-head",
+      "input": "test/fixtures/execution-eval/diagnose-stale-head-changed-selection.input.json",
+      "expected": "test/fixtures/execution-eval/diagnose-stale-head-changed-selection.expected.json"
+    },
+    {
+      "id": "diagnose-missing-artifact-lost-file",
+      "trial": "diagnose",
+      "scenario": "missing-artifact",
+      "input": "test/fixtures/execution-eval/diagnose-missing-artifact-lost-file.input.json",
+      "expected": "test/fixtures/execution-eval/diagnose-missing-artifact-lost-file.expected.json"
+    },
+    {
+      "id": "diagnose-missing-artifact-pruned-file",
+      "trial": "diagnose",
+      "scenario": "missing-artifact",
+      "input": "test/fixtures/execution-eval/diagnose-missing-artifact-pruned-file.input.json",
+      "expected": "test/fixtures/execution-eval/diagnose-missing-artifact-pruned-file.expected.json"
+    },
+    {
+      "id": "diagnose-retry-terminal-child",
+      "trial": "diagnose",
+      "scenario": "retry",
+      "input": "test/fixtures/execution-eval/diagnose-retry-terminal-child.input.json",
+      "expected": "test/fixtures/execution-eval/diagnose-retry-terminal-child.expected.json"
+    },
+    {
+      "id": "diagnose-retry-active-child",
+      "trial": "diagnose",
+      "scenario": "retry",
+      "input": "test/fixtures/execution-eval/diagnose-retry-active-child.input.json",
+      "expected": "test/fixtures/execution-eval/diagnose-retry-active-child.expected.json"
+    },
+    {
+      "id": "diagnose-uncertain-delivery-lost-ack",
+      "trial": "diagnose",
+      "scenario": "uncertain-delivery",
+      "input": "test/fixtures/execution-eval/diagnose-uncertain-delivery-lost-ack.input.json",
+      "expected": "test/fixtures/execution-eval/diagnose-uncertain-delivery-lost-ack.expected.json"
+    },
+    {
+      "id": "diagnose-uncertain-delivery-ended-connection",
+      "trial": "diagnose",
+      "scenario": "uncertain-delivery",
+      "input": "test/fixtures/execution-eval/diagnose-uncertain-delivery-ended-connection.input.json",
+      "expected": "test/fixtures/execution-eval/diagnose-uncertain-delivery-ended-connection.expected.json"
+    },
+    {
+      "id": "diagnose-privacy-gap-withheld-source",
+      "trial": "diagnose",
+      "scenario": "privacy-gap",
+      "input": "test/fixtures/execution-eval/diagnose-privacy-gap-withheld-source.input.json",
+      "expected": "test/fixtures/execution-eval/diagnose-privacy-gap-withheld-source.expected.json"
+    },
+    {
+      "id": "diagnose-privacy-gap-partial-summary",
+      "trial": "diagnose",
+      "scenario": "privacy-gap",
+      "input": "test/fixtures/execution-eval/diagnose-privacy-gap-partial-summary.input.json",
+      "expected": "test/fixtures/execution-eval/diagnose-privacy-gap-partial-summary.expected.json"
+    },
+    {
+      "id": "diagnose-corrupt-source-truncated-json",
+      "trial": "diagnose",
+      "scenario": "corrupt-source",
+      "input": "test/fixtures/execution-eval/diagnose-corrupt-source-truncated-json.input.json",
+      "expected": "test/fixtures/execution-eval/diagnose-corrupt-source-truncated-json.expected.json"
+    },
+    {
+      "id": "diagnose-corrupt-source-unsupported-version",
+      "trial": "diagnose",
+      "scenario": "corrupt-source",
+      "input": "test/fixtures/execution-eval/diagnose-corrupt-source-unsupported-version.input.json",
+      "expected": "test/fixtures/execution-eval/diagnose-corrupt-source-unsupported-version.expected.json"
+    },
+    {
+      "id": "reuse-local-stage-edit-first-variant",
+      "trial": "reuse",
+      "scenario": "local-stage-edit",
+      "input": "test/fixtures/execution-eval/reuse-local-stage-edit-first-variant.input.json",
+      "expected": "test/fixtures/execution-eval/reuse-local-stage-edit-first-variant.expected.json"
+    },
+    {
+      "id": "reuse-local-stage-edit-second-variant",
+      "trial": "reuse",
+      "scenario": "local-stage-edit",
+      "input": "test/fixtures/execution-eval/reuse-local-stage-edit-second-variant.input.json",
+      "expected": "test/fixtures/execution-eval/reuse-local-stage-edit-second-variant.expected.json"
+    },
+    {
+      "id": "reuse-global-code-change-first-variant",
+      "trial": "reuse",
+      "scenario": "global-code-change",
+      "input": "test/fixtures/execution-eval/reuse-global-code-change-first-variant.input.json",
+      "expected": "test/fixtures/execution-eval/reuse-global-code-change-first-variant.expected.json"
+    },
+    {
+      "id": "reuse-global-code-change-second-variant",
+      "trial": "reuse",
+      "scenario": "global-code-change",
+      "input": "test/fixtures/execution-eval/reuse-global-code-change-second-variant.input.json",
+      "expected": "test/fixtures/execution-eval/reuse-global-code-change-second-variant.expected.json"
+    },
+    {
+      "id": "reuse-no-hit-first-variant",
+      "trial": "reuse",
+      "scenario": "no-hit",
+      "input": "test/fixtures/execution-eval/reuse-no-hit-first-variant.input.json",
+      "expected": "test/fixtures/execution-eval/reuse-no-hit-first-variant.expected.json"
+    },
+    {
+      "id": "reuse-no-hit-second-variant",
+      "trial": "reuse",
+      "scenario": "no-hit",
+      "input": "test/fixtures/execution-eval/reuse-no-hit-second-variant.input.json",
+      "expected": "test/fixtures/execution-eval/reuse-no-hit-second-variant.expected.json"
+    },
+    {
+      "id": "reuse-corrupt-artifact-first-variant",
+      "trial": "reuse",
+      "scenario": "corrupt-artifact",
+      "input": "test/fixtures/execution-eval/reuse-corrupt-artifact-first-variant.input.json",
+      "expected": "test/fixtures/execution-eval/reuse-corrupt-artifact-first-variant.expected.json"
+    },
+    {
+      "id": "reuse-corrupt-artifact-second-variant",
+      "trial": "reuse",
+      "scenario": "corrupt-artifact",
+      "input": "test/fixtures/execution-eval/reuse-corrupt-artifact-second-variant.input.json",
+      "expected": "test/fixtures/execution-eval/reuse-corrupt-artifact-second-variant.expected.json"
+    },
+    {
+      "id": "reuse-pruned-artifact-first-variant",
+      "trial": "reuse",
+      "scenario": "pruned-artifact",
+      "input": "test/fixtures/execution-eval/reuse-pruned-artifact-first-variant.input.json",
+      "expected": "test/fixtures/execution-eval/reuse-pruned-artifact-first-variant.expected.json"
+    },
+    {
+      "id": "reuse-pruned-artifact-second-variant",
+      "trial": "reuse",
+      "scenario": "pruned-artifact",
+      "input": "test/fixtures/execution-eval/reuse-pruned-artifact-second-variant.input.json",
+      "expected": "test/fixtures/execution-eval/reuse-pruned-artifact-second-variant.expected.json"
+    },
+    {
+      "id": "reuse-interrupted-source-first-variant",
+      "trial": "reuse",
+      "scenario": "interrupted-source",
+      "input": "test/fixtures/execution-eval/reuse-interrupted-source-first-variant.input.json",
+      "expected": "test/fixtures/execution-eval/reuse-interrupted-source-first-variant.expected.json"
+    },
+    {
+      "id": "reuse-interrupted-source-second-variant",
+      "trial": "reuse",
+      "scenario": "interrupted-source",
+      "input": "test/fixtures/execution-eval/reuse-interrupted-source-second-variant.input.json",
+      "expected": "test/fixtures/execution-eval/reuse-interrupted-source-second-variant.expected.json"
+    },
+    {
+      "id": "supervision-ordinary-progress-stage-transition",
+      "trial": "supervision",
+      "scenario": "ordinary-progress",
+      "input": "test/fixtures/execution-eval/supervision-ordinary-progress-stage-transition.input.json",
+      "expected": "test/fixtures/execution-eval/supervision-ordinary-progress-stage-transition.expected.json"
+    },
+    {
+      "id": "supervision-ordinary-progress-bounded-human-wait",
+      "trial": "supervision",
+      "scenario": "ordinary-progress",
+      "input": "test/fixtures/execution-eval/supervision-ordinary-progress-bounded-human-wait.input.json",
+      "expected": "test/fixtures/execution-eval/supervision-ordinary-progress-bounded-human-wait.expected.json"
+    },
+    {
+      "id": "supervision-ordinary-progress-successful-retry",
+      "trial": "supervision",
+      "scenario": "ordinary-progress",
+      "input": "test/fixtures/execution-eval/supervision-ordinary-progress-successful-retry.input.json",
+      "expected": "test/fixtures/execution-eval/supervision-ordinary-progress-successful-retry.expected.json"
+    },
+    {
+      "id": "supervision-ordinary-progress-completed-output",
+      "trial": "supervision",
+      "scenario": "ordinary-progress",
+      "input": "test/fixtures/execution-eval/supervision-ordinary-progress-completed-output.input.json",
+      "expected": "test/fixtures/execution-eval/supervision-ordinary-progress-completed-output.expected.json"
+    },
+    {
+      "id": "supervision-true-trigger-exhausted-retries",
+      "trial": "supervision",
+      "scenario": "true-trigger",
+      "input": "test/fixtures/execution-eval/supervision-true-trigger-exhausted-retries.input.json",
+      "expected": "test/fixtures/execution-eval/supervision-true-trigger-exhausted-retries.expected.json"
+    },
+    {
+      "id": "supervision-true-trigger-conflicting-owner-constraints",
+      "trial": "supervision",
+      "scenario": "true-trigger",
+      "input": "test/fixtures/execution-eval/supervision-true-trigger-conflicting-owner-constraints.input.json",
+      "expected": "test/fixtures/execution-eval/supervision-true-trigger-conflicting-owner-constraints.expected.json"
+    },
+    {
+      "id": "supervision-true-trigger-unresolved-delivery",
+      "trial": "supervision",
+      "scenario": "true-trigger",
+      "input": "test/fixtures/execution-eval/supervision-true-trigger-unresolved-delivery.input.json",
+      "expected": "test/fixtures/execution-eval/supervision-true-trigger-unresolved-delivery.expected.json"
+    },
+    {
+      "id": "supervision-true-trigger-exhausted-budget",
+      "trial": "supervision",
+      "scenario": "true-trigger",
+      "input": "test/fixtures/execution-eval/supervision-true-trigger-exhausted-budget.input.json",
+      "expected": "test/fixtures/execution-eval/supervision-true-trigger-exhausted-budget.expected.json"
+    },
+    {
+      "id": "supervision-misleading-symptom-long-wall-progress",
+      "trial": "supervision",
+      "scenario": "misleading-symptom",
+      "input": "test/fixtures/execution-eval/supervision-misleading-symptom-long-wall-progress.input.json",
+      "expected": "test/fixtures/execution-eval/supervision-misleading-symptom-long-wall-progress.expected.json"
+    },
+    {
+      "id": "supervision-misleading-symptom-rate-limit-scheduled",
+      "trial": "supervision",
+      "scenario": "misleading-symptom",
+      "input": "test/fixtures/execution-eval/supervision-misleading-symptom-rate-limit-scheduled.input.json",
+      "expected": "test/fixtures/execution-eval/supervision-misleading-symptom-rate-limit-scheduled.expected.json"
+    },
+    {
+      "id": "supervision-misleading-symptom-worker-absent-external-active",
+      "trial": "supervision",
+      "scenario": "misleading-symptom",
+      "input": "test/fixtures/execution-eval/supervision-misleading-symptom-worker-absent-external-active.input.json",
+      "expected": "test/fixtures/execution-eval/supervision-misleading-symptom-worker-absent-external-active.expected.json"
+    },
+    {
+      "id": "supervision-misleading-symptom-artifact-not-yet-due",
+      "trial": "supervision",
+      "scenario": "misleading-symptom",
+      "input": "test/fixtures/execution-eval/supervision-misleading-symptom-artifact-not-yet-due.input.json",
+      "expected": "test/fixtures/execution-eval/supervision-misleading-symptom-artifact-not-yet-due.expected.json"
+    }
+  ]
+}

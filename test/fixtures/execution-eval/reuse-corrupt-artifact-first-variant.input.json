@@ -1,0 +1,99 @@
+{
+  "v": 1,
+  "id": "reuse-corrupt-artifact-first-variant",
+  "trial": "reuse",
+  "scenario": "corrupt-artifact",
+  "input": {
+    "request": "Run the stated deterministic workload fresh; separately classify any source reuse prerequisites without executing reuse.",
+    "workload": {
+      "values": [
+        2,
+        5,
+        8
+      ],
+      "seeds": [
+        3,
+        11,
+        19
+      ],
+      "stages": [
+        {
+          "id": "prepare",
+          "operation": "sum-input-plus-seed"
+        },
+        {
+          "id": "transform",
+          "operation": "multiply-plus-offset",
+          "multiplier": 2,
+          "offset": 1
+        },
+        {
+          "id": "evaluate",
+          "operation": "square-plus-seed"
+        }
+      ]
+    },
+    "currentContext": {
+      "globalCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
+      "method": "synthetic-integer-pipeline-v1",
+      "executorClass": "synthetic-local"
+    },
+    "source": {
+      "attemptId": "75567cbbbbc4fc1b",
+      "status": "succeeded",
+      "globalCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
+      "method": "synthetic-integer-pipeline-v1",
+      "executorClass": "synthetic-local",
+      "workload": {
+        "values": [
+          2,
+          5,
+          8
+        ],
+        "seeds": [
+          3,
+          11,
+          19
+        ],
+        "stages": [
+          {
+            "id": "prepare",
+            "operation": "sum-input-plus-seed"
+          },
+          {
+            "id": "transform",
+            "operation": "multiply-plus-offset",
+            "multiplier": 2,
+            "offset": 1
+          },
+          {
+            "id": "evaluate",
+            "operation": "square-plus-seed"
+          }
+        ]
+      },
+      "artifact": {
+        "present": true,
+        "payload": {
+          "stages": [
+            {
+              "id": "prepare",
+              "content": "Synthetic cached bytes fixture-object-2b73e2c09c858778"
+            },
+            {
+              "id": "transform",
+              "content": "Synthetic cached bytes fixture-object-0e32db866c02392f"
+            },
+            {
+              "id": "evaluate",
+              "content": "Synthetic cached bytes fixture-object-b1014bac043254c5"
+            }
+          ]
+        },
+        "digest": "263deaec4398de08f9e9b81ed8c0d4f6f40df9fd0b20a861c3dae50f33371b89",
+        "digestRule": "sha256(canonical JSON: recursively sorted object keys, preserved array order, UTF-8, no whitespace)"
+      }
+    },
+    "requiredAcceptance": "fresh-final"
+  }
+}

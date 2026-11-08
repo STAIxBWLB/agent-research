@@ -1,0 +1,39 @@
+{
+  "v": 1,
+  "id": "diagnose-stale-head-changed-selection",
+  "trial": "diagnose",
+  "scenario": "stale-head",
+  "input": {
+    "request": "Identify the artifact-producing attempt and safe next action from these records.",
+    "study": {
+      "id": "fixture-study-8180e32e6bf919e2",
+      "selectedHead": "733720dc85c2f3ff84cb5e6818d2f61223495c95"
+    },
+    "attempts": [
+      {
+        "id": "356711593697b794",
+        "commit": "6f36ef667c8fceceafd464be6c516a399a6eb3f0",
+        "status": "succeeded",
+        "run": "investigate"
+      }
+    ],
+    "artifact": {
+      "producerAttemptId": "356711593697b794",
+      "commit": "6f36ef667c8fceceafd464be6c516a399a6eb3f0",
+      "present": true,
+      "digest": "c4793fb94443793eb32e1128b2d4d2cb4c20bed467a6929ec09f78cb87af21a1"
+    },
+    "events": [
+      {
+        "type": "selection.set",
+        "commit": "733720dc85c2f3ff84cb5e6818d2f61223495c95"
+      },
+      {
+        "type": "artifact.recorded",
+        "attemptId": "356711593697b794",
+        "commit": "6f36ef667c8fceceafd464be6c516a399a6eb3f0"
+      }
+    ],
+    "surface": "the comparison names an old frozen commit"
+  }
+}

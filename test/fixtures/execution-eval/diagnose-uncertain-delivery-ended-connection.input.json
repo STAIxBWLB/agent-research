@@ -1,0 +1,31 @@
+{
+  "v": 1,
+  "id": "diagnose-uncertain-delivery-ended-connection",
+  "trial": "diagnose",
+  "scenario": "uncertain-delivery",
+  "input": {
+    "request": "Choose a safe next action when dispatch acknowledgement is inconclusive.",
+    "study": {
+      "id": "fixture-study-9ed8f2356de1cb9f",
+      "selectedHead": "111396518738ba6f77b67b04413b3a48fb395576"
+    },
+    "attempts": [
+      {
+        "id": "da5e4d54b248d1d4",
+        "commit": "111396518738ba6f77b67b04413b3a48fb395576",
+        "status": "unknown",
+        "dispatchId": "synthetic-dispatch-1"
+      }
+    ],
+    "delivery": {
+      "acknowledged": false,
+      "effectObserved": null,
+      "lastTransportState": "connection-ended"
+    },
+    "artifact": {
+      "producerAttemptId": "da5e4d54b248d1d4",
+      "present": false
+    },
+    "retryRequests": 0
+  }
+}
