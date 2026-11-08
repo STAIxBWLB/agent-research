@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Executor-local inputs (#93): optional protocol inputs bind named manifest hashes and read-only stage mounts while keeping network none and existing output limits. The executor hash CLI/MCP command streams regular files through Python3 without downloading or copying input data. Attempts keep path-free input identities and verified hashes; export keeps names/hashes only. Locator changes preserve approval, identity changes stale it; restart requires matching current input identities. No-input protocol hashes/design bindings and old studies remain unchanged; older readers refuse the optional inputs field. Python3 is required and reported by executor check only for input protocols.
+
 ## [0.2.1] - 2026-11-08
 
 - Fix release clean-install smoke to compare installed schema versions with the checkout's FORMAT_VERSIONS, including study v2; an offline regression runs in the ordinary check (#88).

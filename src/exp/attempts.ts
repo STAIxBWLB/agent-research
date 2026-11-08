@@ -7,13 +7,13 @@ import { join, posix } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, requireExperiment, requireGate, sha256, withLock, type Actor, type PendingEvent } from "../study.ts";
-import { designBinding, protocolHash, readDesign, type Protocol } from "./protocol.ts";
-import { buildContainerArgs, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
+import { designBinding, sameProtocolInputs, frozenProtocol, validateStoredProtocol, protocolHash, readProtocol, readDesign, type Protocol } from "./protocol.ts";
+import { buildContainerArgs, validateContainerInputSources, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
 import { resolveSnapshot, transferSnapshot, transferTask } from "./snapshot.ts";
 import { collectEvaluation as defaultEvaluationCollector, collectStageEvidence as defaultStageCollector, EvidenceError, MetricsError, outputBudget, type StageEvidence } from "./metrics.ts";
 
 export type AttemptStatus = "running" | "succeeded" | "failed" | "cancelled" | "unknown";
-export interface AttemptStage { image: string; argv: string[]; mounts: { target: string; readOnly: boolean }[]; network: "none"; limits: Protocol["limits"]; user: string; containerId?: string; startedAt: string; endedAt?: string; exitCode?: number; evidence?: StageEvidence; evidenceError?: { reason: string; message: string } }
+export interface AttemptStage { image: string; argv: string[]; mounts: { target: string; readOnly: boolean }[]; network: "none"; limits: Protocol["limits"]; user: string; containerId?: string; startedAt: string; endedAt?: string; exitCode?: number; evidence?: StageEvidence; evidenceError?: { reason: string; message: string }; launchPending?: true }
 export interface Evaluation { metrics: { name: string; unit: string; value: number; provenance: "ares-observed" }[]; outputs: { path: string; sha256: string; bytes: number }[] }
 export interface Attempt {
   v: 1; id: string; studyId: string; run: string; protocolHash: string; sealBinding: string; commit: string; treeId: string; snapshotSha256?: string; seed: number; label: string; retryOf?: string;
@@ -21,6 +21,7 @@ export interface Attempt {
   stages: Partial<Record<Stage, AttemptStage>>; metrics: Evaluation["metrics"]; outputs: Evaluation["outputs"];
   sealing: { separateContainers: boolean; evaluatorReadOnly: boolean; candidateHasNoEvaluator: boolean; verifiedBy: "ares-observed" };
   launching?: { pid: number; host: string; token: string; claimedAt: string; expiresAt: string };
+  verifiedInputs?: Record<string, string>;
   pendingAutoApproval?: string;
   finalBinding?: string; finalWinner?: string; pendingFinalApproval?: string;
 }
@@ -80,6 +81,11 @@ export function validateAttemptRecord(raw: unknown, run: string, wanted: string)
   runName(run); id(wanted);
       if (plain(raw) && (raw.v !== 1 || (typeof raw.status === "string" && !STATUSES.includes(raw.status as AttemptStatus)) || (typeof raw.stage === "string" && !["candidate", "evaluator"].includes(raw.stage)))) throw new Error("attempt record: unsupported schema version, status or stage; use an ares version that supports this record, keeping the original file unchanged");
       if (!plain(raw) || raw.v !== 1 || raw.run !== run || raw.id !== wanted || !STATUSES.includes(raw.status as AttemptStatus) || !["candidate", "evaluator"].includes(raw.stage as string) || !plain(raw.stages) || !plain(raw.protocol) || !plain(raw.executor) || typeof raw.startedAt !== "string" || !Number.isFinite(Date.parse(raw.startedAt))) throw new Error("attempt record: malformed; restore its last valid version before retrying");
+  if (Object.hasOwn(raw.protocol, "inputs")) {
+    const protocol = validateStoredProtocol(raw.protocol);
+    const expected = Object.entries(protocol.inputs ?? {}), verified = raw.verifiedInputs;
+    if (!plain(verified) || Object.keys(verified).length !== expected.length || expected.some(([name, input]) => verified[name] !== input.sha256)) throw new Error("attempt inputs: verified hashes do not match the frozen input identities; restore the last valid attempt record before retrying");
+  }
   return raw as unknown as Attempt;
 }
 function load(dir: string): Attempt[] { return [...records(dir)]; }
@@ -212,22 +218,46 @@ async function command(attempt: Attempt, step: string, executable: string, args:
     return result;
   } catch { throw hostError(attempt, step); }
 }
+/** Locators are transient and never copied to an attempt or a second store. */
+function executionProtocol(dir: string, attempt: Attempt): Protocol {
+  if (!Object.keys(attempt.protocol.inputs ?? {}).length) return attempt.protocol;
+  let current: Protocol | undefined;
+  try { current = readProtocol(dir); } catch { /* Return safe recovery guidance rather than private parser details. */ }
+  if (!current || !sameProtocolInputs(current, attempt.protocol)) throw new InputVerificationError("attempt inputs: current design identities differ from the frozen attempt; restore the matching input names, hashes and mounts in design/protocol.json before reconciling or retrying");
+  return { ...attempt.protocol, inputs: current.inputs };
+}
 function stageRecord(attempt: Attempt, stage: Stage, user: string, ctx: AttemptContext): AttemptStage {
-  return { image: attempt.protocol[stage].image, argv: attempt.protocol[stage].command, mounts: stage === "candidate" ? [{ target: "/workspace", readOnly: true }, { target: "/out", readOnly: false }] : [{ target: "/eval", readOnly: true }, { target: "/candidate", readOnly: true }, { target: "/result", readOnly: false }], network: "none", limits: attempt.protocol.limits, user, startedAt: at(ctx) };
+  return { image: attempt.protocol[stage].image, argv: attempt.protocol[stage].command, mounts: [...(stage === "candidate" ? [{ target: "/workspace", readOnly: true }, { target: "/out", readOnly: false }] : [{ target: "/eval", readOnly: true }, { target: "/candidate", readOnly: true }, { target: "/result", readOnly: false }]), ...Object.values(attempt.protocol.inputs ?? {}).flatMap(input => input.mount[stage] ? [{ target: input.mount[stage]!, readOnly: true }] : [])], network: "none", limits: attempt.protocol.limits, user, startedAt: at(ctx) };
 }
 
 /** Validate observed container settings before describing its sealing as ares-observed. */
-function observed(raw: unknown, attempt: Attempt): { id: string; running: boolean; exitCode: number; finishedAt?: string; startedAt?: string } {
+function observed(raw: unknown, attempt: Attempt, protocol: Protocol, ownershipOnly = false): { id: string; running: boolean; exitCode: number; finishedAt?: string; startedAt?: string } {
   const value = Array.isArray(raw) && raw.length === 1 ? raw[0] : undefined;
   if (!plain(value) || typeof value.Id !== "string" || !/^[a-f0-9]{64}$/.test(value.Id) || !plain(value.State) || typeof value.State.Running !== "boolean" || !Number.isSafeInteger(value.State.ExitCode) || !plain(value.Config) || !plain(value.HostConfig) || !Array.isArray(value.Mounts)) throw hostError(attempt, "container inspection");
   const expected = attempt.stages[attempt.stage]!, config = value.Config, settings = value.HostConfig;
+  if (ownershipOnly) {
+    if (!plain(config.Labels) || config.Labels["ares.study"] !== attempt.studyId || config.Labels["ares.attempt"] !== attempt.id || config.Labels["ares.stage"] !== attempt.stage || (expected.containerId && value.Id !== expected.containerId)) throw hostError(attempt, "container ownership verification");
+    const finishedAt = typeof value.State.FinishedAt === "string" && Number.isFinite(Date.parse(value.State.FinishedAt)) ? value.State.FinishedAt : undefined;
+    const startedAt = typeof value.State.StartedAt === "string" && Number.isFinite(Date.parse(value.State.StartedAt)) ? value.State.StartedAt : undefined;
+    return { id: value.Id, running: value.State.Running, exitCode: value.State.ExitCode as number, ...(finishedAt ? { finishedAt } : {}), ...(startedAt ? { startedAt } : {}) };
+  }
   const mounts = attempt.stage === "candidate" ? [[attempt.paths.snapshot, "/workspace", false], [attempt.paths.output, "/out", true]] : [[attempt.paths.evaluator, "/eval", false], [attempt.paths.output, "/candidate", false], [attempt.paths.result, "/result", true]];
   const bindMounts = value.Mounts.filter(m => !(plain(m) && m.Type === "tmpfs" && m.Destination === "/tmp"));
+  // Input content was verified at launch. A locator relocation must not invalidate an in-flight mount.
+  const inputs = Object.values(protocol.inputs ?? {}), visible = inputs.filter(input => input.mount[attempt.stage] !== undefined);
+  const privateInputs = inputs.filter(input => input.mount[attempt.stage] === undefined);
+  const workspace = Object.values(attempt.paths);
+  const inputMountsValid = visible.every(input => {
+    const mount = bindMounts.find(m => plain(m) && m.Destination === input.mount[attempt.stage]);
+    if (!plain(mount) || mount.Type !== "bind" || mount.RW !== false || typeof mount.Source !== "string" || !mount.Source.startsWith("/") || /[\0\r\n,"]/.test(mount.Source)) return false;
+    const source = mount.Source;
+    return !workspace.some(path => executionPathsOverlap(source, path)) && !privateInputs.some(other => executionPathsOverlap(source, other.path!));
+  });
   const devices = settings.DeviceRequests;
   const gpuMatches = expected.limits.gpus === 0 ? devices === null || devices === undefined || (Array.isArray(devices) && devices.length === 0) : Array.isArray(devices) && devices.length === 1 && plain(devices[0]) && devices[0].Count === expected.limits.gpus && Array.isArray(devices[0].Capabilities) && devices[0].Capabilities.some(c => Array.isArray(c) && c.includes("gpu"));
   if (!gpuMatches) throw hostError(attempt, "GPU limit verification");
   if (config.Seed !== `ARES_SEED=${attempt.seed}`) throw hostError(attempt, "selected seed verification");
-  if (config.Image !== expected.image || config.User !== expected.user || JSON.stringify(config.Cmd) !== JSON.stringify(expected.argv) || !plain(config.Labels) || config.Labels["ares.study"] !== attempt.studyId || config.Labels["ares.attempt"] !== attempt.id || config.Labels["ares.stage"] !== attempt.stage || settings.NetworkMode !== "none" || settings.ReadonlyRootfs !== true || !Array.isArray(settings.CapDrop) || !settings.CapDrop.some(c => c === "ALL" || c === "all") || !Array.isArray(settings.SecurityOpt) || !settings.SecurityOpt.includes("no-new-privileges") || !plain(settings.Tmpfs) || !("/tmp" in settings.Tmpfs) || settings.Memory !== expected.limits.memoryMb * 1024 * 1024 || settings.PidsLimit !== expected.limits.pidsLimit || settings.NanoCpus !== Math.round(expected.limits.cpus * 1e9) || bindMounts.length !== mounts.length || !mounts.every(([source, target, writable]) => bindMounts.some(m => plain(m) && m.Type === "bind" && m.Source === source && m.Destination === target && m.RW === writable))) throw hostError(attempt, "container isolation verification");
+  if (config.Image !== expected.image || config.User !== expected.user || JSON.stringify(config.Cmd) !== JSON.stringify(expected.argv) || !plain(config.Labels) || config.Labels["ares.study"] !== attempt.studyId || config.Labels["ares.attempt"] !== attempt.id || config.Labels["ares.stage"] !== attempt.stage || settings.NetworkMode !== "none" || settings.ReadonlyRootfs !== true || !Array.isArray(settings.CapDrop) || !settings.CapDrop.some(c => c === "ALL" || c === "all") || !Array.isArray(settings.SecurityOpt) || !settings.SecurityOpt.includes("no-new-privileges") || !plain(settings.Tmpfs) || !("/tmp" in settings.Tmpfs) || settings.Memory !== expected.limits.memoryMb * 1024 * 1024 || settings.PidsLimit !== expected.limits.pidsLimit || settings.NanoCpus !== Math.round(expected.limits.cpus * 1e9) || (!inputMountsValid || bindMounts.length !== mounts.length + visible.length) || !mounts.every(([source, target, writable]) => bindMounts.some(m => plain(m) && m.Type === "bind" && m.Source === source && m.Destination === target && m.RW === writable))) throw hostError(attempt, "container isolation verification");
   if (expected.containerId && value.Id !== expected.containerId) throw hostError(attempt, "container identity verification");
   const finishedAt = typeof value.State.FinishedAt === "string" && Number.isFinite(Date.parse(value.State.FinishedAt)) ? value.State.FinishedAt : undefined;
   const startedAt = typeof value.State.StartedAt === "string" && Number.isFinite(Date.parse(value.State.StartedAt)) ? value.State.StartedAt : undefined;
@@ -265,7 +295,8 @@ async function recordVerifiedStage(dir: string, attempt: Attempt, state: Observe
     return event;
   }, approvals);
 }
-async function inspect(attempt: Attempt, ctx: AttemptContext) {
+async function inspect(dir: string, attempt: Attempt, ctx: AttemptContext, ownershipOnly = false) {
+  const protocol = ownershipOnly ? attempt.protocol : executionProtocol(dir, attempt);
   let result;
   try { result = await runOnExecutor(attempt.executor, "docker", ["inspect", "--format", INSPECT_FORMAT, containerName(attempt.id, attempt.stage)], ctx.runner ?? spawnRunner, { maxOutputBytes: ATTEMPT_BYTES }); }
   catch { throw hostError(attempt, "container inspection"); }
@@ -278,24 +309,40 @@ async function inspect(attempt: Attempt, ctx: AttemptContext) {
   }
   if (result.exitCode !== 0) throw hostError(attempt, "container inspection");
   let raw: unknown; try { raw = JSON.parse(result.stdout); } catch { throw hostError(attempt, "container inspection"); }
-  return observed(raw, attempt);
+  return observed(raw, attempt, protocol, ownershipOnly);
 }
-async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptContext): Promise<Attempt> {
+/** Caller holds a fresh control fence; potentially long input hashing has already completed. */
+async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptContext, verifiedProtocol?: Protocol): Promise<Attempt> {
+  let args: string[];
+  try {
+    const currentProtocol = executionProtocol(dir, attempt), protocol = verifiedProtocol ?? currentProtocol;
+    if (!sameProtocolInputs(currentProtocol, protocol)) throw new InputVerificationError("attempt inputs: identities changed after verification; restore the frozen input identities and retry ares attempt reconcile <dir>");
+    // Keep configuration refusals outside the uncertain container-start catch.
+    args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths });
+  } catch (error) {
+    if (error instanceof InputVerificationError) await update(dir, attempt.id, ctx, current => {
+      if (current.status !== "running" || current.stage !== attempt.stage || current.stages[current.stage]?.containerId || current.launching?.token !== attempt.launching?.token) return undefined;
+      const stage = current.stages[current.stage]!;
+      if (stage.launchPending && !current.launching) return undefined;
+      stage.launchPending = true; delete current.launching;
+      return "attempt.input-unavailable";
+    });
+    throw error;
+  }
   let startedId: string | undefined;
   try {
-    const args = buildContainerArgs({ protocol: attempt.protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths });
     const result = await command(attempt, "container start", "docker", args, ctx), cid = result.stdout.trim();
     if (!/^[a-f0-9]{64}$/.test(cid)) throw hostError(attempt, "container start");
     startedId = cid;
     attempt.stages[attempt.stage]!.containerId = cid;
     await startWatchdog(attempt.executor, attempt.id, attempt.stage, attempt.protocol.limits.wallSeconds, ctx.runner ?? spawnRunner, cid);
-    const state = await inspect(attempt, ctx); if (!state) throw hostError(attempt, "container start verification");
+    const state = await inspect(dir, attempt, ctx); if (!state) throw hostError(attempt, "container start verification");
     return recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.started");
   } catch {
     if (!startedId) {
       try {
         // A lost response is not proof that Docker rejected the start. Adopt only a verified owned container.
-        const state = await inspect(attempt, ctx);
+        const state = await inspect(dir, attempt, ctx);
         if (state) {
           if (state.running) await startWatchdog(attempt.executor, attempt.id, attempt.stage, attempt.protocol.limits.wallSeconds, ctx.runner ?? spawnRunner, state.id);
           return recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered");
@@ -349,6 +396,10 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   const snapshot = await resolveSnapshot(options.repo, options.commit, ctx.runner ?? spawnRunner), hash = protocolHash(protocol);
   const wanted = attemptId(hash, snapshot.commit, snapshot.treeId, seed, run, options.retry);
   if (options.expectedId !== undefined && wanted !== options.expectedId) throw new Error("attempt identity: changed since plan intent; reconcile the plan node before retrying");
+  const inputRoot = posix.join(executor.workdir, study.id, wanted);
+  validateContainerInputSources(protocol, { snapshot: posix.join(inputRoot, "snapshot"), output: posix.join(inputRoot, "output"), evaluator: posix.join(inputRoot, "task", "evaluator"), result: posix.join(inputRoot, "result") });
+  const existing = await withLock(dir, () => load(dir).some(a => a.id === wanted));
+  const verifiedInputs = !existing && protocol.inputs !== undefined ? await verifyExecutorInputs(executor, protocol, ctx.runner ?? spawnRunner) : undefined;
   let created = false;
   let attempt = await withLock(dir, () => {
     requireCopilotAccept(dir, "hypotheses");
@@ -361,7 +412,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     const binding = designBinding(dir), approval = requireGate(dir, openStudy(dir).study, "design", () => binding);
     enforceBudget(protocol, attempts, now(ctx));
     const root = posix.join(executor.workdir, study.id, wanted);
-    const record: Attempt = { v: 1, id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, protocol, paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };
+    const record: Attempt = { v: 1, id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, protocol: frozenProtocol(protocol), ...(verifiedInputs !== undefined ? { verifiedInputs } : {}), paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };
     if (approval.length) record.pendingAutoApproval = binding!;
     if (finalAuthorization) { record.finalBinding = finalAuthorization.binding; record.finalWinner = finalAuthorization.winner; if (finalAuthorization.auto) record.pendingFinalApproval = finalAuthorization.binding; }
     commit(dir, [[file(dir, record), JSON.stringify(record, null, 2) + "\n", ATTEMPT_BYTES]], [{ actor: ctx.actor, type: "attempt.started", data: { id: wanted, run, seed, commit: record.commit, treeId: record.treeId } }]);
@@ -370,7 +421,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   if (created) {
     let preparationStep = "executor check";
     try {
-      const checked = await checkExecutorInputs(attempt.executor, attempt.protocol, ctx.runner ?? spawnRunner);
+      const checked = await checkExecutorInputs(attempt.executor, executionProtocol(dir, attempt), ctx.runner ?? spawnRunner);
       const root = posix.dirname(attempt.paths.snapshot), studyRoot = posix.dirname(root), base = executor.workdir;
       // Require a private, owned, physical root. Attempt mkdir is exclusive, never a shared pre-existing directory.
       const script = `set -eu; umask 077; base=${shellQuote(base)}; test -d "$base"; test ! -L "$base"; test -O "$base"; test "$(cd -P "$base" && pwd -P)" = "$base"; mode=$(stat -c %a "$base" 2>/dev/null || stat -f %Lp "$base"); test "$mode" = 700; study=${shellQuote(studyRoot)}; if test ! -e "$study"; then mkdir -m 700 "$study"; fi; test -d "$study"; test ! -L "$study"; test -O "$study"; mode=$(stat -c %a "$study" 2>/dev/null || stat -f %Lp "$study"); test "$mode" = 700; mkdir -m 700 ${shellQuote(root)}; mkdir -m 700 ${[attempt.paths.snapshot, attempt.paths.output, attempt.paths.result, posix.dirname(attempt.paths.evaluator)].map(shellQuote).join(" ")}`;
@@ -389,9 +440,10 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
       attempt = await withControl(dir, async () => {
         const current = showAttempt(dir, attempt.id);
         if (current.status !== "running" || current.launching?.token !== claim) return current;
-        return launch(dir, current, checked.user, ctx);
+        return launch(dir, current, checked.user, ctx, protocol);
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof InputVerificationError) throw error;
       attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = startupError(current, preparationStep); finish(current, "failed", "preparation", ctx); return "attempt.failed"; });
     }
   }
@@ -407,22 +459,43 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   return attempt;
 }
 
+async function verifyAndLaunchPending(dir: string, pending: Attempt, ctx: AttemptContext): Promise<Attempt | undefined> {
+  const protocol = executionProtocol(dir, pending);
+  validateContainerInputSources(protocol, pending.paths);
+  await verifyExecutorInputs(pending.executor, protocol, ctx.runner ?? spawnRunner);
+  return withControl(dir, async () => {
+    const current = showAttempt(dir, pending.id);
+    if (current.status !== "running" || current.stage !== pending.stage || !current.stages[current.stage]?.launchPending || alive(current, ctx)) return undefined;
+    executionProtocol(dir, current); // Recheck the frozen identities after hashing, under the fresh launch fence.
+    const claimed = await update(dir, current.id, ctx, value => {
+      delete value.stages[value.stage]!.launchPending; value.launching = owner(ctx);
+      return "attempt.stage.retry-intent";
+    });
+    return launch(dir, claimed, claimed.stages[claimed.stage]!.user, ctx, protocol);
+  });
+}
+
 export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Promise<Attempt[]> {
   const dir = studyDir(dirArg);
-  return withControl(dir, async () => {
+  const pending: Attempt[] = [];
+  const changed = await withControl(dir, async () => {
   const changed: Attempt[] = [];
   for (let attempt of load(dir).filter(a => a.status === "running")) {
     if (alive(attempt, ctx)) continue;
     try {
-      let state = await inspect(attempt, ctx);
-      if (!state) { changed.push(await update(dir, attempt.id, ctx, current => { finish(current, "unknown", "lost", ctx); return "attempt.unknown"; })); continue; }
+      let state = await inspect(dir, attempt, ctx);
+      if (!state) {
+        if (attempt.stages[attempt.stage]?.launchPending) pending.push(attempt);
+        else changed.push(await update(dir, attempt.id, ctx, current => { finish(current, "unknown", "lost", ctx); return "attempt.unknown"; }));
+        continue;
+      }
       const recovered = needsReceipt(attempt, state);
       if (recovered) attempt = await recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered");
       const stage = attempt.stages[attempt.stage];
       if (!stage) throw hostError(attempt, "stage record");
       const deadline = Date.parse(stage.startedAt) + stage.limits.wallSeconds * 1000;
       if ((state.running && now(ctx) >= deadline) || (!state.running && state.finishedAt !== undefined && Date.parse(state.finishedAt) >= deadline)) {
-        if (state.running) { await command(attempt, "wall-clock kill", "docker", ["kill", state.id], ctx); const stopped = await inspect(attempt, ctx); if (stopped) state = stopped; }
+        if (state.running) { await command(attempt, "wall-clock kill", "docker", ["kill", state.id], ctx); const stopped = await inspect(dir, attempt, ctx); if (stopped) state = stopped; }
         attempt = await captureStage(dir, attempt, ctx, true);
         const ended = state;
         changed.push(await update(dir, attempt.id, ctx, current => { if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; if (!ended.running) current.stages[current.stage]!.exitCode = ended.exitCode; finish(current, "failed", "wall-clock", ctx); return "attempt.failed"; })); continue;
@@ -442,8 +515,15 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
         })); continue;
       }
       if (attempt.stage === "candidate") {
-        const next = await update(dir, attempt.id, ctx, current => { current.stages.candidate!.exitCode = 0; current.stages.candidate!.endedAt = state.finishedAt ?? at(ctx); current.stage = "evaluator"; current.stages.evaluator = stageRecord(current, "evaluator", stage.user, ctx); current.launching = owner(ctx); return "attempt.stage.changed"; });
-        changed.push(await launch(dir, next, stage.user, ctx));
+        const next = await update(dir, attempt.id, ctx, current => {
+          current.stages.candidate!.exitCode = 0; current.stages.candidate!.endedAt = state.finishedAt ?? at(ctx); current.stage = "evaluator";
+          current.stages.evaluator = stageRecord(current, "evaluator", stage.user, ctx);
+          if (Object.keys(current.protocol.inputs ?? {}).length) { current.stages.evaluator.launchPending = true; delete current.launching; }
+          else current.launching = owner(ctx);
+          return "attempt.stage.changed";
+        });
+        if (next.stages.evaluator?.launchPending) pending.push(next);
+        else changed.push(await launch(dir, next, stage.user, ctx));
       } else {
         let evaluation: Evaluation | undefined, failure: EvidenceError | undefined;
         try { evaluation = await (ctx.collectEvaluation ?? defaultEvaluationCollector)(attempt, ctx.runner ?? spawnRunner); }
@@ -455,13 +535,20 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
           current.metrics = evaluation.metrics; current.outputs = outputBudget([...current.outputs, ...evaluation.outputs]); finish(current, "succeeded", undefined, ctx); return "attempt.succeeded";
         }));
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof InputVerificationError) throw error;
       await update(dir, attempt.id, ctx, current => { delete current.launching; return "attempt.executor-error"; });
       throw hostError(attempt, "reconcile");
     }
   }
   return changed;
   });
+  // No control lock or launch claim is held across a potentially 40-minute manifest pass.
+  for (const attempt of pending) {
+    const launched = await verifyAndLaunchPending(dir, attempt, ctx);
+    if (launched) changed.push(launched);
+  }
+  return changed;
 }
 export async function cancelAttempt(dirArg: string, wanted: string, reason: string | undefined, ctx: AttemptContext, completion?: (attempt: Attempt) => PendingEvent[]): Promise<Attempt> {
   const dir = studyDir(dirArg), why = reason === undefined ? undefined : boundedText(reason, "reason", 500);
@@ -475,14 +562,24 @@ export async function cancelAttempt(dirArg: string, wanted: string, reason: stri
   });
   if (alive(attempt, ctx)) throw new Error("attempt: another startup operation is active; retry cancel when it finishes (abandoned claims expire after 30 minutes)");
   try {
-    let state = await inspect(attempt, ctx);
-    if (state && needsReceipt(attempt, state)) attempt = await recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered", false);
-    if (state?.running) { await command(attempt, "cancel kill", "docker", ["kill", state.id], ctx); state = await inspect(attempt, ctx); }
+    let state = await inspect(dir, attempt, ctx, true);
+    if (state && needsReceipt(attempt, state)) {
+      const owned = state;
+      attempt = await update(dir, attempt.id, ctx, current => {
+        current.stages[current.stage]!.containerId = owned.id;
+        if (owned.startedAt) current.stages[current.stage]!.startedAt = owned.startedAt;
+        delete current.launching;
+        // Ownership permits cancellation; it does not establish isolation or approve any gate.
+        return "attempt.stage.recovered";
+      });
+    }
+    if (state?.running) { await command(attempt, "cancel kill", "docker", ["kill", state.id], ctx); state = await inspect(dir, attempt, ctx, true); }
     if (state) attempt = await captureStage(dir, attempt, ctx, true);
     const ended = state;
     return update(dir, attempt.id, ctx, current => { if (ended && !ended.running) { current.stages[current.stage]!.exitCode = ended.exitCode; if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; } finish(current, "cancelled", why ?? "cancelled", ctx); return "attempt.cancelled"; }, [], completion);
-  } catch {
+  } catch (error) {
     await update(dir, attempt.id, ctx, current => { delete current.launching; return "attempt.executor-error"; });
+    if (error instanceof InputVerificationError) throw error;
     throw hostError(attempt, "cancel");
   }
   });

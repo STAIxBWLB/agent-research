@@ -2,7 +2,7 @@ import { existsSync, lstatSync, opendirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseLedger, plain, readBytesBounded, hashFileBounded, sha256, validateStudy, type LedgerEvent, type Study } from "./study.ts";
 import { validateAttemptRecord, type Attempt } from "./exp/attempts.ts";
-import { TASK_BYTES, TASK_FILES, METRIC_LIMIT, validateProtocol, protocolHash } from "./exp/protocol.ts";
+import { TASK_BYTES, TASK_FILES, METRIC_LIMIT, validateStoredProtocol, protocolHash } from "./exp/protocol.ts";
 import { validateExecutor } from "./exp/executor.ts";
 import { foldIdeas } from "./exp/ideas.ts";
 import { readClosedInvestigation, type CommitResult } from "./exp/investigate.ts";
@@ -427,8 +427,8 @@ export interface LineageComparison {
 function comparisonAttempt(value: Attempt, attempts: Map<string, Attempt>): AttemptComparison {
   if (!HASH.test(value.protocolHash) || !/^[a-f0-9]{40}$/.test(value.treeId) || !Array.isArray(value.metrics) || value.metrics.length > METRIC_LIMIT || value.metrics.some(metric => !plain(metric) || typeof metric.name !== "string" || typeof metric.unit !== "string" || metric.provenance !== "ares-observed" || typeof metric.value !== "number" || !Number.isFinite(metric.value))) fail("malformed-comparison-attempt");
   if (value.snapshotSha256 !== undefined && (typeof value.snapshotSha256 !== "string" || !HASH.test(value.snapshotSha256))) fail("malformed-snapshot-sha256");
-  let protocol: ReturnType<typeof validateProtocol>;
-  try { protocol = validateProtocol(value.protocol); } catch { return fail("malformed-comparison-protocol"); }
+  let protocol: ReturnType<typeof validateStoredProtocol>;
+  try { protocol = validateStoredProtocol(value.protocol); } catch { return fail("malformed-comparison-protocol"); }
   if (protocolHash(protocol) !== value.protocolHash) fail("protocol-hash-mismatch");
   const metricReasons: string[] = [];
   if (new Set(value.metrics.map(metric => metric.name)).size !== value.metrics.length) metricReasons.push("duplicate-metric-names");

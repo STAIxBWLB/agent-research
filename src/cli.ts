@@ -208,6 +208,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       if (!kind || !workdir) throw new Error("executor set: kind/workdir missing; use --kind local|ssh --workdir PATH and --host ALIAS for ssh");
       result = await ops.executorSet(positional[0]!, { v: 1, kind, workdir, ...(str("--host") !== undefined ? { host: str("--host") } : {}) }, ctx); break;
     }
+    case "executor inputs hash": count(spec, positional, 2); result = await ops.executorInputsHash(positional[0]!, positional[1]!, ctx); break;
     case "executor check": count(spec, positional, 1); result = await ops.executorCheck(positional[0]!, ctx); break;
     case "attempt run": {
       count(spec, positional, 1);

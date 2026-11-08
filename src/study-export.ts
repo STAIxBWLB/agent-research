@@ -29,7 +29,7 @@ const LEDGER_KEYS: Record<string, readonly string[]> = {
   "lit.search": ["sources", "added", "merged", "total"], "lit.screen": ["decision"], "lit.card": ["id", "sha256"], "lit.bib": ["entries", "sha256"], "lit.verify": ["verified", "failed"],
   "archive.exported": ["fingerprint"], "skill.proposed": ["skillProposal", "sha256"], "skill.decided": ["skillProposal", "decision"], "watch.set": ["sha256"],
   "plan.set": ["revision", "state", "sha256"], "plan.gates": ["revision"], "plan.paused": ["revision"], "plan.control": ["revision"], "node.observed": ["revision", "status"], "node.intent": ["revision"],
-  "executor.set": ["kind"], "protocol.set": ["sha256", "protocolHash", "treeHash"], "selection.set": ["sha256", "metric"], "final.seeds.set": ["sha256"],
+  "executor.set": ["kind"], "protocol.set": ["sha256", "identitySha256", "protocolHash", "treeHash"], "selection.set": ["sha256", "metric"], "final.seeds.set": ["sha256"],
   "investigate.closed": ["run", "sha256", "ruleSha256", "winner"], "ablate.closed": ["sha256", "investigateSha256"], "final.closed": ["sha256", "status", "investigateSha256"],
   "idea.decided": ["decision"], "paper.built": ["manuscriptSha256", "evidenceSha256", "sourceManuscriptSha256"], "review.added": [], "review.resolved": ["buildSha256"],
   "attempt.started": ["id", "run", "seed", "commit", "treeId"],
@@ -101,6 +101,7 @@ function attemptRow(a: Attempt) {
   return {
     id: a.id, run: a.run, studyIdSha256: sha256(String(a.studyId)), protocolHash: shaped(a.protocolHash, SHA256), sealBinding: shaped(a.sealBinding, SHA256), commit: shaped(a.commit, GIT_ID), treeId: shaped(a.treeId, GIT_ID),
     snapshotSha256: shaped(a.snapshotSha256, SHA256), seed: Number.isSafeInteger(a.seed) ? a.seed : null, labelSha256: sha256(String(a.label ?? "")), retryOf: shaped(a.retryOf, ATTEMPT_ID), status: a.status, stage: a.stage, ...(reason ? { reasonClass: reason } : {}),
+    ...(a.verifiedInputs !== undefined ? { inputs: Object.fromEntries(Object.entries(a.verifiedInputs).map(([name, hash]) => [name, shaped(hash, SHA256)])) } : {}),
     durationMs: duration(a.startedAt, a.endedAt), stages,
     metrics: (Array.isArray(a.metrics) ? a.metrics : []).map(m => ({ name: m.name, unit: m.unit, value: finite(m.value), provenance: m.provenance === "ares-observed" ? "ares-observed" : "other" })),
     outputs: (Array.isArray(a.outputs) ? a.outputs : []).map(o => ({ sha256: shaped(o.sha256, SHA256), bytes: finite(o.bytes) })),

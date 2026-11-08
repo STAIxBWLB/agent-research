@@ -1,6 +1,11 @@
+import { join, resolve } from "node:path";
+import * as ops from "../src/commands.ts";
+import { readProtocol, protocolHash, designBinding, PROTOCOL_BYTES } from "../src/exp/protocol.ts";
+import { readTextBounded, writeAtomic } from "../src/study.ts";
+import { fakeHttp, tempDir } from "./helpers.ts";
 import { expect, test } from "bun:test";
 import { compareManifests, resolveN1, studyFormatCheck, type ManifestLike } from "../scripts/n1-lib.ts";
-import { json, parseArgs, run, spawnFailure, STEPS } from "../scripts/n1-check.ts";
+import { checkN1Protocol, json, parseArgs, run, spawnFailure, STEPS } from "../scripts/n1-check.ts";
 
 test("resolveN1: N-1 is the latest patch of the minor line directly below the checkout core, publication aside", () => {
   expect(resolveN1("0.2.0", ["0.1.0", "0.1.3", "0.2.0"])).toBe("0.1.3");
@@ -109,4 +114,49 @@ test("json: local N-1 and checkout failures name their own step, only npm points
     }
   expect(() => json(failed, "npm view", STEPS.npm)).toThrow("check npm registry access");
   expect(json<{ a: number }>({ code: 0, stdout: '{"a":1}', stderr: "" }, "ok", STEPS.checkout)).toEqual({ a: 1 });
+});
+
+const checkoutRoot = resolve(import.meta.dir, "..");
+function protocolStudy() {
+  const work = tempDir(), dir = join(work, "synthetic n1 study"), ctx = { actor: { kind: "person" as const }, http: fakeHttp([]).http };
+  ops.init(dir, { question: "Synthetic offline N-1 orchestration", mode: "experiment" }, ctx);
+  return { work, dir };
+}
+test("N-1 protocol orchestration creates with the first package and only reads with the second", async () => {
+  const f = protocolStudy(), scripts: string[] = [];
+  // Offline smoke uses this checkout in both roles; the network CI supplies the separately installed N-1 root.
+  const result = await checkN1Protocol(checkoutRoot, checkoutRoot, f.dir, f.work, async (command, args, cwd, timeout) => {
+    expect(command).toBe("bun"); expect(args[0]).toBe("-e"); scripts.push(args[1]!);
+    return run(command, args, cwd, timeout);
+  });
+  expect(scripts).toHaveLength(2);
+  expect(scripts[0]).toContain('await ops.protocol(dir,'); expect(scripts[0]).toContain('await ops.gateDecide(dir,"design","approve"');
+  expect(scripts[1]).not.toContain("await ops.protocol"); expect(scripts[1]).not.toContain("writeAtomic");
+  expect(readProtocol(f.dir)).not.toHaveProperty("inputs");
+  expect(result.protocolHash).toBe(protocolHash(readProtocol(f.dir)!)); expect(result.designBinding).toBe(designBinding(f.dir)!);
+  expect(result.gate).toMatchObject({ state: "approved", current: result.designBinding });
+});
+
+test("N-1 protocol orchestration refuses identity drift or reader byte changes", async () => {
+  for (const shape of ["identity", "bytes"] as const) {
+    const f = protocolStudy(); let calls = 0;
+    await expect(checkN1Protocol(checkoutRoot, checkoutRoot, f.dir, f.work, async (command, args, cwd, timeout) => {
+      const result = await run(command, args, cwd, timeout);
+      if (++calls === 2) {
+        if (shape === "identity") result.stdout = JSON.stringify({ ...JSON.parse(result.stdout), protocolHash: "f".repeat(64) });
+        else { const file = join(f.dir, "design", "protocol.json"); writeAtomic(file, readTextBounded(file, PROTOCOL_BYTES) + "\n", PROTOCOL_BYTES); }
+      }
+      return result;
+    })).rejects.toThrow(shape === "identity" ? "changed the published N-1 no-input protocol hash" : "rewrote a published N-1 no-input protocol");
+    expect(calls).toBe(2);
+  }
+});
+
+test("N-1 protocol creation passes the installed package root and reports its own failure step", async () => {
+  const f = protocolStudy(), installedRoot = join(f.work, "installed-published-n1");
+  await expect(checkN1Protocol(installedRoot, checkoutRoot, f.dir, f.work, async (_command, args) => {
+    expect(args[1]).toContain(JSON.stringify(installedRoot));
+    expect(args[1]).toContain('import(base + "/src/commands.ts")');
+    return { code: 1, stdout: "", stderr: "synthetic installed-package failure" };
+  })).rejects.toThrow("the installed N-1 package failed");
 });

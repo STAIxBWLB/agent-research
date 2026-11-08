@@ -54,6 +54,41 @@ export function parseArgs(args: readonly string[]): { version?: string } {
   return fail("usage: bun scripts/n1-check.ts [--version X.Y.Z]; remove unknown arguments and pass --version with a stable version");
 }
 
+export interface LegacyProtocolIdentity { protocolHash: string; designBinding: string; gate: { gate: string; state: string; current?: string; decided?: unknown } }
+export type N1Runner = (command: string, args: string[], cwd: string, timeout?: number) => Promise<Result>;
+/** Installed N-1 creates the no-input protocol and approval; checkout only reads those exact bytes. */
+export async function checkN1Protocol(oldRoot: string, checkoutRoot: string, study: string, cwd: string, runner: N1Runner = run): Promise<LegacyProtocolIdentity> {
+  const script = (sourceRoot: string, create: boolean) => `
+    const base = ${JSON.stringify(sourceRoot)}, dir = ${JSON.stringify(study)};
+    const ops = await import(base + "/src/commands.ts");
+    const protocol = await import(base + "/src/exp/protocol.ts");
+    ${create ? `
+    const {mkdirSync} = await import("node:fs");
+    const {join} = await import("node:path");
+    const {writeAtomic} = await import(base + "/src/study.ts");
+    mkdirSync(join(dir,"task","evaluator"),{recursive:true});
+    writeAtomic(join(dir,"task","task.md"),"Synthetic published N-1 task",65536);
+    writeAtomic(join(dir,"task","evaluator","run"),"Synthetic published N-1 evaluator, never executed",65536);
+    const image = "fixture@sha256:" + "a".repeat(64), ctx = {actor:{kind:"person"}};
+    await ops.protocol(dir,{v:1,method:"synthetic published N-1 protocol",candidate:{image,command:["candidate"]},evaluator:{image,command:["evaluate"]},metrics:[{name:"score",unit:"points",direction:"max"}],seeds:[1],limits:{cpus:1,memoryMb:64,pidsLimit:32,wallSeconds:60,gpus:0},network:"none",budget:{maxAttempts:3,maxWallHours:1,maxGpuHours:0}},ctx);
+    await ops.gateDecide(dir,"design","approve",undefined,ctx);
+    ` : ""}
+    console.log(JSON.stringify({protocolHash:protocol.protocolHash(protocol.readProtocol(dir)),designBinding:protocol.designBinding(dir),gate:ops.gateList(dir).find(gate=>gate.gate==="design")}));
+  `;
+  const parsed = (result: Result, label: string, step: string): LegacyProtocolIdentity => {
+    const value = json<LegacyProtocolIdentity>(result, label, step);
+    if (!value || !/^[a-f0-9]{64}$/.test(value.protocolHash) || !/^[a-f0-9]{64}$/.test(value.designBinding) || value.gate?.gate !== "design" || value.gate.state !== "approved" || value.gate.current !== value.designBinding) fail(`${label} did not report a valid approved no-input design identity; ${step}`);
+    return value;
+  };
+  const beforeIdentity = parsed(await runner("bun", ["-e", script(oldRoot, true)], cwd), "N-1 protocol creation", STEPS.n1);
+  const files = [["study.json", STUDY_BYTES], ["ledger.jsonl", LEDGER_BYTES], ["design/protocol.json", 65_536], ["task/task.md", 65_536], ["task/evaluator/run", 65_536]] as const;
+  const before = files.map(([name, bound]) => readBytesBounded(join(study, name), bound));
+  const afterIdentity = parsed(await runner("bun", ["-e", script(checkoutRoot, false)], cwd), "checkout N-1 protocol read", STEPS.checkout);
+  if (JSON.stringify(afterIdentity) !== JSON.stringify(beforeIdentity)) fail(`checkout changed the published N-1 no-input protocol hash, design binding or approved gate; ${STEPS.checkout}`);
+  if (files.some(([name, bound], index) => !before[index]!.equals(readBytesBounded(join(study, name), bound)))) fail(`checkout rewrote a published N-1 no-input protocol, task, study or ledger during reads; ${STEPS.checkout}`);
+  return afterIdentity;
+}
+
 async function main(): Promise<void> {
   const pinned = parseArgs(process.argv.slice(2)).version;
   const current = (JSON.parse(readTextBounded(join(root, "package.json"), 65_536)) as { version: string }).version;
@@ -98,6 +133,8 @@ async function main(): Promise<void> {
       for (const args of reads) json(await next(...args), `checkout ${args.slice(0, 2).join(" ")} on N-1 ${mode} study`, STEPS.checkout);
       if (!before.study.equals(readBytesBounded(join(study, "study.json"), STUDY_BYTES)) || !before.ledger.equals(readBytesBounded(join(study, "ledger.jsonl"), LEDGER_BYTES))) fail(`checkout rewrote an N-1 ${mode} study or ledger during reads; status, gate list, autonomy show and lit/attempt list must stay read-only on N-1 studies, fix the reader and rerun bun scripts/n1-check.ts`);
     }
+    await checkN1Protocol(join(prefix, "node_modules", PACKAGE), root, join(work, "n1-experiment"), work);
+    console.log("n1: published N-1 no-input protocol hash, design binding and approved gate survive checkout reads without rewriting bytes");
     console.log("n1: checkout reads N-1 survey and experiment studies and ledgers without rewriting bytes");
 
     // Formats: a checkout-written study at its newest version. N-1 refuses it unchanged when it lacks that version, else reads it unchanged.

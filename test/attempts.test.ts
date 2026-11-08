@@ -8,7 +8,7 @@ import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, CONTROL_FUTURE
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
 import { finalGateBinding } from "../src/exp/final.ts";
-import { readLedger, sha256, withLock, appendEvent, openStudy } from "../src/study.ts";
+import { writeAtomic, readTextBounded, readLedger, sha256, withLock, appendEvent, openStudy } from "../src/study.ts";
 import { deferred, fakeHttp, tempDir } from "./helpers.ts";
 import { logCaptureFixtureRunner, metricLogTar, metricTar } from "./metric-fixtures.ts";
 import { collectStageEvidence, EvidenceError, LOG_COPY_BYTES } from "../src/exp/metrics.ts";
@@ -22,13 +22,22 @@ interface FakeContainer { id: string; args: string[]; running: boolean; exitCode
 function runtime(dir: string) {
   const requests: ProcessRequest[] = [], containers = new Map<string, FakeContainer>();
   const clock = { value: Date.parse("2030-01-01T00:00:00Z") };
+  let beforeHash: (() => Promise<void>) | undefined;
   let beforeResolve: (() => Promise<void>) | undefined, runFailure = false, daemonDown = false, lostStartResponse = false, versionFailure = false;
+  let inputHash = "a".repeat(64);
   let metricsPayload: string | null = '{"score":7}';
   const ok = (stdout = ""): ProcessResult => ({ exitCode: 0, stdout, stderr: "" });
   const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1]!;
   const runner: ProcessRunner = async request => {
     expect(existsSync(join(dir, ".ares.lock"))).toBe(false); requests.push(request);
     const args = request.args;
+    if (request.command === "python3") {
+      if (args.at(-1)!.startsWith("/")) {
+        const hook = beforeHash; beforeHash = undefined; await hook?.();
+        return ok(JSON.stringify({ sha256: inputHash, files: 2, bytes: 123 }));
+      }
+      return ok();
+    }
     if (request.command === "git") {
       if (args.includes("cat-file")) { const hook = beforeResolve; beforeResolve = undefined; await hook?.(); return ok("commit"); }
       if (args.includes("rev-parse")) return ok(treeId);
@@ -86,7 +95,7 @@ function runtime(dir: string) {
     const log = { path: `/synthetic/${stage}.log`, sha256: sha256(""), bytes: 0, truncated: false };
     return { logs: { stdout: log, stderr: log }, outputs: [] };
   } };
-  return { requests, containers, clock, ctx, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; } };
+  return { requests, containers, clock, ctx, beforeHash: (hook: () => Promise<void>) => { beforeHash = hook; }, inputHash: (hash: string) => { inputHash = hash; }, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; } };
 }
 async function setup(p = protocol(), autonomy = "gates", approved = true) {
   const dir = tempDir(); init(dir, { question: "Synthetic?", mode: "experiment", autonomy }, { actor });
@@ -624,4 +633,184 @@ for (const [label, skew, reclaimed] of [["slightly future", 1000, false], ["far 
     if (existsSync(lock) && readFileSync(lock, "utf8") === token) fs.unlinkSync(lock);
     if (pending) await Promise.allSettled([pending]); now.mockRestore();
   }
+});
+
+const inputProtocol = (): Protocol => ({ ...protocol(), inputs: {
+  train: { path: "/synthetic/private-training", sha256: "a".repeat(64), mount: { candidate: "/in/train" } },
+  heldout: { path: "/synthetic/private-heldout", sha256: "a".repeat(64), mount: { evaluator: "/in/heldout" } },
+} });
+test("sealed inputs mismatch refuses before any container or attempt record", async () => {
+  const { dir, fake } = await setup(inputProtocol()); fake.inputHash("b".repeat(64));
+  const before = readTextBounded(join(dir, "ledger.jsonl"), 1024 * 1024);
+  await expect(runAttempt(dir, request, fake.ctx)).rejects.toThrow("executor input train: manifest hash mismatch");
+  expect(fake.containers.size).toBe(0); expect(fake.requests.some(r => r.command === "docker")).toBe(false);
+  expect(listAttempts(dir).attempts).toHaveLength(0);
+  expect(readTextBounded(join(dir, "ledger.jsonl"), 1024 * 1024)).toBe(before);
+});
+test("input attempts persist verified identities without locators and survive stage transitions", async () => {
+  const { dir, fake } = await setup(inputProtocol());
+  const first = await runAttempt(dir, request, fake.ctx);
+  expect(first.verifiedInputs).toEqual({ train: "a".repeat(64), heldout: "a".repeat(64) });
+  const text = readTextBounded(join(dir, "runs", "main", "attempts", `${first.id}.json`), 1024 * 1024);
+  expect(text).not.toContain("/synthetic/private-training"); expect(text).not.toContain("/synthetic/private-heldout");
+  expect(first.protocol.inputs?.train).not.toHaveProperty("path");
+  expect(running(fake, "candidate").args.join(" ")).toContain("/in/train,readonly");
+  expect(running(fake, "candidate").args.join(" ")).not.toContain("/synthetic/private-heldout");
+  running(fake, "candidate").running = false;
+  await reconcileAttempts(dir, fake.ctx);
+  expect(running(fake, "evaluator").args.join(" ")).toContain("/in/heldout,readonly");
+  expect(running(fake, "evaluator").args.join(" ")).not.toContain("/synthetic/private-training");
+  running(fake, "evaluator").running = false; await reconcileAttempts(dir, fake.ctx);
+  expect(showAttempt(dir, first.id).status).toBe("succeeded");
+  const { exportBundle } = await import("../src/study-export.ts"), target = join(tempDir(), "bundle");
+  await exportBundle(dir, { bundle: target });
+  const exported = readTextBounded(join(target, "attempts.jsonl"), 1024 * 1024);
+  expect(JSON.parse(exported).inputs).toEqual(first.verifiedInputs);
+  expect(exported).not.toContain("/synthetic/private");
+});
+test("input identity drift on restart refuses with restore guidance before a new stage", async () => {
+  const p = inputProtocol(), { dir, fake } = await setup(p), first = await runAttempt(dir, request, fake.ctx);
+  running(fake, "candidate").running = false;
+  await withLock(dir, () => setProtocol(dir, { ...p, inputs: { ...p.inputs, heldout: { ...p.inputs!.heldout!, sha256: "b".repeat(64) } } }, actor));
+  await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("restore the matching input names, hashes and mounts");
+  expect(showAttempt(dir, first.id).stage).toBe("candidate");
+  expect(fake.containers.size).toBe(1);
+});
+
+test("same-identity locator relocation during a running candidate remains reconcilable", async () => {
+  const p = inputProtocol(), { dir, fake } = await setup(p), first = await runAttempt(dir, request, fake.ctx);
+  await withLock(dir, () => setProtocol(dir, { ...p, inputs: { ...p.inputs, train: { ...p.inputs!.train!, path: "/synthetic/relocated-training" } } }, actor));
+  expect((await reconcileAttempts(dir, fake.ctx))).toEqual([]);
+  expect(showAttempt(dir, first.id).status).toBe("running");
+  running(fake, "candidate").running = false; await reconcileAttempts(dir, fake.ctx);
+  running(fake, "evaluator").running = false; await reconcileAttempts(dir, fake.ctx);
+  expect(showAttempt(dir, first.id).status).toBe("succeeded");
+});
+test("an evaluator launch blocked by input verification retries after restore without becoming lost", async () => {
+  const { dir, fake } = await setup(inputProtocol()), first = await runAttempt(dir, request, fake.ctx);
+  running(fake, "candidate").running = false; fake.inputHash("b".repeat(64));
+  await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("manifest hash mismatch");
+  let current = showAttempt(dir, first.id);
+  expect(current.status).toBe("running"); expect(current.stage).toBe("evaluator"); expect(current.stages.evaluator?.launchPending).toBe(true);
+  expect(current.stages.evaluator?.containerId).toBeUndefined(); expect(fake.containers.size).toBe(1);
+  await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("manifest hash mismatch");
+  expect(showAttempt(dir, first.id).status).toBe("running");
+  fake.inputHash("a".repeat(64)); await reconcileAttempts(dir, fake.ctx);
+  current = showAttempt(dir, first.id); expect(current.stages.evaluator?.launchPending).toBeUndefined(); expect(fake.containers.size).toBe(2);
+  running(fake, "evaluator").running = false; await reconcileAttempts(dir, fake.ctx);
+  expect(showAttempt(dir, first.id).status).toBe("succeeded");
+  expect(readLedger(dir).some(e => e.type === "attempt.unknown")).toBe(false);
+});
+for (const source of ["relative/input", "/synthetic/private-heldout/", "/private/synthetic-executor/"]) test(`observed input mounts refuse unsafe source ${source}`, async () => {
+  const { dir, fake } = await setup(inputProtocol()); await runAttempt(dir, request, fake.ctx);
+  const candidate = running(fake, "candidate"), index = candidate.args.findIndex(arg => arg.includes("dst=/in/train,"));
+  candidate.args[index] = `type=bind,src=${source},dst=/in/train,readonly`;
+  await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("reconcile");
+});
+
+test("slow initial input hashing holds no launch claim and duplicate admission launches only once", async () => {
+  const { dir, fake } = await setup(inputProtocol()), entered = deferred(), release = deferred();
+  fake.beforeHash(async () => { expect(existsSync(join(dir, ".ares.control.lock"))).toBe(false); entered.resolve(); await release.promise; });
+  const first = runAttempt(dir, request, fake.ctx);
+  await entered.promise;
+  expect(listAttempts(dir).attempts).toHaveLength(0);
+  fake.clock.value += CONTROL_STALE_MS + 1;
+  let other;
+  try { other = await runAttempt(dir, request, fake.ctx); }
+  finally { release.resolve(); }
+  expect((await first).id).toBe(other!.id);
+  expect(fake.requests.filter(r => r.command === "docker" && r.args[0] === "run")).toHaveLength(1);
+});
+test("slow evaluator hashing holds neither control lock nor launch claim and cannot duplicate a competitor", async () => {
+  const { dir, fake } = await setup(inputProtocol()), started = await runAttempt(dir, request, fake.ctx), entered = deferred(), release = deferred();
+  running(fake, "candidate").running = false;
+  fake.beforeHash(async () => {
+    expect(existsSync(join(dir, ".ares.control.lock"))).toBe(false);
+    expect(showAttempt(dir, started.id).launching).toBeUndefined();
+    entered.resolve(); await release.promise;
+  });
+  const first = reconcileAttempts(dir, fake.ctx); await entered.promise;
+  fake.clock.value += CONTROL_STALE_MS + 1;
+  try { await reconcileAttempts(dir, fake.ctx); }
+  finally { release.resolve(); }
+  await first;
+  expect(showAttempt(dir, started.id).status).toBe("running");
+  expect(showAttempt(dir, started.id).stage).toBe("evaluator");
+  expect(fake.requests.filter(r => r.command === "docker" && r.args[0] === "run")).toHaveLength(2);
+  expect(readLedger(dir).some(e => e.type === "attempt.unknown")).toBe(false);
+});
+test("cancel ignores edited or missing current input design and uses the frozen owned container", async () => {
+  for (const missing of [false, true]) {
+    const p = inputProtocol(), { dir, fake } = await setup(p), started = await runAttempt(dir, request, fake.ctx);
+    if (missing) fs.unlinkSync(join(dir, "design", "protocol.json"));
+    else await withLock(dir, () => setProtocol(dir, { ...p, inputs: { train: { ...p.inputs!.train!, sha256: "b".repeat(64) } } }, actor));
+    const before = fake.requests.length;
+    const cancelled = await cancelAttempt(dir, started.id, "synthetic stop", fake.ctx);
+    expect(cancelled.status).toBe("cancelled");
+    expect(fake.requests.slice(before).some(r => r.command === "docker" && r.args[0] === "kill")).toBe(true);
+    expect(fake.requests.slice(before).some(r => r.command === "python3")).toBe(false);
+  }
+});
+test("repeated pending input mismatch polls leave ledger and attempt bytes identical", async () => {
+  const { dir, fake } = await setup(inputProtocol()), started = await runAttempt(dir, request, fake.ctx);
+  running(fake, "candidate").running = false; fake.inputHash("b".repeat(64));
+  await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("manifest hash mismatch");
+  const record = join(dir, "runs", "main", "attempts", `${started.id}.json`), ledger = join(dir, "ledger.jsonl");
+  const before = [readTextBounded(record, 1024 * 1024), readTextBounded(ledger, 1024 * 1024)];
+  for (let i = 0; i < 2; i++) {
+    await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("manifest hash mismatch");
+    expect(readTextBounded(record, 1024 * 1024)).toBe(before[0]!);
+    expect(readTextBounded(ledger, 1024 * 1024)).toBe(before[1]!);
+  }
+});
+test("stage-private input configuration refusal reaches attempt caller before records or containers", async () => {
+  const p = inputProtocol(); p.inputs!.train!.path = "/data/"; p.inputs!.heldout!.path = "/data/private";
+  const { dir, fake } = await setup(p), before = readTextBounded(join(dir, "ledger.jsonl"), 1024 * 1024);
+  await expect(runAttempt(dir, request, fake.ctx)).rejects.toThrow("stage private inputs in separate directories");
+  expect(listAttempts(dir).attempts).toHaveLength(0); expect(fake.containers.size).toBe(0);
+  expect(fake.requests.some(r => r.command === "docker" || r.command === "python3")).toBe(false);
+  expect(readTextBounded(join(dir, "ledger.jsonl"), 1024 * 1024)).toBe(before);
+});
+test("cancellation during a slow evaluator verification prevents a later launch", async () => {
+  const { dir, fake } = await setup(inputProtocol()), started = await runAttempt(dir, request, fake.ctx), entered = deferred(), release = deferred();
+  running(fake, "candidate").running = false;
+  fake.beforeHash(async () => { entered.resolve(); await release.promise; });
+  const first = reconcileAttempts(dir, fake.ctx); await entered.promise;
+  try { expect((await cancelAttempt(dir, started.id, "synthetic stop", fake.ctx)).status).toBe("cancelled"); }
+  finally { release.resolve(); }
+  await first;
+  expect(showAttempt(dir, started.id).status).toBe("cancelled");
+  expect(fake.requests.filter(r => r.command === "docker" && r.args[0] === "run")).toHaveLength(1);
+});
+test("an evaluator input configuration refusal keeps its cause and remains pending", async () => {
+  const p = inputProtocol(), { dir, fake } = await setup(p), started = await runAttempt(dir, request, fake.ctx);
+  const relocated = { ...p, inputs: { train: { ...p.inputs!.train!, path: "/data/" }, heldout: { ...p.inputs!.heldout!, path: "/data/private" } } };
+  await withLock(dir, () => setProtocol(dir, relocated, actor));
+  running(fake, "candidate").running = false;
+  await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("stage private inputs in separate directories");
+  expect(showAttempt(dir, started.id).stages.evaluator?.launchPending).toBe(true);
+  expect(showAttempt(dir, started.id).status).toBe("running");
+  expect(fake.containers.size).toBe(1);
+});
+
+test("identity drift at the short launch fence remains a recoverable never-launched refusal", async () => {
+  const p = inputProtocol(), { dir, fake } = await setup(p);
+  const open = fs.openSync; let changed = false;
+  const spy = spyOn(fs, "openSync").mockImplementation(((file, flags, mode) => {
+    const fd = open(file, flags, mode);
+    if (!changed && String(file) === join(dir, ".ares.control.lock")) {
+      changed = true;
+      writeAtomic(join(dir, "design", "protocol.json"), JSON.stringify({ ...p, inputs: { train: { ...p.inputs!.train!, sha256: "b".repeat(64) } } }), 65536);
+    }
+    return fd;
+  }) as typeof fs.openSync);
+  try { await expect(runAttempt(dir, request, fake.ctx)).rejects.toThrow("restore the matching input names"); }
+  finally { spy.mockRestore(); }
+  const waiting = listAttempts(dir).attempts[0]!;
+  expect(waiting.status).toBe("running"); expect(waiting.stages.candidate?.launchPending).toBe(true); expect(waiting.launching).toBeUndefined();
+  expect(fake.containers.size).toBe(0);
+  await withLock(dir, () => setProtocol(dir, p, actor));
+  await reconcileAttempts(dir, fake.ctx);
+  expect(showAttempt(dir, waiting.id).stages.candidate?.containerId).toBeDefined();
+  expect(fake.containers.size).toBe(1);
 });
