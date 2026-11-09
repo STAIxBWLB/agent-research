@@ -65,6 +65,28 @@ test("AC3: identifiers in link targets, code spans, citation keys and reference 
   expect(codes(check(dir, text))).not.toContain("bare-identifier");
 });
 
+test("Setext headings give sections and duplicate-heading; lists, rules and code do not", () => {
+  const dir = study('[paper]\nblocking = ["duplicate-heading"]\n');
+  const report = check(dir, "Intro\n=====\n\nMethod\n------\n\ntext [@a2026; @a2026]\n\nMethod\n------\n\n```\nFake\n----\n```\n\n- item\n---\n");
+  const dup = report.findings.filter(f => f.code === "duplicate-heading");
+  expect(dup).toHaveLength(1); expect(dup[0]!.severity).toBe("blocking"); expect(dup[0]!.line).toBe(9); expect(dup[0]!.section).toEqual(["Intro", "Method"]);
+  expect(report.ok).toBe(false);
+  expect(report.findings.find(f => f.code === "adjacent-duplicate-citation")!.section).toEqual(["Intro", "Method"]);
+  expect(codes(check(dir, "Intro\n=====\n\nA\n---\n\nB\n---\n"))).not.toContain("duplicate-heading");
+});
+
+test("section assignment stays fast with many headings and findings", () => {
+  const dir = study(), parts: string[] = [];
+  for (let i = 0; i < 40_000; i++) parts.push(`## H\n\nhttps://example.org/${i}\n`);
+  const started = performance.now(), report = check(dir, `# Top\n\n${parts.join("\n")}`);
+  expect(report.findings.filter(f => f.code === "duplicate-heading")).toHaveLength(39_999);
+  expect(performance.now() - started).toBeLessThan(5_000);
+}, 20_000);
+
+test("a URL used as its own link text is not bare", () => {
+  expect(codes(check(study(), "# Intro\n\nSee [https://example.org/p](https://example.org/p) and [https://example.org/a](https://example.org/b).\n")).filter(c => c === "bare-identifier")).toHaveLength(1);
+});
+
 test("AC4: existing studies without settings keep their blocking set and CLI/MCP agree", async () => {
   const dir = study(), text = "# Intro\n\nUnknown [@zzz2026] and [@a2026; @a2026].\n", report = check(dir, text);
   expect(report.ok).toBe(false);

@@ -50,25 +50,39 @@ export function readPaperSettings(dir: string): PaperSettings {
  */
 export function hygieneFindings(manuscript: string, hiddenCode: Uint8Array, proseMask: Uint8Array, citationText: string, settings: PaperSettings): HygieneHit[] {
   const hits: HygieneHit[] = [];
-  // Headings and their section paths.
-  const headings: { start: number; level: number; text: string; parent: number }[] = [];
+  // Headings (ATX and Setext) and their section paths, in source order.
+  const headings: { start: number; end: number; level: number; text: string; parent: number; path: string[] }[] = [];
   const stack: number[] = [];
-  for (const match of manuscript.matchAll(/^ {0,3}(#{1,6})[ \t]+([^\r\n]*?)(?:[ \t]+#+)?[ \t]*\r?$/gm)) {
-    if (hiddenCode[match.index]) continue;
-    const level = match[1]!.length, text = match[2]!.trim().replace(/\s+/g, " ");
+  const addHeading = (start: number, end: number, level: number, raw: string) => {
+    const text = raw.trim().replace(/\s+/g, " ");
     while (stack.length && headings[stack.at(-1)!]!.level >= level) stack.pop();
-    headings.push({ start: match.index, level, text, parent: stack.at(-1) ?? -1 }); stack.push(headings.length - 1);
+    const parent = stack.at(-1) ?? -1;
+    headings.push({ start, end, level, text, parent, path: [...(parent >= 0 ? headings[parent]!.path : []), text] }); stack.push(headings.length - 1);
+  };
+  let paragraph: { start: number; end: number; lines: string[] } | undefined;
+  for (const match of manuscript.matchAll(/[^\n]*(?:\n|$)/g)) {
+    if (!match[0]) break;
+    const start = match.index, line = match[0].replace(/\r?\n$/, "");
+    if (hiddenCode[start + /^[ \t]*/.exec(line)![0].length] || !line.trim()) { paragraph = undefined; continue; }
+    const atx = /^ {0,3}(#{1,6})(?:[ \t]+([^\r\n]*?))?(?:[ \t]+#+)?[ \t]*$/.exec(line);
+    if (atx) { addHeading(start, start + line.length, atx[1]!.length, atx[2] ?? ""); paragraph = undefined; continue; }
+    const underline = /^ {0,3}(=+|-+)[ \t]*$/.exec(line);
+    if (underline && paragraph) { addHeading(paragraph.start, start + line.length, underline[1]![0] === "=" ? 1 : 2, paragraph.lines.join(" ")); paragraph = undefined; continue; }
+    // Block starts that cannot become Setext heading content.
+    if (/^ {0,3}(?:[-+*]|[0-9]+[.)])(?:[ \t]|$)|^ {0,3}>|^ {0,3}(?:(?:-[ \t]*){3,}|(?:\*[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(line) && !paragraph) { paragraph = undefined; continue; }
+    if (paragraph) paragraph.lines.push(line); else paragraph = { start, end: start + line.length, lines: [line] };
   }
+  /** Binary search over heading offsets; paths are precomputed per heading. */
   const section = (offset: number): string[] => {
-    let index = -1; for (let i = 0; i < headings.length && headings[i]!.start <= offset; i++) index = i;
-    const path: string[] = []; while (index >= 0) { path.unshift(headings[index]!.text); index = headings[index]!.parent; }
-    return path;
+    let lo = 0, hi = headings.length;
+    while (lo < hi) { const mid = (lo + hi) >>> 1; if (headings[mid]!.start <= offset) lo = mid + 1; else hi = mid; }
+    return lo ? headings[lo - 1]!.path : [];
   };
   const push = (code: HygieneCode, start: number, end: number, message: string) => hits.push({ code, start, end, section: section(start), message });
   const seen = new Map<string, number>();
   for (const [index, heading] of headings.entries()) {
     const key = `${heading.parent}\u0000${heading.level}\u0000${heading.text}`;
-    if (seen.has(key)) push("duplicate-heading", heading.start, heading.start + heading.level + 1 + heading.text.length, `heading "${heading.text.slice(0, 80)}" repeats a sibling at level ${heading.level}; merge the two sections or rename one`);
+    if (seen.has(key)) push("duplicate-heading", heading.start, heading.end, `heading "${heading.text.slice(0, 80)}" repeats a sibling at level ${heading.level}; merge the two sections or rename one`);
     else seen.set(key, index);
   }
   // Citation groups in source order.
@@ -104,6 +118,8 @@ export function hygieneFindings(manuscript: string, hiddenCode: Uint8Array, pros
   const prose = proseMask.slice();
   for (const group of groups) prose.fill(1, group.start, group.end);
   for (const match of manuscript.matchAll(/^ {0,3}\[[^\]\n]+\]:[^\n]*/gm)) prose.fill(1, match.index, match.index + match[0].length);
+  // A URL shown as its own link text ([https://x](https://x)) is a link, not a bare identifier.
+  for (const match of manuscript.matchAll(/\[([^\[\]\n]+)\]\(\s*<?([^\s<>()]+)>?\s*\)/g)) if (match[1]!.trim() === match[2]) prose.fill(1, match.index, match.index + match[0].length);
   const text = manuscript.split("").map((char, index) => prose[index] && char !== "\n" ? " " : char).join("");
   const patterns: [RegExp, string][] = [
     [/\bhttps?:\/\/[^\s<>()\]]+/gi, "URL"],
