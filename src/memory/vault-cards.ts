@@ -1,7 +1,7 @@
 import { PROCESS_CONTEXT_ENV_KEYS, spawnRunner, type ProcessRunner } from "../exp/executor.ts";
 import { isVerified, loadCandidates, type Candidate } from "../lit/candidates.ts";
 import { CARD_BYTES, CARD_FIELDS, cardPath, readCard, validateCard, validateProvenance, type Card, type CardProvenance, type StoredCard } from "../lit/cards.ts";
-import { boundedText, commit, onlyKeys, openStudy, plain, readLedger, sha256, withLock, type Actor } from "../study.ts";
+import { boundedText, commit, onlyKeys, openStudy, plain, prepareCommit, readLedger, sha256, withLock, type Actor, type PendingEvent } from "../study.ts";
 
 /**
  * Cross-study card reuse through vault-mem reference notes (#101). A reused card is a planning aid only:
@@ -101,6 +101,9 @@ function parsePayload(text: string, where: string): VaultCardPayload {
   if (raw.v !== 1) throw new Error(`${where}: unsupported card block version; use an ares version that supports it`);
   return { v: 1, card: validateCard(raw.card), provenance: validateProvenance(raw.provenance, `${where}.provenance`) };
 }
+function receipt(actor: Actor, vault: string, fingerprint: string, cards: { id: string; note: string; sha256: string }[]): PendingEvent {
+  return { actor, type: "lit.card.exported", data: { vault, fingerprint, cards } };
+}
 const identifierOf = (c: Candidate) => ({ ...(c.doi ? { doi: c.doi } : {}), ...(c.arxivId ? { arxivId: c.arxivId } : {}), ...(c.citekey ? { citekey: c.citekey } : {}), title: c.title });
 
 function cardIds(values: string[]): string[] {
@@ -120,16 +123,17 @@ function ownCard(dir: string, candidates: Candidate[], id: string): { candidate:
 }
 
 /** Read-only preview: the exact payloads, keyed by candidate, and a fingerprint binding them and the target vault. */
-export function previewCardExport(dirArg: string, vault: string, values: string[], extractor: { kind: Actor["kind"]; modelFamily?: string }) {
+export function previewCardExport(dirArg: string, vault: string, values: string[], modelFamily?: string) {
   const { dir, study } = openStudy(dirArg), ids = cardIds(values), candidates = loadCandidates(dir), events = readLedger(dir);
   if (!VAULT_ID.test(vault)) throw new Error("--vault: registered vault id (lower-case letters, digits, - or _); list them with vmem vaults list");
-  const family = extractor.modelFamily?.trim().toLowerCase();
+  const family = modelFamily?.trim().toLowerCase();
   const cards = ids.map(id => {
     const { candidate, card } = ownCard(dir, candidates, id);
-    // extractedAt is the time this card's bytes were last recorded, so re-previews stay stable.
+    // extractedAt and extractor.kind come from the lit.card event that recorded these bytes, never from the exporter.
     const recorded = events.filter(e => e.type === "lit.card" && e.data.id === id).at(-1);
+    if (!recorded) throw new Error(`lit card export: ${id} has no lit.card event recording its card; record the card again with ares lit card`);
     const { id: _id, reused: _r, ...fields } = card;
-    const payload: VaultCardPayload = { v: 1, card: fields, provenance: { studySha256: sha256(study.id), extractedAt: recorded?.at ?? "1970-01-01T00:00:00.000Z", extractor: { kind: extractor.kind, ...(family ? { modelFamily: family } : {}) } } };
+    const payload: VaultCardPayload = { v: 1, card: fields, provenance: { studySha256: sha256(study.id), extractedAt: recorded.at, extractor: { kind: recorded.actor.kind, ...(family ? { modelFamily: family } : {}) } } };
     validateProvenance(payload.provenance, "card provenance");
     return { id, identifier: identifierOf(candidate), payload };
   });
@@ -137,14 +141,23 @@ export function previewCardExport(dirArg: string, vault: string, values: string[
   return { vault, fingerprint, cards: cards.map(c => ({ id: c.id, identifier: c.identifier, fields: CARD_FIELDS.filter(f => (c.payload.card as unknown as Record<string, unknown>)[f] !== undefined), provenance: c.payload.provenance })), payloads: cards };
 }
 
+/** Returns the scope-gate approval events to carry in the command's commit, or throws when the gate refuses. */
+export type GateCheck = () => PendingEvent[];
+const NOTE_PATH_MAX = 200;
 /**
- * Writes each card to the single matching reference note. The study lock is held only to check the fingerprint and to
- * commit the receipt, never across vmem calls; each vault write is itself guarded by the note hash it just read.
+ * Writes each card to the single matching reference note. The study lock is held only to check the gate, the fingerprint
+ * and the receipt capacity, and to commit the receipt, never across vmem calls; each vault write is guarded by the note
+ * hash it just read. The largest possible receipt is preflighted before any vault write, so a full ledger changes nothing.
  */
-export async function exportCards(dirArg: string, vault: string, values: string[], fingerprint: string, actor: Actor, client: VaultClient, modelFamily?: string) {
-  const { dir } = openStudy(dirArg), extractor = { kind: actor.kind, ...(modelFamily ? { modelFamily } : {}) };
-  const preview = await withLock(dir, () => previewCardExport(dir, vault, values, extractor));
-  if (fingerprint !== preview.fingerprint) throw new Error("lit card export: stale fingerprint; run ares lit card export again without --confirm and confirm its current fingerprint");
+export async function exportCards(dirArg: string, vault: string, values: string[], fingerprint: string, actor: Actor, client: VaultClient, gate: GateCheck, modelFamily?: string) {
+  const { dir } = openStudy(dirArg);
+  const { preview, approval } = await withLock(dir, () => {
+    const preview = previewCardExport(dir, vault, values, modelFamily);
+    if (fingerprint !== preview.fingerprint) throw new Error("lit card export: stale fingerprint; run ares lit card export again without --confirm and confirm its current fingerprint");
+    const approval = gate();
+    prepareCommit(dir, [], [...approval, receipt(actor, vault, fingerprint, preview.payloads.map(p => ({ id: p.id, note: "x".repeat(NOTE_PATH_MAX), sha256: "0".repeat(64) })))]);
+    return { preview, approval };
+  });
   const written: { id: string; note: string; sha256: string }[] = [];
   try {
     for (const item of preview.payloads) {
@@ -157,7 +170,7 @@ export async function exportCards(dirArg: string, vault: string, values: string[
     }
   } finally {
     // Receipt what reached the vault even when a later card fails, so the next run can tell.
-    if (written.length) await withLock(dir, () => commit(dir, [], [{ actor, type: "lit.card.exported", data: { vault, fingerprint, cards: written } }]));
+    if (written.length) await withLock(dir, () => commit(dir, [], [...approval, receipt(actor, vault, fingerprint, written)]));
   }
   return { vault, fingerprint, written };
 }
@@ -178,9 +191,11 @@ function importPlan(dir: string, ids: string[]) {
  * Imports only for included candidates whose identifier is verified in this study. Eligibility is checked under the
  * lock, vault reads run unlocked, and the commit re-checks eligibility under the lock so nothing changed in between.
  */
-export async function importCards(dirArg: string, vault: string, values: string[], actor: Actor, client: VaultClient) {
+export async function importCards(dirArg: string, vault: string, values: string[], actor: Actor, client: VaultClient, gate: GateCheck) {
   const { dir } = openStudy(dirArg), ids = cardIds(values), at = new Date().toISOString();
-  const plan = await withLock(dir, () => importPlan(dir, ids));
+  // Import reads the vault only; the gate is checked up front, then checked again with the commit so a scope change
+  // during the vault reads refuses instead of committing under an outdated approval.
+  const plan = await withLock(dir, () => { gate(); return importPlan(dir, ids); });
   const files: [string, string, number][] = [], rows: { id: string; note: string; sha256: string }[] = [];
   for (const { id, candidate } of plan) {
     const notes = await client.findReference(identifierOf(candidate));
@@ -196,7 +211,7 @@ export async function importCards(dirArg: string, vault: string, values: string[
   // One commit for every imported card; the candidate file, verification and gates are not written.
   await withLock(dir, () => {
     if (JSON.stringify(importPlan(dir, ids).map(p => p.key)) !== JSON.stringify(plan.map(p => p.key))) throw new Error("lit card import: a candidate or its card changed during the vault read; nothing was written, run the import again");
-    commit(dir, files, [{ actor, type: "lit.card.imported", data: { vault, cards: rows } }]);
+    commit(dir, files, [...gate(), { actor, type: "lit.card.imported", data: { vault, cards: rows } }]);
   });
   return { vault, imported: rows };
 }

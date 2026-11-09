@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import * as ops from "../src/commands.ts";
 import { run } from "../src/cli.ts";
 import { createAresMcp } from "../src/mcp-tools.ts";
@@ -125,6 +125,47 @@ test("P2d: paper check reports an unreadable cited card instead of hiding it", a
   const report = checkPaper(dir);
   expect(report.unreadableCards).toEqual([{ citekey: key, id: DOI, message: expect.stringMatching(/unreadable, invalid JSON.*record the card again/) }]);
   expect(report.reusedCards).toBeUndefined();
+});
+
+test("B1: export and import need the scope gate, and auto approvals ride in the command's commit", async () => {
+  const source = await study(), vault = fakeVault(vaultNotes()), ctx = { ...source.ctx, runner: vault.runner };
+  await ops.card(source.dir, ARX, { summary: "Synthetic summary." }, source.ctx);
+  const { fingerprint } = await ops.cardExport(source.dir, [ARX], { vault: "test-vault" }, ctx) as { fingerprint: string };
+  // Gates mode with a changed scope: the scope gate is pending, so both commands refuse before any vault call.
+  await ops.autonomySet(source.dir, "gates", undefined, source.ctx);
+  await ops.scope(source.dir, { question: "Changed question?" }, source.ctx);
+  const calls = vault.calls.length, ledger = readFileSync(join(source.dir, "ledger.jsonl"));
+  await expect(ops.cardExport(source.dir, [ARX], { vault: "test-vault", confirm: fingerprint }, ctx)).rejects.toThrow(/gate scope is pending: run ares gate approve <dir> scope/);
+  await expect(ops.cardImport(source.dir, [ARX], { vault: "test-vault" }, ctx)).rejects.toThrow(/gate scope is pending/);
+  expect(vault.calls.length).toBe(calls); expect(readFileSync(join(source.dir, "ledger.jsonl"))).toEqual(ledger);
+  // In auto mode the pending scope is approved automatically, and that approval is committed with the receipt.
+  await ops.autonomySet(source.dir, "auto", undefined, source.ctx);
+  await ops.cardExport(source.dir, [ARX], { vault: "test-vault", confirm: fingerprint }, ctx);
+  expect(readLedger(source.dir).slice(-2).map(e => [e.type, e.data.gate ?? null])).toEqual([["gate.approve", "scope"], ["lit.card.exported", null]]);
+});
+
+test("B2: a ledger without room for the receipt refuses before any vault write", async () => {
+  const source = await study(), vault = fakeVault(vaultNotes()), ctx = { ...source.ctx, runner: vault.runner };
+  await ops.card(source.dir, ARX, { summary: "Synthetic summary." }, source.ctx);
+  const { fingerprint } = await ops.cardExport(source.dir, [ARX], { vault: "test-vault" }, ctx) as { fingerprint: string };
+  const ledger = join(source.dir, "ledger.jsonl"), size = statSync(ledger).size;
+  // Pad the ledger with blank lines (which the reader skips) to just under its 64 MiB bound.
+  appendFileSync(ledger, "\n".repeat(64 * 1024 * 1024 - 300 - size));
+  const original = vault.notes["arxiv-ref.md"], calls = vault.calls.length;
+  await expect(ops.cardExport(source.dir, [ARX], { vault: "test-vault", confirm: fingerprint }, ctx)).rejects.toThrow(/ledger\.jsonl would exceed/);
+  expect(vault.calls.length).toBe(calls); expect(vault.notes["arxiv-ref.md"]).toBe(original);
+  truncateSync(ledger, size);
+});
+
+test("B3: exported provenance names the actor who recorded the card, not the exporter", async () => {
+  const source = await study(), vault = fakeVault(vaultNotes());
+  await ops.card(source.dir, ARX, { summary: "Synthetic summary." }, source.ctx);
+  const agent = { ...source.ctx, actor: { kind: "agent" as const, id: "exporter" }, runner: vault.runner };
+  const preview = await ops.cardExport(source.dir, [ARX], { vault: "test-vault" }, agent) as { fingerprint: string; cards: { provenance: { extractor: { kind: string }; extractedAt: string } }[] };
+  const recorded = readLedger(source.dir).filter(e => e.type === "lit.card" && e.data.id === ARX).at(-1)!;
+  expect(preview.cards[0]!.provenance).toMatchObject({ extractor: { kind: "person" }, extractedAt: recorded.at });
+  await ops.cardExport(source.dir, [ARX], { vault: "test-vault", confirm: preview.fingerprint }, agent);
+  expect(vault.notes["arxiv-ref.md"]).toContain('"kind": "person"');
 });
 
 test("AC1: export previews and needs the fingerprint; import refuses unverified identifiers", async () => {
