@@ -108,14 +108,14 @@ test("T1: every stage field and data/order edge changes attempt identity; budget
   expect(stageProtocolHash(reordered)).toBe(stageProtocolHash(same));
 });
 
-test("T1: v1 identity and files stay unchanged; command refuses v2/future versions before mutation", async () => {
+test("T1: v1 identity and files stay unchanged; command refuses unsupported future versions before mutation", async () => {
   const dir = tempDir(); init(dir, { question: "Synthetic?", mode: "experiment" }, ctx);
   mkdirSync(join(dir, "task", "evaluator"), { recursive: true });
   writeFileSync(join(dir, "task", "task.md"), "synthetic task");
   const p = fixture(), legacy = validateProtocol({ ...p, v: 1, candidate: { image: p.candidate.stages[0]!.image, command: ["run"] } });
   await setProtocol(dir, legacy, ctx);
   const file = join(dir, "design", "protocol.json"), before = readFileSync(file), ledger = readLedger(dir), hash = protocolHash(legacy), binding = designBinding(dir);
-  for (const v of [2, 3]) {
+  for (const v of [3, 4]) {
     await expect(setProtocol(dir, { ...p, v }, ctx)).rejects.toThrow("compatible ares release");
     expect(readFileSync(file)).toEqual(before);
     expect(readLedger(dir)).toEqual(ledger);
@@ -126,4 +126,33 @@ test("T1: v1 identity and files stay unchanged; command refuses v2/future versio
   // The existing bounded snapshot validator supplies link safety, not the pure graph validator.
   symlinkSync("task.md", join(dir, "task", "link"));
   expect(() => taskTreeHash(dir)).toThrow("symlink refused");
+});
+
+test("large evaluator bytes count once, while the actual v2 aggregate ceiling still applies", () => {
+  const p = fixture();
+  p.candidate.stages = p.candidate.stages.slice(0, 1);
+  p.evaluator.command = ["evaluate", ...Array<string>(9).fill("x".repeat(4000))];
+  const formattedBytes = Buffer.byteLength(JSON.stringify(p, null, 2) + "\n");
+  expect(formattedBytes).toBeGreaterThan(36_000);
+  expect(formattedBytes).toBeLessThan(65_536);
+  const normalized = validateStageProtocol(p);
+  expect(normalized.evaluator.command).toEqual(p.evaluator.command);
+  expect(stageProtocolHash(normalized)).toMatch(/^[a-f0-9]{64}$/);
+  // Neither the common validator nor per-stage validation may combine the real evaluator twice.
+  const largeStage = { ...p.candidate.stages[0]!, command: ["run", ...Array<string>(6).fill("y".repeat(4000))] };
+  const nearLimit = { ...p, candidate: { stages: [largeStage] } };
+  expect(Buffer.byteLength(JSON.stringify(nearLimit, null, 2) + "\n")).toBeLessThan(65_536);
+  expect(validateStageProtocol(nearLimit).candidate.stages[0]?.command).toEqual(largeStage.command);
+  const overflow = { ...p, candidate: { stages: [{ ...largeStage, command: [...largeStage.command, ...Array<string>(2).fill("z".repeat(4000))] }] } };
+  expect(Buffer.byteLength(JSON.stringify(overflow, null, 2) + "\n")).toBeGreaterThan(65_536);
+  expect(() => validateStageProtocol(overflow)).toThrow("protocol: too large");
+});
+
+test("refusals identify the stage and offending input/output port", () => {
+  const stageLabel = "candidate.stages[1](train)";
+  expect(() => validateStageProtocol(changedStage({ inputs: { rows: { task: "../outside" } } }))).toThrow(`${stageLabel}.inputs.rows.task`);
+  expect(() => validateStageProtocol(changedStage({ inputs: { rows: { stage: "prepare", output: "missing" } } }))).toThrow(`${stageLabel}.inputs.rows`);
+  expect(() => validateStageProtocol(changedStage({ inputs: { rows: { task: "evaluator/run" } } }))).toThrow(`${stageLabel}.inputs.rows`);
+  expect(() => validateStageProtocol(changedStage({ outputs: { one: "dir", two: "dir/file" } }))).toThrow(`${stageLabel}.outputs.two`);
+  expect(() => validateStageProtocol(changedStage({ env: { TOKEN: "synthetic" } }))).toThrow(`${stageLabel}.env`);
 });

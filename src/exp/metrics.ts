@@ -81,9 +81,10 @@ export async function collectEvaluation(attempt: Attempt, runner: ProcessRunner)
 
 /** Raw copies remain in the executor's private attempt directory; only metadata enters the study. */
 export async function collectStageEvidence(attempt: Attempt, stage: Stage, runner: ProcessRunner): Promise<StageEvidence> {
+  const stageLabel = attempt.pipeline && stage === "candidate" ? `candidate-${attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name}` : stage;
   const cid = container(attempt, stage), root = posix.dirname(attempt.paths.snapshot), logs = posix.join(root, "logs");
-  const stdout = posix.join(logs, `${stage}.stdout.log`), stderr = posix.join(logs, `${stage}.stderr.log`), suffix = randomUUID();
-  const statePath = `logs/${stage}.state.json`, stateFile = posix.join(root, statePath);
+  const stdout = posix.join(logs, `${stageLabel}.stdout.log`), stderr = posix.join(logs, `${stageLabel}.stderr.log`), suffix = randomUUID();
+  const statePath = `logs/${stageLabel}.state.json`, stateFile = posix.join(root, statePath);
   const script = [
     "set -eu", "umask 077", `logs=${shellQuote(logs)}`,
     'if test ! -e "$logs"; then mkdir -m 700 "$logs"; fi', 'test -d "$logs"; test ! -L "$logs"; test -O "$logs"',
@@ -91,7 +92,7 @@ export async function collectStageEvidence(attempt: Attempt, stage: Stage, runne
     'for file in "$out" "$err" "$state"; do if test -e "$file" || test -L "$file"; then test -f "$file"; test ! -L "$file"; fi; done',
     `if test -f "$out" && test -f "$err" && test -f "$state" && test "$(wc -c < "$out")" -le ${LOG_COPY_BYTES} && test "$(wc -c < "$err")" -le ${LOG_COPY_BYTES}; then :; else`,
     `outtmp=${shellQuote(`${stdout}.${suffix}.tmp`)}; errtmp=${shellQuote(`${stderr}.${suffix}.tmp`)}; statetmp=${shellQuote(`${stateFile}.${suffix}.tmp`)}`,
-    `outpipe=${shellQuote(posix.join(logs, `${stage}.${suffix}.stdout.pipe`))}; errpipe=${shellQuote(posix.join(logs, `${stage}.${suffix}.stderr.pipe`))}`,
+    `outpipe=${shellQuote(posix.join(logs, `${stageLabel}.${suffix}.stdout.pipe`))}; errpipe=${shellQuote(posix.join(logs, `${stageLabel}.${suffix}.stderr.pipe`))}`,
     'trap \'rm -f "$outtmp" "$errtmp" "$statetmp" "$outpipe" "$errpipe"\' 0',
     'mkfifo "$outpipe" "$errpipe"',
     `head -c ${LOG_COPY_BYTES} < "$outpipe" > "$outtmp" & outpid=$!`,
@@ -106,7 +107,7 @@ export async function collectStageEvidence(attempt: Attempt, stage: Stage, runne
     // Archive content only: BSD tar otherwise emits binary xattr PAX and AppleDouble entries.
     // ponytail: requires GNU tar >= 1.27 or bsdtar with --no-xattrs; unsupported tar
     // (e.g. BusyBox) fails closed with the generic stage-log collection error, never a metadata fallback.
-    `COPYFILE_DISABLE=1 tar --no-xattrs -C ${shellQuote(root)} -cf - ${shellQuote(`logs/${stage}.stdout.log`)} ${shellQuote(`logs/${stage}.stderr.log`)} ${shellQuote(statePath)}`,
+    `COPYFILE_DISABLE=1 tar --no-xattrs -C ${shellQuote(root)} -cf - ${shellQuote(`logs/${stageLabel}.stdout.log`)} ${shellQuote(`logs/${stageLabel}.stderr.log`)} ${shellQuote(statePath)}`,
   ].join("\n");
   let logArchive;
   try { logArchive = await readArtifactArchive(attempt.executor, "sh", ["-c", script], runner, { capture: statePath, captureBytes: 1024, maxFiles: 3, maxBytes: LOG_COPY_BYTES * 2 + 1024 }); }
@@ -116,7 +117,7 @@ export async function collectStageEvidence(attempt: Attempt, stage: Stage, runne
   if (!plain(truncated) || Object.keys(truncated).length !== 2 || typeof truncated.stdout !== "boolean" || typeof truncated.stderr !== "boolean") throw new EvidenceError("invalid-log-state", "stage evidence: truncation metadata is missing or malformed; remove incomplete log copies on the executor host and retry collection");
   const cuts = truncated as { stdout: boolean; stderr: boolean };
   const log = (kind: "stdout" | "stderr"): LogEvidence => {
-    const file = logArchive.files.find(item => item.path === `logs/${stage}.${kind}.log`);
+    const file = logArchive.files.find(item => item.path === `logs/${stageLabel}.${kind}.log`);
     if (!file) throw new EvidenceError("missing-logs", "stage evidence: a stdout/stderr copy is missing; inspect the executor log directory and retry collection");
     return { path: posix.join(root, file.path), sha256: file.sha256, bytes: file.bytes, truncated: cuts[kind] || file.bytes >= LOG_COPY_BYTES };
   };

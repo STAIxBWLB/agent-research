@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { commit, onlyKeys, openStudy, plain, readTextBounded, requireExperiment, sha256, assertWritable, gateState, readLedger, requireGate, type Actor, type LedgerEvent } from "../study.ts";
-import { readDesign, readProtocol, type Protocol } from "./protocol.ts";
+import { readDesign, readProtocol, type ProtocolDefinition as Protocol } from "./protocol.ts";
 import { listAttempts, type Attempt, type AttemptStatus } from "./attempts.ts";
 import { ablateResultPath, ABLATE_BYTES, foldAblations, readClosedAblate } from "./ablate.ts";
 import { INVESTIGATE_BYTES, investigateResultPath, metricValue, pairSamples, readClosedInvestigation, type PairedSamples, type Sample } from "./investigate.ts";

@@ -98,6 +98,10 @@ function attemptRow(a: Attempt) {
     if (!plain(stage)) continue;
     stages[name] = { exitCode: Number.isSafeInteger(stage.exitCode) ? stage.exitCode : null, durationMs: duration(stage.startedAt, stage.endedAt), network: stage.network === "none" ? "none" : "other", limits: plain(stage.limits) ? reduceData(stage.limits, ["cpus", "memoryMb", "pidsLimit", "wallSeconds", "gpus"]) : null, imageDigest: digest(stage.image) };
   }
+  for (const parent of a.pipeline?.completed ?? []) {
+    const stage = parent.record;
+    stages[parent.name] = { exitCode: stage.exitCode ?? null, durationMs: duration(stage.startedAt, stage.endedAt), network: "none", imageDigest: digest(stage.image), manifestSha256: parent.ref.sha256, inputIndependent: false };
+  }
   const reason = reasonClass(a.reason, a.status);
   return {
     id: a.id, run: a.run, studyIdSha256: sha256(String(a.studyId)), protocolHash: shaped(a.protocolHash, SHA256), sealBinding: shaped(a.sealBinding, SHA256), commit: shaped(a.commit, GIT_ID), treeId: shaped(a.treeId, GIT_ID),

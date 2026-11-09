@@ -14,6 +14,10 @@ const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 export function validArguments(value: unknown, raw: unknown): boolean {
   // An empty JSON schema delegates a frame-bounded field (watch version) to the shared validator.
   if (plain(raw) && Object.keys(raw).length === 0) return true;
+  if (plain(raw) && Object.hasOwn(raw, "oneOf")) {
+    if (Object.keys(raw).length !== 1 || !Array.isArray(raw.oneOf) || !raw.oneOf.length || raw.oneOf.length > 16 || raw.oneOf.some(branch => !plain(branch))) return false;
+    return raw.oneOf.filter(branch => validArguments(value, branch)).length === 1;
+  }
   const s = raw as Record<string, any>, type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
   const types: unknown[] = Array.isArray(s.type) ? s.type : [s.type];
   if (!types.includes(type) && !(type === "number" && Number.isSafeInteger(value) && types.includes("integer"))) return false;

@@ -45,6 +45,8 @@ import { requireExperiment } from "./study.ts";
 import { checkExecutor, setExecutor, readExecutor, hashExecutorInput, type InputManifest } from "./exp/executor.ts";
 import { cancelAttempt, listAttempts, listAttemptSummaries, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type AttemptListOptions, type AttemptOptions } from "./exp/attempts.ts";
 import { readAttemptLogs, type LogOptions } from "./exp/logs.ts";
+import { retainedOperation, type RetainedRef, type RetentionResult } from "./exp/retention.ts";
+import { assertStudyReadLock, onlyKeys, plain, prepareCommit, type PendingEvent } from "./study.ts";
 
 export type ExperimentRuntime = Omit<AttemptContext, "actor">;
 export interface Ctx extends ExperimentRuntime { actor: Actor; http: Http; signal?: AbortSignal }
@@ -115,6 +117,61 @@ export async function executorInputsHash(dirArg: string, path: string, ctx: Ctx)
   return hashExecutorInput(executor, path, ctx.runner);
 }
 export const executorCheck = (dir: string, ctx: Ctx) => checkExecutor(dir, ctx.runner);
+
+function retentionRefs(raw: unknown): RetainedRef[] {
+  if (!Array.isArray(raw) || !raw.length || raw.length > 500) throw new Error("retention refs: select 1..500 explicit retained references");
+  const seen = new Set<string>();
+  return raw.map(value => {
+    if (!plain(value)) throw new Error("retention refs: each reference must be an object");
+    onlyKeys(value, ["attemptId", "stage", "sha256"], "retention reference");
+    if (typeof value.attemptId !== "string" || !/^[a-f0-9]{16}$/.test(value.attemptId) || typeof value.stage !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/.test(value.stage) || ["constructor", "prototype", "__proto__"].includes(value.stage) || typeof value.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.sha256)) throw new Error("retention reference: invalid attempt, stage or manifest digest; use identities from retention inspect");
+    const key = `${value.attemptId}/${value.stage}`;
+    if (seen.has(key)) throw new Error("retention refs: duplicate source; select each attempt/stage once");
+    seen.add(key);
+    return { attemptId: value.attemptId, stage: value.stage, sha256: value.sha256 };
+  });
+}
+function retentionExecutor(dirArg: string) {
+  const { dir, study } = openStudy(dirArg); requireExperiment(study);
+  const executor = readExecutor(dir);
+  if (!executor) throw new Error("executor: not configured; configure an executor before retention inspect or prune");
+  return { dir, study, executor };
+}
+/** Read-only study operation; the executor serializes inventory with producer/consumer/prune state. */
+export async function retentionInspect(dirArg: string, ctx: Pick<Ctx, "runner">): Promise<RetentionResult> {
+  const { study, executor } = retentionExecutor(dirArg);
+  return retainedOperation(executor, { op: "inspect", studyId: study.id }, ctx.runner ?? spawnRunner);
+}
+/** Preview has no local receipt. Confirmation checks current policy and records only a validated disposal. */
+export async function retentionPrune(dirArg: string, options: { refs: RetainedRef[]; fingerprint?: string }, ctx: Ctx): Promise<RetentionResult> {
+  if (!plain(options)) throw new Error("retention prune: options object required");
+  onlyKeys(options, ["refs", "fingerprint"], "retention prune");
+  const refs = retentionRefs(options.refs), fingerprint = options.fingerprint;
+  if (fingerprint !== undefined && (typeof fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(fingerprint))) throw new Error("retention prune: invalid fingerprint; preview the exact references before confirming");
+  const initial = retentionExecutor(dirArg);
+  const request = { op: "prune" as const, studyId: initial.study.id, refs, ...(fingerprint === undefined ? {} : { fingerprint }) };
+  const checked = async (executor: typeof initial.executor) => {
+    const result = await retainedOperation(executor, request, ctx.runner ?? spawnRunner);
+    if (typeof result.fingerprint !== "string" || !/^[a-f0-9]{64}$/.test(result.fingerprint) || result.pruned !== (fingerprint === undefined ? 0 : refs.length) || (fingerprint !== undefined && result.fingerprint !== fingerprint)) throw new Error("retention prune: invalid executor receipt; inspect authoritative tombstones before retrying");
+    return { op: "prune" as const, fingerprint: result.fingerprint, pruned: result.pruned };
+  };
+  if (fingerprint === undefined) return checked(initial.executor);
+  return withLock(initial.dir, async lock => {
+    const { dir, study, executor } = retentionExecutor(initial.dir);
+    requireCopilotAccept(dir, "hypotheses");
+    const binding = designBinding(dir), approval = requireGate(dir, study, "design", binder(dir));
+    const event: PendingEvent = { actor: ctx.actor, type: "retention.pruned", data: { fingerprint, refsSha256: sha256(JSON.stringify(refs)), count: refs.length } };
+    prepareCommit(dir, [], [...approval, event]);
+    assertStudyReadLock(dir, lock);
+    const result = await checked(executor);
+    // Executor tombstones are authoritative across a crash before this local audit receipt.
+    assertStudyReadLock(dir, lock);
+    if (designBinding(dir) !== binding) throw new Error("retention prune: design changed during disposal; inspect authoritative tombstones before retrying");
+    commit(dir, [], [...approval, event]);
+    return result;
+  });
+}
+
 export const harnessStreamSet = (dir: string, raw: unknown, ctx: Ctx) => withLock(dir, () => setHarnessStream(dir, raw, ctx.actor));
 export const harnessStreamShow = (dir: string) => readHarnessStream(dir);
 export const experienceSelect = (dir: string, raw: unknown, ctx: Pick<Ctx, "runner" | "now">, env: NodeJS.ProcessEnv = process.env) => selectExperience(dir, raw, {...ctx, env});

@@ -2,7 +2,7 @@ import { existsSync, lstatSync, opendirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parseLedger, plain, readBytesBounded, hashFileBounded, sha256, validateStudy, type LedgerEvent, type Study, assertStudyReadLock, type StudyReadLock } from "./study.ts";
 import { validateAttemptRecord, type Attempt } from "./exp/attempts.ts";
-import { TASK_BYTES, TASK_FILES, METRIC_LIMIT, validateStoredProtocol, protocolHash } from "./exp/protocol.ts";
+import { TASK_BYTES, TASK_FILES, METRIC_LIMIT, validateStoredProtocol, validateProtocolDefinition, protocolHash } from "./exp/protocol.ts";
 import { validateExecutor } from "./exp/executor.ts";
 import { foldIdeas } from "./exp/ideas.ts";
 import { readClosedInvestigation, type CommitResult } from "./exp/investigate.ts";
@@ -64,6 +64,10 @@ function capture(dir: string, permit?: StudyReadLock): Snapshot {
       outputPaths(stage.evidence.outputs);
       if (plain(stage.evidence.logs)) for (const log of Object.values(stage.evidence.logs)) if (plain(log) && Object.hasOwn(log, "path")) evidencePaths.push(log.path);
     }
+    if (plain(raw.pipeline) && Array.isArray(raw.pipeline.completed)) for (const parent of raw.pipeline.completed) if (plain(parent) && plain(parent.record) && plain(parent.record.evidence)) {
+      outputPaths(parent.record.evidence.outputs);
+      if (plain(parent.record.evidence.logs)) for (const log of Object.values(parent.record.evidence.logs)) if (plain(log) && Object.hasOwn(log, "path")) evidencePaths.push(log.path);
+    }
     // Validate host paths, including evaluator inputs; container mount targets/argv are not host locations.
     for (const location of [...(Object.hasOwn(executor, "workdir") ? [executor.workdir] : []), ...Object.values(paths), ...evidencePaths]) if (typeof location !== "string" || !isAbsolute(location) || location.includes("\0")) fail("malformed-execution-path");
     if (name === "executor.json") { try { validateExecutor(raw); } catch { fail("malformed-executor"); } }
@@ -109,7 +113,7 @@ function capture(dir: string, permit?: StudyReadLock): Snapshot {
   if (events.length > PROVENANCE_EVENTS || events.filter(event => event.type === "plan.set").length > 64) fail("ledger-traversal-capped", true);
   for (const name of ["plan.json", "hypotheses.md", "design/protocol.json", "design/selection.json", "design/final.json", "literature/candidates.json"]) get(name, name === "hypotheses.md" ? 2 * 1024 * 1024 : name.startsWith("literature/") ? 8 * 1024 * 1024 : 65_536);
   for (const name of ["plan.json", "design/protocol.json", "design/selection.json", "design/final.json"]) {
-    const file = files.get(name); if (file) { const raw = parsed(file); if (!plain(raw)) fail("malformed-source"); if (raw.v !== 1) fail("unsupported-version"); }
+    const file = files.get(name); if (file) { const raw = parsed(file); if (!plain(raw)) fail("malformed-source"); if (raw.v !== 1 && !(name === "design/protocol.json" && raw.v === 2)) fail("unsupported-version"); }
   }
   for (const [name, bound] of [["design/harness.json", 1_048_576], ["design/harness-stream.json", 16_384], ["design/harness-experience.json", 1_048_576], ["proposals/lessons.json", 1_048_576]] as const) {
     const file = get(name, bound); if (file) {const raw = parsed(file); if (!plain(raw)) fail("malformed-source"); if (raw.v !== 1) fail("unsupported-version");}
@@ -452,8 +456,8 @@ export interface LineageComparison {
 function comparisonAttempt(value: Attempt, attempts: Map<string, Attempt>): AttemptComparison {
   if (!HASH.test(value.protocolHash) || !/^[a-f0-9]{40}$/.test(value.treeId) || !Array.isArray(value.metrics) || value.metrics.length > METRIC_LIMIT || value.metrics.some(metric => !plain(metric) || typeof metric.name !== "string" || typeof metric.unit !== "string" || metric.provenance !== "ares-observed" || typeof metric.value !== "number" || !Number.isFinite(metric.value))) fail("malformed-comparison-attempt");
   if (value.snapshotSha256 !== undefined && (typeof value.snapshotSha256 !== "string" || !HASH.test(value.snapshotSha256))) fail("malformed-snapshot-sha256");
-  let protocol: ReturnType<typeof validateStoredProtocol>;
-  try { protocol = validateStoredProtocol(value.protocol); } catch { return fail("malformed-comparison-protocol"); }
+  let protocol: ReturnType<typeof validateProtocolDefinition>;
+  try { protocol = value.pipeline ? validateProtocolDefinition(value.pipeline.definition) : validateStoredProtocol(value.protocol); } catch { return fail("malformed-comparison-protocol"); }
   if (protocolHash(protocol) !== value.protocolHash) fail("protocol-hash-mismatch");
   const metricReasons: string[] = [];
   if (new Set(value.metrics.map(metric => metric.name)).size !== value.metrics.length) metricReasons.push("duplicate-metric-names");

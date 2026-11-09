@@ -1,3 +1,6 @@
+import { executionView, materializePipeline, sealPipeline, pipelinePaths, pipelineInputRoot, pipelineRoot, type PipelineState } from "./pipeline.ts";
+import { retainedOperation } from "./retention.ts";
+import { validateStageProtocol } from "./stages.ts";
 import { requireCopilotAccept } from "../copilot.ts";
 import { resolveAutonomy } from "../autonomy.ts";
 import { readFinalSeeds, authorizeFinalAttempt, finalGateBinding, requirePosthocClosed } from "./final.ts";
@@ -7,16 +10,16 @@ import { join, posix } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, requireExperiment, requireGate, sha256, withLock, type Actor, type PendingEvent } from "../study.ts";
-import { designBinding, sameProtocolInputs, frozenProtocol, validateStoredProtocol, protocolHash, readProtocol, readDesign, type Protocol } from "./protocol.ts";
+import { canonical, designBinding, sameProtocolInputs, frozenProtocol, validateStoredProtocol, protocolHash, readProtocol, readDesign, type Protocol } from "./protocol.ts";
 import { buildContainerArgs, probeGpuAdmission, GpuAdmissionDeferred, validateGpuDevices, validateContainerInputSources, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
 import { resolveSnapshot, transferSnapshot, transferTask } from "./snapshot.ts";
-import { collectEvaluation as defaultEvaluationCollector, collectStageEvidence as defaultStageCollector, EvidenceError, MetricsError, outputBudget, type StageEvidence } from "./metrics.ts";
+import { collectEvaluation as defaultEvaluationCollector, collectStageEvidence as defaultStageCollector, EvidenceError, MetricsError, OUTPUT_METADATA_BYTES, outputBudget, type StageEvidence } from "./metrics.ts";
 
 export type AttemptStatus = "running" | "succeeded" | "failed" | "cancelled" | "unknown";
 export interface AttemptStage { image: string; argv: string[]; mounts: { target: string; readOnly: boolean }[]; network: "none"; limits: Protocol["limits"]; user: string; containerId?: string; startedAt: string; endedAt?: string; exitCode?: number; evidence?: StageEvidence; evidenceError?: { reason: string; message: string }; launchPending?: true }
 export interface Evaluation { metrics: { name: string; unit: string; value: number; provenance: "ares-observed" }[]; outputs: { path: string; sha256: string; bytes: number }[] }
 export interface Attempt {
-  v: 1; id: string; studyId: string; run: string; protocolHash: string; sealBinding: string; commit: string; treeId: string; snapshotSha256?: string; seed: number; label: string; retryOf?: string;
+  v: 1 | 2; pipeline?: PipelineState; id: string; studyId: string; run: string; protocolHash: string; sealBinding: string; commit: string; treeId: string; snapshotSha256?: string; seed: number; label: string; retryOf?: string;
   executor: Executor; protocol: Protocol; paths: ContainerPaths; status: AttemptStatus; stage: Stage; reason?: string; error?: string; startedAt: string; endedAt?: string;
   stages: Partial<Record<Stage, AttemptStage>>; metrics: Evaluation["metrics"]; outputs: Evaluation["outputs"];
   sealing: { separateContainers: boolean; evaluatorReadOnly: boolean; candidateHasNoEvaluator: boolean; verifiedBy: "ares-observed" };
@@ -80,8 +83,18 @@ function* records(dir: string): Generator<Attempt> {
 /** Shared store validation for provenance snapshots without a second directory traversal. */
 export function validateAttemptRecord(raw: unknown, run: string, wanted: string): Attempt {
   runName(run); id(wanted);
-      if (plain(raw) && (raw.v !== 1 || (typeof raw.status === "string" && !STATUSES.includes(raw.status as AttemptStatus)) || (typeof raw.stage === "string" && !["candidate", "evaluator"].includes(raw.stage)))) throw new Error("attempt record: unsupported schema version, status or stage; use an ares version that supports this record, keeping the original file unchanged");
-      if (!plain(raw) || raw.v !== 1 || raw.run !== run || raw.id !== wanted || !STATUSES.includes(raw.status as AttemptStatus) || !["candidate", "evaluator"].includes(raw.stage as string) || !plain(raw.stages) || !plain(raw.protocol) || !plain(raw.executor) || typeof raw.startedAt !== "string" || !Number.isFinite(Date.parse(raw.startedAt))) throw new Error("attempt record: malformed; restore its last valid version before retrying");
+      if (plain(raw) && ((raw.v !== 1 && raw.v !== 2) || (typeof raw.status === "string" && !STATUSES.includes(raw.status as AttemptStatus)) || (typeof raw.stage === "string" && !["candidate", "evaluator"].includes(raw.stage)))) throw new Error("attempt record: unsupported schema version, status or stage; use an ares version that supports this record, keeping the original file unchanged");
+      if (!plain(raw) || (raw.v !== 1 && raw.v !== 2) || raw.run !== run || raw.id !== wanted || !STATUSES.includes(raw.status as AttemptStatus) || !["candidate", "evaluator"].includes(raw.stage as string) || !plain(raw.stages) || !plain(raw.protocol) || !plain(raw.executor) || typeof raw.startedAt !== "string" || !Number.isFinite(Date.parse(raw.startedAt))) throw new Error("attempt record: malformed; restore its last valid version before retrying");
+  if (raw.v === 2) {
+    if (!plain(raw.pipeline) || !Number.isSafeInteger(raw.pipeline.index) || !Array.isArray(raw.pipeline.completed)) throw new Error("pipeline: malformed attempt state; restore its last valid record");
+    const definition = validateStageProtocol(raw.pipeline.definition);
+    if (!plain(raw.pipeline.inputHashes) || typeof raw.pipeline.taskTreeHash !== "string" || !/^[a-f0-9]{64}$/.test(raw.pipeline.taskTreeHash)) throw new Error("pipeline: invalid input snapshot identities");
+    const completed = raw.pipeline.completed;
+    if (completed.length !== (raw.pipeline.index as number) + (raw.stage === "evaluator" ? 1 : 0)) throw new Error("pipeline: completed stage receipts do not match current stage");
+    for (const [index, parent] of completed.entries()) if (!plain(parent) || parent.name !== definition.candidate.stages[index]?.name || !plain(parent.ref) || parent.ref.attemptId !== wanted || parent.ref.stage !== parent.name || typeof parent.ref.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(parent.ref.sha256) || !plain(parent.record) || parent.record.exitCode !== 0 || typeof parent.record.containerId !== "string" || typeof parent.record.endedAt !== "string") throw new Error("pipeline: malformed completed-stage provenance");
+    if (canonical(raw.protocol) !== canonical(executionView(definition, raw.pipeline.index as number))) throw new Error("pipeline: execution projection differs from frozen definition");
+    if ((raw.pipeline.index as number) < 0 || (raw.pipeline.index as number) >= definition.candidate.stages.length || raw.protocolHash !== protocolHash(definition)) throw new Error("pipeline: invalid frozen identity or stage index");
+  } else if (raw.pipeline !== undefined) throw new Error("pipeline: version 2 attempt required");
   if (Object.hasOwn(raw.protocol, "inputs")) {
     const protocol = validateStoredProtocol(raw.protocol);
     const expected = Object.entries(protocol.inputs ?? {}), verified = raw.verifiedInputs;
@@ -141,8 +154,7 @@ export function budgetUsage(attempts: Attempt[], time = Date.now()) {
     if (!Number.isFinite(elapsed)) throw new Error("attempt timing: malformed; restore valid timestamps before starting an attempt");
     wallHours += elapsed;
     // Unknown kinds cannot be accounted for safely; read-only operations do not call this function.
-    for (const name of ["candidate", "evaluator"] as const) {
-    const stage = attempt.stages[name];
+    for (const stage of [...Object.values(attempt.stages), ...(attempt.pipeline?.completed.map(value => value.record) ?? [])]) {
     if (!stage) continue;
     const end = stage.endedAt ? Date.parse(stage.endedAt) : attempt.endedAt ? Date.parse(attempt.endedAt) : time;
     const hours = Math.max(0, end - Date.parse(stage.startedAt)) / 3_600_000;
@@ -228,12 +240,12 @@ async function command(attempt: Attempt, step: string, executable: string, args:
 function executionProtocol(dir: string, attempt: Attempt): Protocol {
   if (!Object.keys(attempt.protocol.inputs ?? {}).length) return attempt.protocol;
   let current: Protocol | undefined;
-  try { current = readProtocol(dir); } catch { /* Return safe recovery guidance rather than private parser details. */ }
+  try { const definition = readProtocol(dir); current = definition ? executionView(definition) : undefined; } catch { /* Return safe recovery guidance rather than private parser details. */ }
   if (!current || !sameProtocolInputs(current, attempt.protocol)) throw new InputVerificationError("attempt inputs: current design identities differ from the frozen attempt; restore the matching input names, hashes and mounts in design/protocol.json before reconciling or retrying");
   return { ...attempt.protocol, inputs: current.inputs };
 }
 function stageRecord(attempt: Attempt, stage: Stage, user: string, ctx: AttemptContext): AttemptStage {
-  return { image: attempt.protocol[stage].image, argv: attempt.protocol[stage].command, mounts: [...(stage === "candidate" ? [{ target: "/workspace", readOnly: true }, { target: "/out", readOnly: false }] : [{ target: "/eval", readOnly: true }, { target: "/candidate", readOnly: true }, { target: "/result", readOnly: false }]), ...Object.values(attempt.protocol.inputs ?? {}).flatMap(input => input.mount[stage] ? [{ target: input.mount[stage]!, readOnly: true }] : [])], network: "none", limits: attempt.protocol.limits, user, startedAt: at(ctx) };
+  return { image: attempt.protocol[stage].image, argv: attempt.protocol[stage].command, mounts: [...(stage === "candidate" ? [{ target: "/workspace", readOnly: true }, { target: "/out", readOnly: false }] : [{ target: "/eval", readOnly: true }, { target: "/candidate", readOnly: true }, { target: "/result", readOnly: false }]), ...(pipelineInputRoot(attempt) ? [{ target: "/in", readOnly: true }] : []), ...Object.values(attempt.protocol.inputs ?? {}).flatMap(input => input.mount[stage] ? [{ target: input.mount[stage]!, readOnly: true }] : [])], network: "none", limits: attempt.protocol.limits, user, startedAt: at(ctx) };
 }
 
 /** Validate observed container settings before describing its sealing as ares-observed. */
@@ -242,12 +254,14 @@ function observed(raw: unknown, attempt: Attempt, protocol: Protocol, ownershipO
   if (!plain(value) || typeof value.Id !== "string" || !/^[a-f0-9]{64}$/.test(value.Id) || !plain(value.State) || typeof value.State.Running !== "boolean" || !Number.isSafeInteger(value.State.ExitCode) || !plain(value.Config) || !plain(value.HostConfig) || !Array.isArray(value.Mounts)) throw hostError(attempt, "container inspection");
   const expected = attempt.stages[attempt.stage]!, config = value.Config, settings = value.HostConfig;
   if (ownershipOnly) {
-    if (!plain(config.Labels) || config.Labels["ares.study"] !== attempt.studyId || config.Labels["ares.attempt"] !== attempt.id || config.Labels["ares.stage"] !== attempt.stage || (expected.containerId && value.Id !== expected.containerId)) throw hostError(attempt, "container ownership verification");
+    if (!plain(config.Labels) || config.Labels["ares.study"] !== attempt.studyId || config.Labels["ares.attempt"] !== attempt.id || config.Labels["ares.stage"] !== attempt.stage || (expected?.containerId && value.Id !== expected.containerId)) throw hostError(attempt, "container ownership verification");
     const finishedAt = typeof value.State.FinishedAt === "string" && Number.isFinite(Date.parse(value.State.FinishedAt)) ? value.State.FinishedAt : undefined;
     const startedAt = typeof value.State.StartedAt === "string" && Number.isFinite(Date.parse(value.State.StartedAt)) ? value.State.StartedAt : undefined;
     return { id: value.Id, running: value.State.Running, exitCode: value.State.ExitCode as number, ...(finishedAt ? { finishedAt } : {}), ...(startedAt ? { startedAt } : {}) };
   }
   const mounts = attempt.stage === "candidate" ? [[attempt.paths.snapshot, "/workspace", false], [attempt.paths.output, "/out", true]] : [[attempt.paths.evaluator, "/eval", false], [attempt.paths.output, "/candidate", false], [attempt.paths.result, "/result", true]];
+  const inputRoot = pipelineInputRoot(attempt);
+  if (inputRoot) mounts.push([inputRoot, "/in", false]);
   const bindMounts = value.Mounts.filter(m => !(plain(m) && m.Type === "tmpfs" && m.Destination === "/tmp"));
   // Input content was verified at launch. A locator relocation must not invalidate an in-flight mount.
   const inputs = Object.values(protocol.inputs ?? {}), visible = inputs.filter(input => input.mount[attempt.stage] !== undefined);
@@ -265,9 +279,9 @@ function observed(raw: unknown, attempt: Attempt, protocol: Protocol, ownershipO
     : attempt.gpuDevices !== undefined ? capabilitiesMatch && devices[0].Count === 0 && Array.isArray(devices[0].DeviceIDs) && devices[0].DeviceIDs.length === attempt.gpuDevices.length && new Set(devices[0].DeviceIDs).size === attempt.gpuDevices.length && attempt.gpuDevices.every(device => (devices[0].DeviceIDs as unknown[]).includes(device))
     : capabilitiesMatch && devices[0].Count === expected.limits.gpus;
   if (!gpuMatches) throw hostError(attempt, "GPU limit verification");
-  if (config.Seed !== `ARES_SEED=${attempt.seed}`) throw hostError(attempt, "selected seed verification");
+  if (config.Seed !== (attempt.pipeline && attempt.stage === "candidate" && !attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.seed ? "" : `ARES_SEED=${attempt.seed}`)) throw hostError(attempt, "selected seed verification");
   if (config.Image !== expected.image || config.User !== expected.user || JSON.stringify(config.Cmd) !== JSON.stringify(expected.argv) || !plain(config.Labels) || config.Labels["ares.study"] !== attempt.studyId || config.Labels["ares.attempt"] !== attempt.id || config.Labels["ares.stage"] !== attempt.stage || settings.NetworkMode !== "none" || settings.ReadonlyRootfs !== true || !Array.isArray(settings.CapDrop) || !settings.CapDrop.some(c => c === "ALL" || c === "all") || !Array.isArray(settings.SecurityOpt) || !settings.SecurityOpt.includes("no-new-privileges") || !plain(settings.Tmpfs) || !("/tmp" in settings.Tmpfs) || settings.Memory !== expected.limits.memoryMb * 1024 * 1024 || settings.PidsLimit !== expected.limits.pidsLimit || settings.NanoCpus !== Math.round(expected.limits.cpus * 1e9) || (!inputMountsValid || bindMounts.length !== mounts.length + visible.length) || !mounts.every(([source, target, writable]) => bindMounts.some(m => plain(m) && m.Type === "bind" && m.Source === source && m.Destination === target && m.RW === writable))) throw hostError(attempt, "container isolation verification");
-  if (expected.containerId && value.Id !== expected.containerId) throw hostError(attempt, "container identity verification");
+  if (expected?.containerId && value.Id !== expected.containerId) throw hostError(attempt, "container identity verification");
   const finishedAt = typeof value.State.FinishedAt === "string" && Number.isFinite(Date.parse(value.State.FinishedAt)) ? value.State.FinishedAt : undefined;
   const startedAt = typeof value.State.StartedAt === "string" && Number.isFinite(Date.parse(value.State.StartedAt)) ? value.State.StartedAt : undefined;
   return { id: value.Id, running: value.State.Running, exitCode: value.State.ExitCode as number, ...(finishedAt ? { finishedAt } : {}), ...(startedAt ? { startedAt } : {}) };
@@ -299,20 +313,24 @@ async function recordVerifiedStage(dir: string, attempt: Attempt, state: Observe
       delete current.pendingAutoApproval; delete current.pendingFinalApproval;
     } else {
       current.sealing.evaluatorReadOnly = true;
-      current.sealing.separateContainers = !!current.stages.candidate?.containerId && state.id !== current.stages.candidate.containerId;
+      current.sealing.separateContainers = (current.pipeline ? current.pipeline.completed.every(parent => !!parent.record.containerId && state.id !== parent.record.containerId) : !!current.stages.candidate?.containerId && state.id !== current.stages.candidate.containerId);
     }
     return event;
   }, approvals);
 }
+function attemptContainerName(attempt: Attempt): string {
+  const base = containerName(attempt.id, attempt.stage);
+  return attempt.pipeline && attempt.stage === "candidate" ? `${base}-${attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name}` : base;
+}
 async function inspect(dir: string, attempt: Attempt, ctx: AttemptContext, ownershipOnly = false) {
   const protocol = ownershipOnly ? attempt.protocol : executionProtocol(dir, attempt);
   let result;
-  try { result = await runOnExecutor(attempt.executor, "docker", ["inspect", "--format", INSPECT_FORMAT, containerName(attempt.id, attempt.stage)], ctx.runner ?? spawnRunner, { maxOutputBytes: ATTEMPT_BYTES }); }
+  try { result = await runOnExecutor(attempt.executor, "docker", ["inspect", "--format", INSPECT_FORMAT, attemptContainerName(attempt)], ctx.runner ?? spawnRunner, { maxOutputBytes: ATTEMPT_BYTES }); }
   catch { throw hostError(attempt, "container inspection"); }
   if (result.timedOut || result.truncated) throw hostError(attempt, "container inspection");
   if (result.exitCode === 1) {
     // inspect also exits 1 for daemon outages. Only a successful empty daemon listing confirms absence.
-    const probe = await command(attempt, "container absence confirmation", "docker", ["ps", "--all", "--filter", `name=^/${containerName(attempt.id, attempt.stage)}$`, "--format", "{{.ID}}"], ctx);
+    const probe = await command(attempt, "container absence confirmation", "docker", ["ps", "--all", "--filter", `name=^/${attemptContainerName(attempt)}$`, "--format", "{{.ID}}"], ctx);
     if (probe.stdout.trim() === "") return undefined;
     throw hostError(attempt, "container inspection");
   }
@@ -321,13 +339,45 @@ async function inspect(dir: string, attempt: Attempt, ctx: AttemptContext, owner
   return observed(raw, attempt, protocol, ownershipOnly);
 }
 /** Caller holds a fresh control fence; potentially long input hashing has already completed. */
+const recoveryRunners = new WeakMap<AttemptContext, ProcessRunner>();
+function boundedPipelineContext(dir: string, attempt: Attempt, ctx: AttemptContext): AttemptContext {
+  if (!attempt.pipeline) return ctx;
+  const runner = ctx.runner ?? spawnRunner;
+  const bounded: AttemptContext = { ...ctx, runner: async request => {
+    const seconds = remainingWallSeconds(dir, attempt, ctx);
+    const result = await runner({ ...request, timeoutMs: Math.min(request.timeoutMs ?? 300_000, seconds * 1000) });
+    return result;
+  } };
+  recoveryRunners.set(bounded, recoveryRunners.get(ctx) ?? runner);
+  return bounded;
+}
+function remainingWallSeconds(dir: string, attempt: Attempt, ctx: AttemptContext): number {
+  if (!attempt.pipeline) return attempt.protocol.limits.wallSeconds;
+  const usage = budgetUsage(load(dir), now(ctx)), budget = attempt.protocol.budget;
+  const seconds = Math.floor(Math.min(
+    (Date.parse(attempt.startedAt) + attempt.protocol.limits.wallSeconds * 1000 - now(ctx)) / 1000,
+    (budget.maxWallHours - usage.wallHours) * 3600,
+    attempt.protocol.limits.gpus > 0 ? (budget.maxGpuHours - usage.gpuHours) * 3600 / attempt.protocol.limits.gpus : Infinity,
+  ));
+  if (seconds < 1) throw new Error("pipeline: aggregate wall budget exhausted");
+  return seconds;
+}
 async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptContext, verifiedProtocol?: Protocol): Promise<Attempt> {
+  const recoveryCtx = { ...ctx, runner: recoveryRunners.get(ctx) ?? ctx.runner };
+  ctx = boundedPipelineContext(dir, attempt, ctx);
   let args: string[];
   try {
+    if (attempt.pipeline) {
+      if (designBinding(dir) !== attempt.sealBinding) throw new InputVerificationError("pipeline: design changed; restore the frozen approved definition before consumption");
+      remainingWallSeconds(dir, attempt, ctx);
+      const hashes = await materializePipeline(attempt, ctx);
+      remainingWallSeconds(dir, attempt, ctx);
+      if (JSON.stringify(hashes) !== JSON.stringify(attempt.pipeline.inputHashes)) throw new InputVerificationError("pipeline: verified input identities changed before consumption");
+    }
     const currentProtocol = executionProtocol(dir, attempt), protocol = verifiedProtocol ?? currentProtocol;
     if (!sameProtocolInputs(currentProtocol, protocol)) throw new InputVerificationError("attempt inputs: identities changed after verification; restore the frozen input identities and retry ares attempt reconcile <dir>");
     // Keep configuration refusals outside the uncertain container-start catch.
-    args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths, ...(attempt.gpuDevices ? { gpuDevices: attempt.gpuDevices } : {}) });
+    args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths, ...(attempt.gpuDevices ? { gpuDevices: attempt.gpuDevices } : {}), ...(attempt.pipeline && attempt.stage === "candidate" ? { pipeline: { name: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name, inputRoot: pipelineInputRoot(attempt)!, seed: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.seed } } : {}) });
   } catch (error) {
     if (error instanceof InputVerificationError) await update(dir, attempt.id, ctx, current => {
       if (current.status !== "running" || current.stage !== attempt.stage || current.stages[current.stage]?.containerId || current.launching?.token !== attempt.launching?.token) return undefined;
@@ -344,7 +394,7 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
     if (!/^[a-f0-9]{64}$/.test(cid)) throw hostError(attempt, "container start");
     startedId = cid;
     attempt.stages[attempt.stage]!.containerId = cid;
-    await startWatchdog(attempt.executor, attempt.id, attempt.stage, attempt.protocol.limits.wallSeconds, ctx.runner ?? spawnRunner, cid);
+    await startWatchdog(attempt.executor, attempt.id, attempt.stage, remainingWallSeconds(dir, attempt, ctx), ctx.runner ?? spawnRunner, cid);
     const state = await inspect(dir, attempt, ctx); if (!state) throw hostError(attempt, "container start verification");
     return recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.started");
   } catch {
@@ -353,7 +403,7 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
         // A lost response is not proof that Docker rejected the start. Adopt only a verified owned container.
         const state = await inspect(dir, attempt, ctx);
         if (state) {
-          if (state.running) await startWatchdog(attempt.executor, attempt.id, attempt.stage, attempt.protocol.limits.wallSeconds, ctx.runner ?? spawnRunner, state.id);
+          if (state.running) await startWatchdog(attempt.executor, attempt.id, attempt.stage, remainingWallSeconds(dir, attempt, ctx), ctx.runner ?? spawnRunner, state.id);
           return recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered");
         }
       } catch {
@@ -362,7 +412,7 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
     }
     // A name conflict can belong to another study with the same identity. Only clean up our returned container id.
     if (startedId) {
-      try { await command(attempt, "failed launch cleanup", "docker", ["kill", startedId], ctx); }
+      try { await command(attempt, "failed launch cleanup", "docker", ["kill", startedId], recoveryCtx); }
       catch { return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start"; current.error = hostError(current, "failed start cleanup").message; return "attempt.executor-error"; }); }
     }
     return update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = startupError(current, "container start"); finish(current, "failed", "executor-start", ctx); return "attempt.failed"; });
@@ -385,6 +435,7 @@ async function captureStage(dir: string, attempt: Attempt, ctx: AttemptContext, 
 }
 
 export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: AttemptContext): Promise<Attempt> {
+  const cleanupRunner = ctx.runner ?? spawnRunner;
   const dir = studyDir(dirArg), { study } = openStudy(dir);
   const frozen = await withLock(dir, () => {
     requireCopilotAccept(dir, "hypotheses");
@@ -393,7 +444,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     if (!executor) throw new Error("executor: missing; run ares executor set <dir> --kind local|ssh --workdir PATH before attempt run");
     return { ...design, executor, finalSeeds: readFinalSeeds(dir, design.protocol) };
   });
-  const { protocol, executor } = frozen;
+  const definition = frozen.protocol, protocol = executionView(definition), executor = frozen.executor;
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(study.id)) throw new Error("study id: invalid; restore the id generated by ares init before attempt run");
   const run = runName(options.run ?? "main"), label = boundedText(options.label ?? "baseline", "label", 128), seed = options.seed ?? protocol.seeds[0]!;
   if (!Number.isSafeInteger(seed) || !protocol.seeds.includes(seed)) throw new Error("seed: undeclared; choose a seed from protocol.seeds");
@@ -402,7 +453,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   const finalAuthorization = run === "final" ? await withLock(dir, () => authorizeFinalAttempt(dir, options.commit, seed)) : undefined;
   if (options.retry !== undefined) id(options.retry);
   const initialBinding = frozen.binding;
-  const snapshot = await resolveSnapshot(options.repo, options.commit, ctx.runner ?? spawnRunner), hash = protocolHash(protocol);
+  const snapshot = await resolveSnapshot(options.repo, options.commit, ctx.runner ?? spawnRunner), hash = protocolHash(definition);
   const wanted = attemptId(hash, snapshot.commit, snapshot.treeId, seed, run, options.retry);
   if (options.expectedId !== undefined && wanted !== options.expectedId) throw new Error("attempt identity: changed since plan intent; reconcile the plan node before retrying");
   const inputRoot = posix.join(executor.workdir, study.id, wanted);
@@ -420,8 +471,18 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     }
     gpuDevices = admission.devices;
   }
+  if (definition.v === 2 && !existing) {
+    await withLock(dir, () => {
+      const study = openStudy(dir).study;
+      requireGate(dir, study, "design", () => initialBinding);
+      enforceBudget(protocol, load(dir), now(ctx));
+      if (load(dir).some(a => a.status === "running")) throw new Error("attempt: another attempt is running");
+    });
+    await retainedOperation(executor, { op: "reserve", studyId: study.id, attemptId: wanted, ...(executor.retentionCapBytes === undefined ? {} : { capBytes: executor.retentionCapBytes }) }, ctx.runner ?? spawnRunner);
+  }
   let created = false;
-  let attempt = await withLock(dir, () => {
+  let attempt: Attempt;
+  try { attempt = await withLock(dir, () => {
     requireCopilotAccept(dir, "hypotheses");
     if (run === "posthoc") requirePosthocClosed(dir);
     if (finalAuthorization && authorizeFinalAttempt(dir, options.commit, seed).binding !== finalAuthorization.binding) throw new Error("final inputs changed during snapshot resolution; approve the current final gate before retrying");
@@ -432,25 +493,43 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     const binding = designBinding(dir), approval = requireGate(dir, openStudy(dir).study, "design", () => binding);
     enforceBudget(protocol, attempts, now(ctx));
     const root = posix.join(executor.workdir, study.id, wanted);
-    const record: Attempt = { v: 1, id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, ...(gpuDevices ? { gpuDevices } : {}), protocol: frozenProtocol(protocol), ...(verifiedInputs !== undefined ? { verifiedInputs } : {}), paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };
+    const record: Attempt = { v: definition.v, ...(definition.v === 2 ? { pipeline: { definition, index: 0, completed: [], inputHashes: {}, taskTreeHash: frozen.treeHash } } : {}), id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, ...(gpuDevices ? { gpuDevices } : {}), protocol: frozenProtocol(protocol), ...(verifiedInputs !== undefined ? { verifiedInputs } : {}), paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };
+    if (record.pipeline) record.paths = pipelinePaths(record);
     if (approval.length) record.pendingAutoApproval = binding!;
     if (finalAuthorization) { record.finalBinding = finalAuthorization.binding; record.finalWinner = finalAuthorization.winner; if (finalAuthorization.auto) record.pendingFinalApproval = finalAuthorization.binding; }
     commit(dir, [[file(dir, record), JSON.stringify(record, null, 2) + "\n", ATTEMPT_BYTES]], [{ actor: ctx.actor, type: "attempt.started", data: { id: wanted, run, seed, commit: record.commit, treeId: record.treeId } }]);
     created = true; return record;
-  });
+  }); } catch (error) {
+    if (definition.v === 2 && !existing) await withLock(dir, async () => {
+      if (!load(dir).some(record => record.id === wanted)) await retainedOperation(executor, { op: "release", studyId: study.id, attemptId: wanted }, cleanupRunner);
+    });
+    throw error;
+  }
+  if (attempt.pipeline) ctx = boundedPipelineContext(dir, attempt, ctx);
   if (created) {
     let preparationStep = "executor check";
     try {
       const checked = await checkExecutorInputs(attempt.executor, executionProtocol(dir, attempt), ctx.runner ?? spawnRunner);
       const root = posix.dirname(attempt.paths.snapshot), studyRoot = posix.dirname(root), base = executor.workdir;
       // Require a private, owned, physical root. Attempt mkdir is exclusive, never a shared pre-existing directory.
-      const script = `set -eu; umask 077; base=${shellQuote(base)}; test -d "$base"; test ! -L "$base"; test -O "$base"; test "$(cd -P "$base" && pwd -P)" = "$base"; mode=$(stat -c %a "$base" 2>/dev/null || stat -f %Lp "$base"); test "$mode" = 700; study=${shellQuote(studyRoot)}; if test ! -e "$study"; then mkdir -m 700 "$study"; fi; test -d "$study"; test ! -L "$study"; test -O "$study"; mode=$(stat -c %a "$study" 2>/dev/null || stat -f %Lp "$study"); test "$mode" = 700; mkdir -m 700 ${shellQuote(root)}; mkdir -m 700 ${[attempt.paths.snapshot, attempt.paths.output, attempt.paths.result, posix.dirname(attempt.paths.evaluator)].map(shellQuote).join(" ")}`;
+      const stageDirectories = attempt.pipeline ? attempt.pipeline.definition.candidate.stages.map(stage => posix.join(root, "stages", stage.name, "output")) : [];
+      const script = `set -eu; umask 077; base=${shellQuote(base)}; test -d "$base"; test ! -L "$base"; test -O "$base"; test "$(cd -P "$base" && pwd -P)" = "$base"; mode=$(stat -c %a "$base" 2>/dev/null || stat -f %Lp "$base"); test "$mode" = 700; study=${shellQuote(studyRoot)}; if test ! -e "$study"; then mkdir -m 700 "$study"; fi; test -d "$study"; test ! -L "$study"; test -O "$study"; mode=$(stat -c %a "$study" 2>/dev/null || stat -f %Lp "$study"); test "$mode" = 700; mkdir -m 700 ${shellQuote(root)}; mkdir -p -m 700 ${stageDirectories.length ? stageDirectories.map(shellQuote).join(" ") : shellQuote(posix.join(root, "stages"))}; mkdir -m 700 ${[attempt.paths.snapshot, ...(!attempt.pipeline ? [attempt.paths.output] : []), attempt.paths.result, posix.dirname(attempt.paths.evaluator)].map(shellQuote).join(" ")}`;
       preparationStep = "private workspace preparation";
       await command(attempt, "private workspace preparation", "sh", ["-c", script], ctx);
       preparationStep = "snapshot transfer";
       const transferred = await transferSnapshot(options.repo, snapshot.commit, executor, attempt.paths.snapshot, ctx.runner ?? spawnRunner);
+      if (attempt.pipeline) {
+        const receipt = await retainedOperation(attempt.executor, { op: "snapshot", studyId: attempt.studyId, attemptId: attempt.id, source: attempt.paths.snapshot }, ctx.runner ?? spawnRunner);
+        if (!receipt.sha256 || !/^[a-f0-9]{64}$/.test(receipt.sha256)) throw new Error("pipeline: invalid frozen code snapshot receipt");
+        attempt = await update(dir, attempt.id, ctx, current => { current.pipeline!.codeSnapshotHash = receipt.sha256; return "attempt.pipeline.code"; });
+      }
       preparationStep = "evaluator transfer";
-      await transferTask(join(dir, "task"), executor, posix.dirname(attempt.paths.evaluator), ctx.runner ?? spawnRunner, frozen.treeHash);
+      await transferTask(join(dir, "task"), executor, posix.dirname(attempt.paths.evaluator), ctx.runner ?? spawnRunner, frozen.treeHash, !!attempt.pipeline);
+      if (attempt.pipeline) {
+        for (let index = 1; index < attempt.pipeline.definition.candidate.stages.length; index++) await checkExecutorInputs(executor, executionView(attempt.pipeline.definition, index), ctx.runner ?? spawnRunner);
+        const inputHashes = await materializePipeline(attempt, ctx);
+        attempt = await update(dir, attempt.id, ctx, current => { current.pipeline!.inputHashes = inputHashes; return "attempt.pipeline.inputs"; });
+      }
       preparationStep = "design recheck";
       if (designBinding(dir) !== attempt.sealBinding) throw new Error("design changed during preparation");
       if (attempt.finalBinding && finalGateBinding(dir) !== attempt.finalBinding) throw new Error("final inputs changed during preparation");
@@ -467,6 +546,9 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
       attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = startupError(current, preparationStep); finish(current, "failed", "preparation", ctx); return "attempt.failed"; });
     }
   }
+  if (attempt.pipeline && attempt.status === "failed" && !Object.keys(attempt.stages).length) {
+    await retainedOperation(attempt.executor, { op: "release", studyId: attempt.studyId, attemptId: attempt.id }, cleanupRunner);
+  }
   if (!options.detach) {
     let delay = 1000;
     while (attempt.status === "running") {
@@ -480,7 +562,9 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
 }
 
 async function verifyAndLaunchPending(dir: string, pending: Attempt, ctx: AttemptContext): Promise<Attempt | undefined> {
+  ctx = boundedPipelineContext(dir, pending, ctx);
   const protocol = executionProtocol(dir, pending);
+  const hashes = pending.pipeline ? await materializePipeline(pending, ctx) : undefined;
   validateContainerInputSources(protocol, pending.paths);
   await verifyExecutorInputs(pending.executor, protocol, ctx.runner ?? spawnRunner);
   return withControl(dir, async () => {
@@ -488,6 +572,7 @@ async function verifyAndLaunchPending(dir: string, pending: Attempt, ctx: Attemp
     if (current.status !== "running" || current.stage !== pending.stage || !current.stages[current.stage]?.launchPending || alive(current, ctx)) return undefined;
     executionProtocol(dir, current); // Recheck the frozen identities after hashing, under the fresh launch fence.
     const claimed = await update(dir, current.id, ctx, value => {
+      if (hashes) value.pipeline!.inputHashes = hashes;
       delete value.stages[value.stage]!.launchPending; value.launching = owner(ctx);
       return "attempt.stage.retry-intent";
     });
@@ -513,8 +598,10 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
       if (recovered) attempt = await recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered");
       const stage = attempt.stages[attempt.stage];
       if (!stage) throw hostError(attempt, "stage record");
-      const deadline = Date.parse(stage.startedAt) + stage.limits.wallSeconds * 1000;
-      if ((state.running && now(ctx) >= deadline) || (!state.running && state.finishedAt !== undefined && Date.parse(state.finishedAt) >= deadline)) {
+      const deadline = (attempt.pipeline ? Date.parse(attempt.startedAt) : Date.parse(stage.startedAt)) + stage.limits.wallSeconds * 1000;
+      const usage = attempt.pipeline ? budgetUsage(load(dir), now(ctx)) : undefined;
+      const exhausted = usage && (usage.wallHours >= attempt.protocol.budget.maxWallHours || (attempt.protocol.limits.gpus > 0 && usage.gpuHours >= attempt.protocol.budget.maxGpuHours));
+      if ((state.running && (now(ctx) >= deadline || exhausted)) || (!state.running && state.finishedAt !== undefined && Date.parse(state.finishedAt) >= deadline)) {
         if (state.running) { await command(attempt, "wall-clock kill", "docker", ["kill", state.id], ctx); const stopped = await inspect(dir, attempt, ctx); if (stopped) state = stopped; }
         attempt = await captureStage(dir, attempt, ctx, true);
         const ended = state;
@@ -525,7 +612,7 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
         continue;
       }
       if (state.exitCode !== 0) { attempt = await captureStage(dir, attempt, ctx, true); const ended = state; changed.push(await update(dir, attempt.id, ctx, current => { current.stages[current.stage]!.exitCode = ended.exitCode; if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; finish(current, "failed", `${current.stage}-exit`, ctx); return "attempt.failed"; })); continue; }
-      try { attempt = await captureStage(dir, attempt, ctx, false); }
+      try { attempt = await captureStage(dir, attempt, boundedPipelineContext(dir, attempt, ctx), false); }
       catch (error) {
         const failure = error as EvidenceError, ended = state;
         changed.push(await update(dir, attempt.id, ctx, current => {
@@ -534,7 +621,23 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
           current.error = failure.message; finish(current, "failed", failure.reason, ctx); return "attempt.failed";
         })); continue;
       }
-      if (attempt.stage === "candidate") {
+      if (attempt.stage === "candidate" && attempt.pipeline) {
+        attempt = await update(dir, attempt.id, ctx, current => { current.stages.candidate!.exitCode = 0; current.stages.candidate!.endedAt = state.finishedAt ?? at(ctx); return "attempt.stage.terminated"; });
+        const ref = await sealPipeline(attempt, boundedPipelineContext(dir, attempt, ctx));
+        const next = await update(dir, attempt.id, ctx, current => {
+          const pipeline = current.pipeline!, completed = current.stages.candidate!;
+          pipeline.sidecarBytes = attempt.pipeline!.sidecarBytes;
+          pipeline.completed.push({ name: pipeline.definition.candidate.stages[pipeline.index]!.name, record: completed, ref });
+          delete current.stages.candidate;
+          if (pipeline.index + 1 < pipeline.definition.candidate.stages.length) { pipeline.index++; current.protocol = executionView(pipeline.definition, pipeline.index); }
+          else current.stage = "evaluator";
+          current.paths = pipelinePaths(current);
+          current.stages[current.stage] = stageRecord(current, current.stage, stage.user, ctx);
+          current.stages[current.stage]!.launchPending = true; delete current.launching;
+          return "attempt.stage.changed";
+        });
+        pending.push(next);
+      } else if (attempt.stage === "candidate") {
         const next = await update(dir, attempt.id, ctx, current => {
           current.stages.candidate!.exitCode = 0; current.stages.candidate!.endedAt = state.finishedAt ?? at(ctx); current.stage = "evaluator";
           current.stages.evaluator = stageRecord(current, "evaluator", stage.user, ctx);
@@ -546,12 +649,19 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
         else changed.push(await launch(dir, next, stage.user, ctx));
       } else {
         let evaluation: Evaluation | undefined, failure: EvidenceError | undefined;
-        try { evaluation = await (ctx.collectEvaluation ?? defaultEvaluationCollector)(attempt, ctx.runner ?? spawnRunner); }
-        catch (error) { failure = error instanceof EvidenceError ? error : new MetricsError("invalid-metrics", "evaluator result validation failed"); }
+        try {
+          const bounded = boundedPipelineContext(dir, attempt, ctx);
+          evaluation = await (ctx.collectEvaluation ?? defaultEvaluationCollector)(attempt, bounded.runner ?? spawnRunner);
+          if (attempt.pipeline) remainingWallSeconds(dir, attempt, ctx);
+        }
+        catch (error) { evaluation = undefined; failure = error instanceof EvidenceError ? error : new MetricsError("invalid-metrics", "evaluator result validation failed or aggregate budget exhausted"); }
         changed.push(await update(dir, attempt.id, ctx, current => {
           current.stages.evaluator!.exitCode = 0;
           if (state.finishedAt) current.stages.evaluator!.endedAt = state.finishedAt;
           if (!evaluation) { const rejected = failure ?? new MetricsError("invalid-metrics", "the collector returned no result"); current.error = rejected.message; finish(current, "failed", rejected.reason, ctx); return "attempt.failed"; }
+          if (current.pipeline && Buffer.byteLength(JSON.stringify(outputBudget([...current.outputs, ...evaluation.outputs]), null, 2)) + (current.pipeline.sidecarBytes ?? 0) > OUTPUT_METADATA_BYTES) {
+            current.error = "pipeline: total output metadata including retained sidecars exceeds the attempt limit"; finish(current, "failed", "artifact-limit", ctx); return "attempt.failed";
+          }
           current.metrics = evaluation.metrics; current.outputs = outputBudget([...current.outputs, ...evaluation.outputs]); finish(current, "succeeded", undefined, ctx); return "attempt.succeeded";
         }));
       }
@@ -568,7 +678,27 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
     const launched = await verifyAndLaunchPending(dir, attempt, ctx);
     if (launched) changed.push(launched);
   }
+  await reconcileRetentionReservations(dir, ctx);
   return changed;
+}
+/** Explicit reconciliation only frees a hold after the executor confirms no owned live container. */
+async function reconcileRetentionReservations(dir: string, ctx: AttemptContext): Promise<void> {
+  const executor = readExecutor(dir), { study } = openStudy(dir);
+  if (!executor || (!load(dir).some(attempt => !!attempt.pipeline) && readProtocol(dir)?.v !== 2)) return;
+  if (load(dir).some(attempt => attempt.status === "running")) return;
+  const view = await retainedOperation(executor, { op: "inspect", studyId: study.id }, ctx.runner ?? spawnRunner);
+  for (const reservation of view.reservations ?? []) {
+    if (!reservation.active) continue;
+    const attempt = load(dir).find(value => value.id === reservation.attemptId);
+    if (attempt?.status === "running") continue;
+    await withControl(dir, async () => {
+      const current = load(dir).find(value => value.id === reservation.attemptId);
+      if (current?.status === "running") return;
+      const live = await runOnExecutor(executor, "docker", ["ps", "--filter", `label=ares.study=${study.id}`, "--filter", `label=ares.attempt=${reservation.attemptId}`, "--format", "{{.ID}}"], ctx.runner ?? spawnRunner);
+      if (live.exitCode !== 0 || live.timedOut || live.truncated || live.stdout.trim()) return;
+      await retainedOperation(executor, { op: "release", studyId: study.id, attemptId: reservation.attemptId }, ctx.runner ?? spawnRunner);
+    });
+  }
 }
 export async function cancelAttempt(dirArg: string, wanted: string, reason: string | undefined, ctx: AttemptContext, completion?: (attempt: Attempt) => PendingEvent[]): Promise<Attempt> {
   const dir = studyDir(dirArg), why = reason === undefined ? undefined : boundedText(reason, "reason", 500);
@@ -594,7 +724,9 @@ export async function cancelAttempt(dirArg: string, wanted: string, reason: stri
       });
     }
     if (state?.running) { await command(attempt, "cancel kill", "docker", ["kill", state.id], ctx); state = await inspect(dir, attempt, ctx, true); }
+    if (attempt.pipeline && state?.running) throw hostError(attempt, "cancellation termination confirmation");
     if (state) attempt = await captureStage(dir, attempt, ctx, true);
+    if (attempt.pipeline) await retainedOperation(attempt.executor, { op: "release", studyId: attempt.studyId, attemptId: attempt.id }, ctx.runner ?? spawnRunner);
     const ended = state;
     return update(dir, attempt.id, ctx, current => { if (ended && !ended.running) { current.stages[current.stage]!.exitCode = ended.exitCode; if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; } finish(current, "cancelled", why ?? "cancelled", ctx); return "attempt.cancelled"; }, [], completion);
   } catch (error) {

@@ -1,3 +1,4 @@
+import { validateStageProtocol, stageProtocolHash, type ProtocolV2 } from "./stages.ts";
 import { requireCopilotAccept } from "../copilot.ts";
 import { finalSeedsHash } from "./final.ts";
 import { selectionHash } from "./selection.ts";
@@ -14,6 +15,12 @@ export interface Protocol {
   metrics: { name: string; unit: string; direction: "max" | "min" }[];
   seeds: number[]; limits: Limits; network: "none";
   budget: { maxAttempts: number; maxWallHours: number; maxGpuHours: number };
+}
+export type ProtocolDefinition = Protocol | ProtocolV2;
+export function validateProtocolDefinition(raw: unknown): ProtocolDefinition {
+  if (plain(raw) && raw.v === 2) return validateStageProtocol(raw);
+  if (!plain(raw) || raw.v !== 1) throw new Error("protocol.v: unsupported version; use a compatible ares release, keeping the original definition unchanged");
+  return validateProtocol(raw);
 }
 export const METRIC_LIMIT = 100;
 export const PROTOCOL_BYTES = 65_536, TASK_FILES = 500, TASK_BYTES = 64 * 1024 * 1024;
@@ -122,13 +129,18 @@ export function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 /** Accept full public or already-frozen records, but never mixed locator/identity descriptors. */
-export function frozenProtocol(protocol: Protocol): Protocol {
+export function frozenProtocol(protocol: Protocol): Protocol;
+export function frozenProtocol(protocol: ProtocolV2): ProtocolV2;
+export function frozenProtocol(protocol: ProtocolDefinition): ProtocolDefinition;
+export function frozenProtocol(protocol: ProtocolDefinition): ProtocolDefinition {
+  if (protocol.v === 2) return validateStageProtocol(protocol);
   const hasLocators = plain(protocol.inputs) && Object.values(protocol.inputs).some(input => plain(input) && Object.hasOwn(input, "path"));
   const normalized = hasLocators ? validateProtocol(protocol) : validateStoredProtocol(protocol);
   if (normalized.inputs !== undefined) normalized.inputs = Object.fromEntries(Object.entries(normalized.inputs).map(([name, input]) => [name, { sha256: input.sha256, mount: { ...input.mount } }]));
   return normalized;
 }
-export function protocolHash(protocol: Protocol): string {
+export function protocolHash(protocol: ProtocolDefinition): string {
+  if (protocol.v === 2) return stageProtocolHash(protocol);
   const { budget: _budget, ...comparable } = frozenProtocol(protocol);
   return sha256(canonical(comparable));
 }
@@ -137,12 +149,13 @@ export function sameProtocolInputs(left: Protocol, right: Protocol): boolean {
   return canonical(frozenProtocol(left).inputs ?? {}) === canonical(frozenProtocol(right).inputs ?? {});
 }
 /** Preserve legacy raw-byte design seals when inputs are absent. */
-function protocolSealHash(protocol: Protocol, sourceText: string): string {
+function protocolSealHash(protocol: ProtocolDefinition, sourceText: string): string {
+  if (protocol.v === 2) return sha256(canonical(validateStageProtocol(protocol)));
   return sha256(protocol.inputs === undefined ? sourceText : canonical(frozenProtocol(protocol)));
 }
-export function readProtocol(dir: string): Protocol | undefined {
+export function readProtocol(dir: string): ProtocolDefinition | undefined {
   const file = join(dir, "design", "protocol.json");
-  return existsSync(file) ? validateProtocol(readJsonFile(file, PROTOCOL_BYTES)) : undefined;
+  return existsSync(file) ? validateProtocolDefinition(readJsonFile(file, PROTOCOL_BYTES)) : undefined;
 }
 /** Hash unambiguous sorted [relative path, file hash] pairs; directory entries are never followed. */
 export function taskTreeHash(dir: string): string {
@@ -179,24 +192,24 @@ export function designBinding(dir: string): string | undefined {
   return readDesign(dir)?.binding;
 }
 /** Capture the validated protocol and design seal; input identities omit locators, legacy bytes stay bound. */
-export function readDesign(dir: string): { protocol: Protocol; treeHash: string; binding: string } | undefined {
+export function readDesign(dir: string): { protocol: ProtocolDefinition; treeHash: string; binding: string } | undefined {
   const file = join(dir, "design", "protocol.json");
   if (!existsSync(file)) return undefined;
   const text = readTextBounded(file, PROTOCOL_BYTES);
   let raw: unknown; try { raw = JSON.parse(text); } catch { throw new Error("protocol: invalid JSON; restore design/protocol.json with a valid ares protocol input"); }
-  const protocol = validateProtocol(raw), treeHash = taskTreeHash(dir);
+  const protocol = validateProtocolDefinition(raw), treeHash = taskTreeHash(dir);
   const selected = selectionHash(dir, protocol), reserved = finalSeedsHash(dir, protocol);
   return { protocol, treeHash, binding: sha256(JSON.stringify([protocolSealHash(protocol, text), treeHash, ...(selected !== undefined ? [selected] : []), ...(reserved !== undefined ? [reserved] : [])])) };
 }
 /** Caller holds the study lock, as with setScope. Validate everything before any write. */
-export function setProtocol(dir: string, raw: unknown, actor: Actor): Protocol {
+export function setProtocol(dir: string, raw: unknown, actor: Actor): ProtocolDefinition {
   requireExperiment(openStudy(dir).study);
-  const protocol = validateProtocol(raw);
+  const protocol = validateProtocolDefinition(raw);
   requireCopilotAccept(dir, "hypotheses");
   const treeHash = taskTreeHash(dir), text = JSON.stringify(protocol, null, 2) + "\n";
   // Never commit a protocol that makes its existing selection unreadable.
   selectionHash(dir, protocol);
   finalSeedsHash(dir, protocol);
-  commit(dir, [[join(dir, "design", "protocol.json"), text, PROTOCOL_BYTES]], [{ actor, type: "protocol.set", data: { sha256: sha256(text), ...(protocol.inputs === undefined ? {} : { identitySha256: protocolSealHash(protocol, text) }), protocolHash: protocolHash(protocol), treeHash } }]);
+  commit(dir, [[join(dir, "design", "protocol.json"), text, PROTOCOL_BYTES]], [{ actor, type: "protocol.set", data: { sha256: sha256(text), ...((protocol.v === 1 && protocol.inputs === undefined) ? {} : { identitySha256: protocolSealHash(protocol, text) }), protocolHash: protocolHash(protocol), treeHash } }]);
   return protocol;
 }

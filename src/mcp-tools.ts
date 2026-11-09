@@ -6,6 +6,7 @@ import { isAbsolute } from "node:path";
 import * as ops from "./commands.ts";
 import { createHttp, type Http } from "./http.ts";
 import type { McpHandler, McpTool } from "./mcp.ts";
+import type { RetainedRef } from "./exp/retention.ts";
 import { PLAYBOOK } from "./playbook.ts";
 import { PLAN_ID_BYTES, STEP_COMMANDS } from "./plan/definition.ts";
 import { PLAN_GATE_BYTES } from "./plan/state.ts";
@@ -45,7 +46,8 @@ const stage = { type: "string", enum: ["candidate", "evaluator"] };
 const stream = { type: "string", enum: ["stdout", "stderr"] };
 const attemptId = { type: "string", minLength: 16, maxLength: 16, description: "16-hex attempt id from attempt list" };
 const run = text(64), seed = integer(-2_147_483_648, 2_147_483_647);
-const PROTOCOL = obj({
+const RETAINED_REFS = { type: "array", minItems: 1, maxItems: 500, items: obj({ attemptId, stage: text(32), sha256: { ...text(64), minLength: 64 } }, ["attemptId", "stage", "sha256"]) };
+const PROTOCOL_V1 = obj({
   v: { type: "integer", enum: [1] }, method: text(4000),
   candidate: obj({ image, command: argv, env: { type: "object", maxProperties: 64, properties: {}, additionalProperties: { type: "string", maxLength: 4096 }, description: "Non-secret environment values; secret-like keys and reserved ARES_SEED are refused" } }, ["image", "command"]),
   evaluator: obj({ image, command: argv }, ["image", "command"]),
@@ -56,6 +58,21 @@ const PROTOCOL = obj({
   inputs: { type: "object", maxProperties: 8, properties: {}, additionalProperties: obj({ path: text(4096), sha256: text(64), mount: obj({ candidate: text(256), evaluator: text(256) }, []) }, ["path", "sha256", "mount"]) },
   budget: obj({ maxAttempts: integer(1, 1_000_000), maxWallHours: { type: "number", minimum: 0.000001, maximum: 1_000_000 }, maxGpuHours: { type: "number", minimum: 0, maximum: 64_000_000 } }, ["maxAttempts", "maxWallHours", "maxGpuHours"]),
 }, ["v", "method", "candidate", "evaluator", "metrics", "seeds", "limits", "network", "budget"]);
+
+const STAGE_PROTOCOL = obj({ ...PROTOCOL_V1.properties,
+  v: { type: "integer", enum: [2] },
+  inputs: undefined,
+  candidate: obj({ stages: { type: "array", minItems: 1, maxItems: 16, items: obj({
+    name: text(32), image, command: argv, env: { type: "object", maxProperties: 64, properties: {}, additionalProperties: { type: "string", maxLength: 4096 } },
+    seed: { type: "boolean" }, code: { type: "string", enum: ["snapshot"] },
+    needs: { type: "array", maxItems: 16, items: text(32) },
+    inputs: { type: "object", maxProperties: 32, additionalProperties: { oneOf: [obj({ task: text(256) }, ["task"]), obj({ stage: text(32), output: text(32) }, ["stage", "output"])] } },
+    outputs: { type: "object", maxProperties: 32, additionalProperties: text(256) },
+  }, ["name", "image", "command", "seed", "code", "needs", "inputs", "outputs"]) } }, ["stages"]),
+}, PROTOCOL_V1.required);
+// Omit the v1 external-input property entirely; undefined is not a JSON schema.
+delete STAGE_PROTOCOL.properties.inputs;
+const PROTOCOL = { oneOf: [PROTOCOL_V1, STAGE_PROTOCOL] };
 
 const planId = text(PLAN_ID_BYTES);
 const PLAN = obj({
@@ -80,6 +97,8 @@ const SELECTION = obj({
 const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), parent: text(64), commit: { type: "string", minLength: 40, maxLength: 40 } }, ["id", "title", "hypothesis"]);
 
 export const ARES_TOOLS: readonly McpTool[] = [
+  { name: "ares_retention_inspect", description: "Inspect executor-local retained identities, quota reservations and tombstones without a study write. Active sources/consumers remain explicit; no artifact bodies are returned.", inputSchema: obj({study}, ["study"]), annotations: {...read, openWorldHint: true} },
+  { name: "ares_retention_prune", description: "Preview explicit retained references by default. Confirm the returned fingerprint to dispose bytes under current design policy; active producers/consumers refuse. Tombstones preserve provenance. Executor tombstones remain authoritative after a crash before the local audit receipt; inspect them before retrying.", inputSchema: obj({study, refs: RETAINED_REFS, fingerprint: {...text(64), minLength: 64}}, ["study", "refs"]), annotations: {...net, destructiveHint: true} },
   {name: "ares_lesson_propose", description: "Propose a bounded lesson from a closed native harness round. Inspect required evidence/counterevidence explicitly; fixture-only single-task observations never establish real behavior, success or transfer.", inputSchema: obj({study, proposal: {type: "object"}}, ["study", "proposal"]), annotations: net},
   {name: "ares_lesson_list", description: "Read stored lesson proposals and dispositions locally, without current source checks. Stored eligibility is not fresh proof; no body or activation.", inputSchema: obj({study}, ["study"]), annotations: read},
   {name: "ares_lesson_check", description: "Explicitly recheck a lesson's current native closure and screened evidence/counterevidence without writing. Integrity never establishes support; no body is retained.", inputSchema: obj({study, name: text(64)}, ["study", "name"]), annotations: {...read, openWorldHint: true}},
@@ -133,7 +152,7 @@ export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_final_seeds", description: "Reserve unused unique declared protocol seeds for final evaluation (new/changed values reject prior use in every run/status), at least one and at most half the declared seeds. New/changed raw file bytes join the design seal; identical bytes are a no-op. Experiment mode only; starts no work.", inputSchema: obj({ study, final: obj({ v: { type: "integer", enum: [1] }, seeds: { type: "array", minItems: 1, maxItems: 500, items: seed } }, ["v", "seeds"]) }, ["study", "final"]), annotations: write },
   { name: "ares_selection_set", description: "Set a declared investigation selection rule before results: run (not reserved ablate/final/posthoc), primary metric, frozen baseline commit, minimum paired seeds and nonnegative improvement. Changes reopen the design gate; identical bytes leave the cutoff unchanged. Requires experiment mode and a protocol; starts no investigation or executor.", inputSchema: obj({ study, selection: SELECTION }, ["study", "selection"]), annotations: write },
   { name: "ares_protocol_set", description: "Set an experiment protocol after bounded validation of protocol and task/. Sealed identity changes reopen design approval; same-identity input locator-only edits preserve approval. Comparable attempt identity excludes budget and input locators.", inputSchema: obj({ study, protocol: PROTOCOL }, ["study", "protocol"]), annotations: write },
-  { name: "ares_executor_set", description: "Configure local or SSH Docker execution with an explicit private absolute workdir. Stores the host alias only, never credentials. Optional gpu settings enable a one-pass device/memory/load admission check; failed admission defers without an attempt.", inputSchema: obj({ study, kind: { type: "string", enum: ["local", "ssh"] }, host: text(128), workdir: text(4096), gpu: obj({ devices: { type: "array", minItems: 1, maxItems: 64, items: { type: ["string", "integer"], maxLength: 40 } }, minFreeMemoryMb: integer(0, 2147483647), maxLoadRatio: { type: "number", exclusiveMinimum: 0, maximum: 1000000 } }, ["devices", "minFreeMemoryMb", "maxLoadRatio"]) }, ["study", "kind", "workdir"]), annotations: write },
+  { name: "ares_executor_set", description: "Configure local or SSH Docker execution with an explicit private absolute workdir. Stores the host alias only, never credentials. Optional gpu settings enable a one-pass device/memory/load admission check; failed admission defers without an attempt.", inputSchema: obj({ study, kind: { type: "string", enum: ["local", "ssh"] }, host: text(128), workdir: text(4096), retentionCapBytes: integer(1, 1024 ** 4), gpu: obj({ devices: { type: "array", minItems: 1, maxItems: 64, items: { type: ["string", "integer"], maxLength: 40 } }, minFreeMemoryMb: integer(0, 2147483647), maxLoadRatio: { type: "number", exclusiveMinimum: 0, maximum: 1000000 } }, ["devices", "minFreeMemoryMb", "maxLoadRatio"]) }, ["study", "kind", "workdir"]), annotations: write },
   { name: "ares_executor_inputs_hash", description: "Hash a pre-staged input directory on the configured local or SSH executor host. Returns only sha256, files and bytes; never copies input paths or bodies into the study. Read-only external host access, with no gate or ledger write.", inputSchema: obj({ study, path: text(4096) }, ["study", "path"]), annotations: { ...read, openWorldHint: true } },
   { name: "ares_executor_check", description: "Check executor Docker server, non-root uid:gid and digest-pinned image availability; pulls missing images.", inputSchema: obj({ study }, ["study"]), annotations: net },
   { name: "ares_attempt_run", description: "Start a frozen-commit experiment attempt and return without waiting for completion. Always detached; requires approved design in gates mode. Duplicate requests return the existing attempt. GPU admission can return status deferred with devices/load/probe reason and exitCode 75, without creating an attempt; no automatic retry.", inputSchema: obj({ study, repo: text(4096), commit: { type: "string", minLength: 40, maxLength: 40 }, seed, run, label: text(128), retry: attemptId }, ["study", "repo", "commit"]), annotations: net },
@@ -170,6 +189,8 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
   const background = new Map<Promise<void>, () => void>();
   const track = (completion: Promise<void>, terminate: () => void) => { background.set(completion, terminate); void completion.then(() => { background.delete(completion); }); };
   const handlers: Record<string, McpHandler> = {
+    ares_retention_inspect: a => ops.retentionInspect(dir(a), ctx),
+    ares_retention_prune: a => ops.retentionPrune(dir(a), {refs: a.refs as RetainedRef[], ...(a.fingerprint === undefined ? {} : {fingerprint: a.fingerprint as string})}, ctx),
     ares_lesson_propose: a => ops.lessonPropose(dir(a), a.proposal, ctx, env),
     ares_lesson_list: a => ops.lessonList(dir(a)),
     ares_lesson_check: a => ops.lessonCheck(dir(a), a.name as string, ctx, env),
@@ -222,7 +243,7 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
     ares_harness_set: a => ops.harnessSet(dir(a), a.round, ctx),
     ares_harness_show: a => ops.harnessShow(dir(a), a.round as string | undefined),
     ares_harness_import: a => ops.harnessImport(dir(a), a.round as string, a.fixture, ctx),
-    ares_executor_set: a => ops.executorSet(dir(a), { v: 1, kind: a.kind, ...(a.host !== undefined ? { host: a.host } : {}), workdir: a.workdir, ...(a.gpu !== undefined ? { gpu: a.gpu } : {}) }, ctx),
+    ares_executor_set: a => ops.executorSet(dir(a), { v: 1, kind: a.kind, ...(a.host !== undefined ? { host: a.host } : {}), workdir: a.workdir, ...(a.retentionCapBytes !== undefined ? { retentionCapBytes: a.retentionCapBytes } : {}), ...(a.gpu !== undefined ? { gpu: a.gpu } : {}) }, ctx),
     ares_executor_inputs_hash: a => ops.executorInputsHash(dir(a), a.path as string, ctx),
     ares_executor_check: a => ops.executorCheck(dir(a), ctx),
     ares_attempt_run: a => ops.attemptRun(dir(a), { repo: absolute(a.repo, "repo"), commit: a.commit as string, ...(a.seed !== undefined ? { seed: a.seed as number } : {}), ...(a.run !== undefined ? { run: a.run as string } : {}), ...(a.label !== undefined ? { label: a.label as string } : {}), ...(a.retry !== undefined ? { retry: a.retry as string } : {}), detach: true }, ctx),

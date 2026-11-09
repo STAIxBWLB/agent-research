@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+
+- Protocol v2 stage execution and retained artifacts (#61): opt-in serial fresh candidate stages consume verified read-only task/parent snapshots; a separate fresh evaluator produces metrics. Output payload/file/metadata and wall/compute budgets remain cumulative across the attempt. Executor-local retention uses bounded atomic publication, a default 1 GiB cap with in-flight reservations, and explicit fingerprinted prune with active-consumer refusal and provenance tombstones. Python3 is required for v2. `retention inspect` and `retention prune` share CLI/MCP implementations. The prior T1 evaluator double-counting bug and stage/port refusal labels are corrected.
+
+- Release requirement: these opt-in v2 protocol/attempt records require a compatible minor release before publication. This change does not bump the package, tag or publish. At that release, `scripts/n1-check.ts` resolves the latest published patch of the previous minor line; no fixed registry version is assumed here.
+  - N-1 CLI: existing commands and required usage remain; retention commands and optional `executor set --retention-cap-bytes` are additive. V1 protocol execution, attempt identity and raw-byte design seals remain unchanged.
+  - N-1 MCP tools: existing tools and annotations remain; retention inspect/prune are additive and protocol-set accepts a closed v1/v2 union. Optional executor retention cap settings require the compatible reader.
+  - N-1 study/ledger formats: study and ledger versions stay unchanged. Current readers keep v1 protocols/attempts; older readers refuse opt-in protocol/attempt v2 without rewriting them. New retention/progress events are additive. Retained bytes remain executor-local; no migration or downgrade is performed. The installed-package/network N-1 CI job remains separate from offline fixture checks.
+
 - Filter prospective experience for temporal and model/runtime/toolset eligibility before any exact-id counterevidence or note reads; incompatible handoffs refuse locally. Share the 256-byte model identity bound across fixture, lesson, experience and MCP validation, preserving valid long model identities.
 
 - Complete #62 T2/T3: new skill proposals default to source-inspected v2, with shared aggregate 25 s/256 KiB response budgets, one local provenance snapshot, owned-lock generation fencing and atomic evidence fingerprints on acceptance. Evidence and counterevidence must both stay available/unchanged; negative/no-winner/unfinished outcomes never imply successful support. Add read-only CLI/MCP skill check and stored-strength console details; no body retention, fallback, export or installation. Historical v1 files and final decisions are unchanged. New v2 writes need a compatible minor release; older readers refuse them rather than silently downgrade. Synthetic executable tests cover process-group cleanup/spawn/output bounds; no live amem or account proof is claimed.

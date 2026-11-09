@@ -2,6 +2,8 @@
 export interface CommandSpec { name: string; usage: string; mutates: boolean | "network"; options: Record<string, "flag" | "value"> }
 const json = { "--json": "flag" } as const;
 export const COMMANDS: readonly CommandSpec[] = [
+  { name: "retention inspect", usage: "retention inspect <dir> [--json]", mutates: "network", options: json },
+  { name: "retention prune", usage: "retention prune <dir> --file PATH|- [--confirm FINGERPRINT] [--json]", mutates: "network", options: { "--file": "value", "--confirm": "value", ...json } },
   { name: "skill check", usage: "skill check <dir> <name> [--json]", mutates: "network", options: json },
   { name: "harness close", usage: "harness close <dir> <round> --file PATH|- [--confirm FINGERPRINT] [--json]", mutates: true, options: { "--file": "value", "--confirm": "value", ...json } },
   { name: "harness contrast", usage: "harness contrast <dir> <round> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
@@ -56,7 +58,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "final seeds", usage: "final seeds <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "selection", usage: "selection <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "protocol", usage: "protocol <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
-  { name: "executor set", usage: "executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--gpu-devices IDS --gpu-min-free-memory-mb MB --gpu-max-load-ratio RATIO] [--json]", mutates: true, options: { "--kind": "value", "--host": "value", "--workdir": "value", "--gpu-devices": "value", "--gpu-min-free-memory-mb": "value", "--gpu-max-load-ratio": "value", ...json } },
+  { name: "executor set", usage: "executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--retention-cap-bytes BYTES] [--gpu-devices IDS --gpu-min-free-memory-mb MB --gpu-max-load-ratio RATIO] [--json]", mutates: true, options: { "--kind": "value", "--host": "value", "--workdir": "value", "--retention-cap-bytes": "value", "--gpu-devices": "value", "--gpu-min-free-memory-mb": "value", "--gpu-max-load-ratio": "value", ...json } },
   { name: "executor inputs hash", usage: "executor inputs hash <dir> <path> [--json]", mutates: "network", options: json },
   { name: "executor check", usage: "executor check <dir> [--json]", mutates: "network", options: json },
   { name: "gate list", usage: "gate list <dir> [--json]", mutates: false, options: json },

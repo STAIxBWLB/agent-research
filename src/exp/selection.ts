@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { boundedText, commit, onlyKeys, openStudy, plain, readTextBounded, requireExperiment, sha256, type Actor } from "../study.ts";
-import type { Protocol } from "./protocol.ts";
+import type { ProtocolDefinition as Protocol } from "./protocol.ts";
 
 export interface Selection { v: 1; run: string; metric: string; baseline: { commit: string }; minSeeds: number; minDelta: number }
 export const SELECTION_BYTES = 65_536;
