@@ -200,5 +200,5 @@ export function checkPaper(dirArg: string) {
     catch (error) { unreadableCards.push({ citekey: key, id: candidate!.id, message: error instanceof Error ? error.message : "card unreadable; record it again with ares lit card" }); return []; }
     return card?.reused ? [{ citekey: key, id: candidate!.id, vault: card.reused.vault, note: card.reused.note, at: card.reused.at, provenance: card.reused.provenance }] : [];
   });
-  return { ok: !findings.some(f => f.severity === "blocking"), settings, manuscriptSha256: sha256(manuscript), ...(plan ? {planSha256: plan.sha256} : {}), rendered, placeholders: resolution.placeholders, findings: findings.sort((a, b) => a.start - b.start || a.code.localeCompare(b.code)), literals: resolution.literals, codeNumbers, codeNumberCount, citations, reusedCards, unreadableCards };
+  return { ok: !findings.some(f => f.severity === "blocking"), settings, manuscriptSha256: sha256(manuscript), ...(plan ? {planSha256: plan.sha256} : {}), rendered, placeholders: resolution.placeholders, findings: findings.sort((a, b) => a.start - b.start || a.code.localeCompare(b.code)), literals: resolution.literals, codeNumbers, codeNumberCount, citations, ...(reusedCards.length ? { reusedCards } : {}), ...(unreadableCards.length ? { unreadableCards } : {}) };
 }

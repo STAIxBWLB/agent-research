@@ -124,7 +124,7 @@ test("P2d: paper check reports an unreadable cited card instead of hiding it", a
   writeFileSync(join(dir, "paper", "manuscript.md"), `Prior work [@${key}].\n`);
   const report = checkPaper(dir);
   expect(report.unreadableCards).toEqual([{ citekey: key, id: DOI, message: expect.stringMatching(/unreadable, invalid JSON.*record the card again/) }]);
-  expect(report.reusedCards).toEqual([]);
+  expect(report.reusedCards).toBeUndefined();
 });
 
 test("AC1: export previews and needs the fingerprint; import refuses unverified identifiers", async () => {
@@ -219,5 +219,5 @@ test("AC4: provenance is shown wherever a reused card is referenced, CLI and MCP
   await ops.card(target.dir, DOI, { summary: "Own card." }, target.ctx);
   const own = loadCandidates(target.dir).find(c => c.id === DOI)!.citekey!;
   writeFileSync(join(target.dir, "paper", "manuscript.md"), `Prior work [@${own}].\n`);
-  expect(checkPaper(target.dir).reusedCards).toEqual([]);
+  expect(checkPaper(target.dir).reusedCards).toBeUndefined();
 });
