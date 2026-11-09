@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { checkReuseTreatmentFixture, checkProducerReuseUnitFixture } from "../scripts/execution-reuse.ts";
+import { checkReuseTreatmentFixture, checkProducerReuseUnitFixture, checkProducerReuseMissFixture } from "../scripts/execution-reuse.ts";
 import { freshValues } from "../scripts/execution-workload.ts";
 import { COST_FIELDS } from "../scripts/execution-eval.ts";
 import { readTextBounded, sha256 } from "../src/study.ts";
@@ -56,5 +56,22 @@ test("separate non-frozen producer unit exercises actual reuse hits through the 
   expect(result.executed).toEqual(["prepare", "transform", "evaluate", "verify", "verify"]);
   expect(result.counts).toEqual({ sourceExecutedStages: 4, currentExecutedStages: 1, reusedStages: 3, currentIndependentSamples: 0 });
   expect(Object.values(result.costs).every(value => value === "unknown")).toBe(true);
+  expect(result.candidateEvidenceSha256).toMatch(/^[a-f0-9]{64}$/);
+}, 20_000);
+
+test("a changed code tree makes every sealed producer stage miss and run fresh", async () => {
+  const result = await checkProducerReuseMissFixture();
+  expect(result.kind).toBe("producer-reuse-miss-check"); expect(result.authority).toBe("functional-fixture-only");
+  expect(result.sourcePopulation).toBe("separate-unit-fixture"); expect(result.changedKey).toBe("code-tree");
+  expect(result.sourceAttemptId).not.toBe(result.currentAttemptId);
+  expect(result.sourceRefs).toHaveLength(3); expect(result.sourceRefs.every(ref => ref.attemptId === result.sourceAttemptId)).toBe(true);
+  // Every stage keyed on the changed input misses with a recorded non-hit reason instead of reusing the sealed source.
+  expect(result.misses.map(row => row.stage).sort()).toEqual(["evaluate", "prepare", "transform"]);
+  expect(result.misses.every(row => row.reason !== "verified-hit")).toBe(true);
+  expect(result.freshStages).toEqual(["prepare", "transform", "evaluate"]);
+  expect(result.counts).toEqual({ reusedStages: 0, currentExecutedStages: 4 });
+  expect(result.currentObserved).toEqual(result.sourceObserved);
+  expect(result.currentObserved).toEqual({ seed: 5, prepare: 11, transform: 51, evaluate: 2611 });
+  expect(result.sourceRecordUnchanged).toBe(true); expect(result.sourceRecordSha256).toMatch(/^[a-f0-9]{64}$/);
   expect(result.candidateEvidenceSha256).toMatch(/^[a-f0-9]{64}$/);
 }, 20_000);

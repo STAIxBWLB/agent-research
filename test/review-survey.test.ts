@@ -77,6 +77,24 @@ test("AC3: existing reports and studies without the setting read unchanged", asy
   expect(ops.reviewShow(survey).surveyAnswers).toEqual([{ reviewId: old.id, modelFamily: "a", survey: null }]);
 });
 
+test("off also hides survey answers from the checklists projection, and a broken study.toml is reported once", async () => {
+  const dir = await setup("survey");
+  const added = await ops.reviewAdd(dir, report(dir, "a", allTrue), ctx);
+  expect(ops.reviewShow(dir).checklists[0]).toHaveProperty("survey");
+  writeFileSync(join(dir, "study.toml"), '[review]\nsurveyChecklist = "off"\n');
+  const off = ops.reviewShow(dir);
+  expect(off.surveyChecklist).toBe("off"); expect(off.surveyAnswers).toEqual([]);
+  expect(off.checklists).toEqual([{ reviewId: added.id, negativeResults: true, denominators: true, limitations: true, reproducibility: true }]);
+  expect(off.unmet.map(u => u.code)).not.toContain("review-survey-settings");
+  writeFileSync(join(dir, "study.toml"), '[review]\nsurveyChecklist = "always"\n');
+  const broken = ops.reviewShow(dir);
+  expect(broken.surveyChecklist).toBe("show");
+  const notes = broken.info.filter(item => item.code === "review-survey-settings");
+  expect(notes).toHaveLength(1);
+  expect(notes[0]!.message).toMatch(/^study\.toml: .*; checklist display defaults to show$/);
+  expect(broken.unmet.map(u => u.code)).not.toContain("review-survey-settings");
+});
+
 test("AC4: review checklist lists exactly the six keys with questions, CLI and MCP alike", async () => {
   const direct = ops.reviewChecklistShow();
   expect(direct.survey.map(q => q.key as string)).toEqual(KEYS);

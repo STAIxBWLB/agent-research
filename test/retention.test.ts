@@ -273,3 +273,19 @@ test("legacy interrupted archive shard temporaries never become published entrie
   unlinkSync(temporary); symlinkSync("missing", temporary);
   await expect(f.run({ op: "inspect" })).rejects.toThrow("unsafe interrupted archive write");
 });
+
+test("retention repair advice follows a native reason that already names its next step", async () => {
+  const f = fixture(); writeFileSync(join(f.source, "rows.txt"), "synthetic rows");
+  const refusal = async (request: Promise<unknown>) => {
+    try { await request; } catch (error) { return error instanceof Error ? error.message : String(error); }
+    throw new Error("expected a refusal");
+  };
+  await f.run({ op: "reserve", attemptId, reservationBytes: 4096, capBytes: 5000 } as Omit<RetentionRequest, "studyId">);
+  // The cap-full reason already says what to do, so the generic integrity advice must not be appended after it.
+  expect(await refusal(f.run({ op: "reserve", attemptId: otherId, reservationBytes: 4096 } as Omit<RetentionRequest, "studyId">)))
+    .toBe("retention: study retention cap full; prune explicit evidence or raise cap before admission");
+  const sealed = await f.seal(), ref: RetainedRef = { attemptId, stage: "prepare", sha256: sealed.sha256! };
+  // A native reason without a next step keeps the generic repair advice, so every refusal names cause and next step.
+  expect(await refusal(f.run({ op: "prune", refs: [ref] } as Omit<RetentionRequest, "studyId">)))
+    .toBe("retention: active producer or consumer prevents prune; inspect retained evidence and restore integrity before retrying");
+});

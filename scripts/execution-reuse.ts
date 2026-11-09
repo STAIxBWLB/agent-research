@@ -119,7 +119,7 @@ function transport(env: NodeJS.ProcessEnv) {
 }
 
 interface ProducerFixture {
-  dir: string; repo: string; workdir: string; commit: string; seed: number; fake: ReturnType<typeof transport>;
+  dir: string; repo: string; workdir: string; commit: string; seed: number; fake: ReturnType<typeof transport>; commitFile: (name: string, text: string) => Promise<string>;
 }
 async function withProducerFixture<T>(input: Record<string, unknown>, seed: number, maxAttempts: 1 | 2, use: (fixture: ProducerFixture) => Promise<T>): Promise<T> {
   if (!plain(input.currentContext)) fail("current context is missing");
@@ -145,7 +145,13 @@ async function withProducerFixture<T>(input: Record<string, unknown>, seed: numb
     ] }, evaluator: { image: `synthetic@sha256:${"b".repeat(64)}`, command: ["/fixture-workload", "verify"] }, metrics: [{ name: "score", unit: "integer", direction: "max" }], seeds: workload.seeds, limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts, maxWallHours: 1, maxGpuHours: 0 } };
     await withLock(dir, () => { const normalized = setProtocol(dir, protocol, actor); setExecutor(dir, { v: 1, kind: "local", workdir }, actor); setSelection(dir, { v: 1, run: "investigate", metric: "score", baseline: { commit }, minSeeds: 1, minDelta: 0 }, normalized, actor); });
     await gateDecide(dir, "design", "approve", undefined, { actor, http: offlineHttp });
-    return await use({ dir, repo, workdir, commit, seed, fake: transport(env) });
+    const commitFile = async (name: string, text: string) => {
+      writeAtomic(join(repo, name), text, BYTES, 0o600);
+      await git(["add", name]);
+      await git(["-c", "user.name=Synthetic Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "commit", "-qm", `Synthetic fixture ${name} change`]);
+      return await git(["rev-parse", "HEAD"]);
+    };
+    return await use({ dir, repo, workdir, commit, seed, fake: transport(env), commitFile });
   } finally { cleanup(root); }
 }
 async function completeProducer(fixture: ProducerFixture, initial: Attempt, beforeStop?: (attempt: Attempt) => Promise<void>): Promise<Attempt> {
@@ -204,11 +210,15 @@ export interface ProducerReuseUnitCheck {
   executed: string[]; counts: { sourceExecutedStages: number; currentExecutedStages: number; reusedStages: number; currentIndependentSamples: 0 };
   candidateEvidenceSha256: string; costs: CostRecord; limitations: string[];
 }
-/** Separate hardcoded producer conformance only. It neither accepts nor reads a frozen corpus source. */
-export async function checkProducerReuseUnitFixture(): Promise<ProducerReuseUnitCheck> {
-  const seed = 5, input = { workload: { values: [1, 2, 3], seeds: [seed], stages: [
+const PRODUCER_UNIT_SEED = 5;
+function producerUnitInput(seed: number) {
+  return { workload: { values: [1, 2, 3], seeds: [seed], stages: [
     { id: "prepare", operation: "sum-input-plus-seed" }, { id: "transform", operation: "multiply-plus-offset", multiplier: 4, offset: 7 }, { id: "evaluate", operation: "square-plus-two-seeds" },
   ] }, currentContext: { method: "separate-producer-reuse-unit-v1", globalCodeDigest: sha256("non-frozen-producer-unit-code-v1") } };
+}
+/** Separate hardcoded producer conformance only. It neither accepts nor reads a frozen corpus source. */
+export async function checkProducerReuseUnitFixture(): Promise<ProducerReuseUnitCheck> {
+  const seed = PRODUCER_UNIT_SEED, input = producerUnitInput(seed);
   return withProducerFixture<ProducerReuseUnitCheck>(input, seed, 2, async fixture => {
     const { dir, repo, commit, fake } = fixture;
     const source = await completeProducer(fixture, await runAttempt(dir, { repo, commit, seed, run: "investigate", reuse: "eligible", detach: true }, fake.ctx));
@@ -244,5 +254,37 @@ export async function checkProducerReuseUnitFixture(): Promise<ProducerReuseUnit
       sourceRecordSha256: sha256(sourceBytes), sourceRecordUnchanged: true, sourceMetricsSha256: sha256(sourceMetrics), currentMetricsSha256: sha256(canonical(current.metrics)),
       evaluatorFresh: true, pinsHeldBeforeEvaluation: true, pinsReleased: true, executed: [...fake.executed], candidateEvidenceSha256: sha256(canonical(evidence)), costs: unknownCosts(),
       limitations: ["separate hardcoded unit fixture, outside the frozen corpus; no opaque frozen source is rematerialized", "fake container transport validates producer control/dataflow only; no kernel isolation or native container proof", "no treatment trial, benchmark estimate, measured cost or adoption disposition is produced"] };
+  });
+}
+
+export interface ProducerReuseMissCheck {
+  v: 1; kind: "producer-reuse-miss-check"; authority: "functional-fixture-only"; sourcePopulation: "separate-unit-fixture"; frozenCorpus: false;
+  status: "succeeded"; sourceAttemptId: string; currentAttemptId: string; changedKey: "code-tree";
+  sourceRefs: RetainedRef[]; misses: { stage: string; reason: string }[]; freshStages: string[];
+  sourceObserved: FreshValues; currentObserved: FreshValues; sourceRecordSha256: string; sourceRecordUnchanged: true;
+  counts: { reusedStages: 0; currentExecutedStages: 4 };
+  candidateEvidenceSha256: string; costs: CostRecord; limitations: string[];
+}
+/** A changed keyed input must miss every sealed stage of the source and recompute rather than reuse across identities. */
+export async function checkProducerReuseMissFixture(): Promise<ProducerReuseMissCheck> {
+  const seed = PRODUCER_UNIT_SEED, input = producerUnitInput(seed);
+  return withProducerFixture<ProducerReuseMissCheck>(input, seed, 2, async fixture => {
+    const { dir, repo, commit, fake } = fixture;
+    const source = await completeProducer(fixture, await runAttempt(dir, { repo, commit, seed, run: "investigate", reuse: "eligible", detach: true }, fake.ctx));
+    if (!source.pipeline || source.pipeline.completed.some(parent => parent.reuse) || fake.executed.join(",") !== "prepare,transform,evaluate,verify") fail("producer miss source was not produced fresh");
+    const sourceBytes = attemptBytes(fixture, source), sourceValues = await producerValues(fixture, source), sourceRefs = source.pipeline.completed.map(parent => ({ ...parent.ref }));
+    const changedCommit = await fixture.commitFile("global-code-digest.txt", sha256("non-frozen-producer-unit-code-v2") + "\n");
+    const current = await completeProducer(fixture, await runAttempt(dir, { repo, commit: changedCommit, seed, run: "investigate", reuse: "eligible", retry: source.id, detach: true }, fake.ctx));
+    if (!current.pipeline || fake.executed.slice(4).join(",") !== "prepare,transform,evaluate,verify" || current.pipeline.completed.some(parent => parent.reuse)) fail("changed code tree reused a sealed source instead of running every affected stage fresh");
+    const misses = Object.entries(current.reuse?.stages ?? {}).map(([stage, value]) => ({ stage, reason: value.reason }));
+    if (misses.length !== 3 || misses.some(row => row.reason === "verified-hit")) fail("changed code tree did not record a reuse miss for every affected stage");
+    const currentValues = await producerValues(fixture, current), expected = freshValues(input, seed), view = attemptReuseView(current, readLedger(dir));
+    if (canonical(sourceValues.observed) !== canonical(expected) || canonical(currentValues.observed) !== canonical(expected)) fail("changed code tree did not recompute the functional workload");
+    if (!view || view.reusedCandidateStages !== 0 || view.executedStages !== 4 || view.independentSamples !== 0) fail("changed code tree counts misrepresent the fresh recomputation");
+    if (!sourceBytes.equals(attemptBytes(fixture, showAttempt(dir, source.id)))) fail("changed code tree overwrote the original source record");
+    const evidence = { sourceAttemptId: source.id, currentAttemptId: current.id, changedKey: "code-tree" as const, sourceRefs, misses, sourceObserved: sourceValues.observed, currentObserved: currentValues.observed, sourceRecordSha256: sha256(sourceBytes), counts: { reusedStages: 0 as const, currentExecutedStages: 4 as const } };
+    return { v: 1, kind: "producer-reuse-miss-check", authority: "functional-fixture-only", sourcePopulation: "separate-unit-fixture", frozenCorpus: false, status: "succeeded", ...evidence, sourceRecordUnchanged: true,
+      freshStages: ["prepare", "transform", "evaluate"], candidateEvidenceSha256: sha256(canonical(evidence)), costs: unknownCosts(),
+      limitations: ["separate hardcoded unit fixture, outside the frozen corpus; the changed key is a synthetic code tree, not a frozen source artifact", "fake container transport validates producer control/dataflow only; no kernel isolation or native container proof", "no treatment trial, benchmark estimate, measured cost or adoption disposition is produced"] };
   });
 }

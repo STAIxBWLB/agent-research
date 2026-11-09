@@ -39,9 +39,12 @@ export interface RetentionResult {
   fingerprint?: string; pruned?: number;
   archivedReservations?: number; offset?: number; limit?: number; total?: number; remaining?: number;
 }
+const RETENTION_NEXT_STEP = "inspect retained evidence and restore integrity before retrying";
+/** A native reason that names its next step after '; ' keeps it; the generic repair advice would contradict that step. */
+const withNextStep = (reason: string) => reason.includes("; ") ? reason : `${reason}; ${RETENTION_NEXT_STEP}`;
 export class RetentionError extends Error {
   constructor(readonly code: "busy" | "transport" | "integrity", readonly retryable: boolean, reason: string) {
-    super(`retention: ${reason}; inspect retained evidence and restore integrity before retrying`);
+    super(`retention: ${withNextStep(reason)}`);
     this.name = "RetentionError";
   }
 }
