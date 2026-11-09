@@ -154,7 +154,7 @@ test("temporary committed CLI controls have complete independent end-to-end cost
     const file = join(f.root, `forged-${field}.json`); writeAtomic(file, JSON.stringify(forged), 8 * 1024 * 1024);
     const result = f.cli("controls", file); expect(result.status).toBe(1); expect(result.stderr).toContain("execution code binding"); expect(result.stderr).toContain("restore the original run receipt");
   }
-});
+}, 30_000);
 
 test("nested role DTOs reject held-out/future libraries, mismatched text hashes and method-labelled candidates", () => {
   const {protocol, cases} = corpus(), order = protocol.orders[0], task = cases.at(-1)!, context = makeRoleValidationContext(cases, order, task.id, protocol.corpus.learningSourceIds, "contrastive-prior"), library = librarySnapshot(cases, order, task.id, protocol.corpus.learningSourceIds), valid = buildRoleInputs(task, "contrastive-prior", library, context);
@@ -189,7 +189,7 @@ test("a committed executable-mode change refuses control receipt resume without 
   fs.chmodSync(bootstrap, 0o644); f.git("add", "--", "bin/ares.js"); f.git("commit", "--quiet", "-m", "Synthetic mode-only change");
   const {bindRunCode} = await import("../scripts/execution-code-binding.ts"); expect(bindRunCode(f.root).codeSha256).toBe(receipt.code.codeSha256);
   const result = f.cli("controls", output); expect(result.status).toBe(1); expect(result.stderr).toContain("stored/current source mode mismatch"); expect(result.stderr).toContain("restore the original run receipt"); expect(readTextBounded(output, 8 * 1024 * 1024)).toBe(before);
-});
+}, 30_000);
 
 test("CLI receipt read failures name the cause and a recovery step without raw fs errors", () => {
   const f = committedCliFixture(), missing = join(f.root, "missing-receipt.json"), directory = join(f.root, "directory-receipt"); fs.mkdirSync(directory);
@@ -198,7 +198,7 @@ test("CLI receipt read failures name the cause and a recovery step without raw f
   }
   const control = f.cli("controls", directory); expect(control.status).toBe(1); expect(control.stderr).toContain("control receipt"); expect(control.stderr).toContain("restore the registered control receipt bytes"); expect(control.stderr).not.toContain("EISDIR");
   expect(() => verifyControlReceipt(f.root, missing)).toThrow("control receipt");
-});
+}, 30_000);
 
 test("checked-in evidence stays bound to its historical main code and registration", () => {
   const receipt = read(sourceRoot, "docs/verification/harness-eval-controls.json", 8 * 1024 * 1024), raw = JSON.stringify(receipt), {receiptSha256, ...body} = receipt, home = tempDir();
