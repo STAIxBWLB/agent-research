@@ -94,7 +94,7 @@ export function validateProtocol(raw: unknown): Protocol { return protocolShape(
 export function validateStoredProtocol(raw: unknown): Protocol { return protocolShape(raw, true); }
 function protocolShape(raw: unknown, stored: boolean): Protocol {
   const p = object(raw, ["v", "method", "candidate", "evaluator", "metrics", "seeds", "limits", "network", "budget", "inputs"], "protocol");
-  if (p.v !== 1) throw new Error("protocol.v: unsupported version; set protocol.v to 1");
+  if (p.v !== 1) throw new Error("protocol.v: unsupported version; this executor supports v1 only; use a compatible ares release for stage protocols, keeping the original definition unchanged");
   if (p.network !== "none") throw new Error('protocol.network: network access is unsupported; set protocol.network to "none"');
   const limitsRaw = object(p.limits, Object.keys(LIMIT_BOUNDS), "protocol.limits");
   const limits = Object.fromEntries(Object.entries(LIMIT_BOUNDS).map(([key, [min, max]]) => [key, number(limitsRaw[key], `protocol.limits.${key}`, min, max, key !== "cpus")])) as unknown as Limits;
@@ -116,7 +116,7 @@ function protocolShape(raw: unknown, stored: boolean): Protocol {
   if (Buffer.byteLength(JSON.stringify(protocol, null, 2) + "\n") > PROTOCOL_BYTES) throw new Error(`protocol: too large; reduce the formatted protocol to at most ${PROTOCOL_BYTES} bytes`);
   return protocol;
 }
-function canonical(value: unknown): string {
+export function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (plain(value)) return `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${canonical(value[k])}`).join(",")}}`;
   return JSON.stringify(value);
