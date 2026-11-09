@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Follow-ups from the merged #61/#63/#102 reviews. A retention refusal now appends "inspect retained evidence and restore integrity before retrying" only when the native reason names no next step, so "cap full", "missing output port", "busy" and selection-bound refusals keep their own advice instead of gaining a contradicting one. With `[review] surveyChecklist = "off"`, `review show` omits the survey answers from `checklists` as well as from `surveyAnswers`; an unreadable `study.toml` adds one `review-survey-settings` info note instead of defaulting silently. The separate non-frozen producer fixture also covers a changed code tree, where every sealed source stage misses and reruns fresh while the original record stays unchanged. Gates, exit codes and stored bytes are unchanged.
+  - N-1 CLI: no command or usage change; `review show` output only drops a field it already hid from `surveyAnswers`.
+  - N-1 MCP: no tool, annotation or schema change; `ares_review_show` output follows the CLI projection.
+  - N-1 study/ledger formats: no change; review report v1 and the ledger versions stay as they are, and existing refusals only gain or keep trailing advice.
+
 - Optional survey checklist in review reports (#102): `checklist.survey` takes six booleans (`taxonomyPrinciple`, `noEnumeration`, `specificGaps`, `citationRelations`, `selectionReported`, `scopeControl`); unknown keys refuse. New read-only `review checklist` (MCP `ares_review_checklist`) prints the questions. `study.toml` `[review] surveyChecklist = "off" | "show" | "require"` (default `show` for survey studies, `off` for experiments); `require` refuses a report without the block. `review show` adds `surveyChecklist` and `surveyAnswers`; answers never gate. The MCP review schema now also accepts the #100 `repair`/`section` finding fields.
   - N-1 CLI: existing commands and usage are unchanged; `review checklist` is additive.
   - N-1 MCP: existing tools stay; `ares_review_checklist` is additive and the `ares_review_add` input schema gains optional fields only.

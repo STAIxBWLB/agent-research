@@ -132,7 +132,7 @@ export function reviewBinding(dirArg: string): string | undefined {
   try { const { dir } = openStudy(dirArg), current = readCurrentBuild(dir), events = readLedger(dir); return binding(current, events, foldReviews(events)); } catch { return undefined; }
 }
 export function reviewReadiness(dirArg: string) {
-  const { dir } = openStudy(dirArg), events = readLedger(dir), unmet: { code: string; message: string }[] = [];
+  const { dir, study } = openStudy(dirArg), events = readLedger(dir), unmet: { code: string; message: string }[] = [];
   for (const artifact of ["paper", "reviews"] as const) {
     try { requireCopilotAccept(dir, artifact); }
     catch (error) { unmet.push({ code: `accept:${artifact}`, message: error instanceof Error ? error.message : `copilot ${artifact} acceptance unavailable; inspect ares gate list` }); }
@@ -148,15 +148,19 @@ export function reviewReadiness(dirArg: string) {
   if (families.length < 2) unmet.push({ code: "model-families", message: "fewer than two distinct model families reviewed the current evidence hash; add current-build reviews from two families" });
   const openBlocking = reviews.flatMap(row => row.report.findings.filter(f => f.blocking && !row.resolutions[f.id]).map(f => ({ reviewId: row.id, findingId: f.id, kind: f.kind, location: f.location, text: f.text })));
   if (openBlocking.length) unmet.push({ code: "blocking-findings", message: `open blocking findings: ${openBlocking.map(f => `${f.reviewId}/${f.findingId} (${f.kind})`).join(", ")}; resolve each with a reason using ares review resolve` });
-  return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, checklists: reviews.map(row => ({ reviewId: row.id, ...row.report.checklist })), claims: "unavailable (STAIxBWLB/agent-hub#931)", unmet, ...roundsView(dir, rows, buildSha256), ...surveyView(dir, reviews) };
+  const rounds = roundsView(dir, rows, buildSha256), survey = surveyView(dir, study.mode, reviews);
+  return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, checklists: reviews.map(row => { const { survey: answers, ...rest } = row.report.checklist; return { reviewId: row.id, ...rest, ...(survey.surveyChecklist === "off" || answers === undefined ? {} : { survey: answers }) }; }), claims: "unavailable (STAIxBWLB/agent-hub#931)", unmet, ...rounds, ...survey, info: [...rounds.info, ...survey.info] };
 }
-/** Display only: answers, including false ones, never enter unmet. Off hides the block; require is enforced at review add. */
-function surveyView(dir: string, reviews: ReviewRecord[]) {
-  const studyMode = openStudy(dir).study.mode;
-  let mode: SurveyChecklistMode;
-  try { mode = surveyChecklistMode(dir, studyMode); } catch { mode = studyMode === "survey" ? "show" : "off"; }
-  if (mode === "off") return { surveyChecklist: mode, surveyAnswers: [] };
-  return { surveyChecklist: mode, surveyAnswers: reviews.map(row => ({ reviewId: row.id, modelFamily: row.report.reviewer.modelFamily, survey: row.report.checklist.survey ?? null })) };
+/** Display only: answers, including false ones, never enter unmet. Off hides the block and the projection; require is enforced at review add. */
+function surveyView(dir: string, studyMode: string, reviews: ReviewRecord[]) {
+  let mode: SurveyChecklistMode, info: { code: string; message: string }[] = [];
+  try { mode = surveyChecklistMode(dir, studyMode); }
+  catch (error) {
+    mode = studyMode === "survey" ? "show" : "off";
+    info = [{ code: "review-survey-settings", message: `${error instanceof Error ? error.message : "study.toml unreadable"}; checklist display defaults to ${mode}` }];
+  }
+  if (mode === "off") return { surveyChecklist: mode, surveyAnswers: [], info };
+  return { surveyChecklist: mode, surveyAnswers: reviews.map(row => ({ reviewId: row.id, modelFamily: row.report.reviewer.modelFamily, survey: row.report.checklist.survey ?? null })), info };
 }
 /** Informational only: rounds never enter unmet, so the gate conditions are unchanged. */
 function roundsView(dir: string, rows: ReviewRecord[], buildSha256: string | undefined) {
