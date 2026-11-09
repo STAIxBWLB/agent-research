@@ -1,3 +1,4 @@
+import {HARNESS_MODEL_BYTES} from "./limits.ts";
 import {plain, onlyKeys, sha256, isHarnessGate, type Actor, type LedgerEvent} from "../study.ts";
 import {canonical} from "../plan/state.ts";
 import {hasHarnessCredential} from "./privacy.ts";
@@ -40,7 +41,7 @@ function base(row: Record<string, unknown>, input: "contrast" | "compose" | "ado
   if (row.v !== 1) transitionFail("unsupported form version; keep original bytes and use a supporting version");
   let sourceExecution: DeclaredExecutionRef | undefined;
   if (row.sourceExecution !== undefined) {try {sourceExecution = validateHarnessExecution(row.sourceExecution);} catch {throw new Error(`harness ${input} sourceExecution: malformed or unsafe; correct sourceExecution in the ${input} input form, then retry with the current fingerprint from ares harness show --json`);}}
-  return {v: 1, id: id(row.id), fingerprint: digest(row.fingerprint), ...(row.model !== undefined ? {model: text(row.model, 256)} : {}), ...(sourceExecution ? {sourceExecution} : {})};
+  return {v: 1, id: id(row.id), fingerprint: digest(row.fingerprint), ...(row.model !== undefined ? {model: text(row.model, HARNESS_MODEL_BYTES)} : {}), ...(sourceExecution ? {sourceExecution} : {})};
 }
 export function parseContrast(raw: unknown): HarnessContrast {
   const row = object(raw, ["v", "id", "fingerprint", "arm", "outcome", "basis", "judge", "model", "sourceExecution", "observations", "uncertainty", "explanations", "evidence"]);

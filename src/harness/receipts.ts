@@ -1,3 +1,4 @@
+import {HARNESS_MODEL_BYTES} from "./limits.ts";
 import {hasHarnessCredential} from "./privacy.ts";
 /** Ares-owned synthetic fixture projections, not the wire schemas or assurance receipts of agent-hub producers. */
 import {plain} from "../study.ts";
@@ -30,7 +31,7 @@ function text(raw: unknown, field: string, bound = 256): string {
 }
 function hash(raw: unknown, field: string): string {if (typeof raw !== "string" || !/^[a-f0-9]{64}$/.test(raw)) fail(field); return raw;}
 function integer(raw: unknown, field: string, min: number, max: number): number {if (!Number.isSafeInteger(raw) || Number(raw) < min || Number(raw) > max) fail(field); return raw as number;}
-function model(raw: unknown, field: string): string {const value = text(raw, field); if (/[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) fail(field); return value;}
+function model(raw: unknown, field: string): string {const value = text(raw, field, HARNESS_MODEL_BYTES); if (/[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) fail(field); return value;}
 export function parseVariantFixture(raw: unknown): VariantFixtureProjectionV1 {
   const value = object(raw, VARIANT, "variant");
   if (!Array.isArray(value.evidence) || value.evidence.length > 16) fail("variant evidence");
