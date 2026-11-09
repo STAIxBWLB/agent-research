@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { openStudy, readTextBounded, sha256 } from "../study.ts";
 import { loadCandidates } from "../lit/candidates.ts";
 import { checkCitations, citationOccurrences } from "../lit/cite.ts";
+import { readCard } from "../lit/cards.ts";
 import { readProtocol } from "../exp/protocol.ts";
 import { readSelection } from "../exp/selection.ts";
 import { investigateResultPath, readClosedInvestigation } from "../exp/investigate.ts";
@@ -189,5 +190,15 @@ export function checkPaper(dirArg: string) {
   let rendered = "", cursor = 0;
   for (const entry of resolution.placeholders) { rendered += manuscript.slice(cursor, entry.placeholder.start) + entry.rendered; cursor = entry.placeholder.end; }
   rendered += manuscript.slice(cursor);
-  return { ok: !findings.some(f => f.severity === "blocking"), settings, manuscriptSha256: sha256(manuscript), ...(plan ? {planSha256: plan.sha256} : {}), rendered, placeholders: resolution.placeholders, findings: findings.sort((a, b) => a.start - b.start || a.code.localeCompare(b.code)), literals: resolution.literals, codeNumbers, codeNumberCount, citations };
+  // Reused cards are planning aids: list every cited candidate whose card came from the vault, with its provenance.
+  const cited = loadCandidates(dir), unreadableCards: { citekey: string; id: string; message: string }[] = [];
+  const reusedCards = citations.keys.flatMap(key => {
+    const candidate = cited.find(c => c.citekey === key);
+    let card: ReturnType<typeof readCard>;
+    // An unreadable card is reported (not hidden), but does not block the check: cards are planning aids, never evidence.
+    try { card = candidate ? readCard(dir, candidate.id) : undefined; }
+    catch (error) { unreadableCards.push({ citekey: key, id: candidate!.id, message: error instanceof Error ? error.message : "card unreadable; record it again with ares lit card" }); return []; }
+    return card?.reused ? [{ citekey: key, id: candidate!.id, vault: card.reused.vault, note: card.reused.note, at: card.reused.at, provenance: card.reused.provenance }] : [];
+  });
+  return { ok: !findings.some(f => f.severity === "blocking"), settings, manuscriptSha256: sha256(manuscript), ...(plan ? {planSha256: plan.sha256} : {}), rendered, placeholders: resolution.placeholders, findings: findings.sort((a, b) => a.start - b.start || a.code.localeCompare(b.code)), literals: resolution.literals, codeNumbers, codeNumberCount, citations, ...(reusedCards.length ? { reusedCards } : {}), ...(unreadableCards.length ? { unreadableCards } : {}) };
 }
