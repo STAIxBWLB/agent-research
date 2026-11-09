@@ -560,3 +560,17 @@ test("v2 transient seal busy/SSH failures preserve the stopped stage and retry w
     expect(f.fake.executed).toEqual(["prepare", "train"]);
   }
 }, 20_000);
+
+test("v2 evaluator task mutation refuses fresh evaluator launch despite having no named task inputs", async () => {
+  const f = await setup(); let attempt = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx);
+  attempt = await terminateAndReconcile(f, attempt); attempt = await terminateAndReconcile(f, attempt);
+  expect(f.fake.executed).toEqual(["prepare", "train", "predict"]);
+  writeFileSync(join(attempt.paths.evaluator, "run"), "tampered evaluator bytes");
+  f.fake.finish(); await reconcileAttempts(f.dir, f.fake.ctx);
+  const failed = showAttempt(f.dir, attempt.id);
+  expect(failed.status).toBe("failed"); expect(failed.reason).toBe("evidence-read");
+  expect(failed.error).toContain("frozen task snapshot integrity mismatch");
+  expect(failed.stage).toBe("evaluator"); expect(failed.metrics).toEqual([]);
+  expect(f.fake.executed).toEqual(["prepare", "train", "predict"]);
+  await assertNoReservation(f, failed);
+});

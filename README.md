@@ -186,7 +186,7 @@ Without `--detach`, `attempt run` reconciles until finished. Detached runs and M
 
 The same protocol hash, commit/tree, seed and run return the same attempt. Use `--retry <id>` for a linked new attempt; a different commit or seed is a new attempt, not a reproduction. Every status counts toward study budgets (attempt count, wall hours, GPU hours). `attempt list` returns summaries and whole-study totals for every status regardless of filters or page; default page size 50, maximum 200, with `--offset` for later pages. `attempt show` returns the full record.
 
-Raw outputs and logs stay in the private executor attempt directory. The study holds output paths, sha256 and byte counts (regular files only, at most 500 files and 256 MiB total), plus each log stream's path, hash, bytes and truncation flag. Each stdout/stderr copy is capped at 16 MiB; excess log volume does not fail an attempt. `attempt logs` checks the recorded copies and prints tails without changing the study; `--tail` accepts 0..65536 bytes (default 16384), and omitted stage/stream filters return all recorded streams. No log content is persisted in the study.
+Raw outputs and logs stay in the private executor attempt directory. The study holds output paths, sha256 and byte counts (regular files only, at most 500 files and 256 MiB total), plus each log stream's path, hash, bytes and truncation flag. Each stdout/stderr copy is capped at 16 MiB; excess log volume does not fail an attempt. `attempt logs` checks the recorded copies and prints tails without changing the study; `--tail` accepts 0..65536 bytes per stream (default 16384), and omitted stage/stream filters return all recorded streams, including completed v2 candidates. Use `--candidate-stage NAME` (MCP `candidateStage`) to select one named current or completed candidate. Combined returned tails are capped at 256 KiB: defaults shrink across many streams, while an oversized explicit tail requires a narrower selection or smaller value. No log content is persisted in the study.
 
 
 On a shared Linux NVIDIA executor, admission can be enabled explicitly:
@@ -727,7 +727,7 @@ ares attempt list <dir> [--run NAME] [--status running|succeeded|failed|cancelle
 ares attempt show <dir> <id> [--json]
 ares attempt cancel <dir> <id> [--reason TEXT] [--json]
 ares attempt reconcile <dir> [--json]
-ares attempt logs <dir> <id> [--stage candidate|evaluator] [--stream stdout|stderr] [--tail BYTES] [--json]
+ares attempt logs <dir> <id> [--stage candidate|evaluator] [--candidate-stage NAME] [--stream stdout|stderr] [--tail BYTES] [--json]
 ares lit search <dir> <query> [--source openalex|s2|arxiv|all] [--limit 1..50] [--year-from YYYY] [--json]
 ares lit list <dir> [--status new|included|excluded] [--limit 1..500] [--json]
 ares lit screen <dir> <id>... --include|--exclude [--reason TEXT] [--json]

@@ -1,3 +1,7 @@
+import { executionView } from "../src/exp/pipeline.ts";
+import { validateStageProtocol } from "../src/exp/stages.ts";
+import { protocolHash } from "../src/exp/protocol.ts";
+import { createAresMcp } from "../src/mcp-tools.ts";
 import { expect, test } from "bun:test";
 import { mkdirSync, readFileSync, realpathSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, posix } from "node:path";
@@ -54,3 +58,64 @@ test("available-stream defaults skip stages that have no collected logs and name
   expect((await readAttemptLogs(dir, attempt.id)).logs).toHaveLength(2);
   await expect(readAttemptLogs(dir, attempt.id, { stage: "evaluator" })).rejects.toThrow("reconcile after the stage finishes");
 });
+
+
+function pipelineFixture(count = 2, bodyBytes = 0) {
+  const f = fixture(), { attempt } = f, evaluator = structuredClone(attempt.stages.evaluator!), base = structuredClone(attempt.stages.candidate!);
+  const names = Array.from({ length: count }, (_, i) => count === 2 ? ["prepare", "train"][i]! : `step-${i}`);
+  const definition = validateStageProtocol({ ...attempt.protocol, v: 2, candidate: { stages: names.map(name => ({ name, ...attempt.protocol.candidate, seed: true, code: "snapshot", needs: [], inputs: {}, outputs: {} })) } });
+  const logsDir = posix.join(attempt.executor.workdir, attempt.studyId, attempt.id, "logs");
+  const records = names.map(name => {
+    const record = structuredClone(base);
+    const log = (stream: "stdout" | "stderr") => {
+      const body = bodyBytes ? "x".repeat(bodyBytes) : `${name} synthetic ${stream}\n`, path = posix.join(logsDir, `candidate-${name}.${stream}.log`);
+      writeFileSync(path, body, { mode: 0o600 });
+      return { path, sha256: sha256(body), bytes: Buffer.byteLength(body), truncated: false };
+    };
+    record.evidence = { logs: { stdout: log("stdout"), stderr: log("stderr") }, outputs: [] };
+    return record;
+  });
+  const completed = names.slice(0, -1).map((name, i) => ({ name, record: records[i]!, ref: { attemptId: attempt.id, stage: name, sha256: "a".repeat(64) } }));
+  attempt.v = 2; attempt.stage = "candidate"; attempt.protocol = executionView(definition, count - 1); attempt.protocolHash = protocolHash(definition);
+  attempt.pipeline = { definition, index: count - 1, completed, inputHashes: {}, taskTreeHash: "b".repeat(64) };
+  attempt.stages = { candidate: records.at(-1)! }; f.save();
+  return { ...f, names, records, finish() {
+    const name = names.at(-1)!;
+    attempt.pipeline!.completed.push({ name, record: records.at(-1)!, ref: { attemptId: attempt.id, stage: name, sha256: "a".repeat(64) } });
+    attempt.stage = "evaluator"; attempt.stages = { evaluator }; f.save();
+  } };
+}
+
+test("named current and completed pipeline logs are available through shared CLI/MCP reads without study writes", async () => {
+  const f = pipelineFixture();
+  expect((await readAttemptLogs(f.dir, f.attempt.id, { stage: "candidate" })).logs.map(row => row.candidateStage)).toEqual(["prepare", "prepare", "train", "train"]);
+  expect((await readAttemptLogs(f.dir, f.attempt.id, { candidateStage: "train", stream: "stdout" })).logs[0]!.text).toBe("train synthetic stdout\n");
+  f.finish();
+  const before = readFileSync(f.recordPath), ledger = readFileSync(join(f.dir, "ledger.jsonl"));
+  const expected = await readAttemptLogs(f.dir, f.attempt.id, { candidateStage: "prepare", stream: "stdout", tailBytes: 10 });
+  expect(expected.logs[0]!.candidateStage).toBe("prepare"); expect(expected.logs[0]!.text).toBe("ic stdout\n");
+  expect((await readAttemptLogs(f.dir, f.attempt.id)).logs).toHaveLength(6);
+  const http = fakeHttp([]).http, mcp = createAresMcp({}, http);
+  expect(await mcp.handlers.ares_attempt_logs!({ study: f.dir, id: f.attempt.id, candidateStage: "prepare", stream: "stdout", tailBytes: 10 })).toEqual(expected);
+  const cli = await run(["attempt", "logs", f.dir, f.attempt.id, "--candidate-stage", "prepare", "--stream", "stdout", "--tail", "10", "--json"], {}, { http });
+  expect(JSON.parse(cli.text)).toEqual(expected);
+  expect(readFileSync(f.recordPath)).toEqual(before); expect(readFileSync(join(f.dir, "ledger.jsonl"))).toEqual(ledger);
+});
+
+test("named log selectors and forged completed-stage paths refuse before transport", async () => {
+  const f = pipelineFixture(); f.finish(); let called = 0;
+  const noProcess: ProcessRunner = async () => { called++; throw new Error("synthetic unexpected transport"); };
+  for (const options of [{ candidateStage: "unknown" }, { candidateStage: "../prepare" }, { stage: "evaluator", candidateStage: "prepare" }]) await expect(readAttemptLogs(f.dir, f.attempt.id, options, noProcess)).rejects.toThrow("invalid candidate stage");
+  f.attempt.pipeline!.completed[0]!.record.evidence!.logs.stdout.path = "/private/unrelated"; f.save();
+  await expect(readAttemptLogs(f.dir, f.attempt.id, { candidateStage: "prepare", stream: "stdout" }, noProcess)).rejects.toThrow("invalid log receipt or path");
+  expect(called).toBe(0);
+});
+
+test("all named logs share an aggregate tail bound while explicit oversized tails refuse before transport", async () => {
+  const f = pipelineFixture(16, 9000); let called = 0;
+  await expect(readAttemptLogs(f.dir, f.attempt.id, { tailBytes: 65536 }, async () => { called++; throw new Error("unexpected synthetic transport"); })).rejects.toThrow("combined tail bound");
+  expect(called).toBe(0);
+  const result = await readAttemptLogs(f.dir, f.attempt.id);
+  expect(result.logs).toHaveLength(32); expect(result.logs.every(row => row.tailBytes === 8192)).toBe(true);
+  expect(result.logs.reduce((sum, row) => sum + row.tailBytes, 0)).toBe(256 * 1024);
+}, 20_000);

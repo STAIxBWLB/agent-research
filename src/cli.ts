@@ -280,8 +280,8 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "attempt reconcile": count(spec, positional, 1); result = await ops.attemptReconcile(positional[0]!, ctx); break;
     case "attempt logs": {
       count(spec, positional, 2); const tailBytes = integer(flags["--tail"], "--tail");
-      const logs = await ops.attemptLogs(positional[0]!, positional[1]!, { ...(str("--stage") !== undefined ? { stage: str("--stage") } : {}), ...(str("--stream") !== undefined ? { stream: str("--stream") } : {}), ...(tailBytes !== undefined ? { tailBytes } : {}) }, ctx);
-      if (!flags["--json"]) return { text: logs.logs.map(log => `[${log.stage} ${log.stream}${log.truncated ? ", truncated copy" : ""}]\n${log.text}`).join("\n"), code: 0 };
+      const logs = await ops.attemptLogs(positional[0]!, positional[1]!, { ...(str("--stage") !== undefined ? { stage: str("--stage") } : {}), ...(str("--candidate-stage") !== undefined ? { candidateStage: str("--candidate-stage") } : {}), ...(str("--stream") !== undefined ? { stream: str("--stream") } : {}), ...(tailBytes !== undefined ? { tailBytes } : {}) }, ctx);
+      if (!flags["--json"]) return { text: logs.logs.map(log => `[${log.candidateStage === undefined ? log.stage : `candidate:${log.candidateStage}`} ${log.stream}${log.truncated ? ", truncated copy" : ""}]\n${log.text}`).join("\n"), code: 0 };
       result = logs; break;
     }
     case "gate list": count(spec, positional, 1); result = ops.gateList(positional[0]!); break;

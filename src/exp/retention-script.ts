@@ -480,7 +480,7 @@ def perform(q):
             if not isinstance(inputs,dict) or len(inputs)>32: fail('invalid input ports')
             has_task=any(isinstance(descriptor,dict) and 'task' in descriptor for descriptor in inputs.values())
             def verify_task():
-                if not has_task: return
+                if not has_task and stage!='evaluator': return
                 expected=hexhash(q.get('expectedTaskTreeHash'))
                 physical(task_root)
                 task_files,_,_=inventory(task_root,max_bytes=64*1024*1024)
