@@ -1,5 +1,5 @@
 import {setHarnessStream, readHarnessStream, selectExperience, freezeExperience, checkExperience} from "./harness/experience.ts";
-import {harnessRoundBinding, readHarnessRounds, type HarnessRound, setHarnessRound, showHarness, importHarnessFixture} from "./harness/rounds.ts";
+import {harnessRoundBinding, readHarnessRounds, type HarnessRound, setHarnessRound, showHarness, importHarnessFixture, recordHarnessTransition} from "./harness/rounds.ts";
 import { readProvenance, compareLineage, type ProvenanceOptions, type ProvenancePage, type LineageComparison } from "./provenance.ts";
 import { validateAutonomyMode, validatePhase, PHASES, ACCEPT_ARTIFACTS, resolveAutonomy, type AcceptArtifact, type Autonomy } from "./autonomy.ts";
 import { copilotBinding, requireCopilotAccept } from "./copilot.ts";
@@ -119,6 +119,10 @@ export const experienceSelect = (dir: string, raw: unknown, ctx: Pick<Ctx, "runn
 export const experienceFreeze = (dir: string, raw: unknown, ctx: Ctx) => withLock(dir, () => freezeExperience(dir, raw, ctx.actor));
 export const experienceCheck = (dir: string, round: string, identity: {model: string; runtime: string}, ctx: Pick<Ctx, "runner" | "now">, env: NodeJS.ProcessEnv = process.env) => checkExperience(dir, round, identity, {...ctx, env});
 export const harnessSet = (dir: string, raw: unknown, ctx: Ctx) => withLock(dir, () => setHarnessRound(dir, raw, ctx.actor));
+export const harnessContrast = (dir: string, round: string, raw: unknown, ctx: Ctx) => withLock(dir, () => recordHarnessTransition(dir, round, "contrast", raw, ctx.actor));
+export const harnessCompose = (dir: string, round: string, raw: unknown, ctx: Ctx) => withLock(dir, () => recordHarnessTransition(dir, round, "composition", raw, ctx.actor));
+export const harnessClose = (dir: string, round: string, raw: unknown, confirm: string | undefined, ctx: Ctx) => withLock(dir, () => recordHarnessTransition(dir, round, "closure", raw, ctx.actor, confirm));
+export const harnessAdopt = (dir: string, round: string, raw: unknown, confirm: string | undefined, ctx: Ctx) => withLock(dir, () => recordHarnessTransition(dir, round, "adoption", raw, ctx.actor, confirm));
 export const harnessShow = (dir: string, round?: string) => showHarness(dir, round);
 export const harnessImport = (dir: string, round: string, raw: unknown, ctx: Ctx) => withLock(dir, () => importHarnessFixture(dir, round, raw, ctx.actor));
 export async function attemptRun(dir: string, options: AttemptOptions, ctx: Ctx) {

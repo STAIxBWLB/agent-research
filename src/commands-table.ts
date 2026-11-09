@@ -2,6 +2,10 @@
 export interface CommandSpec { name: string; usage: string; mutates: boolean | "network"; options: Record<string, "flag" | "value"> }
 const json = { "--json": "flag" } as const;
 export const COMMANDS: readonly CommandSpec[] = [
+  { name: "harness close", usage: "harness close <dir> <round> --file PATH|- [--confirm FINGERPRINT] [--json]", mutates: true, options: { "--file": "value", "--confirm": "value", ...json } },
+  { name: "harness contrast", usage: "harness contrast <dir> <round> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
+  { name: "harness compose", usage: "harness compose <dir> <round> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
+  { name: "harness adopt", usage: "harness adopt <dir> <round> --file PATH|- [--confirm FINGERPRINT] [--json]", mutates: true, options: { "--file": "value", "--confirm": "value", ...json } },
   { name: "harness stream set", usage: "harness stream set <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "harness stream show", usage: "harness stream show <dir> [--json]", mutates: false, options: json },
   { name: "experience select", usage: "experience select <dir> --file PATH|- [--json]", mutates: "network", options: { "--file": "value", ...json } },

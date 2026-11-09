@@ -108,7 +108,7 @@ export default (host) => {
     if (!study) return [toolbar("Study", true), ui.notice(text(snapshot.error, "Choose a registered study from the studies panel."), "warn")];
     const sections = [toolbar(text(study.question, "Study"), true), decisionNotice()];
     if (typeof study.dir === "string") sections.push(h("div", { class: "ares-bar" },
-      ui.button("Lineage", () => go("lineage", { study: study.dir })), ui.button("Compare", () => go("compare", { study: study.dir }))));
+      ui.button("Lineage", () => go("lineage", { study: study.dir })), ui.button("Compare", () => go("compare", { study: study.dir })), ui.button("Harness", () => go("harness", {study: study.dir}))));
     if (study.available === false) return [...sections, ui.notice(text(study.reason, "Study unavailable; its registration is retained."), "err"), h("p", { class: "ares-sub", text: text(study.dir, "") })];
     sections.push(h("div", { class: "ares-bar" }, ui.chip(text(study.mode), "neutral"), ui.chip(autonomyLabel(study.autonomy), "neutral")),
       h("p", { class: "ares-sub", text: text(study.dir, "") }), gateRows(study.gates, study.dir), attemptRows(study.attempts));
@@ -258,10 +258,95 @@ export default (host) => {
     }
     return sections;
   };
+  const harnessView = (snapshot) => {
+    const sections = readHeader("Harness rounds", snapshot), study = record(snapshot.study), harness = record(snapshot.harness);
+    if (!study.dir) return [...sections, chooseStudy(snapshot, "harness")];
+    if (!snapshot.harness) return [...sections, ui.empty("Harness records unavailable", "Restore the recorded round sources and refresh.")];
+    sections.push(ui.notice("Experimental records only. Correctness is unavailable; transfer is not demonstrated. Fixture compatibility is not matched live execution or scientific evidence.", "warn"));
+    const roundViews = rows(harness.rounds).slice(0, 16);
+    sections.push(ui.rows(roundViews, view => {
+      const definition = record(view.definition), readiness = record(record(view.transitions).readiness);
+      return ui.row({title: text(definition.id, "Round"), sub: `Task ${text(record(definition.task).id)} | binding ${text(view.binding)}`, chip: {text: text(readiness.state, "open"), tone: readiness.state === "stale" ? "warn" : "neutral"}, onOpen: () => go("harness", {study: study.dir, round: definition.id})});
+    }) ?? ui.empty("No harness rounds", "No declared round is recorded for this experiment."));
+    if (harness.truncated || Number(harness.remaining) > 0 || rows(harness.rounds).length > roundViews.length) sections.push(ui.notice("Round list shortened. Inspect the complete records with the ares CLI; this view is not a complete evidence set.", "warn"));
+    const selected = roundViews.filter(view => typeof params.round === "string" ? record(view.definition).id === params.round : roundViews.length === 1);
+    if (!selected.length && roundViews.length) sections.push(ui.notice("Choose a round to inspect its recorded comparison and edit-to-evidence chain.", "neutral"));
+    const describe = value => {
+      const items = Array.isArray(value) ? value.filter(item => typeof item === "string") : null;
+      const omitted = items ? value.length - Math.min(items.length, 16) : 0;
+      const raw = items ? items.slice(0, 16).join("; ") : text(value, "Not recorded");
+      return (raw.length > 4000 ? raw.slice(0, 4000) + "... (text display incomplete)" : raw) + (omitted > 0 ? ` (${omitted} more entries; display incomplete)` : "");
+    };
+    const actorLabel = value => {const actor = record(value); return `${text(actor.kind, "actor unavailable")}${typeof actor.id === "string" ? `: ${actor.id}` : ""}`;};
+    const recorded = entry => `${text(entry.sha256)} | ${actorLabel(entry.actor)} | ${at(entry.at)}`;
+    for (const view of selected) {
+      const definition = record(view.definition), transitions = record(view.transitions), readiness = record(transitions.readiness), hypothesis = record(definition.hypothesis);
+      sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: `Round ${text(definition.id)}`}),
+        h("p", {text: `Declared authoring: ${text(definition.authoring)} | round ${text(view.binding)} | transitions ${text(transitions.fingerprint)}`}),
+        h("p", {text: `Deficiency: ${describe(hypothesis.deficiency)}`}), h("p", {text: `Predicted change: ${describe(hypothesis.predictedChange)}`}),
+        ui.chip(`Recorded state: ${text(readiness.state, "open")}`, readiness.state === "stale" ? "warn" : "neutral"),
+        h("p", {text: "Experimental: true | correctness: unavailable | transfer: not-demonstrated"}),
+        ui.table({caption: "Declared guidance identities", columns: [{key: "arm", label: "Arm"}, {key: "hash", label: "Guidance SHA-256"}], rows: [{arm: "baseline", hash: text(record(definition.baseline).guidanceSha256)}, ...rows(definition.candidates).slice(0, 2).map(candidate => ({arm: text(candidate.id), hash: text(candidate.guidanceSha256)}))]})));
+      sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: "Recorded comparisons"}),
+        ui.table({caption: "Fixture comparison identities", columns: [{key: "arm", label: "Arm"}, {key: "compatible", label: "Declared inputs compatible"}, {key: "matched", label: "Matched live evidence"}, {key: "source", label: "Source strength"}, {key: "reasons", label: "Reasons / confounders"}],
+          rows: rows(view.comparisons).slice(0, 3).map(comparison => ({arm: text(comparison.arm), compatible: String(comparison.compatible === true), matched: "false", source: text(comparison.sourceStrength, "producer-unavailable"), reasons: describe([...rows(comparison.reasons), ...rows(comparison.confounders)])}))}),
+        h("p", {text: `Historical fixture imports: ${number(view.historicalImports)}. Real import and end-to-end evaluation remain unavailable.`})));
+      if (rows(view.comparisons).length > 3) sections.push(ui.notice("Comparison display shortened; inspect ares harness show --json for the complete admitted identities.", "warn"));
+      if (typeof transitions.nextStep === "string") sections.push(ui.notice(transitions.nextStep, "neutral"));
+      const contrasts = rows(transitions.contrasts).slice(0, 32);
+      if (!contrasts.length) sections.push(ui.empty("No recorded contrasts"));
+      for (const entry of contrasts) {
+        const form = record(entry.form), evidence = rows(form.evidence).slice(0, 16);
+        const account = form.basis === "actor-claim" ? "Actor claim (not observed evidence)" : form.basis === "blinded-judgment" ? "Recorded blinded judgment" : form.basis === "deterministic-check" ? "Recorded deterministic-check account" : "Recorded account (basis unavailable)";
+        sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: `Recorded contrast ${text(form.id)}`}),
+          h("p", {text: `${text(form.arm)} | outcome ${text(form.outcome)} | provenance basis ${text(form.basis)}${form.basis === "blinded-judgment" ? ` | judge ${text(form.judge, "not declared")}` : ""} | model ${text(form.model, "not declared")}`}),
+          h("p", {class: "ares-prose", text: `${account}: ${describe(form.observations)}`}), h("p", {class: "ares-prose", text: `Uncertainty: ${describe(form.uncertainty)}`}),
+          h("p", {class: "ares-prose", text: `Explanations: ${describe(form.explanations)}`}), h("p", {class: "ares-sub", text: recorded(entry)}),
+          ui.table({caption: "Recorded contrast evidence references", columns: [{key: "probe", label: "Probe"}, {key: "projection", label: "Projection SHA-256"}, {key: "output", label: "Output manifest SHA-256"}],
+            rows: evidence.map(item => ({probe: typeof item.probe === "string" ? item.probe : text(record(item.probe).id), projection: text(item.projectionSha256), output: text(item.outputManifestHash, "not recorded")}))}),
+          rows(form.evidence).length > evidence.length ? ui.notice("Evidence references shortened to the first sixteen; inspect the full round with the CLI.", "warn") : null));
+      }
+      if (rows(transitions.contrasts).length > contrasts.length) sections.push(ui.notice(`${rows(transitions.contrasts).length - contrasts.length} more contrasts; inspect ares harness show --json for the complete round.`, "warn"));
+      const composition = record(transitions.composition), compositionForm = record(composition.form), edits = rows(compositionForm.sections).slice(0, 32);
+      if (transitions.composition) sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: `Recorded per-section edit-to-evidence ${text(compositionForm.id)}`}),
+        h("p", {text: `Composed successor SHA-256: ${text(compositionForm.successorSha256, "none recorded")}`}),
+        h("p", {class: "ares-sub", text: recorded(composition)}),
+        ui.table({caption: "Recorded composition decisions", columns: [{key: "section", label: "Section"}, {key: "decision", label: "Recorded decision"}, {key: "contrasts", label: "Contrast ids / hashes"}, {key: "reason", label: "Reason"}],
+          rows: edits.map(edit => ({section: text(edit.section), decision: text(edit.decision), contrasts: rows(edit.contrasts).slice(0, 16).map(contrast => `${text(contrast.id)} @ ${text(contrast.sha256)}`).join("; ") || "none recorded", reason: describe(edit.reason)}))}),
+        rows(compositionForm.sections).length > edits.length || edits.some(edit => rows(edit.contrasts).length > 16) ? ui.notice("Composition display shortened to bounded sections or contrast references.", "warn") : null));
+      else sections.push(ui.empty("No recorded composition"));
+      const adoption = record(transitions.adoption), adoptionForm = record(adoption.form), independent = record(adoptionForm.independentCheck), checkSource = record(independent.source);
+      if (transitions.adoption) sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: `Recorded adoption ${text(adoptionForm.id)}`}),
+        h("p", {text: `${text(adoptionForm.decision)} | arm ${text(adoptionForm.arm)} | ${describe(adoptionForm.reason)}`}), h("p", {class: "ares-sub", text: recorded(adoption)}),
+        ui.chip(`Independent check state: ${text(independent.state, "unavailable")}`, "neutral"), h("p", {text: `Independent check source kind: ${text(checkSource.kind, "unavailable")}`}),
+        ui.notice("Judgment basis and independent-check source/status are separate. Synthetic fixture references do not promote a check into verified correctness or transfer evidence.", "neutral"),
+        ui.table({caption: "Recorded adoption probe references", columns: [{key: "probe", label: "Declared probe"}, {key: "projection", label: "Projection SHA-256"}, {key: "output", label: "Output manifest SHA-256"}], rows: rows(adoptionForm.checks).slice(0, 16).map(ref => ({probe: text(ref.probe), projection: text(ref.projectionSha256), output: text(ref.outputManifestHash, "not recorded")}))}),
+        rows(adoptionForm.checks).length > 16 ? ui.notice("Adoption probe references shortened to sixteen records.", "warn") : null,
+        ui.table({caption: "Recorded independent-check source references", columns: [{key: "probe", label: "Probe"}, {key: "projection", label: "Projection SHA-256"}, {key: "output", label: "Output manifest SHA-256"}], rows: rows(checkSource.refs).slice(0, 16).map(ref => ({probe: text(ref.probe), projection: text(ref.projectionSha256), output: text(ref.outputManifestHash, "not recorded")}))}),
+        rows(checkSource.refs).length > 16 ? ui.notice("Independent-check references shortened to sixteen records.", "warn") : null));
+      const closure = record(transitions.closure), closureForm = record(closure.form);
+      if (transitions.closure) sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: `Recorded closure ${text(closureForm.id)}`}),
+        ui.chip(closure.current === true ? "current closure" : "stale closure", closure.current === true ? "neutral" : "warn"),
+        h("p", {text: `Recorded outcome: ${text(closureForm.outcome)} | ${describe(closureForm.reason)}`}), h("p", {class: "ares-sub", text: recorded(closure)}),
+        h("p", {text: `Binding ${text(closure.binding)} | synthetic-fixture | matched: false${typeof closureForm.adoptionSha256 === "string" ? ` | adoption SHA-256 ${closureForm.adoptionSha256}` : ""}`}),
+        ui.notice("An adopted-experimental closure does not activate guidance or demonstrate correctness or transfer.", "neutral")));
+      else sections.push(ui.empty("Round remains open", "No immutable closure is recorded."));
+      const history = rows(transitions.closures).slice(0, 16);
+      if (history.length) sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: "Recorded closure history"}),
+        ui.table({caption: "Immutable closure records", columns: [{key: "id", label: "Closure"}, {key: "outcome", label: "Recorded outcome"}, {key: "currency", label: "Binding state"}, {key: "binding", label: "Binding"}, {key: "record", label: "Recorded hash / actor / time"}], rows: history.map(entry => ({id: text(record(entry.form).id), outcome: text(record(entry.form).outcome), currency: entry.current === true ? "current" : entry.current === false ? "stale" : "not asserted", binding: text(entry.binding), record: recorded(entry)}))})));
+      const remainingClosures = (Number.isSafeInteger(transitions.remainingClosures) && transitions.remainingClosures >= 0 ? transitions.remainingClosures : 0) + rows(transitions.closures).length - history.length;
+      if (remainingClosures > 0) sections.push(ui.notice(`${remainingClosures} more closure records; displayed history is incomplete. Inspect the complete immutable history with the CLI.`, "warn"));
+      const successor = record(transitions.successor);
+      if (transitions.successor) sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: "Successor guidance"}),
+        h("p", {text: `SHA-256 ${text(successor.guidanceSha256)} | ${text(successor.execution)}${typeof successor.probeId === "string" ? ` | probe ${successor.probeId}` : ""}`}),
+        ui.notice(successor.execution === "unexecuted" ? "Successor guidance is unexecuted and untested." : "Successor guidance remains untested: a fixture declaration is not live execution or an independent correctness check.", "warn")));
+    }
+    return sections;
+  };
   const render = (snapshot) => {
     if (destroyed || !visible || snapshot.changed === false) return;
     last = { key: viewKey(), snapshot };
-    const body = panel === "lineage" ? lineageView(snapshot) : panel === "compare" ? compareView(snapshot) : snapshot.error && panel !== "study" ? [ui.notice(String(snapshot.error), "err")]
+    const body = panel === "harness" ? harnessView(snapshot) : panel === "lineage" ? lineageView(snapshot) : panel === "compare" ? compareView(snapshot) : snapshot.error && panel !== "study" ? [ui.notice(String(snapshot.error), "err")]
       : panel === "studies" ? studies(snapshot) : panel === "study" ? studyView(snapshot) : [ui.empty("Unknown research panel", "Choose Studies from the console.")];
     root.replaceChildren(...body.filter(Boolean));
   };
