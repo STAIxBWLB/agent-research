@@ -21,7 +21,7 @@ function blank(text: string, mask: Uint8Array): string { return text.split("").m
 function mark(mask: Uint8Array, start: number, end: number) { mask.fill(1, start, end); }
 function escaped(text: string, index: number): boolean { let slashes = 0; while (index > 0 && text[--index] === "\\") slashes++; return slashes % 2 === 1; }
 /** Masks syntax-only destinations and code while retaining original offsets. Visible link labels remain prose. */
-function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Array; code: Uint8Array; hidden: Uint8Array; headingHidden: Uint8Array } {
+function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Array; code: Uint8Array; hidden: Uint8Array; headingHidden: Uint8Array; anchorHidden: Uint8Array } {
   const mask = new Uint8Array(text.length), protectedText = new Uint8Array(text.length), tokens = parsePlaceholders(text);
   for (const token of [...tokens.placeholders, ...tokens.findings]) mark(protectedText, token.start, token.end);
   let fence: { char: string; length: number } | undefined, paragraph = false, indented = false;
@@ -73,7 +73,7 @@ function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Arra
     const close = next.get(i);
     if (close !== undefined) { mark(mask, runs[i]!.index, runs[close]!.index + runs[close]![0].length); i = close; }
   }
-  const code = mask.slice();
+  const code = mask.slice(), anchorHidden = code.slice();
   const labels: number[] = [];
   for (let i = 0; i < text.length; i++) {
     if (mask[i] || protectedText[i] || knownHidden?.[i] || (text[i] !== "<" && text[i] !== "]" && text[i] !== "[") || escaped(text, i)) continue;
@@ -104,8 +104,10 @@ function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Arra
       const quote = text[tail++]!; while (tail < text.length && (text[tail] !== quote || escaped(text, tail))) tail++;
       if (tail >= text.length) continue; tail++; while (/\s/.test(text[tail] ?? "") && tail < text.length) tail++;
     }
-    if (text[tail] === ")") mark(mask, start, end);
+    if (text[tail] === ")") { mark(mask, start, end); mark(anchorHidden, i + 1, tail + 1); }
   }
+  // Point anchors are comments in prose, never examples in syntax-only destinations/titles or placeholders.
+  for (let i = 0; i < mask.length; i++) if (mask[i] || protectedText[i]) anchorHidden[i] = 1;
   const hidden = new Uint8Array(text.length); let hasComment = false;
   for (const comment of text.matchAll(/<!--[\s\S]*?(?:-->|$)/g)) {
     if (!code[comment.index] && !protectedText[comment.index]) { mark(mask, comment.index, comment.index + comment[0].length); mark(hidden, comment.index, comment.index + comment[0].length); hasComment = true; }
@@ -115,13 +117,13 @@ function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Arra
     const target = match[1]!, start = match.index + match[0].lastIndexOf(target);
     if (!mask[start] && !protectedText[start]) {
       mark(mask, start, start + target.length);
-      const lineEnd = text.indexOf("\n", match.index); mark(hidden, match.index, lineEnd < 0 ? text.length : lineEnd);
+      const lineEnd = text.indexOf("\n", match.index); mark(hidden, match.index, lineEnd < 0 ? text.length : lineEnd); mark(anchorHidden, match.index, lineEnd < 0 ? text.length : lineEnd);
     }
   }
   // Reclassify once with non-code comments excluded, so a fence inside a comment cannot hide later prose.
   if (!knownHidden && hasComment) return markdownMask(text, hidden);
   const headingHidden = blockCode.slice(); for (let i = 0; i < hidden.length; i++) if (hidden[i]) headingHidden[i] = 1;
-  return { mask, code, hidden, headingHidden };
+  return { mask, code, hidden, headingHidden, anchorHidden };
 }
 export function manuscriptPath(dir: string): string { return join(dir, "paper", "manuscript.md"); }
 export function checkPaper(dirArg: string) {
@@ -188,7 +190,7 @@ export function checkPaper(dirArg: string) {
     findings.push({ code: hit.code, severity: settings.blocking.includes(hit.code) ? "blocking" : "warning", section: hit.section, start: hit.start, end: hit.end, ...location(hit.start), message: hit.message });
   }
   if (plan) for (const hit of paperPlanFindings(manuscript, masks.headingHidden, citationText, plan.plan, candidates)) findings.push({...hit, ...location(hit.start)});
-  if (plan) for (const hit of paperPointFindings(dir, manuscript, masks.code, masks.headingHidden, citationText, plan.plan)) findings.push({...hit, ...location(hit.start)});
+  if (plan) for (const hit of paperPointFindings(dir, manuscript, masks.anchorHidden, masks.headingHidden, citationText, plan.plan)) findings.push({...hit, ...location(hit.start)});
   let rendered = "", cursor = 0;
   for (const entry of resolution.placeholders) { rendered += manuscript.slice(cursor, entry.placeholder.start) + entry.rendered; cursor = entry.placeholder.end; }
   rendered += manuscript.slice(cursor);

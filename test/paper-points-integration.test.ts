@@ -111,3 +111,21 @@ test("CLI and MCP share Unicode-character claims, versioning and atomic invalid-
     expect(readBytesBounded(remote.plan, PAPER_PLAN_BYTES)).toEqual(beforePlan); expect(ledger(remote.dir)).toEqual(beforeLedger);
   }
 });
+
+test("escaped comments and link/reference metadata neither create anchors nor truncate a real point window", async () => {
+  const fakeAnchors = [
+    `\\<!-- point:claim-a --> [@${KEY}]`,
+    `[link](https://synthetic.test "<!-- point:claim-a -->")\n[@${KEY}]`,
+    `[x]: https://synthetic.test "<!-- point:claim-a -->"\n[@${KEY}]`,
+  ];
+  for (const fake of fakeAnchors) {
+    const f = fixture("survey", `## ${HEADING}\n\n${fake}\n`);
+    await ops.paperPlanSet(f.dir, pointsPlan(), ctx);
+    const absent = ops.paperCheck(f.dir), hits = absent.findings.filter(item => item.code === "missing-point");
+    expect(absent.ok).toBe(false);
+    expect(hits).toMatchObject([{ code: "missing-point", severity: "blocking", pointId: "claim-a", sectionId: "intro" }]);
+    writeAtomic(f.source, `## ${HEADING}\n\n<!-- point:claim-a -->\n${fake.replace("point:claim-a", "point:unknown")}\n`, MANUSCRIPT_BYTES);
+    const real = ops.paperCheck(f.dir);
+    expect(real.findings.filter(item => (POINT_CODES as readonly string[]).includes(item.code))).toEqual([]);
+  }
+});

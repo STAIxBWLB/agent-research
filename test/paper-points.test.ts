@@ -87,7 +87,7 @@ test("claim content is never read and alternate prose does not change determinis
   expect(hits[0]!.message).not.toContain("A synthetic sentence"); expect(hits[0]!.message).not.toContain("supports");
 });
 
-test("evidence resolves once per point rather than per duplicate anchor, and still reports when its anchor is missing", () => {
+test("each unique evidence reference resolves once per check rather than per duplicate anchor, including missing anchors", () => {
   const declared = {...point(), evidence: ["attempt:aaaaaaaaaaaaaaaa", "card:doi:10.1/synthetic"]};
   const resolve = spyOn(pointEvidence, "resolvePointEvidence").mockImplementation((_dir, ref) => ({resolved: ref.startsWith("attempt:")}));
   try {
@@ -126,4 +126,35 @@ test("an unclosed comment-looking opener in masked code cannot swallow a later r
   }
   // A real unclosed prose comment still owns its whole token, including anchor-looking inner text.
   expect(check("## A\n<!-- real prose opener\n<!-- point:p --> [@a]\n")).toMatchObject([{code: "missing-point", pointId: "p"}]);
+});
+
+
+test("Markdown-escaped comment openers cannot anchor or truncate a real point window", () => {
+  for (const count of [1, 3]) {
+    const prefix = "\\".repeat(count), escaped = `## A\n${prefix}<!-- point:p --> [@a]\n`;
+    expect(check(escaped)).toMatchObject([{code: "missing-point", pointId: "p"}]);
+    expect(check(`## A\n<!-- point:p -->\n${prefix}<!-- point:unknown --> [@a]\n`)).toEqual([]);
+  }
+  expect(check("## A\n" + "\\".repeat(2) + "<!-- point:p --> [@a]\n")).toEqual([]);
+  expect(check("## A\n\\<!-- an escaped unclosed opener\n<!-- point:p --> [@a]\n")).toEqual([]);
+});
+
+test("only 1..64-character point slugs form anchor boundaries", () => {
+  const valid = "x".repeat(64), oversized = "x".repeat(65);
+  expect(check(`## A\n<!-- point:${valid} --> [@a]\n`, plan([point(valid)]))).toEqual([]);
+  const longUnknown = `## A\n<!-- point:p -->\n<!-- point:${oversized} --> [@a]\n`;
+  expect(check(longUnknown)).toEqual([]);
+  const validUnknown = `## A\n<!-- point:p -->\n<!-- point:${valid} --> [@a]\n`;
+  expect(check(validUnknown)).toMatchObject([{code: "missing-required-citation", pointId: "p"}]);
+});
+
+test("shared evidence is resolved once globally per check while findings stay attached to every affected point", () => {
+  const ref = "attempt:aaaaaaaaaaaaaaaa", routing = plan([{...point("p"), evidence: [ref]}, {...point("q", ["b"]), evidence: [ref]}]);
+  const resolve = spyOn(pointEvidence, "resolvePointEvidence").mockImplementation(() => ({resolved: false, reason: "synthetic source absent"}));
+  try {
+    const text = "## A\n<!-- point:p --> [@a]\n<!-- point:q --> [@b]\n", hits = check(text, routing);
+    expect(resolve).toHaveBeenCalledTimes(1);
+    expect(hits.map(hit => [hit.code, hit.pointId])).toEqual([["unresolved-point-evidence", "p"], ["unresolved-point-evidence", "q"]]);
+    check(text, routing); expect(resolve).toHaveBeenCalledTimes(2);
+  } finally { resolve.mockRestore(); }
 });

@@ -26,11 +26,13 @@ function anchors(manuscript: string, codeMask: Uint8Array): PointAnchor[] {
   for (;;) {
     const start = manuscript.indexOf("<!--", cursor);
     if (start < 0) break;
-    // A comment-looking opener inside code cannot consume a later prose comment's closer.
-    if (codeMask[start]) { cursor = start + 4; continue; }
+    // A masked or Markdown-escaped opener cannot consume a later prose comment's closer.
+    let backslashes = 0;
+    for (let index = start - 1; index >= 0 && manuscript[index] === "\\"; index--) backslashes++;
+    if (codeMask[start] || backslashes % 2 === 1) { cursor = start + 4; continue; }
     const close = manuscript.indexOf("-->", start + 4), end = close < 0 ? manuscript.length : close + 3;
     const match = /^<!--[\s]*point:([a-z0-9]+(?:-[a-z0-9]+)*)[\s]*-->$/.exec(manuscript.slice(start, end));
-    if (match) result.push({id: match[1]!, start, end});
+    if (match && match[1]!.length <= 64) result.push({id: match[1]!, start, end});
     cursor = end;
   }
   return result;
@@ -44,6 +46,7 @@ export function paperPointFindings(dir: string, manuscript: string, codeMask: Ui
   const boundaries = markdownHeadings(manuscript, headingHidden).filter(heading => byHeading.has(heading.rawText));
   const windows: SectionWindow[] = boundaries.map((heading, index) => ({section: byHeading.get(heading.rawText)!, heading, end: boundaries[index + 1]?.start ?? manuscript.length}));
   const tokens = anchors(manuscript, codeMask), own = new Map<string, PointAnchor[]>(), citations = citationOccurrences(citationText), hits: PaperPointHit[] = [];
+  const evidenceResults = new Map<string, pointEvidence.PointEvidenceResolution>();
   let windowCursor = 0, citationCursor = 0;
   for (const [index, anchor] of tokens.entries()) {
     while (windowCursor < windows.length && windows[windowCursor]!.heading.start <= anchor.start) windowCursor++;
@@ -67,10 +70,13 @@ export function paperPointFindings(dir: string, manuscript: string, codeMask: Ui
     if (!first) hits.push({code: "missing-point", severity: "blocking", ...context,
       message: `point ${point.id} has no anchor in section ${section.id}; add an exact <!-- point:${point.id} --> comment in that section before its paragraph`});
     for (const ref of new Set(point.evidence ?? [])) {
-      let resolved = false;
-      try { resolved = pointEvidence.resolvePointEvidence(dir, ref).resolved; } catch { /* An unreadable source stays unresolved without exposing its body or locator. */ }
-      if (!resolved) hits.push({code: "unresolved-point-evidence", severity: "blocking", ...context,
-        message: `point ${point.id} evidence ${ref.slice(0, 80)} does not resolve; restore the referenced card or attempt record, or revise the point evidence`});
+      let resolution = evidenceResults.get(ref);
+      if (resolution === undefined) {
+        try { resolution = pointEvidence.resolvePointEvidence(dir, ref); } catch { resolution = {resolved: false}; }
+        evidenceResults.set(ref, resolution);
+      }
+      if (!resolution.resolved) hits.push({code: "unresolved-point-evidence", severity: "blocking", ...context,
+        message: `point ${point.id} evidence ${ref.slice(0, 80)} does not resolve; ${resolution.reason?.slice(0, 500) ?? "restore the referenced card or attempt record, or revise the point evidence"}`});
     }
   }
   return hits.sort((a, b) => a.start - b.start || a.code.localeCompare(b.code));

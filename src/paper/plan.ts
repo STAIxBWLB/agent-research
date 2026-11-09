@@ -60,7 +60,7 @@ function points(raw: unknown, scope: ReadonlySet<string>, ids: Set<string>, reso
           if (!resolution || typeof resolution.resolved !== "boolean") invalid("point evidence resolver returned an invalid source result");
           resolutions.set(ref, resolution);
         }
-        if (!resolution.resolved) invalid("point evidence does not resolve to an existing extraction card or attempt record; restore it or remove the reference");
+        if (!resolution.resolved) invalid(`point evidence does not resolve to an existing extraction card or attempt record; ${resolution.reason?.slice(0, 500) ?? "restore it or remove the reference"}`);
         return ref;
       });
     }
