@@ -11,11 +11,12 @@ import { investigateResultPath, readClosedInvestigation } from "../exp/investiga
 import { finalResultPath } from "../exp/final.ts";
 import { MANUSCRIPT_BYTES, parsePlaceholders, resolvePlaceholders } from "./placeholders.ts";
 import { hygieneFindings, readPaperSettings, type HygieneCode } from "./hygiene.ts";
-import { readPaperPlanSnapshot } from "./plan.ts";
+import { readPaperPlanCheckSnapshot } from "./plan.ts";
+import { paperPointFindings, type PointFindingCode } from "./points.ts";
 import { paperPlanFindings, type ScopeFindingCode } from "./scopes.ts";
 
 export const MAX_CODE_NUMBERS = 500;
-export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "unaccepted-draft" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result" | HygieneCode | ScopeFindingCode; severity: "blocking" | "warning"; section?: string[]; sectionId?: string; start: number; end: number; line: number; column: number; message: string }
+export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "unaccepted-draft" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result" | HygieneCode | ScopeFindingCode | PointFindingCode; severity: "blocking" | "warning"; section?: string[]; sectionId?: string; pointId?: string; start: number; end: number; line: number; column: number; message: string }
 function blank(text: string, mask: Uint8Array): string { return text.split("").map((char, index) => mask[index] && char !== "\n" && char !== "\r" ? " " : char).join(""); }
 function mark(mask: Uint8Array, start: number, end: number) { mask.fill(1, start, end); }
 function escaped(text: string, index: number): boolean { let slashes = 0; while (index > 0 && text[--index] === "\\") slashes++; return slashes % 2 === 1; }
@@ -150,7 +151,7 @@ export function checkPaper(dirArg: string) {
   }
   for (const problem of parsed.findings) { mark(numberMask, problem.start, problem.end); mark(citationMask, problem.start, problem.end); }
   const citationText = blank(manuscript, citationMask), candidates = loadCandidates(dir), citations = checkCitations(citationText, candidates);
-  const plan = readPaperPlanSnapshot(dir, candidates);
+  const plan = readPaperPlanCheckSnapshot(dir, candidates);
   const groups = new Map<number, number>();
   for (const hit of citationOccurrences(citationText)) {
     mark(numberMask, hit.start, hit.end); groups.set(hit.groupStart, hit.groupEnd);
@@ -187,6 +188,7 @@ export function checkPaper(dirArg: string) {
     findings.push({ code: hit.code, severity: settings.blocking.includes(hit.code) ? "blocking" : "warning", section: hit.section, start: hit.start, end: hit.end, ...location(hit.start), message: hit.message });
   }
   if (plan) for (const hit of paperPlanFindings(manuscript, masks.headingHidden, citationText, plan.plan, candidates)) findings.push({...hit, ...location(hit.start)});
+  if (plan) for (const hit of paperPointFindings(dir, manuscript, masks.code, masks.headingHidden, citationText, plan.plan)) findings.push({...hit, ...location(hit.start)});
   let rendered = "", cursor = 0;
   for (const entry of resolution.placeholders) { rendered += manuscript.slice(cursor, entry.placeholder.start) + entry.rendered; cursor = entry.placeholder.end; }
   rendered += manuscript.slice(cursor);

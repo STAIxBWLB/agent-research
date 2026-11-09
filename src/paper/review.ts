@@ -28,6 +28,10 @@ export interface ReviewReport {
   checklist: { negativeResults: boolean; denominators: boolean; limitations: boolean; reproducibility: boolean; survey?: SurveyAnswers };
   findings: ReviewFinding[];
 }
+export interface ReviewPointFindings {
+  point: string; open: number; blocking: number;
+  findings: { reviewId: string; findingId: string; kind: ReviewFinding["kind"]; blocking: boolean }[];
+}
 interface Resolution { reason: string; actor: Actor; at: string }
 interface ReviewRecord { id: string; report: ReviewReport; actor: Actor; at: string; resolutions: Record<string, Resolution> }
 function bad(message: string): never { throw new Error(`review: ${message}; inspect ares review show, correct the report or target, and retry`); }
@@ -148,8 +152,26 @@ export function reviewReadiness(dirArg: string) {
   if (families.length < 2) unmet.push({ code: "model-families", message: "fewer than two distinct model families reviewed the current evidence hash; add current-build reviews from two families" });
   const openBlocking = reviews.flatMap(row => row.report.findings.filter(f => f.blocking && !row.resolutions[f.id]).map(f => ({ reviewId: row.id, findingId: f.id, kind: f.kind, location: f.location, text: f.text })));
   if (openBlocking.length) unmet.push({ code: "blocking-findings", message: `open blocking findings: ${openBlocking.map(f => `${f.reviewId}/${f.findingId} (${f.kind})`).join(", ")}; resolve each with a reason using ares review resolve` });
-  const rounds = roundsView(dir, rows, buildSha256), survey = surveyView(dir, study.mode, reviews);
-  return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, checklists: reviews.map(row => { const { survey: answers, ...rest } = row.report.checklist; return { reviewId: row.id, ...rest, ...(survey.surveyChecklist === "off" || answers === undefined ? {} : { survey: answers }) }; }), claims: "unavailable (STAIxBWLB/agent-hub#931)", unmet, ...rounds, ...survey, info: [...rounds.info, ...survey.info] };
+  const rounds = roundsView(dir, rows, buildSha256), survey = surveyView(dir, study.mode, reviews), points = pointView(reviews);
+  return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, ...points, checklists: reviews.map(row => { const { survey: answers, ...rest } = row.report.checklist; return { reviewId: row.id, ...rest, ...(survey.surveyChecklist === "off" || answers === undefined ? {} : { survey: answers }) }; }), claims: "unavailable (STAIxBWLB/agent-hub#931)", unmet, ...rounds, ...survey, info: [...rounds.info, ...survey.info] };
+}
+/** Exact location metadata only: no paper-plan lookup, support judgment or readiness change. */
+function pointView(reviews: ReviewRecord[]): { openByPoint?: ReviewPointFindings[] } {
+  const groups = new Map<string, ReviewPointFindings["findings"]>();
+  let explicit = false;
+  for (const row of reviews) for (const finding of row.report.findings) {
+    const match = /^point:([a-z0-9]+(?:-[a-z0-9]+)*)$/.exec(finding.location.trim()), point = match?.[1];
+    if (point === undefined || point.length > 64) continue;
+    explicit = true;
+    if (row.resolutions[finding.id]) continue;
+    const findings = groups.get(point) ?? [];
+    findings.push({ reviewId: row.id, findingId: finding.id, kind: finding.kind, blocking: finding.blocking });
+    groups.set(point, findings);
+  }
+  if (!explicit) return {};
+  return { openByPoint: [...groups].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([point, findings]) => ({
+    point, open: findings.length, blocking: findings.filter(finding => finding.blocking).length, findings,
+  })) };
 }
 /** Display only: answers, including false ones, never enter unmet. Off hides the block and the projection; require is enforced at review add. */
 function surveyView(dir: string, studyMode: string, reviews: ReviewRecord[]) {

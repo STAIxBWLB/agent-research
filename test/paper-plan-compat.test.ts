@@ -16,7 +16,8 @@ const SOURCE_BYTES = 8 * 1024 * 1024, LIST_BYTES = 256 * 1024;
 const MANUSCRIPT_BYTES = 1024 * 1024, EVIDENCE_BYTES = 8 * 1024 * 1024, LEDGER_BYTES = 64 * 1024 * 1024;
 const actor = { kind: "person" as const }, ctx = { actor, http: fakeHttp([]).http };
 
-function legacySource() {
+function legacySource(baseline = BASE) {
+  if (!/^[a-f0-9]{40}$/.test(baseline)) throw new Error("paper source compatibility: fixed full baseline commit required; pass a trusted 40-hex local commit");
   const root = fileURLToPath(new URL("../", import.meta.url)), privateRoot = tempDir();
   const sourceRoot = join(privateRoot, "source"), privateHome = join(privateRoot, "home");
   mkdirSync(sourceRoot, { mode: 0o700 }); mkdirSync(privateHome, { mode: 0o700 });
@@ -27,9 +28,9 @@ function legacySource() {
     GIT_TERMINAL_PROMPT: "0", GIT_NO_LAZY_FETCH: "1", GIT_ALLOW_PROTOCOL: "", GIT_ASKPASS: "false", SSH_ASKPASS: "false",
   };
   const gitArgs = ["--no-optional-locks", "-c", "protocol.allow=never", "-c", "core.hooksPath=/dev/null", "-C", root];
-  const commit = spawnSync("git", [...gitArgs, "cat-file", "-e", `${BASE}^{commit}`], { env, timeout: 3000, maxBuffer: LIST_BYTES });
-  if (commit.error || commit.status !== 0) throw new Error(`paper no-plan compatibility: baseline ${BASE} is unavailable; restore full local repository history before running this check (automatic fetch and skip are forbidden)`);
-  const archive = spawnSync("git", [...gitArgs, "archive", "--format=tar", BASE, "--", "src", "package.json"], { env, timeout: 10_000, maxBuffer: SOURCE_BYTES });
+  const commit = spawnSync("git", [...gitArgs, "cat-file", "-e", `${baseline}^{commit}`], { env, timeout: 3000, maxBuffer: LIST_BYTES });
+  if (commit.error || commit.status !== 0) throw new Error(`paper no-plan compatibility: baseline ${baseline} is unavailable; restore full local repository history before running this check (automatic fetch and skip are forbidden)`);
+  const archive = spawnSync("git", [...gitArgs, "archive", "--format=tar", baseline, "--", "src", "package.json"], { env, timeout: 10_000, maxBuffer: SOURCE_BYTES });
   if (archive.error || archive.status !== 0 || !archive.stdout?.length || archive.stdout.length > SOURCE_BYTES) throw new Error("paper no-plan compatibility: bounded baseline source archive unavailable; restore full local history and its source blobs, then rerun without fetching from this test");
   const listing = spawnSync("tar", ["-tf", "-"], { env, input: archive.stdout, timeout: 5000, maxBuffer: LIST_BYTES });
   if (listing.error || listing.status !== 0 || listing.stdout.length > LIST_BYTES) throw new Error("paper no-plan compatibility: baseline source archive listing failed; restore a readable trusted baseline and native tar");
@@ -102,4 +103,44 @@ test("no-plan reports and v1 evidence remain byte-identical to the exact pre-cha
   expect(readBytesBounded(paths.evidence, EVIDENCE_BYTES)).toEqual(evidence);
   expect(readBytesBounded(join(planned, "ledger.jsonl"), LEDGER_BYTES)).toEqual(ledger);
   expect(readBytesBounded(paths.manuscript, MANUSCRIPT_BYTES)).toEqual(manuscript);
+}, 30_000);
+
+
+test("no-point v1 plans reports and plan-bound evidence remain byte-identical to merged section-scopes source", async () => {
+  const sourceRoot = legacySource("387a8f246ec900aea03536b1429c0fc99798d022");
+  const oldCheck = await import(pathToFileURL(join(sourceRoot, "src", "paper", "check.ts")).href) as Pick<typeof import("../src/paper/check.ts"), "checkPaper">;
+  const oldBuild = await import(pathToFileURL(join(sourceRoot, "src", "paper", "build.ts")).href) as Pick<typeof import("../src/paper/build.ts"), "buildPaper" | "paperBuildPaths">;
+  const oldPlan = await import(pathToFileURL(join(sourceRoot, "src", "paper", "plan.ts")).href) as Pick<typeof import("../src/paper/plan.ts"), "setPaperPlan">;
+  const oldStudy = await import(pathToFileURL(join(sourceRoot, "src", "study.ts")).href) as Pick<typeof import("../src/study.ts"), "withLock">;
+  const routing = {v: 1 as const, sections: [{id: "intro", heading: "Introduction", cites: ["a2026"]}, {id: "method", heading: "Methods", cites: ["b2026"]}]};
+  const fixtures = [
+    "# Introduction\n\nKnown [@a2026].\n\n## Unplanned subsection\nRepeated [@a2026; @a2026].\n\n# Methods\nKnown [@b2026].\n",
+    "Introduction\r\n============\r\n\r\nLiteral {{lit:조건 2026}} and [@a2026].\r\n\r\nMethods\r\n-------\r\n\r\nKnown [@b2026], inline `[@a2026]` and [target](https://example.test/[@a2026]).\r\n",
+    "# Introduction\n\nWrong scope [@b2026].\n\n# Methods\nKnown [@b2026].\n",
+  ];
+  let built = 0, refused = 0;
+  for (const text of fixtures) {
+    const dir = study(text), file = join(dir, "paper", "plan.json");
+    await oldStudy.withLock(dir, () => oldPlan.setPaperPlan(dir, routing, actor));
+    const oldPlanBytes = readBytesBounded(file, 65_536);
+    await ops.paperPlanSet(dir, routing, ctx);
+    expect(readBytesBounded(file, 65_536)).toEqual(oldPlanBytes);
+    const stored = JSON.parse(readTextBounded(file, 65_536)) as {v: number; sections: object[]};
+    expect(stored.v).toBe(1); expect(stored.sections.every(section => !Object.hasOwn(section, "points"))).toBe(true);
+    const current = checkPaper(dir), previous = oldCheck.checkPaper(dir);
+    expect(JSON.stringify(current)).toBe(JSON.stringify(previous));
+    expect(readBytesBounded(file, 65_536)).toEqual(oldPlanBytes);
+    if (!current.ok) { refused++; continue; }
+    await oldStudy.withLock(dir, () => oldBuild.buildPaper(dir, actor));
+    const paths = oldBuild.paperBuildPaths(dir), evidence = readBytesBounded(paths.evidence, EVIDENCE_BYTES), manuscript = readBytesBounded(paths.manuscript, MANUSCRIPT_BYTES), ledger = readBytesBounded(join(dir, "ledger.jsonl"), LEDGER_BYTES);
+    const body = JSON.parse(readTextBounded(paths.evidence, EVIDENCE_BYTES)) as Record<string, unknown>;
+    expect(body.v).toBe(2); expect(typeof body.planSha256).toBe("string");
+    const rebuilt = await ops.paperBuild(dir, ctx); expect(rebuilt.changed).toBe(false);
+    expect(readBytesBounded(paths.evidence, EVIDENCE_BYTES)).toEqual(evidence);
+    expect(readBytesBounded(paths.manuscript, MANUSCRIPT_BYTES)).toEqual(manuscript);
+    expect(readBytesBounded(file, 65_536)).toEqual(oldPlanBytes);
+    expect(readBytesBounded(join(dir, "ledger.jsonl"), LEDGER_BYTES)).toEqual(ledger);
+    built++;
+  }
+  expect(built).toBe(2); expect(refused).toBe(1);
 }, 30_000);

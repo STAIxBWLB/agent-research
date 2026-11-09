@@ -42,7 +42,7 @@ test("paper plan file/stdin CLI and MCP share validation, storage and routing co
   expect(validArguments({study: f.dir, plan: raw}, schema)).toBe(true);
   expect(validArguments({study: f.dir, plan: {...raw, unexpected: true}}, schema)).toBe(false);
   const beforePlan = readBytesBounded(f.file, plans.PAPER_PLAN_BYTES), beforeLedger = ledger(f.dir);
-  for (const invalid of [{...raw, v: 2}, {v: 1 as const, sections: [{...raw.sections[0]!, cites: ["unknown"]}]}]) {
+  for (const invalid of [{...raw, v: 3}, {v: 1 as const, sections: [{...raw.sections[0]!, cites: ["unknown"]}]}]) {
     await expect(server.handlers.ares_paper_plan_set!({study: f.dir, plan: invalid})).rejects.toThrow("paper plan");
     await expect(run(["paper", "plan", "set", f.dir, "--file", "-"], {}, {http: ctx.http, readStdin: async () => JSON.stringify(invalid)})).rejects.toThrow("paper plan");
     expect(readBytesBounded(f.file, plans.PAPER_PLAN_BYTES)).toEqual(beforePlan); expect(ledger(f.dir)).toEqual(beforeLedger);
