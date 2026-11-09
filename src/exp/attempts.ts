@@ -650,7 +650,7 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
           else if (attempt.pipeline) state = { ...state, running: false, exitCode: 137, finishedAt: at(ctx) };
           if (attempt.pipeline && state.running) throw new EvidenceError("executor-stop", "pipeline: container termination is not yet observed; active attempt and retention reservation remain held");
         }
-        if (!attempt.pipeline) attempt = await captureStage(dir, attempt, ctx, true);
+        attempt = await captureStage(dir, attempt, ctx, true);
         const ended = state;
         changed.push(await update(dir, attempt.id, ctx, current => { if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; if (!ended.running) current.stages[current.stage]!.exitCode = ended.exitCode; finish(current, "failed", "wall-clock", ctx); return "attempt.failed"; })); continue;
       }

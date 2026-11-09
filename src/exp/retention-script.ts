@@ -452,7 +452,8 @@ def perform(q):
             os.mkdir(tmp,0o700);data=os.path.join(tmp,'data');os.mkdir(data,0o700)
             try:
                 # Copy only declared outputs, while retaining their paths under the stage output root.
-                for path in paths:
+                for port,path in outputs.items():
+                    if not os.path.lexists(os.path.join(source,path)): fail('declared output port '+port+' missing at its declared path; the stage command must write that output')
                     selected=within(os.path.join(source,path),source)
                     dest=os.path.join(data,path);os.makedirs(os.path.dirname(dest),mode=0o700,exist_ok=True)
                     bounded_copy(selected,dest)
