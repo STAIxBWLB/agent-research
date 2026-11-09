@@ -300,7 +300,7 @@ async function recordVerifiedStage(dir: string, attempt: Attempt, state: Observe
     if (current.status !== "running" || current.stage !== attempt.stage) return undefined;
     const stage = current.stages[current.stage]!;
     stage.containerId = state.id; if (state.startedAt) stage.startedAt = state.startedAt;
-    if (current.reason === "executor-start" || current.reason === "executor-start-uncertain" || current.reason === "executor-preflight") { delete current.reason; delete current.error; }
+    if (current.reason === "executor-start" || current.reason === "executor-start-uncertain" || current.reason === "executor-preflight" || current.reason === "executor-seal") { delete current.reason; delete current.error; }
     delete current.launching;
     if (current.stage === "candidate") {
       current.sealing.candidateHasNoEvaluator = true;
@@ -719,11 +719,14 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
     } catch (error) {
       if (attempt.pipeline && observedState && !observedState.running) {
         const failure = pipelineFailureAt(dir, attempt, error, ctx);
+        const retryable = retryablePipelineFailure(error) && failure.reason !== "wall-clock";
         changed.push(await update(dir, attempt.id, ctx, current => {
           if (current.status !== "running") return undefined;
           const stage = current.stages[current.stage];
           if (stage) { stage.exitCode = observedState!.exitCode; stage.endedAt = observedState!.finishedAt ?? at(ctx); delete stage.launchPending; }
-          current.error = failure.message; finish(current, "failed", failure.reason, ctx); return "attempt.failed";
+          current.error = failure.message;
+          if (retryable) { current.reason = "executor-seal"; return "attempt.executor-error"; }
+          finish(current, "failed", failure.reason, ctx); return "attempt.failed";
         }));
         continue;
       }

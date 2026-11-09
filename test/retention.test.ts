@@ -230,3 +230,46 @@ test("near-bound retention history compacts into immutable shards without bricki
   expect((await f.run({ op: "inspect", offset: 4000, limit: 2 } as Omit<RetentionRequest, "studyId">)).entries).toHaveLength(1);
   await expect(f.run({ op: "verify", ref } as Omit<RetentionRequest, "studyId">)).rejects.toThrow("pruned");
 }, 60_000);
+
+test("SIGKILL during archive publication leaves only quarantine metadata and retry recovers all operations", async () => {
+  const f = fixture(); writeFileSync(join(f.source, "rows.txt"), "synthetic rows");
+  await f.run({ op: "reserve", attemptId } as Omit<RetentionRequest, "studyId">);
+  const sealed = await f.seal(), ref = { attemptId, stage: "prepare", sha256: sealed.sha256! };
+  const crashRunner: import("../src/exp/executor.ts").ProcessRunner = request => {
+    const args = [...request.args], script = args[3]!;
+    const publication = "        os.replace(tmp,path);syncdir(os.path.dirname(path))";
+    expect(script).toContain(publication);
+    args[3] = script.replace(publication, "        if pending is not None: os.kill(os.getpid(),9)\n" + publication);
+    return spawnRunner({ ...request, args });
+  };
+  await expect(retainedOperation(f.executor, { op: "release", studyId, attemptId }, crashRunner)).rejects.toThrow("executor operation failed");
+  const store = join(f.root, studyId, ".retained"), pending = join(store, "quarantine", `archive-${attemptId}.pending`);
+  expect(existsSync(pending)).toBe(true);
+  expect(existsSync(join(store, "archive", attemptId.slice(0, 2), `${attemptId}.json`))).toBe(false);
+  expect((await f.run({ op: "inspect" })).entries?.[0]?.active).toBe(true);
+  expect((await f.run({ op: "verify", ref } as Omit<RetentionRequest, "studyId">)).sha256).toBe(ref.sha256);
+  await f.run({ op: "release", attemptId } as Omit<RetentionRequest, "studyId">);
+  expect(existsSync(pending)).toBe(false);
+  expect((await f.run({ op: "inspect" })).archivedReservations).toBe(1);
+  await f.run({ op: "reserve", attemptId: otherId } as Omit<RetentionRequest, "studyId">);
+  const preview = await f.run({ op: "prune", refs: [ref] } as Omit<RetentionRequest, "studyId">);
+  expect((await f.run({ op: "prune", refs: [ref], fingerprint: preview.fingerprint } as Omit<RetentionRequest, "studyId">)).pruned).toBe(1);
+});
+
+test("legacy interrupted archive shard temporaries never become published entries or block inventory", async () => {
+  const f = fixture(); writeFileSync(join(f.source, "rows.txt"), "synthetic rows");
+  await f.run({ op: "reserve", attemptId } as Omit<RetentionRequest, "studyId">);
+  const sealed = await f.seal(), ref = { attemptId, stage: "prepare", sha256: sealed.sha256! };
+  await f.run({ op: "release", attemptId } as Omit<RetentionRequest, "studyId">);
+  const prefix = join(f.root, studyId, ".retained", "archive", attemptId.slice(0, 2));
+  const temporary = join(prefix, `${attemptId}.json.${"0".repeat(32)}.tmp`);
+  writeFileSync(temporary, '{"partial":', { mode: 0o600 });
+  const view = await f.run({ op: "inspect" });
+  expect(view.total).toBe(1); expect(view.archivedReservations).toBe(1);
+  expect((await f.run({ op: "verify", ref } as Omit<RetentionRequest, "studyId">)).sha256).toBe(ref.sha256);
+  await f.run({ op: "reserve", attemptId: otherId } as Omit<RetentionRequest, "studyId">);
+  const preview = await f.run({ op: "prune", refs: [ref] } as Omit<RetentionRequest, "studyId">);
+  expect((await f.run({ op: "prune", refs: [ref], fingerprint: preview.fingerprint } as Omit<RetentionRequest, "studyId">)).pruned).toBe(1);
+  unlinkSync(temporary); symlinkSync("missing", temporary);
+  await expect(f.run({ op: "inspect" })).rejects.toThrow("unsafe interrupted archive write");
+});

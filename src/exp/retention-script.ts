@@ -62,10 +62,14 @@ def syncdir(path):
     fd=os.open(path,os.O_RDONLY)
     try: os.fsync(fd)
     finally: os.close(fd)
-def atomic(path,value,bound):
+def atomic(path,value,bound,pending=None):
     data=encoded(value)
     if len(data)>bound: fail('retention metadata bound exceeded')
-    tmp=path+'.'+uuid.uuid4().hex+'.tmp'
+    tmp=pending if pending is not None else path+'.'+uuid.uuid4().hex+'.tmp'
+    if pending is not None and os.path.lexists(tmp):
+        st=os.lstat(tmp)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink!=1 or st.st_uid!=os.getuid() or st.st_size>bound: fail('unsafe interrupted metadata write')
+        os.unlink(tmp)
     fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
     try:
         with os.fdopen(fd,'wb') as f: f.write(data);f.flush();os.fsync(f.fileno())
@@ -200,11 +204,11 @@ def ref_for(entry):
 def archive_path(store,aid):
     ident(aid,'attempt')
     return os.path.join(store,'archive',aid[:2],aid+'.json')
-def immutable(path,value,bound=MAX_META):
+def immutable(path,value,bound=MAX_META,pending=None):
     if os.path.lexists(path):
         if read_bytes(path,bound)!=encoded(value): fail('immutable retention provenance mismatch')
     else:
-        atomic(path,value,bound);os.chmod(path,0o400)
+        atomic(path,value,bound,pending);os.chmod(path,0o400)
 def read_archive(store,aid):
     path=archive_path(store,aid)
     if not os.path.lexists(path): return None
@@ -222,6 +226,13 @@ def archives(store):
             physical(prefix.path,True)
             with os.scandir(prefix.path) as records:
                 for item in records:
+                    # Older interrupted writers used same-directory shard temporaries. They are not published shards.
+                    if re.fullmatch(r'[a-f0-9]{16}\.json\.[a-f0-9]{32}\.tmp',item.name) and item.name[:2]==prefix.name:
+                        st=os.lstat(item.path)
+                        if not stat.S_ISREG(st.st_mode) or st.st_nlink!=1 or st.st_uid!=os.getuid() or st.st_size>ARCHIVE_BYTES: fail('unsafe interrupted archive write')
+                        count+=1
+                        if count>1000000: fail('retention archive exceeds bounded record count; archive this study before adding evidence')
+                        continue
                     if not re.fullmatch(r'[a-f0-9]{16}\.json',item.name) or item.name[:2]!=prefix.name: fail('invalid retention archive filename')
                     count+=1
                     if count>1000000: fail('retention archive exceeds bounded record count; archive this study before adding evidence')
@@ -262,7 +273,8 @@ def compact(state,store):
         entries={k:e for k,e in state['entries'].items() if e['attemptId']==aid}
         if len(entries)>16: fail('unsupported released attempt stage count; retain the original index for compatible recovery')
         record={'v':1,'attemptId':aid,'reservation':state['attempts'][aid],'entries':entries}
-        prefix=mkdir(os.path.join(base,aid[:2]));immutable(archive_path(store,aid),record,ARCHIVE_BYTES)
+        prefix=mkdir(os.path.join(base,aid[:2]));quarantine=mkdir(os.path.join(store,'quarantine'))
+        immutable(archive_path(store,aid),record,ARCHIVE_BYTES,os.path.join(quarantine,'archive-'+aid+'.pending'))
     # Publishing a shard before removing its active-index rows is crash-safe: readers deduplicate by attempt id.
     for aid in released: del state['attempts'][aid]
     state['entries']={k:e for k,e in state['entries'].items() if e['attemptId'] not in released}

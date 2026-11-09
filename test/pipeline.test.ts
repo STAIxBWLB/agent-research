@@ -531,3 +531,32 @@ test("v2 a kill acknowledgement without observed termination keeps the attempt a
   expect([...f.fake.containers.values()].some(container => container.running)).toBe(false);
   await assertNoReservation(f, stopped);
 });
+
+test("v2 transient seal busy/SSH failures preserve the stopped stage and retry without rerunning it", async () => {
+  for (const cause of ["busy", "ssh"] as const) {
+    const f = await setup(), initial = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx), original = f.fake.ctx.runner!;
+    let failedOnce = false;
+    const transient: AttemptContext = { ...f.fake.ctx, runner: request => {
+      if (!failedOnce && retentionRequest(request)?.op === "seal") {
+        failedOnce = true;
+        return Promise.resolve(cause === "busy" ? { exitCode: 1, stdout: '{"error":"retention operation busy; retry after the current owner finishes"}', stderr: "" }
+          : { exitCode: 255, stdout: "", stderr: "synthetic SSH unavailable" });
+      }
+      return original(request);
+    } };
+    f.fake.finish(); await reconcileAttempts(f.dir, transient);
+    const stopped = showAttempt(f.dir, initial.id);
+    expect(stopped.status).toBe("running"); expect(stopped.reason).toBe("executor-seal");
+    expect(stopped.stages.candidate?.exitCode).toBe(0);
+    expect(stopped.stages.candidate?.containerId).toBe(initial.stages.candidate?.containerId);
+    expect(stopped.pipeline?.completed).toEqual([]); expect(stopped.metrics).toEqual([]);
+    expect(f.fake.executed).toEqual(["prepare"]);
+    expect((await retainedOperation(stopped.executor, { op: "inspect", studyId: stopped.studyId }, original)).reservedBytes).toBeGreaterThan(0);
+    await reconcileAttempts(f.dir, f.fake.ctx);
+    const next = showAttempt(f.dir, initial.id);
+    expect(next.status).toBe("running"); expect(next.pipeline?.index).toBe(1);
+    expect(next.pipeline?.completed[0]?.record.containerId).toBe(initial.stages.candidate?.containerId);
+    expect(next.reason).toBeUndefined(); expect(next.error).toBeUndefined();
+    expect(f.fake.executed).toEqual(["prepare", "train"]);
+  }
+}, 20_000);
