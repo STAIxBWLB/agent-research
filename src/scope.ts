@@ -2,9 +2,28 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { boundedText, commit, onlyKeys, plain, readBytesBounded, readJsonFile, sha256, type Actor } from "./study.ts";
 
-export interface Scope { question: string; subquestions: string[]; include: string[]; exclude: string[]; yearFrom?: number; yearTo?: number; maxCandidates: number }
-const KEYS = ["question", "subquestions", "include", "exclude", "yearFrom", "yearTo", "maxCandidates"] as const;
-export const MAX_CANDIDATES = 5000;
+export interface ExclusionCode { code: string; label: string }
+export interface Scope { question: string; subquestions: string[]; include: string[]; exclude: string[]; yearFrom?: number; yearTo?: number; maxCandidates: number; exclusionCodes?: ExclusionCode[] }
+const KEYS = ["question", "subquestions", "include", "exclude", "yearFrom", "yearTo", "maxCandidates", "exclusionCodes"] as const;
+export const MAX_CANDIDATES = 5000, MAX_EXCLUSION_CODES = 30;
+/** Lower-case slug; "uncoded" names the group of exclusions without a code and is reserved. */
+export const EXCLUSION_CODE = /^[a-z][a-z0-9-]{0,31}$/;
+function exclusionCodes(value: unknown): ExclusionCode[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > MAX_EXCLUSION_CODES) throw new Error(`scope.exclusionCodes: list of at most ${MAX_EXCLUSION_CODES} {code, label} objects`);
+  const seen = new Set<string>();
+  return value.map((item, i) => {
+    const at = `scope.exclusionCodes[${i}]`;
+    if (!plain(item)) throw new Error(`${at}: object {code, label} required`);
+    onlyKeys(item, ["code", "label"], at);
+    if (typeof item.code !== "string" || !EXCLUSION_CODE.test(item.code) || item.code === "uncoded") throw new Error(`${at}.code: lower-case slug of at most 32 characters (letters, digits, -), not "uncoded"`);
+    if (seen.has(item.code)) throw new Error(`${at}.code: duplicate code ${item.code}`);
+    seen.add(item.code);
+    const label = boundedText(item.label, `${at}.label`, 200);
+    if (/{{|}}|\||[\r\n]/.test(label)) throw new Error(`${at}.label: must not contain {{, }}, | or line breaks, so it can appear in the lit flow table; reword the label`);
+    return { code: item.code, label };
+  });
+}
 
 function list(value: unknown, what: string, maxItems: number, maxText: number): string[] {
   if (value === undefined) return [];
@@ -24,6 +43,7 @@ export function validateScope(raw: unknown): Scope {
   if (yearFrom !== undefined && yearTo !== undefined && yearFrom > yearTo) throw new Error("scope: yearFrom after yearTo");
   const max = raw.maxCandidates ?? 500;
   if (!Number.isSafeInteger(max) || (max as number) < 1 || (max as number) > MAX_CANDIDATES) throw new Error(`scope.maxCandidates: 1..${MAX_CANDIDATES}`);
+  const codes = exclusionCodes(raw.exclusionCodes);
   return {
     question: boundedText(raw.question, "scope.question", 2000),
     subquestions: list(raw.subquestions, "scope.subquestions", 30, 1000),
@@ -31,6 +51,7 @@ export function validateScope(raw: unknown): Scope {
     exclude: list(raw.exclude, "scope.exclude", 50, 500),
     ...(yearFrom !== undefined ? { yearFrom } : {}), ...(yearTo !== undefined ? { yearTo } : {}),
     maxCandidates: max as number,
+    ...(codes ? { exclusionCodes: codes } : {}),
   };
 }
 
