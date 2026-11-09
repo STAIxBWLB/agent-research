@@ -312,3 +312,24 @@ test("lost lookup acknowledgement recovers the pre-RPC marker and the same pinne
   expect(readLedger(f.dir).filter(event => event.type === "attempt.unknown")).toEqual([]);
   expect((await retainedOperation(first.executor, { op: "inspect", studyId: first.studyId }, original)).reservedBytes).toBe(0);
 }, 30_000);
+
+test("a local stage edit reuses only unaffected upstream work and matches a full fresh revised pipeline", async () => {
+  const f = await setup({ reuse: true }), original = await source(f);
+  const revised = readProtocol(f.dir)!;
+  if (revised.v !== 2) throw new Error("synthetic v2 fixture required");
+  revised.candidate.stages[1]!.command = ["/synthetic", "--revised-tool-option", "train"];
+  await withLock(f.dir, () => setProtocol(f.dir, revised, actor));
+  await gateDecide(f.dir, "design", "approve", undefined, { actor, http: fakeHttp([]).http });
+  const fresh = await finish(f, await runAttempt(f.dir, { ...runOptions(f), reuse: "off", retry: original.id }, f.fake.ctx));
+  expect(fresh.status).toBe("succeeded");
+  expect(readBytesBounded(join(fresh.paths.output, "predict", "predictions.txt"), 1024)).not.toEqual(readBytesBounded(join(original.paths.output, "predict", "predictions.txt"), 1024));
+  const partial = await finish(f, await runAttempt(f.dir, { ...runOptions(f), reuse: "eligible", retry: fresh.id }, f.fake.ctx));
+  expect(partial.status).toBe("succeeded");
+  expect(partial.reuse?.stages.prepare?.outcome).toBe("reused");
+  expect(partial.pipeline!.completed[0]!.ref).toEqual(original.pipeline!.completed[0]!.ref);
+  expect(partial.reuse?.stages.train?.outcome).toBe("fresh"); expect(partial.reuse?.stages.predict?.outcome).toBe("fresh");
+  expect(f.fake.executed).toEqual(["prepare", "train", "predict", "evaluate", "prepare", "train", "predict", "evaluate", "train", "predict", "evaluate"]);
+  expect(readBytesBounded(join(partial.paths.output, "predict", "predictions.txt"), 1024)).toEqual(readBytesBounded(join(fresh.paths.output, "predict", "predictions.txt"), 1024));
+  expect(readBytesBounded(join(partial.paths.result, "metrics.json"), 65536)).toEqual(readBytesBounded(join(fresh.paths.result, "metrics.json"), 65536));
+  expect(attemptReuseView(partial)).toMatchObject({ reusedStages: 1, executedCandidateStages: 2, freshEvaluations: 1, independentSamples: 0 });
+}, 30_000);

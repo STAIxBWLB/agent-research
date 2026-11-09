@@ -77,7 +77,7 @@ export function runtime() {
       const output = stage === "evaluate" ? source("/result") : source("/out");
       mkdirSync(output, { recursive: true });
       if (stage === "prepare") writeFileSync(join(output, "rows.txt"), readTextBounded(join(source("/in"), "data"), 1024) + ":rows");
-      else if (stage === "train") writeFileSync(join(output, "model.txt"), readTextBounded(join(source("/in"), "rows"), 1024) + ":model");
+      else if (stage === "train") writeFileSync(join(output, "model.txt"), readTextBounded(join(source("/in"), "rows"), 1024) + ":model" + (args.includes("--revised-tool-option") ? ":revised" : ""));
       else if (stage === "predict") writeFileSync(join(output, "predictions.txt"), readTextBounded(join(source("/in"), "model"), 1024) + ":predictions");
       else if (stage === "evaluate") {
         const prediction = readTextBounded(join(source("/candidate"), "predict", "predictions.txt"), 1024);
