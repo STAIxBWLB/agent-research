@@ -2,6 +2,8 @@
 export interface CommandSpec { name: string; usage: string; mutates: boolean | "network"; options: Record<string, "flag" | "value"> }
 const json = { "--json": "flag" } as const;
 export const COMMANDS: readonly CommandSpec[] = [
+  { name: "retention inspect", usage: "retention inspect <dir> [--offset N] [--limit N] [--json]", mutates: "network", options: { "--offset": "value", "--limit": "value", ...json } },
+  { name: "retention prune", usage: "retention prune <dir> --file PATH|- [--confirm FINGERPRINT] [--json]", mutates: "network", options: { "--file": "value", "--confirm": "value", ...json } },
   { name: "skill check", usage: "skill check <dir> <name> [--json]", mutates: "network", options: json },
   { name: "harness close", usage: "harness close <dir> <round> --file PATH|- [--confirm FINGERPRINT] [--json]", mutates: true, options: { "--file": "value", "--confirm": "value", ...json } },
   { name: "harness contrast", usage: "harness contrast <dir> <round> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
@@ -56,7 +58,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "final seeds", usage: "final seeds <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "selection", usage: "selection <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "protocol", usage: "protocol <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
-  { name: "executor set", usage: "executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--gpu-devices IDS --gpu-min-free-memory-mb MB --gpu-max-load-ratio RATIO] [--json]", mutates: true, options: { "--kind": "value", "--host": "value", "--workdir": "value", "--gpu-devices": "value", "--gpu-min-free-memory-mb": "value", "--gpu-max-load-ratio": "value", ...json } },
+  { name: "executor set", usage: "executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--retention-cap-bytes BYTES] [--gpu-devices IDS --gpu-min-free-memory-mb MB --gpu-max-load-ratio RATIO] [--json]", mutates: true, options: { "--kind": "value", "--host": "value", "--workdir": "value", "--retention-cap-bytes": "value", "--gpu-devices": "value", "--gpu-min-free-memory-mb": "value", "--gpu-max-load-ratio": "value", ...json } },
   { name: "executor inputs hash", usage: "executor inputs hash <dir> <path> [--json]", mutates: "network", options: json },
   { name: "executor check", usage: "executor check <dir> [--json]", mutates: "network", options: json },
   { name: "gate list", usage: "gate list <dir> [--json]", mutates: false, options: json },
@@ -67,7 +69,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "attempt show", usage: "attempt show <dir> <id> [--json]", mutates: false, options: json },
   { name: "attempt cancel", usage: "attempt cancel <dir> <id> [--reason TEXT] [--json]", mutates: "network", options: { "--reason": "value", ...json } },
   { name: "attempt reconcile", usage: "attempt reconcile <dir> [--json]", mutates: "network", options: json },
-  { name: "attempt logs", usage: "attempt logs <dir> <id> [--stage candidate|evaluator] [--stream stdout|stderr] [--tail BYTES] [--json]", mutates: false, options: { "--stage": "value", "--stream": "value", "--tail": "value", ...json } },
+  { name: "attempt logs", usage: "attempt logs <dir> <id> [--stage candidate|evaluator] [--candidate-stage NAME] [--stream stdout|stderr] [--tail BYTES] [--json]", mutates: false, options: { "--stage": "value", "--candidate-stage": "value", "--stream": "value", "--tail": "value", ...json } },
   { name: "lit search", usage: "lit search <dir> <query> [--source openalex|s2|arxiv|all] [--limit 1..50] [--year-from YYYY] [--json]", mutates: "network", options: { "--source": "value", "--limit": "value", "--year-from": "value", ...json } },
   { name: "lit list", usage: "lit list <dir> [--status new|included|excluded] [--limit 1..500] [--json]", mutates: false, options: { "--status": "value", "--limit": "value", ...json } },
   { name: "lit screen", usage: "lit screen <dir> <id>... --include|--exclude [--reason TEXT] [--json]", mutates: true, options: { "--include": "flag", "--exclude": "flag", "--reason": "value", ...json } },

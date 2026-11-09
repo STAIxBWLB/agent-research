@@ -206,6 +206,17 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       if (file === undefined) throw new Error("selection: input missing; pass --file PATH or --file - for a JSON rule");
       result = await ops.selection(positional[0]!, await readInput(file, io), ctx); break;
     }
+    case "retention inspect": {
+      count(spec, positional, 1); const offset = str("--offset"), limit = integer(flags["--limit"], "--limit");
+      if (offset !== undefined && !/^[0-9]{1,8}$/.test(offset)) throw new Error("retention inspect: offset must be in 0..16000000");
+      result = await ops.retentionInspect(positional[0]!, ctx, { ...(offset === undefined ? {} : { offset: Number(offset) }), ...(limit === undefined ? {} : { limit }) }); break;
+    }
+    case "retention prune": {
+      count(spec, positional, 1); const file = str("--file"), fingerprint = str("--confirm");
+      if (file === undefined) throw new Error("retention prune: --file PATH|- is required for explicit retained references");
+      const refs = await readInput(file, io);
+      result = await ops.retentionPrune(positional[0]!, { refs: refs as Parameters<typeof ops.retentionPrune>[1]["refs"], ...(fingerprint === undefined ? {} : { fingerprint }) }, ctx); break;
+    }
     case "protocol": {
       count(spec, positional, 1);
       const file = str("--file");
@@ -245,7 +256,9 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       if (gpuRequested && gpuValues.some(value => value === undefined)) throw new Error("executor GPU: incomplete settings; pass --gpu-devices, --gpu-min-free-memory-mb and --gpu-max-load-ratio together");
       const gpu = gpuRequested ? { devices: gpuValues[0]!.split(",").map(value => value.trim()), minFreeMemoryMb: Number(gpuValues[1]), maxLoadRatio: Number(gpuValues[2]) } : undefined;
       if (gpu && (!/^[0-9]{1,10}$/.test(gpuValues[1]!) || !/^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$/.test(gpuValues[2]!))) throw new Error("executor GPU: invalid thresholds; use decimal memory MB and a positive decimal load ratio");
-      result = await ops.executorSet(positional[0]!, { v: 1, kind, workdir, ...(str("--host") !== undefined ? { host: str("--host") } : {}), ...(gpu ? { gpu } : {}) }, ctx); break;
+      const cap = str("--retention-cap-bytes");
+      if (cap !== undefined && !/^[0-9]{1,13}$/.test(cap)) throw new Error("--retention-cap-bytes: expected an integer byte count in 1..1099511627776");
+      result = await ops.executorSet(positional[0]!, { v: 1, kind, workdir, ...(cap !== undefined ? { retentionCapBytes: Number(cap) } : {}), ...(str("--host") !== undefined ? { host: str("--host") } : {}), ...(gpu ? { gpu } : {}) }, ctx); break;
     }
     case "executor inputs hash": count(spec, positional, 2); result = await ops.executorInputsHash(positional[0]!, positional[1]!, ctx); break;
     case "executor check": count(spec, positional, 1); result = await ops.executorCheck(positional[0]!, ctx); break;
@@ -267,8 +280,8 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "attempt reconcile": count(spec, positional, 1); result = await ops.attemptReconcile(positional[0]!, ctx); break;
     case "attempt logs": {
       count(spec, positional, 2); const tailBytes = integer(flags["--tail"], "--tail");
-      const logs = await ops.attemptLogs(positional[0]!, positional[1]!, { ...(str("--stage") !== undefined ? { stage: str("--stage") } : {}), ...(str("--stream") !== undefined ? { stream: str("--stream") } : {}), ...(tailBytes !== undefined ? { tailBytes } : {}) }, ctx);
-      if (!flags["--json"]) return { text: logs.logs.map(log => `[${log.stage} ${log.stream}${log.truncated ? ", truncated copy" : ""}]\n${log.text}`).join("\n"), code: 0 };
+      const logs = await ops.attemptLogs(positional[0]!, positional[1]!, { ...(str("--stage") !== undefined ? { stage: str("--stage") } : {}), ...(str("--candidate-stage") !== undefined ? { candidateStage: str("--candidate-stage") } : {}), ...(str("--stream") !== undefined ? { stream: str("--stream") } : {}), ...(tailBytes !== undefined ? { tailBytes } : {}) }, ctx);
+      if (!flags["--json"]) return { text: logs.logs.map(log => `[${log.candidateStage === undefined ? log.stage : `candidate:${log.candidateStage}`} ${log.stream}${log.truncated ? ", truncated copy" : ""}]\n${log.text}`).join("\n"), code: 0 };
       result = logs; break;
     }
     case "gate list": count(spec, positional, 1); result = ops.gateList(positional[0]!); break;

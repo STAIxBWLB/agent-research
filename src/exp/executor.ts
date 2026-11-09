@@ -5,7 +5,7 @@ import { commit, openStudy, plain, readJsonFile, requireExperiment, type Actor }
 import { readProtocol, canonicalExecutorPath, validateProtocol, type Protocol } from "./protocol.ts";
 
 export interface ExecutorGpu { devices: (number | string)[]; minFreeMemoryMb: number; maxLoadRatio: number }
-export interface Executor { v: 1; kind: "local" | "ssh"; host?: string; workdir: string; gpu?: ExecutorGpu }
+export interface Executor { v: 1; kind: "local" | "ssh"; host?: string; workdir: string; retentionCapBytes?: number; gpu?: ExecutorGpu }
 export interface ProcessRequest {
   command: string; args: string[]; stdin?: Uint8Array | AsyncIterable<Uint8Array>;
   stdoutSink?: (chunk: Uint8Array) => void | Promise<void>; signal?: AbortSignal;
@@ -121,13 +121,14 @@ export function validateGpuDevices(raw: unknown, count: number): string[] {
 }
 export function validateExecutor(raw: unknown): Executor {
   if (!plain(raw)) throw new Error("executor: object required; pass kind and workdir to ares executor set");
-  const extra = Object.keys(raw).find(key => !["v", "kind", "host", "workdir", "gpu"].includes(key));
+  const extra = Object.keys(raw).find(key => !["v", "kind", "host", "workdir", "gpu", "retentionCapBytes"].includes(key));
   if (extra !== undefined) throw new Error(`executor: unknown field ${extra}; use only v, kind, host, workdir and optional gpu`);
   if (raw.v !== 1 || (raw.kind !== "local" && raw.kind !== "ssh")) throw new Error("executor: invalid version or kind; set v to 1 and kind to local or ssh");
   if (raw.kind === "ssh" && (typeof raw.host !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(raw.host))) throw new Error("executor.host: invalid SSH alias; configure an SSH alias and pass its name only (letters, digits, dot, underscore or hyphen)");
   if (raw.kind === "local" && raw.host !== undefined) throw new Error("executor.host: local executor has no SSH host; remove host or set kind to ssh");
   if (raw.workdir === undefined || raw.workdir === null) throw new Error("executor.workdir: required with no default; run ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH using a private directory on the executor host");
-  return { v: 1, kind: raw.kind, ...(raw.kind === "ssh" ? { host: raw.host as string } : {}), workdir: directory(raw.workdir, "executor.workdir"), ...(raw.gpu === undefined ? {} : { gpu: validateExecutorGpu(raw.gpu) }) };
+  if (raw.retentionCapBytes !== undefined && (typeof raw.retentionCapBytes !== "number" || !Number.isSafeInteger(raw.retentionCapBytes) || raw.retentionCapBytes < 1 || raw.retentionCapBytes > 1024 ** 4)) throw new Error("executor.retentionCapBytes: expected 1..1099511627776 bytes");
+  return { v: 1, ...(raw.retentionCapBytes !== undefined ? { retentionCapBytes: raw.retentionCapBytes as number } : {}), kind: raw.kind, ...(raw.kind === "ssh" ? { host: raw.host as string } : {}), workdir: directory(raw.workdir, "executor.workdir"), ...(raw.gpu === undefined ? {} : { gpu: validateExecutorGpu(raw.gpu) }) };
 }
 export function readExecutor(dir: string): Executor | undefined {
   const file = join(dir, "executor.json");
@@ -323,6 +324,11 @@ export async function checkExecutor(dir: string, runner: ProcessRunner = spawnRu
   const executor = readExecutor(dir), protocol = readProtocol(dir);
   if (!executor) throw new Error("executor: not configured; run ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH");
   if (!protocol) throw new Error("protocol: missing; run ares protocol <dir> --file PATH before executor check");
+  if (protocol.v === 2) {
+    const { executionView } = await import("./pipeline.ts");
+    for (let index = 1; index < protocol.candidate.stages.length; index++) await checkExecutorInputs(executor, executionView(protocol, index), runner);
+    return checkExecutorInputs(executor, executionView(protocol), runner);
+  }
   return checkExecutorInputs(executor, protocol, runner);
 }
 /** Check a frozen attempt's configuration rather than mutable study files. */
@@ -351,7 +357,7 @@ export function executionPathsOverlap(left: string, right: string): boolean {
 }
 export type Stage = "candidate" | "evaluator";
 export interface ContainerPaths { snapshot: string; output: string; evaluator: string; result: string }
-export interface ContainerOptions { protocol: Protocol; stage: Stage; studyId: string; attemptId: string; user: string; paths: ContainerPaths; seed?: number; gpuDevices?: string[] }
+export interface ContainerOptions { protocol: Protocol; stage: Stage; studyId: string; attemptId: string; user: string; paths: ContainerPaths; seed?: number; gpuDevices?: string[]; pipeline?: { name: string; inputRoot: string; seed: boolean } }
 export function containerName(attemptId: string, stage: Stage): string {
   if (!/^[a-f0-9]{16}$/.test(attemptId) || !["candidate", "evaluator"].includes(stage)) throw new Error("container identity: invalid attempt or stage; use a 16-hex attempt id and candidate or evaluator stage");
   return `ares-${attemptId}-${stage}`;
@@ -369,7 +375,8 @@ export function validateContainerInputSources(protocol: Protocol, pathsArg: Cont
 }
 /** Mounts are fixed by stage, never supplied as free-form Docker options. */
 export function buildContainerArgs(options: ContainerOptions): string[] {
-  const p = validateProtocol(options.protocol), name = containerName(options.attemptId, options.stage);
+  const p = validateProtocol(options.protocol), name = containerName(options.attemptId, options.stage) + (options.pipeline ? `-${options.pipeline.name}` : "");
+  if (options.pipeline && (options.stage !== "candidate" || !/^[a-z][a-z0-9_-]{0,31}$/.test(options.pipeline.name))) throw new Error("pipeline container: invalid stage name");
   const seed = options.seed === undefined ? p.seeds[0]! : options.seed;
   if (!Number.isSafeInteger(seed) || !p.seeds.includes(seed)) throw new Error("container seed: undeclared or non-integer; choose a seed from protocol.seeds for ares attempt run --seed N");
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(options.studyId)) throw new Error("study id: invalid label; use the id from study.json");
@@ -385,7 +392,8 @@ export function buildContainerArgs(options: ContainerOptions): string[] {
   const inputs = Object.values(p.inputs ?? {});
   const argv = ["run", "--detach", "--pull", "missing", "--name", name, "--label", `ares.study=${options.studyId}`, "--label", `ares.attempt=${options.attemptId}`, "--label", `ares.stage=${options.stage}`,
     "--network", "none", "--read-only", "--tmpfs", "/tmp", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", options.user,
-    "--cpus", String(p.limits.cpus), "--memory", `${p.limits.memoryMb}m`, "--pids-limit", String(p.limits.pidsLimit), "--env", `ARES_SEED=${seed}`];
+    "--cpus", String(p.limits.cpus), "--memory", `${p.limits.memoryMb}m`, "--pids-limit", String(p.limits.pidsLimit)];
+  if (!options.pipeline || options.pipeline.seed) argv.push("--env", `ARES_SEED=${seed}`);
   if (options.gpuDevices !== undefined) {
     const devices = validateGpuDevices(options.gpuDevices, p.limits.gpus);
     if (devices.length) argv.push("--gpus", `"device=${devices.join(",")}"`);
@@ -398,6 +406,11 @@ export function buildContainerArgs(options: ContainerOptions): string[] {
   } else {
     mount(paths.evaluator, "/eval", true); mount(paths.output, "/candidate", true); mount(paths.result, "/result", false);
     argv.push("--workdir", "/eval");
+  }
+  if (options.pipeline) {
+    const source = directory(options.pipeline.inputRoot, "pipeline inputs");
+    if (sources.some(path => executionPathsOverlap(source, path))) throw new Error("pipeline inputs: source overlaps workspace mounts");
+    mount(source, "/in", true);
   }
   for (const input of inputs) {
     const target = input.mount[options.stage];

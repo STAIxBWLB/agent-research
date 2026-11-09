@@ -67,7 +67,7 @@ export async function transferSnapshot(repoArg: string, commitArg: string, execu
 }
 
 /** Capture each file once; the hash binds the same bytes copied into private immutable evaluator staging. */
-export async function transferTask(taskDir: string, executor: Executor, destination: string, runner: ProcessRunner = spawnRunner, expectedTreeHash?: string): Promise<{ sha256: string; bytes: number; treeHash: string }> {
+export async function transferTask(taskDir: string, executor: Executor, destination: string, runner: ProcessRunner = spawnRunner, expectedTreeHash?: string, includeCandidate = false): Promise<{ sha256: string; bytes: number; treeHash: string }> {
   repository(taskDir);
   if (expectedTreeHash !== undefined && !/^[a-f0-9]{64}$/.test(expectedTreeHash)) throw new Error("task tree hash: invalid; use the approved taskTreeHash before transferring evaluator files");
   const staging = mkdtempSync(join(tmpdir(), "ares-task-")), entries: [string, string][] = [];
@@ -92,7 +92,7 @@ export async function transferTask(taskDir: string, executor: Executor, destinat
         try { content = readBytesBounded(source, TASK_BYTES - total); }
         catch { throw new Error(`${label}: bounded read failed; restore a readable regular file within the 64 MiB task limit`); }
         total += content.length; entries.push([relative, sha256(content)]);
-        if (relative.startsWith("evaluator/")) {
+        if (includeCandidate || relative.startsWith("evaluator/")) {
           const target = join(staging, relative); mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
           writeFileSync(target, content, { mode: stat.mode & 0o777 });
         }
@@ -102,7 +102,7 @@ export async function transferTask(taskDir: string, executor: Executor, destinat
     const treeHash = sha256(JSON.stringify(entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)));
     if (expectedTreeHash !== undefined && treeHash !== expectedTreeHash) throw new Error("task/: content changed since approval; set the protocol, approve design again, and retry ares attempt run");
     // Bounded tar headers and long-path metadata supplement the 64 MiB task payload cap.
-    const transferred = await transferArchive("task", { command: "tar", args: ["-C", staging, "-cf", "-", "evaluator"] }, TASK_BYTES + 16 * 1024 * 1024, executor, destination, runner);
+    const transferred = await transferArchive("task", { command: "tar", args: ["-C", staging, "-cf", "-", includeCandidate ? "." : "evaluator"] }, TASK_BYTES + 16 * 1024 * 1024, executor, destination, runner);
     return { ...transferred, treeHash };
   } catch (error) {
     if (error instanceof Error && (error.message.startsWith("task/") || error.message.startsWith("executor "))) throw error;

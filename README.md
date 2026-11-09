@@ -186,7 +186,7 @@ Without `--detach`, `attempt run` reconciles until finished. Detached runs and M
 
 The same protocol hash, commit/tree, seed and run return the same attempt. Use `--retry <id>` for a linked new attempt; a different commit or seed is a new attempt, not a reproduction. Every status counts toward study budgets (attempt count, wall hours, GPU hours). `attempt list` returns summaries and whole-study totals for every status regardless of filters or page; default page size 50, maximum 200, with `--offset` for later pages. `attempt show` returns the full record.
 
-Raw outputs and logs stay in the private executor attempt directory. The study holds output paths, sha256 and byte counts (regular files only, at most 500 files and 256 MiB total), plus each log stream's path, hash, bytes and truncation flag. Each stdout/stderr copy is capped at 16 MiB; excess log volume does not fail an attempt. `attempt logs` checks the recorded copies and prints tails without changing the study; `--tail` accepts 0..65536 bytes (default 16384), and omitted stage/stream filters return all recorded streams. No log content is persisted in the study.
+Raw outputs and logs stay in the private executor attempt directory. The study holds output paths, sha256 and byte counts (regular files only, at most 500 files and 256 MiB total), plus each log stream's path, hash, bytes and truncation flag. Each stdout/stderr copy is capped at 16 MiB; excess log volume does not fail an attempt. `attempt logs` checks the recorded copies and prints tails without changing the study; `--tail` accepts 0..65536 bytes per stream (default 16384), and omitted stage/stream filters return all recorded streams, including completed v2 candidates. Use `--candidate-stage NAME` (MCP `candidateStage`) to select one named current or completed candidate. Combined returned tails are capped at 256 KiB: defaults shrink across many streams, while an oversized explicit tail requires a narrower selection or smaller value. No log content is persisted in the study.
 
 
 On a shared Linux NVIDIA executor, admission can be enabled explicitly:
@@ -200,6 +200,18 @@ The equivalent MCP `ares_executor_set` setting is `gpu: { devices: [0, 1], minFr
 For a new attempt with GPUs and admission settings, ares makes one bounded read-only transport call to `nvidia-smi`, `/proc/loadavg` and `nproc` (or `getconf _NPROCESSORS_ONLN`). It picks the first eligible devices in allow-list order, deduplicating index/UUID aliases for the same device. Not enough free devices, excessive load, or missing/malformed telemetry returns `{status:"deferred",reason:"devices"|"load"|"probe",message,exitCode:75}`. The CLI exits 75 and MCP returns the same object. No attempt, approval event or budget is recorded, and no container starts. Ares never queues, waits for admission, automatically retries or preempts other jobs; invoke the command again explicitly when conditions improve. A plan step records a known failed node with a distinguishable `deferred:devices|load|probe` reason and an `ares plan control <dir> retry <node>` next step. The predicted attempt id is cleared, no Attempt or budget is consumed, and admission is not probed again without explicit recovery. In step autonomy, this failed node pauses as usual; no special step accounting is introduced.
 
 Chosen UUIDs are frozen in `gpuDevices` and reused for both stages with explicit Docker device selection; inspection checks those UUIDs. Study bundles retain `gpuDeviceCount` only. Duplicate requests for an existing attempt do not probe again. Admission is a point-in-time check, not a resource reservation: host pressure can change after it. GPU settings affect new attempts only; without settings, GPU argv remains the existing `--gpus <n>` path. CPU-only attempts do not probe, even when the executor has GPU settings. Missing telemetry is never treated as an idle host. Tests use fake transport responses; no live GPU admission or training run is claimed.
+
+## Serial stage experiments and retained outputs
+
+Opt-in protocol v2 uses 1..16 fresh candidate stages in declared order, named task/upstream-output inputs, digest-pinned images and a separate fresh evaluator. See [the schema and lifecycle contract](docs/design/stage-protocol.md). V1 protocols keep the existing execution and identity behavior. V2 needs Python3 on the executor and a compatible minor release for distribution; no release is performed by setting a protocol.
+
+Each candidate receives frozen code at `/workspace`, named read-only inputs at `/in/<port>` and fresh writable `/out`. The evaluator receives all sealed stage trees at `/candidate/<stage>`, its private `/eval`, and fresh writable `/result`. Only evaluator metrics are parsed. Every stage executes fresh; retained bytes are evidence and inputs, not reuse or an independent sample.
+
+The attempt shares 500 output files, 256 MiB payload, 256 KiB total output metadata including manifest sidecars, a 1 MiB record, and aggregate wall/compute budgets. Seals are published atomically after observed successful termination and bounded verification. Consumption rechecks code, task and parent snapshots and copies selected inputs to private read-only snapshots. Same-user/executor tampering is an integrity limit; permissions alone are not attestation.
+
+Retention defaults to a 1 GiB study cap including in-flight reservations. Configure an explicit cap with `ares executor set <dir> --kind local --workdir PATH --retention-cap-bytes BYTES` (up to 1 TiB). Full capacity refuses admission and never evicts evidence. `ares retention inspect <dir> --json` returns a bounded page of identities, capacity, active reservations and archived-history counts; use `--offset N --limit N` to page through retained evidence and tombstones. Released history is preserved in immutable shards, keeping the active index bounded; administration bytes count against quota. Save selected `{attemptId,stage,sha256}` references as a JSON array, preview `ares retention prune <dir> --file refs.json --json`, then add `--confirm FINGERPRINT` for the exact reviewed selection. Active producers/consumers refuse disposal; tombstones preserve provenance. Current design approval is checked at confirmation.
+
+After an interrupted release, explicit `ares attempt reconcile <dir>` can free terminal or orphan reservation holds only after the executor confirms no owned live container. Unknown work is never rerun. Prune commits executor tombstones before disposal; a crash before the local audit commit leaves authoritative remote tombstones and no false local success or automatic approval. Inspect and preview again before retrying. This is not an atomic transaction spanning the executor and study filesystem.
 
 ## Investigation workflow
 
@@ -648,6 +660,8 @@ The implemented CLI surface below comes from `src/commands-table.ts`; `ares --he
 
 <!-- facts:commands -->
 ```text
+ares retention inspect <dir> [--offset N] [--limit N] [--json]
+ares retention prune <dir> --file PATH|- [--confirm FINGERPRINT] [--json]
 ares skill check <dir> <name> [--json]
 ares harness close <dir> <round> --file PATH|- [--confirm FINGERPRINT] [--json]
 ares harness contrast <dir> <round> --file PATH|- [--json]
@@ -702,7 +716,7 @@ ares final close <dir> [--json]
 ares final seeds <dir> --file PATH|- [--json]
 ares selection <dir> --file PATH|- [--json]
 ares protocol <dir> --file PATH|- [--json]
-ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--gpu-devices IDS --gpu-min-free-memory-mb MB --gpu-max-load-ratio RATIO] [--json]
+ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--retention-cap-bytes BYTES] [--gpu-devices IDS --gpu-min-free-memory-mb MB --gpu-max-load-ratio RATIO] [--json]
 ares executor inputs hash <dir> <path> [--json]
 ares executor check <dir> [--json]
 ares gate list <dir> [--json]
@@ -713,7 +727,7 @@ ares attempt list <dir> [--run NAME] [--status running|succeeded|failed|cancelle
 ares attempt show <dir> <id> [--json]
 ares attempt cancel <dir> <id> [--reason TEXT] [--json]
 ares attempt reconcile <dir> [--json]
-ares attempt logs <dir> <id> [--stage candidate|evaluator] [--stream stdout|stderr] [--tail BYTES] [--json]
+ares attempt logs <dir> <id> [--stage candidate|evaluator] [--candidate-stage NAME] [--stream stdout|stderr] [--tail BYTES] [--json]
 ares lit search <dir> <query> [--source openalex|s2|arxiv|all] [--limit 1..50] [--year-from YYYY] [--json]
 ares lit list <dir> [--status new|included|excluded] [--limit 1..500] [--json]
 ares lit screen <dir> <id>... --include|--exclude [--reason TEXT] [--json]
@@ -732,7 +746,7 @@ ares mcp
 <!-- /facts:commands -->
 
 <!-- facts:mcp-tools -->
-The MCP server publishes 75 tools: `ares_lesson_propose`, `ares_lesson_list`, `ares_lesson_check`, `ares_lesson_decide`, `ares_skill_check`, `ares_harness_close`, `ares_harness_contrast`, `ares_harness_compose`, `ares_harness_adopt`, `ares_harness_stream_set`, `ares_harness_stream_show`, `ares_experience_select`, `ares_experience_freeze`, `ares_experience_check`, `ares_harness_set`, `ares_harness_show`, `ares_harness_import`, `ares_lineage_show`, `ares_lineage_compare`, `ares_autonomy_show`, `ares_autonomy_set`, `ares_watch_set`, `ares_watch_run`, `ares_watch_show`, `ares_console_add`, `ares_console_remove`, `ares_console_list`, `ares_setup`, `ares_manifest`, `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide`, `ares_skill_list`, `ares_plan_set`, `ares_plan_control`, `ares_plan_show`, `ares_status`, `ares_study_export`, `ares_scope_set`, `ares_gate`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show`, `ares_investigate_close`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_posthoc_show`, `ares_final_close`, `ares_final_seeds`, `ares_selection_set`, `ares_protocol_set`, `ares_executor_set`, `ares_executor_inputs_hash`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile`, `ares_attempt_logs`, `ares_lit_search`, `ares_lit_list`, `ares_lit_screen`, `ares_lit_card`, `ares_lit_verify`, `ares_lit_bib`, `ares_review_add`, `ares_review_resolve`, `ares_review_show`, `ares_paper_build`, `ares_paper_check`, `ares_cite_check`, `ares_playbook`.
+The MCP server publishes 77 tools: `ares_retention_inspect`, `ares_retention_prune`, `ares_lesson_propose`, `ares_lesson_list`, `ares_lesson_check`, `ares_lesson_decide`, `ares_skill_check`, `ares_harness_close`, `ares_harness_contrast`, `ares_harness_compose`, `ares_harness_adopt`, `ares_harness_stream_set`, `ares_harness_stream_show`, `ares_experience_select`, `ares_experience_freeze`, `ares_experience_check`, `ares_harness_set`, `ares_harness_show`, `ares_harness_import`, `ares_lineage_show`, `ares_lineage_compare`, `ares_autonomy_show`, `ares_autonomy_set`, `ares_watch_set`, `ares_watch_run`, `ares_watch_show`, `ares_console_add`, `ares_console_remove`, `ares_console_list`, `ares_setup`, `ares_manifest`, `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide`, `ares_skill_list`, `ares_plan_set`, `ares_plan_control`, `ares_plan_show`, `ares_status`, `ares_study_export`, `ares_scope_set`, `ares_gate`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show`, `ares_investigate_close`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_posthoc_show`, `ares_final_close`, `ares_final_seeds`, `ares_selection_set`, `ares_protocol_set`, `ares_executor_set`, `ares_executor_inputs_hash`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile`, `ares_attempt_logs`, `ares_lit_search`, `ares_lit_list`, `ares_lit_screen`, `ares_lit_card`, `ares_lit_verify`, `ares_lit_bib`, `ares_review_add`, `ares_review_resolve`, `ares_review_show`, `ares_paper_build`, `ares_paper_check`, `ares_cite_check`, `ares_playbook`.
 <!-- /facts:mcp-tools -->
 
 Reviewed harness lesson tools are `ares_lesson_propose`, `ares_lesson_list`, `ares_lesson_check` and `ares_lesson_decide`; their mutations and explicit source checks share the CLI operations. Listing remains local.

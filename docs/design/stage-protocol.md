@@ -1,6 +1,6 @@
-# Stage protocol: T1 definition boundary
+# Serial stage execution and retained artifacts
 
-Issue #61 T1 adds a pure protocol v2 validator and identity helpers in `src/exp/stages.ts`. This PR deliberately stops after T1, as allowed by task #84. No stage runner, retained artifact store, retention command, study mutation path or v2 manifest advertisement is enabled. CLI/MCP protocol writes and the existing executor continue accepting v1 only. A v2 definition is refused before any protocol/attempt record or container effect. `PlanNode.needs` remains scheduling-only.
+Protocol v2 opts into fresh serial candidate stages and bounded executor-local artifact retention. The CLI and MCP use the same protocol, attempt, inspect and prune implementations. Existing protocol/attempt v1 readers and execution paths keep their identity and raw-byte seal behavior. The source requires a compatible minor release for distribution; no version bump, tag or publication is included.
 
 ## Definition
 
@@ -61,26 +61,51 @@ This validator is structural preflight only. Task paths and code bytes must be c
 
 `stageProtocolHash` validates and canonically hashes the entire v2 definition except `budget`. It binds the version, explicit stage order, image, argv, env, seed policy, code source, port names/paths, every ordering/data edge, evaluator, metrics, seeds, limits and network policy. Object key order is irrelevant; array order and argv bytes remain significant. This hash can feed the existing attempt identity formula together with frozen commit/tree, seed, run and retry identity once v2 execution is implemented.
 
-`stageDesignBinding` hashes the validated full definition, including budget, together with a caller-supplied bounded task-tree hash. It is only the protocol/task component for future study integration. It does not read a study, record approval, replace `readDesign`, or bind selection/final-seed files. T2 integration must compose those existing seals too. No v1 hash or raw-byte design-seal formula changes.
+`stageDesignBinding` hashes the validated full definition, including budget, together with a caller-supplied bounded task-tree hash. It is only the protocol/task component for study integration. It does not read a study, record approval, replace `readDesign`, or bind selection/final-seed files. The integrated study design seal composes the v2 definition with the bounded task tree and existing selection/final-seed seals. No v1 hash or raw-byte design-seal formula changes.
+
+## Execution and integrity
+
+Code snapshots hash symlink targets as link metadata without following them; artifact/task snapshots still refuse links. Valid unusual Git filenames remain code inputs, rather than being misreported as transfer failures.
+
+A v2 attempt record freezes the complete v2 definition, code commit/tree, task-tree hash, extracted code snapshot digest, seed and design seal. Its current candidate/evaluator projection is validated against that frozen definition on every read. Completed candidate receipts retain distinct container ids, observed termination and manifest digests; they are not independent samples. One study still admits at most one running attempt.
+
+Candidates run sequentially in distinct fresh containers with non-root uid/gid, network none, read-only root, no capabilities, no-new-privileges and bounded resources. Code mounts at `/workspace:ro`, named copied inputs at `/in/<port>:ro` and fresh writable output at `/out`. A stage with `seed: false` receives no injected `ARES_SEED`. The separate fresh evaluator mounts its private `/eval:ro`, all sealed stage trees at `/candidate/<stage>:ro` and fresh writable `/result`. Only the evaluator result supplies metrics. The complete frozen task tree is reverified whenever the evaluator will mount `/eval`, even when no named input is a task descriptor.
+
+Before consumption, bounded executor operations rehash the extracted code tree, frozen task tree and retained parent manifests/payloads. Parent input identities reference the producing manifest digest, while separate internal payload hashes verify the selected port bytes. They copy only declared inputs into a fresh per-stage snapshot, hash the copy again and mount it read-only. Idempotent materialization rechecks original sources and actual copied bytes, including rejection of undeclared extra inputs; a changed marker alone cannot bless tampered bytes. Same-user/executor interference between verification and use remains an integrity limit. Local permissions are not remote attestation.
+
+Seal requires a verified stopped successful container. Declared output bytes are copied to deterministic quarantine under the study store, verified against the stopped producer and observed output inventory, then published by same-filesystem rename. Metadata is bounded and digest-referenced. An unindexed publication is unavailable until an exact retry revalidates its manifest and payload against the producer. Partial snapshots do not become usable inputs. Deterministic quarantine limits interrupted retries to one pending copy per attempt/stage.
+
+Read-only logs resolve both current candidate receipts and `pipeline.completed` history, validating the exact `candidate-<name>` path and original hash/size. CLI `--candidate-stage NAME` and MCP `candidateStage` share selection; returned rows retain the candidate name. V1 path/selection behavior stays unchanged. Combined tails are bounded at 256 KiB, with smaller defaults for many streams and explicit oversized selections refused before executor reads.
+
+## Aggregate budgets and retention lifecycle
+
+All candidate stages and evaluator share at most 500 output files, 256 MiB payload, 256 KiB metadata (ordinary output inventory plus retained manifest sidecars), and a 1 MiB attempt record. Stage transfers and verification use the remaining attempt-wide wall/global wall/compute budget as their process timeout. Admission and stage transitions do not multiply the budget by stage count; stopped evaluators cannot succeed after verification exhausts it. Existing first-final semantics and explicit retry identities remain authoritative. Permanent observed stopped-stage seal/input failures end as failed with their evidence/artifact-limit/wall-clock cause and release their reservation. A no-start transport or flock failure keeps an explicit retryable launchPending receipt. A transient seal busy/transport error preserves the stopped successful container receipt and retries sealing without rerunning its computation; exhausted wall budget and integrity failures remain terminal. Fresh claim/error fences bind both the exact stage index and monotonic preflight revision; stale workers cannot overwrite a successor or terminate an uncertain launched container. A kill acknowledgement without observed termination keeps the active slot and reservation held.
+
+Retention defaults to a 1 GiB study cap, configurable through executor `retentionCapBytes` or CLI `--retention-cap-bytes` (1..1 TiB). Admission reserves a full bounded output/metadata allowance, including in-flight work, plus a bounded 256 KiB administration allowance before recording/launching a new v2 attempt under the same owned study lock. Released reservations and their stage-index entries move into immutable bounded archive shards; tombstone/disposal markers preserve provenance. Archive publication uses deterministic quarantine temporaries rather than files in the scanned archive prefix; interrupted writes can be retried, and validated legacy temporary names are never exposed as shards. The active 1 MiB index does not accumulate released history, and quota includes archived administration bytes. Full capacity refuses admission without eviction. Explicit attempt reconciliation releases dangling/terminal holds only after the executor confirms no owned live container; it never reruns unknown work. Active consumer references survive interrupted operations until confirmed safe release.
+
+`retention inspect --offset N --limit N` (default 200, maximum 500 rows) returns paged identities, reservations, usage and tombstones. `retention prune --file refs.json` previews explicit `{attemptId,stage,sha256}` references; `--confirm FINGERPRINT` checks that exact state and current design policy. A store-wide OS lock serializes reservation, materialization and prune. Active producer/consumer pins refuse disposal. Tombstones are durable before payload deletion, and manifests remain as provenance; interrupted disposal retains its old quota charge until confirmed cleanup finishes.
+
+Executor mutation and the study filesystem are separate transaction domains. Confirmed prune preflights the local commit, performs fingerprinted executor disposal, then writes approval and its own audit event in one study commit on validated success only. A crash in between leaves authoritative executor tombstones and no false local success or automatic approval. Inspect and preview again before retrying; no cross-system atomic transaction is claimed.
 
 ## Migration-free compatibility matrix
 
-| Record or operation | Current v1 CLI/MCP/executor | T1 pure v2 helper | Complete compatible v2 release |
-| --- | --- | --- | --- |
-| Existing v1 study/protocol/attempt | Existing reads and fresh execution unchanged | Not a v1 parser | Must retain v1 reads, identity and execution |
-| Protocol v2 declaration | Refuse before mutation; keep original file | Validate/hash only, no writes | Opt-in read/write only after T2/T3 execution safety |
-| Protocol future version | Refuse before mutation | Refuse | Refuse unsupported versions before mutation |
-| Existing selection/final rules | Unchanged, including first-final rules | No mutation or approval | Preserve existing seal composition and first-final behavior |
-| Retained output or prune | No new command or availability claim | No artifact support | Requires bounded verification, reservation, tombstone and consumption lifecycle |
+| Record or operation | Older v1 reader | Current compatible reader |
+| --- | --- | --- |
+| Existing v1 study/protocol/attempt | Existing support | Read and fresh execution unchanged |
+| Opt-in protocol/attempt v2 | Refuse unsupported version without mutation | Validated fresh serial execution |
+| Future protocol/attempt version | Refuse | Refuse before mutation |
+| Selection/final rules | Existing support | Existing seals and first-final semantics preserved |
+| Retention inspect/prune | Not advertised | Shared CLI/MCP; bounded metadata and explicit prune |
 
-No automatic migration or downgrade is provided. `FORMAT_VERSIONS.experimentProtocol` stays 1 because v2 is not an implemented family-readable record yet. `scripts/n1-check.ts` remains authoritative for the published N-1 CLI, MCP and study/ledger checks, including legacy no-input protocol hash/design-seal identity. Offline fixture tests are distinct from that network/installed-package check.
+Study and ledger versions do not change. Protocol and attempt manifest format versions become 2. The original v1 no-input protocol hash and raw-byte design-binding formulas do not change. `scripts/n1-check.ts` continues selecting the previous minor line's latest published patch and checking installed CLI, MCP and study/ledger compatibility separately from offline fixtures. Unreleased `CHANGELOG.md` records separate N-1 statements; release authorization, version bump, tag and publication remain outside this implementation.
 
-Activating protocol v2 requires a separately authorized compatible release. Because the older reader cannot interpret the new protocol format, activation belongs on a new minor line, with explicit CLI, MCP and study/ledger N-1 statements in `CHANGELOG.md` and the prior-minor published patch selected by `scripts/n1-check.ts`. Older binaries must refuse the opt-in v2 definition without mutation; existing v1 studies remain usable without migration. This PR neither bumps a version nor tags or publishes anything.
+## Evidence coverage
 
-## Pending execution and evidence
+- AC1: synthetic private-filesystem/Git/tar/Python executor fixture runs three fresh candidate stages in order and a distinct fake evaluator, checks retained parent hashes and read-only mounts. Docker is fake; this is not native container-isolation proof.
+- AC2: schema fixtures reject cycles/forward/undeclared refs, unsafe paths, unsupported versions, images/env and actual aggregate definition overflow. Runtime fixtures cover cumulative zero-byte file/metadata caps and in-flight retention admission.
+- AC3: synthetic interrupted-state fixtures cover unindexed publication, partial consumption and tombstone-before-disposal; payload, marker, task and code tampering are refused. Most are crash-state simulations. A focused archive-compaction test additionally SIGKILLs the private Python writer before rename, then checks retry and operation recovery; no power-loss or container-isolation proof is claimed.
+- AC4: fake-executor fixtures cover unknown/cancelled attempts without descendant reruns, distinct stage containers and read-only copied inputs. Actual kernel mount enforcement remains pending container proof.
+- AC5: real private-filesystem store tests cover in-flight reservations, active cross-attempt consumer pins, stale fingerprints, tombstones and metadata retained after disposal. Explicit reconciliation recovers failed terminal release without a rerun.
+- AC6: the required full check includes v1, budget, first-final and compatibility regressions; installed-package N-1 and hosted CI are reported separately. Protocol v2 requires its compatible minor release.
 
-T2/T3 must implement fresh sequential stages with upstream read-only snapshots, a separate fresh evaluator, atomic bounded retention after observed termination, integrity verification before every consumption, aggregate retention reservation/cap and fingerprinted prune with active-consumer refusal and tombstones. Same-user/executor tampering remains an integrity limit, not solved by filesystem permissions.
-
-Attempt-wide limits must cover all candidate stages and evaluator work, including retries and verification: at most 500 files, 256 MiB output payload, existing total output metadata and 1 MiB attempt record bounds. Wall/compute time must also remain cumulative. Manifest sidecars cannot bypass the metadata ceiling. The default 1 GiB study retention cap must include in-flight reservations and refuse admission without eviction.
-
-The synthetic tests in this PR cover three-stage declaration/data edges, malformed graph/path/execution refusals, bounded definitions, identity changes, atomic v2/future refusal and existing task-tree link refusal. They do not execute a fake three-stage runner, retain artifacts or test crash/prune races. T4 fake-runner proof remains pending with T2/T3. Container proof still requires its separate go-ahead. AC1-AC6 are not claimed complete by this T1 foundation.
+The separately authorized container proof remains pending. No reuse, model-output cache, process snapshot, native session manipulation or measured speedup is implemented.
