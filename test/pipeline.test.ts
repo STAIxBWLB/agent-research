@@ -290,6 +290,14 @@ test("v2 missing declared output and stopped-stage wall expiry terminate with th
     const failed = showAttempt(f.dir, attempt.id);
     expect(failed.status).toBe("failed");
     expect(failed.reason).toBe(cause === "missing-output" ? "evidence-read" : "wall-clock");
+    if (cause === "missing-output") {
+      expect(failed.error).toContain("declared output port");
+      expect(failed.error).toContain("the stage command must write that output");
+      expect(failed.error).not.toContain(attempt.paths.output);
+    } else {
+      // Best-effort log evidence survives a v2 wall-clock failure.
+      expect(failed.stages[failed.stage]?.evidence?.logs.stdout.sha256).toMatch(/^[0-9a-f]{64}$/);
+    }
     expect(failed.metrics).toEqual([]); expect(f.fake.executed).toEqual(["prepare"]);
     await assertNoReservation(f, failed);
   }

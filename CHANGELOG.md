@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- #61 follow-up: a stage that exits 0 without a declared output now fails with a seal refusal naming the missing output port and the next step, instead of a generic retained filesystem error. V2 wall-clock failures keep best-effort stage log evidence like v1; terminal status, reservation release and the unobserved-stop hold are unchanged. No format change.
 
 - Protocol v2 stage execution and retained artifacts (#61): opt-in serial fresh candidate stages consume verified read-only task/parent snapshots; a separate fresh evaluator produces metrics. Output payload/file/metadata and wall/compute budgets remain cumulative across the attempt. Executor-local retention uses bounded atomic publication, a default 1 GiB cap with in-flight reservations, and explicit fingerprinted prune with active-consumer refusal and provenance tombstones. Python3 is required for v2. `retention inspect` and `retention prune` share CLI/MCP implementations. Permanent stopped-stage verification failures retain their terminal cause and release capacity; transient seal errors preserve the stopped computation for retry; pre-start transient executor failures remain retryable. Released history is preserved in immutable shards with paged inspection, keeping the active index bounded. The prior T1 evaluator double-counting bug and stage/port refusal labels are corrected.
 
