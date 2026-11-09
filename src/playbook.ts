@@ -20,7 +20,7 @@ ares lessons <dir> --for "scope and verify the literature"
 1. Use the initialized study; choose its scope before collecting literature.
 2. Write scope.json (question, subquestions, include, exclude, yearFrom, yearTo, maxCandidates) and run ares scope <dir> --file scope.json.
    In gates mode a person or the agent the workspace allows approves it: ares gate approve <dir> scope.
-3. Search each subquestion: ares lit search <dir> "<query>" [--source all]. A source that is rate limited is reported, not fatal; retry later or set S2_API_KEY / OPENALEX_API_KEY.
+3. Search each subquestion: ares lit search <dir> "<query>" [--source all] [--intent lexical|semantic|background]. Mix lexical (exact terms, acronyms), semantic (concept descriptions) and background (adjacent foundations) queries; ares lit queries <dir> then shows per-query yield by intent and the queries whose candidates were never included. A source that is rate limited is reported, not fatal; retry later or set S2_API_KEY / OPENALEX_API_KEY.
 4. Screen against include/exclude: ares lit screen <dir> <id>... --include|--exclude --reason "...". Read titles and abstracts with ares lit list.
 5. For each included paper you read, record a card: summary, claims, methods, findings, limitations, relevance (ares lit card <dir> <id> --file card.json). Cards hold what the paper says, never what you hope it says.
 6. Verify identifiers: ares lit verify <dir>. "verified" means the DOI or arXiv id exists and its registry title and year match. It never means the paper supports a claim.

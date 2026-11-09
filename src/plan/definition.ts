@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { validatePhase, type Phase } from "../autonomy.ts";
 import { COMMANDS } from "../commands-table.ts";
+import { validateIntent } from "../lit/queries.ts";
 import { boundedText, commit, onlyKeys, plain, readJsonFile, sha256, type Actor } from "../study.ts";
 
 export const PLAN_BYTES = 65_536, PLAN_ID_BYTES = 128;
@@ -39,6 +40,7 @@ function stepArgs(raw: unknown, command: StepCommand, id: string): StepArgs {
       if (Buffer.byteLength(query) > 1000) throw new Error(`${field}: at most 1000 bytes`);
       args[key] = query; continue;
     }
+    if (command === "lit.search" && key === "intent") { args[key] = validateIntent(value, field); continue; }
     if (command === "cite.check" && key === "draft") {
       args[key] = boundedText(value, field, 4096); continue;
     }

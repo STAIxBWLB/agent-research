@@ -35,6 +35,7 @@ import type { Http } from "./http.ts";
 import { readScope, scopeHash, setScope } from "./scope.ts";
 import { boundedText, commit, decideGate, gateState, GATES, initStudy, openStudy, readBytesBounded, readLedger, readTextBounded, requireGate, isHarnessGate, sha256, withLock, readPlanOwner, type Actor, type Binder, type GateName, type Study, STUDY_BYTES } from "./study.ts";
 import { candidatesFile, includedHash, isVerified, loadCandidates, mergeCandidates, sameWork, verifySubject, type Candidate } from "./lit/candidates.ts";
+import { litQueries, nextSearchId, validateIntent } from "./lit/queries.ts";
 import { searchSource, SOURCES, type SourceName } from "./lit/sources.ts";
 import { verifyCandidates } from "./lit/verify.ts";
 import { assignCitekeys, renderBib } from "./lit/bibtex.ts";
@@ -254,11 +255,12 @@ export async function gateDecide(dirArg: string, gate: string, decision: "approv
   });
 }
 
-export async function search(dirArg: string, query: string, options: { source?: string; limit?: number; yearFrom?: number }, ctx: Ctx) {
+export async function search(dirArg: string, query: string, options: { source?: string; limit?: number; yearFrom?: number; intent?: string }, ctx: Ctx) {
   const { dir } = openStudy(dirArg); return withLock(dir, () => searchLocked(dir, query, options, ctx));
 }
-async function searchLocked(dirArg: string, query: string, options: { source?: string; limit?: number; yearFrom?: number }, ctx: Ctx) {
+async function searchLocked(dirArg: string, query: string, options: { source?: string; limit?: number; yearFrom?: number; intent?: string }, ctx: Ctx) {
   const { dir, study } = openStudy(dirArg), q = boundedText(query, "query", 500);
+  const intent = options.intent === undefined ? undefined : validateIntent(options.intent);
   const source = options.source ?? "all";
   if (source !== "all" && !SOURCES.includes(source as SourceName)) throw new Error("--source: openalex, s2, arxiv or all");
   const limit = options.limit ?? 20;
@@ -272,15 +274,17 @@ async function searchLocked(dirArg: string, query: string, options: { source?: s
   const names = source === "all" ? SOURCES : [source as SourceName];
   const results = [];
   for (const name of names) results.push(await searchSource(ctx.http, name, q, { limit, ...(yearFrom !== undefined ? { yearFrom } : {}), ...(sc.yearTo !== undefined ? { yearTo: sc.yearTo } : {}) }));
-  const list = loadCandidates(dir), counts = mergeCandidates(list, results.flatMap(r => r.records), sc.maxCandidates);
+  const list = loadCandidates(dir), counts = mergeCandidates(list, results.flatMap(r => r.records), sc.maxCandidates, undefined, nextSearchId(readLedger(dir)));
   const sources = results.map(r => ({ source: r.source, ok: r.ok, returned: r.records.length, ...(r.error ? { error: r.error } : {}) }));
   // A search where every source failed is recorded but is not a success, so it approves nothing.
   const answered = sources.some(r => r.ok);
-  commit(dir, [candidatesFile(dir, list)], [...(answered ? approval : []), { actor: ctx.actor, type: "lit.search", data: { query: q, sources, ...counts } }]);
-  return { query: q, sources, ...counts, candidates: list.length };
+  // Intent is added only when given, so a search without it keeps the earlier event shape.
+  commit(dir, [candidatesFile(dir, list)], [...(answered ? approval : []), { actor: ctx.actor, type: "lit.search", data: { query: q, ...(intent ? { intent } : {}), sources, ...counts } }]);
+  return { query: q, ...(intent ? { intent } : {}), sources, ...counts, candidates: list.length };
 
 }
 
+export const queries = (dir: string) => litQueries(dir);
 export function list(dirArg: string, options: { status?: string; limit?: number }) {
   const { dir } = openStudy(dirArg), limit = options.limit ?? 50;
   if (options.status !== undefined && !["new", "included", "excluded"].includes(options.status)) throw new Error("--status: new, included or excluded");
@@ -470,7 +474,7 @@ export async function planRun(dirArg: string, options: { parallel?: number }, ct
           return result.ok ? { status: "done", output: { added: result.added } } : { status: "failed", reason: "watch: every source failed; inspect ares watch show and retry the plan node" };
         }
         case "lit.search": {
-          const value = await search(dir, stepText(node, "query"), { ...(node.args.source !== undefined ? { source: stepText(node, "source") } : {}), ...(stepNumber(node, "limit") !== undefined ? { limit: stepNumber(node, "limit")! } : {}), ...(stepNumber(node, "year-from") !== undefined ? { yearFrom: stepNumber(node, "year-from")! } : {}) }, ctx);
+          const value = await search(dir, stepText(node, "query"), { ...(node.args.source !== undefined ? { source: stepText(node, "source") } : {}), ...(stepNumber(node, "limit") !== undefined ? { limit: stepNumber(node, "limit")! } : {}), ...(stepNumber(node, "year-from") !== undefined ? { yearFrom: stepNumber(node, "year-from")! } : {}), ...(node.args.intent !== undefined ? { intent: stepText(node, "intent") } : {}) }, ctx);
           ok = value.sources.some(s => s.ok); result = value; break;
         }
         case "lit.verify": result = await verify(dir, (node.args.ids as string[] | undefined) ?? [], ctx); break;

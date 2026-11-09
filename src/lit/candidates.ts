@@ -16,6 +16,8 @@ export interface Candidate extends Omit<RawCandidate, "source"> {
   citekey?: string; verify?: Verification;
   /** Other candidates that a record linked to this one but could not be absorbed (screened or keyed). */
   duplicates?: string[];
+  /** Id (search-<n>) of the lit.search event that created this candidate; absent for candidates created before #103. */
+  firstQuery?: string;
 }
 
 const ABSTRACT_MAX = 2000, TITLE_MAX = 1000, AUTHORS_MAX = 100, AUTHOR_MAX = 300, CANDIDATES_BYTES = 64 * 1024 * 1024;
@@ -93,7 +95,7 @@ function link(a: Candidate, b: Candidate): void {
   b.duplicates = [...new Set([...(b.duplicates ?? []), a.id])];
 }
 
-export function mergeCandidates(list: Candidate[], incoming: RawCandidate[], limit: number, now = new Date().toISOString()): { added: number; merged: number; dropped: number; linked: number } {
+export function mergeCandidates(list: Candidate[], incoming: RawCandidate[], limit: number, now = new Date().toISOString(), firstQuery?: string): { added: number; merged: number; dropped: number; linked: number } {
   let added = 0, merged = 0, dropped = 0, linked = 0;
   for (const raw of incoming) {
     const clean = cleanRaw(raw);
@@ -116,7 +118,8 @@ export function mergeCandidates(list: Candidate[], incoming: RawCandidate[], lim
     }
     if (list.length >= limit) { dropped++; continue; }
     const { source, ...rest } = clean;
-    list.push({ ...rest, id: candidateId(clean), sources: [source], addedAt: now, status: "new" });
+    // firstQuery is set only here, when this search creates the candidate; later merges never overwrite it.
+    list.push({ ...rest, id: candidateId(clean), sources: [source], addedAt: now, status: "new", ...(firstQuery ? { firstQuery } : {}) });
     added++;
   }
   return { added, merged, dropped, linked };

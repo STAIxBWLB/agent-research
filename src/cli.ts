@@ -292,11 +292,12 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "lit search": {
       count(spec, positional, 2);
       const limit = integer(flags["--limit"], "--limit"), yearFrom = integer(flags["--year-from"], "--year-from");
-      const out = await ops.search(positional[0]!, positional[1]!, { ...(str("--source") ? { source: str("--source")! } : {}), ...(limit !== undefined ? { limit } : {}), ...(yearFrom !== undefined ? { yearFrom } : {}) }, ctx);
+      const out = await ops.search(positional[0]!, positional[1]!, { ...(str("--source") ? { source: str("--source")! } : {}), ...(limit !== undefined ? { limit } : {}), ...(yearFrom !== undefined ? { yearFrom } : {}), ...(str("--intent") !== undefined ? { intent: str("--intent")! } : {}) }, ctx);
       if (!out.sources.some(s => s.ok)) code = 1;
       result = out;
       break;
     }
+    case "lit queries": count(spec, positional, 1); result = ops.queries(positional[0]!); break;
     case "lit list": {
       count(spec, positional, 1);
       const limit = integer(flags["--limit"], "--limit");

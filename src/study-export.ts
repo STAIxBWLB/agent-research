@@ -9,6 +9,8 @@ import { readClosedInvestigation } from "./exp/investigate.ts";
 import { readSelection } from "./exp/selection.ts";
 import { designBinding, protocolHash, readProtocol } from "./exp/protocol.ts";
 import { FORMAT_VERSIONS } from "./manifest.ts";
+import { loadCandidates } from "./lit/candidates.ts";
+import { intentSummary } from "./lit/queries.ts";
 import { PAPER_EVIDENCE_BYTES, paperBuildPaths } from "./paper/build.ts";
 import { assertWritable, openStudy, plain, readLedger, readTextBounded, sha256, withLock, writeAtomic, type LedgerEvent } from "./study.ts";
 
@@ -28,7 +30,7 @@ const METRIC_KEYS = new Set(["name", "unit", "metric"]);
 /** Closed data keys per ledger event type; unlisted types keep the envelope with empty data. Never host, containerId or hubProject. */
 const LEDGER_KEYS: Record<string, readonly string[]> = {
   "scope.set": ["sha256"], "autonomy.set": ["from", "to", "phase"], "gate.approve": ["gate", "binding"], "gate.reject": ["gate", "binding"],
-  "lit.search": ["sources", "added", "merged", "total"], "lit.screen": ["decision"], "lit.card": ["id", "sha256"], "lit.bib": ["entries", "sha256"], "lit.verify": ["verified", "failed"],
+  "lit.search": ["intent", "sources", "added", "merged", "total"], "lit.screen": ["decision"], "lit.card": ["id", "sha256"], "lit.bib": ["entries", "sha256"], "lit.verify": ["verified", "failed"],
   "archive.exported": ["fingerprint"], "skill.proposed": ["skillProposal", "sha256"], "skill.decided": ["skillProposal", "decision"], "watch.set": ["sha256"],
   "plan.set": ["revision", "state", "sha256"], "plan.gates": ["revision"], "plan.paused": ["revision"], "plan.control": ["revision"], "node.observed": ["revision", "status"], "node.intent": ["revision"],
   "executor.set": ["kind"], "protocol.set": ["sha256", "identitySha256", "protocolHash", "treeHash"], "selection.set": ["sha256", "metric"], "final.seeds.set": ["sha256"],
@@ -42,7 +44,7 @@ for (const t of ["attempt.run", "attempt.snapshot", "attempt.stage.changed", "at
 
 export interface BundleManifest {
   bundle: 1; formats: typeof FORMAT_VERSIONS; studyIdSha256: string; mode: string; protocolHash: string | null; sealBinding: string | null;
-  window: { from: string | null; to: string | null }; counts: { attempts: number; byStatus: Record<AttemptStatus, number>; byRun: Record<string, Record<AttemptStatus, number>>; ledgerEvents: number; reviews: number; reviewSections: { sections: { sectionSha256: string; rounds: number; pass: boolean }[]; repairs: Record<string, number> } };
+  window: { from: string | null; to: string | null }; counts: { attempts: number; byStatus: Record<AttemptStatus, number>; byRun: Record<string, Record<AttemptStatus, number>>; ledgerEvents: number; reviews: number; reviewSections: { sections: { sectionSha256: string; rounds: number; pass: boolean }[]; repairs: Record<string, number> }; litQueries: Record<string, { queries: number; added: number; merged: number; included: number; excluded: number; new: number }> };
   files: Record<string, string>;
 }
 export interface BundleListing { bundle: string; files: string[]; wouldWrite: true }
@@ -254,7 +256,7 @@ function readBundle(dirArg: string, maxFileBytes: number) {
     bundle: 1, formats: { ...FORMAT_VERSIONS }, studyIdSha256: sha256(study.id), mode: study.mode,
     protocolHash: protocol ? protocolHash(protocol) : null, sealBinding: study.mode === "experiment" ? designBinding(dir) ?? null : null,
     window: (() => { const ats = events.map(e => isoAt(e.at)).filter((v): v is string => v !== null); return { from: ats[0] ?? null, to: ats.at(-1) ?? null }; })(),
-    counts: { attempts: attemptLines.length, byStatus, byRun, ledgerEvents: events.length, reviews: reviewRows.length, reviewSections: reviewSections(reviewRows, events) },
+    counts: { attempts: attemptLines.length, byStatus, byRun, ledgerEvents: events.length, reviews: reviewRows.length, reviewSections: reviewSections(reviewRows, events), litQueries: intentSummary(events, loadCandidates(dir)) },
     files: Object.fromEntries(Object.entries(files).map(([name, text]) => [name, sha256(text)])),
   };
   files["manifest.json"] = JSON.stringify(manifest, null, 2) + "\n";
