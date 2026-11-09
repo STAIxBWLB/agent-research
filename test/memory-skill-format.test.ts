@@ -52,10 +52,14 @@ test("v2 replay is read-only and unavailable current evidence refuses acceptance
   expect(readLedger(dir)).toHaveLength(2);
 });
 test("v2 terminal decisions need matching versions and accepted evidence fingerprints", () => {
-  const proposed = event(proposal()), decide = {v: 1 as const, at: proposed.at, actor: ctx.actor, type: "skill.decided", data: {skillProposal: 2, name: "versioned-lesson", decision: "accept", reason: "Synthetic review", pr: "https://example.test/pr/1", evidenceFingerprint: evidenceFingerprint(proposed.data.sha256, validateSkillProposalV2(proposal()).inspections, null), inspections: proposal().inspections, localGeneration: null}};
+  const proposed = event(proposal()), decide = {v: 1 as const, at: proposed.at, actor: ctx.actor, type: "skill.decided", data: {skillProposal: 2, name: "versioned-lesson", decision: "accept", reason: "Synthetic review", pr: "https://example.test/pr/1", evidenceFingerprint: evidenceFingerprint(proposed.data.sha256, validateSkillProposalV2(proposal()).inspections, hash), inspections: proposal().inspections, localGeneration: hash}};
   expect(foldSkills([proposed, decide])[0]).toMatchObject({state: "accepted", decision: {evidenceFingerprint: decide.data.evidenceFingerprint}});
   expect(() => foldSkills([proposed, {...decide, data: {...decide.data, evidenceFingerprint: undefined}}])).toThrow("fingerprint");
   expect(() => foldSkills([proposed, {...decide, data: {...decide.data, skillProposal: 1}}])).toThrow("mismatched-version");
+  for (const localGeneration of [null, undefined, "a".repeat(63), "A".repeat(64), hash + "\n"]) {
+    const supplied = localGeneration as string | null;
+    expect(() => foldSkills([proposed, {...decide, data: {...decide.data, localGeneration, evidenceFingerprint: evidenceFingerprint(proposed.data.sha256, validateSkillProposalV2(proposal()).inspections, supplied)}}])).toThrow("localGeneration");
+  }
 });
 test("compatibility addresses map only one-to-one typed kinds and never cross study or infer paths", async () => {
   const dir = tempDir(), {study} = ops.init(dir, {question: "Synthetic reference scope"}, ctx), display = `ares:${study.id}/attempt:${"a".repeat(16)}`;
@@ -101,4 +105,16 @@ test("v2 Markdown retains the inclusive 16 KiB UTF-8 ceiling with source-owned r
   const summary = "한".repeat(Math.floor(remaining / 3)) + "x".repeat(remaining % 3);
   expect(Buffer.byteLength(skillMarkdownV2(validateSkillProposalV2({...raw, summary})))).toBe(SKILL_BYTES);
   expect(() => validateSkillProposalV2({...raw, summary: summary + "x"})).toThrow("exceed");
+});
+
+
+test("accepted amem-only replay requires null generation, while local counterevidence requires its snapshot digest", () => {
+  const ref = {v: 1 as const, tool: "amem" as const, id: "b".repeat(32)}, inspection = {ref, state: "available", digest: hash, integrity: "screened", outcome: {status: "not-applicable", success: false}, support: "reviewer-judgment", sourceVersion: {reference: 1, amem: "0.22.1"}, observedAt: "2030-01-01T00:00:00Z"};
+  for (const localCounter of [false, true]) {
+    const raw = validateSkillProposalV2({...proposal(), evidence: [ref], counterevidence: localCounter ? [source()] : [], inspections: localCounter ? [inspection, ...proposal().inspections] : [inspection]});
+    const content = skillMarkdownV2(raw), proposed = {v: 1 as const, at: "2030-01-01T00:00:00Z", actor: ctx.actor, type: "skill.proposed", data: {skillProposal: 2, proposal: raw, sha256: sha256(content)}};
+    const decide = (localGeneration: string | null) => ({v: 1 as const, at: proposed.at, actor: ctx.actor, type: "skill.decided", data: {skillProposal: 2, name: raw.name, decision: "accept", reason: "Synthetic reviewed limits", pr: "https://example.test/pr/1", inspections: raw.inspections, localGeneration, evidenceFingerprint: evidenceFingerprint(proposed.data.sha256, raw.inspections, localGeneration)}});
+    expect(foldSkills([proposed, decide(localCounter ? hash : null)])[0]?.state).toBe("accepted");
+    expect(() => foldSkills([proposed, decide(localCounter ? null : hash)])).toThrow("localGeneration");
+  }
 });

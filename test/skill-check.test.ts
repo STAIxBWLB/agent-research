@@ -157,3 +157,15 @@ test("explicit check detects proposal drift during an amem-only observation with
   expect(result).toMatchObject({state: "changed", acceptReady: false}); if (!("reasons" in result)) throw new Error(); expect(result.reasons).toContain("proposal-changed");
   expect(readLedger(f.dir).some(event => event.type === "skill.decided")).toBe(false);
 });
+
+
+test("accepted, rejected and withdrawn proposals never report acceptReady even when sources remain available", async () => {
+  for (const action of ["accept", "reject", "withdraw"] as const) {
+    const f = fixture(), row = await ops.skillPropose(f.dir, input([f.local]), f.ctx);
+    expect((await ops.skillCheck(f.dir, row.name)).acceptReady).toBe(true);
+    await ops.skillDecide(f.dir, row.name, action, "Synthetic final decision", action === "accept" ? pr : undefined, f.ctx);
+    const before = bytes(f.dir), checked = await ops.skillCheck(f.dir, row.name);
+    expect(checked).toMatchObject({state: "available", acceptReady: false}); expect(checked.nextStep).toContain("Decision is final"); expect(checked.nextStep).toContain("revised proposal for new evidence");
+    expect(checked.inspections[0]?.state).toBe("available"); expect(bytes(f.dir)).toEqual(before);
+  }
+});
