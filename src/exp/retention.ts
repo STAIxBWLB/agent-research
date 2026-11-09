@@ -12,7 +12,7 @@ export interface RetainedIdentity {
   image: string; argvHash: string; envHash: string; seed: number; producerVersion: string;
 }
 export interface RetainedManifest {
-  v: 1; studyId: string; attemptId: string; stage: string; identity: RetainedIdentity;
+  v: 1; studyId: string; attemptId: string; stage: string; identity: RetainedIdentity; reuseKey?: string;
   observed: { containerId: string; endedAt: string; exitCode: 0 };
   outputs: Record<string, string>; files: RetainedFile[]; directories: string[];
 }
@@ -21,14 +21,16 @@ export type RetentionRequest = { studyId: string } & (
   | { op: "reserve"; attemptId: string; capBytes?: number; reservationBytes?: number }
   | { op: "release"; attemptId: string }
   | { op: "snapshot"; attemptId: string; source: string }
-  | { op: "seal"; attemptId: string; stage: string; source: string; outputs: Record<string, string>; identity: RetainedIdentity; observed: RetainedManifest["observed"]; metadataLimit?: number }
+  | { op: "seal"; attemptId: string; stage: string; source: string; outputs: Record<string, string>; identity: RetainedIdentity; observed: RetainedManifest["observed"]; metadataLimit?: number; reuseKey?: string }
   | { op: "verify"; ref: RetainedRef }
+  | { op: "lookup"; attemptId: string; stage: string; key: string; expected: RetainedIdentity; outputs: Record<string, string> }
   | { op: "materialize"; attemptId: string; stage: string; target: string; taskRoot: string; expectedTaskTreeHash?: string; codeRoot?: string; expectedCodeHash?: string; inputs: Record<string, RetainedInput> }
   | { op: "inspect"; offset?: number; limit?: number }
   | { op: "prune"; refs: RetainedRef[]; fingerprint?: string }
 );
 export interface RetentionResult {
   op: RetentionRequest["op"];
+  hit?: boolean; reason?: "missing" | "pruned" | "corrupt" | "unsupported" | "ineligible-source" | "scan-cap"; ref?: RetainedRef;
   manifest?: RetainedManifest; sha256?: string; manifestBytes?: number; sidecarBytes?: number;
   inputHashes?: Record<string, string>; files?: RetainedFile[];
   entries?: { ref: RetainedRef; bytes: number; tombstone: boolean; active: boolean }[];

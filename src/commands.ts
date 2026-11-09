@@ -188,6 +188,8 @@ export const harnessAdopt = (dir: string, round: string, raw: unknown, confirm: 
 export const harnessShow = (dir: string, round?: string) => showHarness(dir, round);
 export const harnessImport = (dir: string, round: string, raw: unknown, ctx: Ctx) => withLock(dir, () => importHarnessFixture(dir, round, raw, ctx.actor));
 export async function attemptRun(dir: string, options: AttemptOptions, ctx: Ctx) {
+  if (options.reuse !== undefined && options.reuse !== "off" && options.reuse !== "eligible") throw new Error("attempt reuse: off or eligible required");
+  if (options.forceFresh !== undefined && typeof options.forceFresh !== "boolean") throw new Error("attempt forceFresh: boolean required");
   try { return await runAttempt(dir, options, ctx); }
   catch (error) { if (error instanceof GpuAdmissionDeferred) return error.result; throw error; }
 }
@@ -415,15 +417,19 @@ function stepNumber(node: StepNode, key: string): number | undefined {
 }
 export async function planRun(dirArg: string, options: { parallel?: number }, ctx: Ctx) {
   const { dir } = openStudy(dirArg);
-  const attemptOptions = (node: StepNode, retryOf?: string) => {
+  const attemptOptions = (node: StepNode, retryOf?: string): AttemptOptions => {
     const parent = retryOf ?? (node.args.retry !== undefined ? stepText(node, "retry") : undefined);
     const retry = parent && listAttempts(dir).attempts.some(a => a.id === parent) ? parent : undefined;
+    const reuse = node.args.reuse;
+    if (reuse !== undefined && reuse !== "off" && reuse !== "eligible") throw new Error("plan attempt reuse: off or eligible required");
+    const forceFresh = node.args["force-fresh"];
+    if (forceFresh !== undefined && typeof forceFresh !== "boolean") throw new Error("plan attempt force-fresh: boolean required");
     return {
       repo: resolve(dir, stepText(node, "repo")), commit: stepText(node, "commit"),
       ...(stepNumber(node, "seed") !== undefined ? { seed: stepNumber(node, "seed")! } : {}),
       ...(node.args.run !== undefined ? { run: stepText(node, "run") } : {}),
       ...(node.args.label !== undefined ? { label: stepText(node, "label") } : {}),
-      ...(retry ? { retry } : {}), detach: true,
+      ...(retry ? { retry } : {}), ...(reuse === undefined ? {} : { reuse }), ...(forceFresh === undefined ? {} : { forceFresh }), detach: true,
     };
   };
   const observed = (attempt: ReturnType<typeof showAttempt>): Observation => ({

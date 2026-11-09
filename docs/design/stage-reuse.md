@@ -1,10 +1,10 @@
-# Stage-artifact reuse: T1 declaration and key contract
+# Stage-artifact reuse
 
-Issue #64 T1 adds structural eligibility and deterministic key helpers. It does not look up artifacts, select a hit, skip a container, read external state, record a reuse receipt, cache model output or create a new observation. Runtime execution still follows the fresh #61 pipeline. T2/T3 and fixture-equivalence proof remain pending; the measured pilot still requires its separate go-ahead.
+Protocol v2 candidate stages can opt into deterministic artifact reuse during the current investigation run. Default execution stays fresh. Evaluators, ablation, final and posthoc execution always stay fresh; evaluator metrics are never copied. The implementation uses the existing attempt controller and study-scoped retained store, with no global cache or model-output cache.
 
-## Declaration
+## Declaration and controls
 
-A v2 candidate may optionally declare `reuse`. The normal CLI/MCP protocol setter validates the same closed shape and includes it in the frozen protocol identity and design seal. Adding or changing it reopens design approval. Without the field, normalized bytes and existing v1/v2 hashes stay unchanged.
+Declare `stages[].reuse` in the protocol and obtain the current design approval under workspace policy:
 
 ```json
 {
@@ -17,47 +17,54 @@ A v2 candidate may optionally declare `reuse`. The normal CLI/MCP protocol sette
     "modelOutputs": "forbidden",
     "determinism": "byte-exact",
     "toolchain": {
-      "description": "Synthetic deterministic byte transformer and its toolchain",
+      "description": "Synthetic deterministic byte transformer and its documented toolchain",
       "documentationSha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
     }
   }
 }
 ```
 
-The description is at most 1,024 UTF-8 bytes; its documentation digest has 64 lowercase hex digits. Every field is required, unknown fields and future versions refuse, and strings retain their original bytes without trimming or Unicode normalization. Secret-like execution env restrictions remain the v1 validator's contract. Do not put secrets or executor locators into the description.
+The description is at most 1,024 UTF-8 bytes; the documentation digest is 64 lowercase hex digits. Every field is required, unknown fields/future versions refuse, and strings retain their original bytes. A declaration is not evidence that the documentation exists or that isolation proves determinism. Review the actual toolchain and complete mounted input set; do not place secrets or locators in this text. There is no caller `reviewed` or `approved` flag.
 
-This is a reviewable declaration, not proof of determinism. Documentation existence or adequacy is not verified by its hash. Container isolation does not establish purity. There is no `reviewed`, `approved`, actor or caller inspection field: current approval must come from the study's actual design gate at future consumption time. A proposed contract may be stored before review, as with the rest of a protocol, and cannot authorize a hit by itself.
+`attempt run --reuse off|eligible` and MCP `reuse` use the same implementation. Off is the default and adds no reuse probes/indexing. Eligible mode requires a current selection rule whose run matches the attempt; a caller cannot classify a final run as investigate. Undeclared, no-output, unsupported and out-of-phase stages execute fresh with a reasoned miss. Sources without an indexed key remain misses; off-mode work is not retroactively promoted.
 
-## Structural eligibility
+`--force-fresh` / MCP `forceFresh` prevents consuming a hit. Existing terminal identities remain immutable and idempotent; use the existing explicit `--retry ID` path for a new computation. Force-fresh without a retry refuses an already-existing identity. A first forced fresh eligible run can publish its verified source for later reuse. These controls do not replace decisive first-final records or mint a new identity by changing a hidden cache flag.
 
-`stageReuseEligibility` accepts a validated protocol, a candidate/evaluator selection, an execution phase, optional `mode: off|eligible` and optional boolean `forceFresh`.
+## Key and source facts
 
-- Default mode is `off`. Force-fresh always refuses reuse.
-- Only protocol v2 candidates in phase `investigate` with an explicit pure-artifact contract and nonempty declared outputs can be structurally eligible.
-- Evaluator, evaluate, ablate, final, posthoc and other phases remain fresh. Legacy protocols and undeclared contracts remain fresh. Model-output or statistical contracts are refused rather than treated as deterministic artifacts.
-- The result always says `kind: declaration-only`. Its `eligible` value is not permission, a current gate check, byte verification, a source-existence claim, a hit or an independent sample.
+The version-1 key binds:
 
-T1 exposes no new CLI/MCP execution switches. Its pure helper controls are groundwork for T2 parity; they do not change the default runner. The phase and runtime facts accepted by helpers are internal caller context, not new public authority. The future adapter must derive them from source-owned study/executor state and must not trust a caller to classify a final run as investigate.
+- Study id, full frozen Git tree (40 hex) and extracted code snapshot digest (64 hex), without an unproven narrowed code closure.
+- Exactly one actual digest per declared input port. Retained inputs use the verified parent manifest digest; task input hashes come from frozen materialization.
+- The full selected stage, including name, image, argv/env bytes, seed policy, data/order edges, output paths and pure-artifact contract; the selected seed remains keyed even when seed injection is off.
+- Protocol version, method, evaluator, metrics, declared seeds, limits and network; candidates outside the selected stage and budget are excluded. An unrelated downstream configuration edit can preserve an upstream key, but the complete current design still must be resealed and approved.
+- A presence-aware canonical fingerprint of the source-owned validated selection rule and reserved seeds, including an absent reservation file.
+- Actual Bun version, package producer version and bounded producer-source hashes, plus an isolated executor OS/architecture/kernel/libc and CPU model/features/count and uid/gid identity and a hashed executor configuration. No raw executor locator or invented ABI is returned as a fact.
 
-## Key domain
+Platform probing is bounded to 5 seconds/4 KiB and runs only for eligible investigation candidates. GPU ABI reuse is currently unsupported and becomes a fresh miss; no GPU equivalence or measured savings is claimed. Missing runtime/platform/population facts do not receive a numeric or identity substitute. The frozen context is stored with admitted outcomes/receipts for audit; source and current keys must agree.
 
-`stageReuseKey` requires structural eligibility and returns a SHA-256 key over canonical version-1 key material. It includes:
+The T1 pure helpers still return structural `declaration-only` eligibility. The runtime adapter supplies source-owned facts and actual authorization; the helper itself remains neither a lookup nor an approval receipt.
 
-- Study id, full frozen Git tree id (40 hex) and extracted code snapshot digest (64 hex). No narrower code closure or file allow list is accepted.
-- Every declared input port's actual identity digest, exactly once, with no missing or undeclared ports. For retained-stage inputs this is the verified parent manifest digest; the manifest binds output bytes and source provenance. Task input identities come from verified frozen task materialization.
-- The entire selected stage: name, image digest, argv, explicit env, seed policy, frozen-code declaration, ordering/data edges, output names/paths and pure-artifact contract. Selected seed remains keyed even for a stage without seed injection, conservatively allowing extra misses.
-- Frozen selection-population digest, sourced from the actual selection rule and reserved-seed identities at the approved design. A missing population identity cannot produce a key; T2 must derive this from study records rather than accept a caller assertion.
-- Comparison domain: protocol version, method, evaluator definition, metrics, declared seeds, resource limits and network policy. Budget is excluded because admission enforces it anew; budget edits still change the full design seal.
-- Explicit runtime semantics and producer version plus operating system, architecture and platform ABI. Each fact is nonblank, bounded to 128 UTF-8 bytes and control-free; no missing-fact fallback is provided. T2 must obtain actual supported facts from the executor, not invent an ABI or infer it from the image alone.
+## Lookup, admission and recovery
 
-Other candidate definitions are outside the comparison domain. Changing only a downstream candidate's configuration can preserve an unchanged upstream key when its full code tree and inputs remain the same. A code-tree edit invalidates all keyed stages until a narrower closure is proven. Canonical object order is irrelevant; argv and array order are significant. Evaluator or selection-population domain edits always invalidate the key.
+Lookup stays in the current physical study/executor store. Under its flock it excludes active/current producers, scans at most 10,000 records/entries and 4 MiB metadata, verifies the original manifest and payload, checks the key and producing definition/input/code/image/argv/env/seed/version/output identities, and pins the source before returning. Missing, pruned, corrupt, unsupported and scan-capped sources are reasoned misses, followed by ordinary fresh admission. No automatic eviction or cross-study/node fallback is added.
 
-Key equality alone never authorizes cross-study sharing. T2 lookup must remain in the current study's physical executor-local store, validate source study/attempt/stage provenance and revalidate manifest and selected bytes. It must enforce current gates and permissions, ordinary budgets and fresh downstream/evaluator execution after any required reseal. A key does not carry approval or attest that runtime/ABI facts were honestly sourced.
+Before consumption and after awaited lookup, the controller checks current design binding, design gate, copilot/hypotheses acceptance, remaining budgets and exact stage owner/index/revision. The local stage advance, source receipt, own ledger event and any workspace automatic approval share one study commit. Decoded hit metadata is checked again against the original source attempt and file metadata; malformed/underreported hits cannot claim success or avoid metadata accounting.
 
-## Remaining execution obligations
+A durable preflight marker says no container start was issued. Interrupted lookup/materialization can reconcile that intent and its persisted pin without recomputing the source. The marker is cleared in a fenced fresh-start intent before Docker is called; a genuinely uncertain issued start retains the existing inspection/unknown rules and is never automatically replayed. Native source pin and local study receipt are separate transaction domains: a crash can leave a conservative pin without a local success receipt. Safe explicit reconciliation releases holds only after no owned live container is confirmed.
 
-- T2: atomic, fenced lookup/admission/reconciliation; source-availability and corruption misses; current policy checks; budget admission; immutable source references and reuse receipts; original compute versus verification/materialization overhead; no automatic rerun of uncertain work.
-- T3: CLI/MCP reuse off|eligible and force-fresh parity, explicit retry handling, provenance and console views, executed/reused stage counts and honest independent-sample counts. Existing terminal idempotence and first-final records must be preserved. Never reuse or overwrite evaluator metrics.
-- T4: predeclared byte-exact fresh-versus-reused fixture outputs and fresh evaluator equivalence, false-hit injection detection, and separately authorized measured pilot. No savings or adoption decision is claimed here.
+A reused completion references the original manifest and original container receipt, explicitly marked reused; it never claims a current candidate container. Fresh downstream stages materialize selected original bytes read-only and verify them again. A separate fresh evaluator sees the complete logical candidate pipeline. Existing aggregate file/payload/metadata/record and wall/GPU budgets still apply; referenced manifest sidecars count toward the attempt metadata bound. Original source computation is not charged again as current GPU time.
 
-This PR does not bump a package version, tag, publish or perform a live run. The optional declaration requires a compatible reader; older strict v2 readers refuse the new field without mutation. The compatible minor release requirement for v2 activation remains as documented in the Unreleased changelog. Existing absent-contract studies need no migration.
+## Counts, costs and provenance
+
+Controlled attempts use format v3, so readers unaware of reused stage semantics refuse them. Default fresh attempts keep existing v1/v2 formats. Study and ledger versions remain unchanged; new progress/admission events are additive. The source reference, key and receipt are recorded with local admission. Source disposal disables later hits while preserving historical receipts and tombstones.
+
+Provenance, export and console views separate executed candidates, reused candidates, fresh evaluators and independent samples. Attempts with reused computation are not counted as new independent samples; retries are not pooled as additional samples. These descriptive projections do not change investigation/final authority. Reused-stage logs remain owned by the original attempt; explicit named requests return the source attempt id rather than pretending the logs were produced by the current run.
+
+Original source wall/GPU allocation time is separate from current monotonic lookup/verification and materialization wall intervals. CPU usage, total failure overhead, storage and transfer costs remain unknown where uninstrumented. Observed preflight-failure timing is a subset that can overlap other categories; the clock relationship is explicit and these fields must not be summed as total compute. No cache-hit-rate-to-cost-saving conversion or adoption verdict is produced.
+
+## Evidence and limits
+
+Private synthetic Git/tar/Python fixtures compare fresh and reused pipeline bytes, require a new evaluator and unchanged source receipts, exercise invalidation/prune/corruption/false-hit, policy/budget/unknown-state guards, source pinning and CLI/MCP parity. Docker execution is fake. Same-user/executor tampering between verification and use remains an integrity limit; filesystem modes are not attestation.
+
+The separately authorized measured pilot remains pending. No treatment trial, live/native/account run, version bump, tag or publication is included. A compatible minor release is required for opt-in attempt v3 and its reader semantics; existing fresh studies need no migration.

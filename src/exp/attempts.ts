@@ -1,4 +1,5 @@
-import { executionView, materializePipeline, sealPipeline, pipelinePaths, pipelineInputRoot, type PipelineState } from "./pipeline.ts";
+import { prepareStageReuse } from "./reuse-admission.ts";
+import { executionView, materializePipeline, sealPipeline, pipelinePaths, pipelineInputRoot, type PipelineState, type AttemptReuseState } from "./pipeline.ts";
 import { retainedOperation, RetentionError } from "./retention.ts";
 import { validateStageProtocol } from "./stages.ts";
 import { requireCopilotAccept } from "../copilot.ts";
@@ -19,7 +20,7 @@ export type AttemptStatus = "running" | "succeeded" | "failed" | "cancelled" | "
 export interface AttemptStage { image: string; argv: string[]; mounts: { target: string; readOnly: boolean }[]; network: "none"; limits: Protocol["limits"]; user: string; containerId?: string; startedAt: string; endedAt?: string; exitCode?: number; evidence?: StageEvidence; evidenceError?: { reason: string; message: string }; launchPending?: true }
 export interface Evaluation { metrics: { name: string; unit: string; value: number; provenance: "ares-observed" }[]; outputs: { path: string; sha256: string; bytes: number }[] }
 export interface Attempt {
-  v: 1 | 2; pipeline?: PipelineState; id: string; studyId: string; run: string; protocolHash: string; sealBinding: string; commit: string; treeId: string; snapshotSha256?: string; seed: number; label: string; retryOf?: string;
+  v: 1 | 2 | 3; pipeline?: PipelineState; reuse?: AttemptReuseState; id: string; studyId: string; run: string; protocolHash: string; sealBinding: string; commit: string; treeId: string; snapshotSha256?: string; seed: number; label: string; retryOf?: string;
   executor: Executor; protocol: Protocol; paths: ContainerPaths; status: AttemptStatus; stage: Stage; reason?: string; error?: string; startedAt: string; endedAt?: string;
   stages: Partial<Record<Stage, AttemptStage>>; metrics: Evaluation["metrics"]; outputs: Evaluation["outputs"];
   sealing: { separateContainers: boolean; evaluatorReadOnly: boolean; candidateHasNoEvaluator: boolean; verifiedBy: "ares-observed" };
@@ -29,7 +30,7 @@ export interface Attempt {
   pendingAutoApproval?: string;
   finalBinding?: string; finalWinner?: string; pendingFinalApproval?: string;
 }
-export interface AttemptOptions { repo: string; commit: string; seed?: number; run?: string; label?: string; retry?: string; detach?: boolean; expectedId?: string }
+export interface AttemptOptions { repo: string; commit: string; seed?: number; run?: string; label?: string; retry?: string; detach?: boolean; expectedId?: string; reuse?: "off" | "eligible"; forceFresh?: boolean }
 /** collectEvaluation is T4's validating adapter; T3 does not parse or validate metric schemas. */
 export interface AttemptContext { actor: Actor; runner?: ProcessRunner; now?: () => number; sleep?: (ms: number) => Promise<void>; collectEvaluation?: (attempt: Attempt, runner: ProcessRunner) => Promise<Evaluation>; collectStageEvidence?: (attempt: Attempt, stage: Stage, runner: ProcessRunner) => Promise<StageEvidence> }
 export const ATTEMPT_BYTES = 1024 * 1024;
@@ -80,21 +81,46 @@ function* records(dir: string): Generator<Attempt> {
     }
   }
 }
+function reuseMilliseconds(value: unknown): boolean { return typeof value === "number" && Number.isFinite(value) && value >= 0; }
+function reuseContext(value: unknown): boolean {
+  if (!plain(value) || typeof value.populationSha256 !== "string" || !/^[a-f0-9]{64}$/.test(value.populationSha256) || !plain(value.runtime) || !plain(value.platform)) return false;
+  return [value.runtime.semantics, value.runtime.producerVersion, value.platform.os, value.platform.arch, value.platform.abi].every(text => typeof text === "string" && !!text.trim() && Buffer.byteLength(text) <= 128 && !/\p{Cc}/u.test(text));
+}
+function validateReuseState(raw: Record<string, unknown>, definition: import("./stages.ts").ProtocolV2, completed: unknown[], wanted: string, run: string): void {
+  const reuse = raw.reuse;
+  if (!plain(reuse) || !["off", "eligible"].includes(String(reuse.mode)) || typeof reuse.forceFresh !== "boolean" || !plain(reuse.stages) || Object.keys(reuse.stages).length > 16 || !reuseMilliseconds(reuse.verificationMs) || !reuseMilliseconds(reuse.materializationMs) || (reuse.failureMs !== undefined && !reuseMilliseconds(reuse.failureMs))) throw new Error("reuse: malformed attempt control receipt");
+  for (const [name, entry] of Object.entries(reuse.stages)) {
+    if (!definition.candidate.stages.some(stage => stage.name === name) || !plain(entry) || !["fresh", "reused"].includes(String(entry.outcome)) || typeof entry.reason !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(entry.reason) || !reuseMilliseconds(entry.verificationMs) || !reuseMilliseconds(entry.materializationMs) || (entry.key !== undefined && (typeof entry.key !== "string" || !/^[a-f0-9]{64}$/.test(entry.key) || !reuseContext(entry.context)))) throw new Error("reuse: malformed named stage outcome");
+    if (entry.outcome === "reused" && !completed.some(parent => plain(parent) && parent.name === name && plain(parent.reuse))) throw new Error("reuse: outcome has no atomic completed-stage receipt");
+    if (entry.outcome === "fresh" && entry.source !== undefined) throw new Error("reuse: fresh execution cannot carry a reused source");
+  }
+  const measurement = (value: unknown) => value === "unknown" || reuseMilliseconds(value);
+  for (const parent of completed) if (plain(parent) && parent.reuse !== undefined) {
+    const receipt = parent.reuse, ref = parent.ref, declared = definition.candidate.stages.find(stage => stage.name === parent.name);
+    if (reuse.mode !== "eligible" || reuse.forceFresh || ["ablate", "final", "posthoc"].includes(run) || !declared?.reuse || !Object.keys(declared.outputs).length || !plain(ref) || ref.attemptId === wanted || !/^[a-f0-9]{16}$/.test(String(ref.attemptId)) || !plain(receipt) || receipt.v !== 1 || typeof receipt.key !== "string" || !/^[a-f0-9]{64}$/.test(receipt.key) || canonical(receipt.source) !== canonical(ref) || !reuseContext(receipt.context) || !plain(receipt.original) || !measurement(receipt.original.wallSeconds) || !measurement(receipt.original.gpuHours) || receipt.original.cpuSeconds !== "unknown" || !reuseMilliseconds(receipt.verificationMs) || !reuseMilliseconds(receipt.materializationMs)) throw new Error("reuse: malformed source receipt");
+    const outcome = reuse.stages[parent.name as string];
+    if (!plain(outcome) || outcome.outcome !== "reused" || outcome.key !== receipt.key || canonical(outcome.source) !== canonical(ref) || canonical(outcome.context) !== canonical(receipt.context)) throw new Error("reuse: source receipt and admitted outcome differ");
+  }
+}
 /** Shared store validation for provenance snapshots without a second directory traversal. */
 export function validateAttemptRecord(raw: unknown, run: string, wanted: string): Attempt {
   runName(run); id(wanted);
-      if (plain(raw) && ((raw.v !== 1 && raw.v !== 2) || (typeof raw.status === "string" && !STATUSES.includes(raw.status as AttemptStatus)) || (typeof raw.stage === "string" && !["candidate", "evaluator"].includes(raw.stage)))) throw new Error("attempt record: unsupported schema version, status or stage; use an ares version that supports this record, keeping the original file unchanged");
-      if (!plain(raw) || (raw.v !== 1 && raw.v !== 2) || raw.run !== run || raw.id !== wanted || !STATUSES.includes(raw.status as AttemptStatus) || !["candidate", "evaluator"].includes(raw.stage as string) || !plain(raw.stages) || !plain(raw.protocol) || !plain(raw.executor) || typeof raw.startedAt !== "string" || !Number.isFinite(Date.parse(raw.startedAt))) throw new Error("attempt record: malformed; restore its last valid version before retrying");
-  if (raw.v === 2) {
+      if (plain(raw) && ((raw.v !== 1 && raw.v !== 2 && raw.v !== 3) || (typeof raw.status === "string" && !STATUSES.includes(raw.status as AttemptStatus)) || (typeof raw.stage === "string" && !["candidate", "evaluator"].includes(raw.stage)))) throw new Error("attempt record: unsupported schema version, status or stage; use an ares version that supports this record, keeping the original file unchanged");
+      if (!plain(raw) || (raw.v !== 1 && raw.v !== 2 && raw.v !== 3) || raw.run !== run || raw.id !== wanted || !STATUSES.includes(raw.status as AttemptStatus) || !["candidate", "evaluator"].includes(raw.stage as string) || !plain(raw.stages) || !plain(raw.protocol) || !plain(raw.executor) || typeof raw.startedAt !== "string" || !Number.isFinite(Date.parse(raw.startedAt))) throw new Error("attempt record: malformed; restore its last valid version before retrying");
+  if (raw.v === 2 || raw.v === 3) {
     if (!plain(raw.pipeline) || !Number.isSafeInteger(raw.pipeline.index) || !Array.isArray(raw.pipeline.completed)) throw new Error("pipeline: malformed attempt state; restore its last valid record");
     const definition = validateStageProtocol(raw.pipeline.definition);
     if (!plain(raw.pipeline.inputHashes) || typeof raw.pipeline.taskTreeHash !== "string" || !/^[a-f0-9]{64}$/.test(raw.pipeline.taskTreeHash)) throw new Error("pipeline: invalid input snapshot identities");
     if (raw.pipeline.preflightRevision !== undefined && (!Number.isSafeInteger(raw.pipeline.preflightRevision) || (raw.pipeline.preflightRevision as number) < 0)) throw new Error("pipeline: invalid launch revision");
+    if (raw.pipeline.reusedSidecarBytes !== undefined && (!reuseMilliseconds(raw.pipeline.reusedSidecarBytes) || (raw.pipeline.reusedSidecarBytes as number) > OUTPUT_METADATA_BYTES)) throw new Error("reuse: invalid retained metadata allowance");
     const completed = raw.pipeline.completed;
     if (completed.length !== (raw.pipeline.index as number) + (raw.stage === "evaluator" ? 1 : 0)) throw new Error("pipeline: completed stage receipts do not match current stage");
-    for (const [index, parent] of completed.entries()) if (!plain(parent) || parent.name !== definition.candidate.stages[index]?.name || !plain(parent.ref) || parent.ref.attemptId !== wanted || parent.ref.stage !== parent.name || typeof parent.ref.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(parent.ref.sha256) || !plain(parent.record) || parent.record.exitCode !== 0 || typeof parent.record.containerId !== "string" || typeof parent.record.endedAt !== "string") throw new Error("pipeline: malformed completed-stage provenance");
+    for (const [index, parent] of completed.entries()) if (!plain(parent) || parent.name !== definition.candidate.stages[index]?.name || !plain(parent.ref) || (parent.reuse === undefined && parent.ref.attemptId !== wanted) || !/^[a-f0-9]{16}$/.test(String(parent.ref.attemptId)) || parent.ref.stage !== parent.name || typeof parent.ref.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(parent.ref.sha256) || !plain(parent.record) || parent.record.exitCode !== 0 || typeof parent.record.containerId !== "string" || typeof parent.record.endedAt !== "string") throw new Error("pipeline: malformed completed-stage provenance");
     if (canonical(raw.protocol) !== canonical(executionView(definition, raw.pipeline.index as number))) throw new Error("pipeline: execution projection differs from frozen definition");
     if ((raw.pipeline.index as number) < 0 || (raw.pipeline.index as number) >= definition.candidate.stages.length || raw.protocolHash !== protocolHash(definition)) throw new Error("pipeline: invalid frozen identity or stage index");
+    if (raw.v === 3) {
+      validateReuseState(raw, definition, completed, wanted, run);
+    } else if (raw.reuse !== undefined || completed.some(parent => plain(parent) && parent.reuse !== undefined)) throw new Error("reuse: version 3 attempt required");
   } else if (raw.pipeline !== undefined) throw new Error("pipeline: version 2 attempt required");
   if (Object.hasOwn(raw.protocol, "inputs")) {
     const protocol = validateStoredProtocol(raw.protocol);
@@ -146,7 +172,8 @@ export function showAttempt(dirArg: string, attemptId: string): Attempt {
 }
 function save(dir: string, attempt: Attempt, ctx: AttemptContext, event: string, approvals: PendingEvent[] = []): void {
   if (attempt.pipeline && attempt.status === "running" && Buffer.byteLength(JSON.stringify(attempt, null, 2) + "\n") > ATTEMPT_BYTES - 1024) throw new EvidenceError("artifact-limit", "pipeline: reserve terminal receipt capacity within the 1 MiB attempt record");
-  commit(dir, [[file(dir, attempt), JSON.stringify(attempt, null, 2) + "\n", ATTEMPT_BYTES]], [...approvals, { actor: ctx.actor, type: event, data: { id: attempt.id, run: attempt.run, stage: attempt.stage, status: attempt.status, ...(attempt.reason ? { reason: attempt.reason } : {}) } }]);
+  const reused = event === "attempt.stage.reused" ? attempt.pipeline?.completed.at(-1) : undefined;
+  commit(dir, [[file(dir, attempt), JSON.stringify(attempt, null, 2) + "\n", ATTEMPT_BYTES]], [...approvals, { actor: ctx.actor, type: event, data: { id: attempt.id, run: attempt.run, stage: attempt.stage, status: attempt.status, ...(attempt.reason ? { reason: attempt.reason } : {}), ...(reused?.reuse ? { candidateStage: reused.name, key: reused.reuse.key, sourceAttemptId: reused.reuse.source.attemptId, sourceStage: reused.reuse.source.stage, sourceSha256: reused.reuse.source.sha256, reuse: reused.reuse } : {}) } }]);
 }
 export function budgetUsage(attempts: Attempt[], time = Date.now()) {
   let wallHours = 0, gpuHours = 0;
@@ -156,7 +183,7 @@ export function budgetUsage(attempts: Attempt[], time = Date.now()) {
     if (!Number.isFinite(elapsed)) throw new Error("attempt timing: malformed; restore valid timestamps before starting an attempt");
     wallHours += elapsed;
     // Unknown kinds cannot be accounted for safely; read-only operations do not call this function.
-    for (const stage of [...Object.values(attempt.stages), ...(attempt.pipeline?.completed.map(value => value.record) ?? [])]) {
+    for (const stage of [...Object.values(attempt.stages), ...(attempt.pipeline?.completed.filter(value => !value.reuse).map(value => value.record) ?? [])]) {
     if (!stage) continue;
     const end = stage.endedAt ? Date.parse(stage.endedAt) : attempt.endedAt ? Date.parse(attempt.endedAt) : time;
     const hours = Math.max(0, end - Date.parse(stage.startedAt)) / 3_600_000;
@@ -281,7 +308,7 @@ function observed(raw: unknown, attempt: Attempt, protocol: Protocol, ownershipO
     : attempt.gpuDevices !== undefined ? capabilitiesMatch && devices[0].Count === 0 && Array.isArray(devices[0].DeviceIDs) && devices[0].DeviceIDs.length === attempt.gpuDevices.length && new Set(devices[0].DeviceIDs).size === attempt.gpuDevices.length && attempt.gpuDevices.every(device => (devices[0].DeviceIDs as unknown[]).includes(device))
     : capabilitiesMatch && devices[0].Count === expected.limits.gpus;
   if (!gpuMatches) throw hostError(attempt, "GPU limit verification");
-  if (config.Seed !== (attempt.pipeline && attempt.stage === "candidate" && !attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.seed ? "" : `ARES_SEED=${attempt.seed}`)) throw hostError(attempt, "selected seed verification");
+  if (config.Seed !== (attempt.pipeline && attempt.stage === "candidate" && !attempt.pipeline!.definition.candidate.stages[attempt.pipeline!.index]!.seed ? "" : `ARES_SEED=${attempt.seed}`)) throw hostError(attempt, "selected seed verification");
   if (config.Image !== expected.image || config.User !== expected.user || JSON.stringify(config.Cmd) !== JSON.stringify(expected.argv) || !plain(config.Labels) || config.Labels["ares.study"] !== attempt.studyId || config.Labels["ares.attempt"] !== attempt.id || config.Labels["ares.stage"] !== attempt.stage || settings.NetworkMode !== "none" || settings.ReadonlyRootfs !== true || !Array.isArray(settings.CapDrop) || !settings.CapDrop.some(c => c === "ALL" || c === "all") || !Array.isArray(settings.SecurityOpt) || !settings.SecurityOpt.includes("no-new-privileges") || !plain(settings.Tmpfs) || !("/tmp" in settings.Tmpfs) || settings.Memory !== expected.limits.memoryMb * 1024 * 1024 || settings.PidsLimit !== expected.limits.pidsLimit || settings.NanoCpus !== Math.round(expected.limits.cpus * 1e9) || (!inputMountsValid || bindMounts.length !== mounts.length + visible.length) || !mounts.every(([source, target, writable]) => bindMounts.some(m => plain(m) && m.Type === "bind" && m.Source === source && m.Destination === target && m.RW === writable))) throw hostError(attempt, "container isolation verification");
   if (expected?.containerId && value.Id !== expected.containerId) throw hostError(attempt, "container identity verification");
   const finishedAt = typeof value.State.FinishedAt === "string" && Number.isFinite(Date.parse(value.State.FinishedAt)) ? value.State.FinishedAt : undefined;
@@ -380,7 +407,7 @@ function retryablePipelineFailure(error: unknown): boolean {
   const message = error instanceof Error ? error.message : "";
   return /retention operation active|executor operation failed|malformed executor receipt|mismatched executor receipt|process start failed/i.test(message);
 }
-async function recordPipelinePreflightFailure(dir: string, attempt: Attempt, error: unknown, ctx: AttemptContext): Promise<Attempt> {
+async function recordPipelinePreflightFailure(dir: string, attempt: Attempt, error: unknown, ctx: AttemptContext, elapsedMs = 0): Promise<Attempt> {
   try { remainingWallSeconds(dir, attempt, ctx); } catch (budget) { error = budget; }
   const failure = pipelineFailure(error), retryable = retryablePipelineFailure(error) && failure.reason !== "wall-clock";
   return update(dir, attempt.id, ctx, current => {
@@ -389,6 +416,7 @@ async function recordPipelinePreflightFailure(dir: string, attempt: Attempt, err
     if (attempt.launching) { if (current.launching?.token !== attempt.launching.token) return undefined; }
     else if (!current.stages[current.stage]?.launchPending || current.launching) return undefined;
     current.error = failure.message;
+    if (current.reuse) current.reuse.failureMs = (current.reuse.failureMs ?? 0) + elapsedMs;
     delete current.launching;
     if (retryable) {
       current.stages[current.stage]!.launchPending = true; current.reason = "executor-preflight";
@@ -399,24 +427,93 @@ async function recordPipelinePreflightFailure(dir: string, attempt: Attempt, err
     return "attempt.failed";
   });
 }
+function addMaterialization(attempt: Attempt, elapsedMs: number): void {
+  if (!attempt.reuse || !attempt.pipeline) return;
+  const name = attempt.stage === "evaluator" ? "evaluator" : attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name;
+  attempt.reuse.materializationMs += elapsedMs;
+  (attempt.pipeline.materializationMs ??= {})[name] = (attempt.pipeline.materializationMs?.[name] ?? 0) + elapsedMs;
+}
+async function recordMaterialization(dir: string, attempt: Attempt, elapsedMs: number, ctx: AttemptContext): Promise<Attempt> {
+  return update(dir, attempt.id, ctx, current => {
+    if (current.status !== "running" || current.stage !== attempt.stage || current.pipeline?.index !== attempt.pipeline?.index || current.launching?.token !== attempt.launching?.token) throw new InputVerificationError("reuse: stage ownership changed during materialization");
+    addMaterialization(current, elapsedMs); return "attempt.reuse.materialized";
+  });
+}
 async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptContext, verifiedProtocol?: Protocol): Promise<Attempt> {
+  const preflightStarted = performance.now();
   const recoveryCtx = { ...ctx, runner: recoveryRunners.get(ctx) ?? ctx.runner };
   ctx = boundedPipelineContext(dir, attempt, ctx);
   let args: string[];
   try {
+    if (attempt.reuse) {
+      attempt = await update(dir, attempt.id, recoveryCtx, current => {
+        if (current.status !== "running" || current.stage !== attempt.stage || current.pipeline?.index !== attempt.pipeline?.index || current.launching?.token !== attempt.launching?.token) throw new InputVerificationError("reuse: preflight ownership changed");
+        requireCopilotAccept(dir, "hypotheses");
+        if (designBinding(dir) !== current.sealBinding) throw new InputVerificationError("reuse: design changed before preflight");
+        requireGate(dir, openStudy(dir).study, "design", () => current.sealBinding);
+        if (current.stages[current.stage]!.launchPending) return undefined;
+        current.stages[current.stage]!.launchPending = true;
+        return "attempt.reuse.preflight";
+      });
+    }
     if (attempt.pipeline) {
       if (designBinding(dir) !== attempt.sealBinding) throw new InputVerificationError("pipeline: design changed; restore the frozen approved definition before consumption");
       remainingWallSeconds(dir, attempt, ctx);
-      const hashes = await materializePipeline(attempt, ctx);
+      const materialized = await materializePipeline(attempt, ctx), hashes = materialized.inputHashes;
+      if (attempt.reuse) attempt = await recordMaterialization(dir, attempt, materialized.materializationMs, ctx);
       remainingWallSeconds(dir, attempt, ctx);
-      if (JSON.stringify(hashes) !== JSON.stringify(attempt.pipeline.inputHashes)) throw new InputVerificationError("pipeline: verified input identities changed before consumption");
+      if (JSON.stringify(hashes) !== JSON.stringify(attempt.pipeline!.inputHashes)) throw new InputVerificationError("pipeline: verified input identities changed before consumption");
     }
     const currentProtocol = executionProtocol(dir, attempt), protocol = attempt.pipeline ? currentProtocol : verifiedProtocol ?? currentProtocol;
     if (!sameProtocolInputs(currentProtocol, protocol)) throw new InputVerificationError("attempt inputs: identities changed after verification; restore the frozen input identities and retry ares attempt reconcile <dir>");
+    if (attempt.pipeline && attempt.reuse && attempt.stage === "candidate") {
+      requireCopilotAccept(dir, "hypotheses");
+      requireGate(dir, openStudy(dir).study, "design", () => designBinding(dir));
+      const decision = await prepareStageReuse(dir, attempt, ctx, source => showAttempt(dir, source));
+      remainingWallSeconds(dir, attempt, ctx);
+      const approvals: PendingEvent[] = [];
+      const index = attempt.pipeline.index, name = attempt.pipeline.definition.candidate.stages[index]!.name;
+      attempt = await update(dir, attempt.id, ctx, current => {
+        if (current.status !== "running" || current.stage !== "candidate" || current.pipeline?.index !== index || current.pipeline.preflightRevision !== attempt.pipeline!.preflightRevision || current.launching?.token !== attempt.launching?.token) throw new InputVerificationError("reuse: stage ownership changed before admission");
+        if (designBinding(dir) !== current.sealBinding) throw new InputVerificationError("reuse: current design changed before admission");
+        requireCopilotAccept(dir, "hypotheses");
+        const gate = requireGate(dir, openStudy(dir).study, "design", () => current.sealBinding);
+        remainingWallSeconds(dir, current, ctx);
+        decision.materializationMs = current.pipeline.materializationMs?.[name] ?? 0;
+        if (decision.outcome === "reused") decision.receipt.materializationMs = decision.materializationMs;
+        current.reuse!.verificationMs += decision.verificationMs;
+        current.reuse!.stages[name] = { outcome: decision.outcome, reason: decision.reason, ...(decision.key ? { key: decision.key, context: decision.context } : {}), verificationMs: decision.verificationMs, materializationMs: decision.materializationMs, ...(decision.outcome === "reused" ? { source: decision.source } : {}) };
+        if (decision.outcome === "fresh") return "attempt.reuse.miss";
+        const outputs = outputBudget([...current.outputs, ...decision.outputs]);
+        const sidecarBytes = (current.pipeline.sidecarBytes ?? 0) + decision.manifestBytes;
+        if (Buffer.byteLength(JSON.stringify(outputs, null, 2)) + sidecarBytes > OUTPUT_METADATA_BYTES) throw new EvidenceError("artifact-limit", "reuse: shared output and retained metadata budget exhausted");
+        current.outputs = outputs; current.pipeline.sidecarBytes = sidecarBytes;
+        current.pipeline.reusedSidecarBytes = (current.pipeline.reusedSidecarBytes ?? 0) + decision.manifestBytes;
+        current.pipeline.completed.push({ name, record: decision.record, ref: decision.source, reuse: decision.receipt });
+        current.sealing.candidateHasNoEvaluator = true;
+        if (current.pendingAutoApproval === current.sealBinding) { approvals.push(...gate); delete current.pendingAutoApproval; }
+        delete current.stages.candidate;
+        if (index + 1 < current.pipeline.definition.candidate.stages.length) { current.pipeline.index++; current.protocol = executionView(current.pipeline.definition, current.pipeline.index); }
+        else current.stage = "evaluator";
+        current.paths = pipelinePaths(current);
+        current.stages[current.stage] = stageRecord(current, current.stage, user, ctx);
+        current.stages[current.stage]!.launchPending = true; delete current.launching;
+        return "attempt.stage.reused";
+      }, approvals);
+      if (decision.outcome === "reused") return attempt;
+    }
     // Keep configuration refusals outside the uncertain container-start catch.
     args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths, ...(attempt.gpuDevices ? { gpuDevices: attempt.gpuDevices } : {}), ...(attempt.pipeline && attempt.stage === "candidate" ? { pipeline: { name: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name, inputRoot: pipelineInputRoot(attempt)!, seed: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.seed } } : {}) });
+    if (attempt.reuse) attempt = await update(dir, attempt.id, recoveryCtx, current => {
+      if (current.status !== "running" || current.stage !== attempt.stage || current.pipeline?.index !== attempt.pipeline?.index || current.launching?.token !== attempt.launching?.token) throw new InputVerificationError("reuse: container launch ownership changed");
+      requireCopilotAccept(dir, "hypotheses");
+      if (designBinding(dir) !== current.sealBinding) throw new InputVerificationError("reuse: design changed before fresh execution");
+      requireGate(dir, openStudy(dir).study, "design", () => current.sealBinding);
+      delete current.stages[current.stage]!.launchPending;
+      return "attempt.reuse.fresh-intent";
+    });
   } catch (error) {
-    if (attempt.pipeline) return recordPipelinePreflightFailure(dir, attempt, error, recoveryCtx);
+    if (attempt.pipeline) return recordPipelinePreflightFailure(dir, attempt, error, recoveryCtx, performance.now() - preflightStarted);
     if (error instanceof InputVerificationError) await update(dir, attempt.id, ctx, current => {
       if (current.status !== "running" || current.stage !== attempt.stage || current.stages[current.stage]?.containerId || current.launching?.token !== attempt.launching?.token) return undefined;
       const stage = current.stages[current.stage]!;
@@ -473,6 +570,8 @@ async function captureStage(dir: string, attempt: Attempt, ctx: AttemptContext, 
 }
 
 export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: AttemptContext): Promise<Attempt> {
+  if (options.reuse !== undefined && options.reuse !== "off" && options.reuse !== "eligible") throw new Error("reuse: choose off or eligible");
+  if (options.forceFresh !== undefined && typeof options.forceFresh !== "boolean") throw new Error("force-fresh: boolean required");
   const controlCtx = ctx;
   const cleanupRunner = ctx.runner ?? spawnRunner;
   const dir = studyDir(dirArg), { study } = openStudy(dir);
@@ -498,6 +597,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   const inputRoot = posix.join(executor.workdir, study.id, wanted);
   validateContainerInputSources(protocol, { snapshot: posix.join(inputRoot, "snapshot"), output: posix.join(inputRoot, "output"), evaluator: posix.join(inputRoot, "task", "evaluator"), result: posix.join(inputRoot, "result") });
   const existing = await withLock(dir, () => load(dir).some(a => a.id === wanted));
+  if (options.forceFresh && existing && !options.retry) throw new Error("force-fresh: existing attempt is immutable; use --retry ID for an explicit new attempt");
   const verifiedInputs = !existing && protocol.inputs !== undefined ? await verifyExecutorInputs(executor, protocol, ctx.runner ?? spawnRunner) : undefined;
   let gpuDevices: string[] | undefined;
   if (!existing && executor.gpu && protocol.limits.gpus > 0) {
@@ -524,7 +624,8 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     enforceBudget(protocol, attempts, now(ctx));
     if (definition.v === 2) { await retainedOperation(executor, { op: "reserve", studyId: study.id, attemptId: wanted, ...(executor.retentionCapBytes === undefined ? {} : { capBytes: executor.retentionCapBytes }) }, cleanupRunner); reserved = true; }
     const root = posix.join(executor.workdir, study.id, wanted);
-    const record: Attempt = { v: definition.v, ...(definition.v === 2 ? { pipeline: { definition, index: 0, completed: [], inputHashes: {}, taskTreeHash: frozen.treeHash } } : {}), id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, ...(gpuDevices ? { gpuDevices } : {}), protocol: frozenProtocol(protocol), ...(verifiedInputs !== undefined ? { verifiedInputs } : {}), paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };
+    const controlled = definition.v === 2 && (options.reuse === "eligible" || options.forceFresh === true);
+    const record: Attempt = { v: controlled ? 3 : definition.v, ...(controlled ? { reuse: { mode: options.reuse ?? "off", forceFresh: options.forceFresh ?? false, stages: {}, verificationMs: 0, materializationMs: 0, failureMs: 0 } } : {}), ...(definition.v === 2 ? { pipeline: { definition, index: 0, completed: [], inputHashes: {}, taskTreeHash: frozen.treeHash } } : {}), id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, ...(gpuDevices ? { gpuDevices } : {}), protocol: frozenProtocol(protocol), ...(verifiedInputs !== undefined ? { verifiedInputs } : {}), paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };
     if (record.pipeline) record.paths = pipelinePaths(record);
     if (approval.length) record.pendingAutoApproval = binding!;
     if (finalAuthorization) { record.finalBinding = finalAuthorization.binding; record.finalWinner = finalAuthorization.winner; if (finalAuthorization.auto) record.pendingFinalApproval = finalAuthorization.binding; }
@@ -559,8 +660,9 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
       await transferTask(join(dir, "task"), executor, posix.dirname(attempt.paths.evaluator), ctx.runner ?? spawnRunner, frozen.treeHash, !!attempt.pipeline);
       if (attempt.pipeline) {
         for (let index = 1; index < attempt.pipeline.definition.candidate.stages.length; index++) await checkExecutorInputs(executor, executionView(attempt.pipeline.definition, index), ctx.runner ?? spawnRunner);
-        const inputHashes = await materializePipeline(attempt, ctx);
-        attempt = await update(dir, attempt.id, ctx, current => { current.pipeline!.inputHashes = inputHashes; return "attempt.pipeline.inputs"; });
+        const materialized = await materializePipeline(attempt, ctx);
+        if (attempt.reuse) attempt = await recordMaterialization(dir, attempt, materialized.materializationMs, ctx);
+        attempt = await update(dir, attempt.id, ctx, current => { current.pipeline!.inputHashes = materialized.inputHashes; return "attempt.pipeline.inputs"; });
       }
       preparationStep = "design recheck";
       if (designBinding(dir) !== attempt.sealBinding) throw new Error("design changed during preparation");
@@ -575,7 +677,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
       });
     } catch (error) {
       if (!attempt.pipeline && error instanceof InputVerificationError) throw error;
-      const failure = attempt.pipeline ? pipelineFailure(error) : undefined;
+      const failure = attempt.pipeline ? pipelineFailureAt(dir, attempt, error, controlCtx) : undefined;
       attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = failure ? `${preparationStep}: ${failure.message}` : startupError(current, preparationStep); finish(current, "failed", failure?.reason ?? "preparation", ctx); return "attempt.failed"; });
     }
   }
@@ -595,14 +697,21 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
 async function verifyAndLaunchPending(dir: string, pending: Attempt, ctx: AttemptContext): Promise<Attempt | undefined> {
   ctx = boundedPipelineContext(dir, pending, ctx);
   const protocol = executionProtocol(dir, pending);
-  let hashes: Record<string, string> | undefined;
+  let hashes: Record<string, string> | undefined, materializationMs = 0;
+  const preflightStarted = performance.now();
   try {
-    hashes = pending.pipeline ? await materializePipeline(pending, ctx) : undefined;
+    if (pending.reuse) {
+      requireCopilotAccept(dir, "hypotheses");
+      if (designBinding(dir) !== pending.sealBinding) throw new InputVerificationError("reuse: design changed before pending consumption");
+      requireGate(dir, openStudy(dir).study, "design", () => pending.sealBinding);
+    }
+    const materialized = pending.pipeline ? await materializePipeline(pending, ctx) : undefined;
+    hashes = materialized?.inputHashes; materializationMs = materialized?.materializationMs ?? 0;
     validateContainerInputSources(protocol, pending.paths);
     await verifyExecutorInputs(pending.executor, protocol, ctx.runner ?? spawnRunner);
   } catch (error) {
     if (!pending.pipeline) throw error;
-    return withControl(dir, () => recordPipelinePreflightFailure(dir, pending, error, ctx));
+    return withControl(dir, () => recordPipelinePreflightFailure(dir, pending, error, ctx, performance.now() - preflightStarted));
   }
   return withControl(dir, async () => {
     const current = showAttempt(dir, pending.id);
@@ -611,6 +720,7 @@ async function verifyAndLaunchPending(dir: string, pending: Attempt, ctx: Attemp
     executionProtocol(dir, current); // Recheck the frozen identities after hashing, under the fresh launch fence.
     const claimed = await update(dir, current.id, ctx, value => {
       if (hashes) value.pipeline!.inputHashes = hashes;
+      if (value.reuse) addMaterialization(value, materializationMs);
       if (value.pipeline) value.pipeline.preflightRevision = (value.pipeline.preflightRevision ?? 0) + 1;
       delete value.stages[value.stage]!.launchPending; value.launching = owner(ctx);
       return "attempt.stage.retry-intent";

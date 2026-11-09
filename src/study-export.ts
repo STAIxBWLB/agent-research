@@ -1,3 +1,4 @@
+import { attemptReuseView } from "./provenance.ts";
 import {urlOrKeyLike} from "./privacy.ts";
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, isAbsolute, sep } from "node:path";
@@ -34,8 +35,9 @@ const LEDGER_KEYS: Record<string, readonly string[]> = {
   "investigate.closed": ["run", "sha256", "ruleSha256", "winner"], "ablate.closed": ["sha256", "investigateSha256"], "final.closed": ["sha256", "status", "investigateSha256"],
   "idea.decided": ["decision"], "paper.built": ["manuscriptSha256", "evidenceSha256", "sourceManuscriptSha256"], "review.added": [], "review.resolved": ["buildSha256"],
   "attempt.started": ["id", "run", "seed", "commit", "treeId"],
+  "attempt.stage.reused": ["id", "stage", "candidateStage", "key", "sourceAttemptId", "sourceStage", "sourceSha256"],
 };
-for (const t of ["attempt.run", "attempt.snapshot", "attempt.stage.changed", "attempt.stage.evidence", "attempt.stage.recovered", "attempt.stage.started", "attempt.succeeded", "attempt.failed", "attempt.cancelled", "attempt.unknown"]) LEDGER_KEYS[t] = ["id", "run", "stage", "status"];
+for (const t of ["attempt.run", "attempt.snapshot", "attempt.stage.changed", "attempt.stage.evidence", "attempt.stage.recovered", "attempt.stage.started", "attempt.reuse.preflight", "attempt.reuse.fresh-intent", "attempt.reuse.materialized", "attempt.reuse.miss", "attempt.succeeded", "attempt.failed", "attempt.cancelled", "attempt.unknown"]) LEDGER_KEYS[t] = ["id", "run", "stage", "status"];
 
 export interface BundleManifest {
   bundle: 1; formats: typeof FORMAT_VERSIONS; studyIdSha256: string; mode: string; protocolHash: string | null; sealBinding: string | null;
@@ -100,15 +102,17 @@ function attemptRow(a: Attempt) {
   }
   for (const parent of a.pipeline?.completed ?? []) {
     const stage = parent.record;
-    stages[parent.name] = { exitCode: stage.exitCode ?? null, durationMs: duration(stage.startedAt, stage.endedAt), network: "none", imageDigest: digest(stage.image), manifestSha256: parent.ref.sha256, inputIndependent: false };
+    const borrowed = parent.reuse;
+    if (borrowed !== undefined) stages[parent.name] = { execution: "reused", originalExitCode: stage.exitCode ?? null, originalDurationMs: duration(stage.startedAt, stage.endedAt), imageDigest: digest(stage.image), manifestSha256: parent.ref.sha256, inputIndependent: false };
+    else stages[parent.name] = { execution: "executed", exitCode: stage.exitCode ?? null, durationMs: duration(stage.startedAt, stage.endedAt), network: "none", imageDigest: digest(stage.image), manifestSha256: parent.ref.sha256, inputIndependent: false };
   }
-  const reason = reasonClass(a.reason, a.status);
+  const reason = reasonClass(a.reason, a.status), reuse = attemptReuseView(a);
   return {
     id: a.id, run: a.run, studyIdSha256: sha256(String(a.studyId)), protocolHash: shaped(a.protocolHash, SHA256), sealBinding: shaped(a.sealBinding, SHA256), commit: shaped(a.commit, GIT_ID), treeId: shaped(a.treeId, GIT_ID),
     snapshotSha256: shaped(a.snapshotSha256, SHA256), seed: Number.isSafeInteger(a.seed) ? a.seed : null, labelSha256: sha256(String(a.label ?? "")), retryOf: shaped(a.retryOf, ATTEMPT_ID), status: a.status, stage: a.stage, ...(reason ? { reasonClass: reason } : {}),
     ...(a.verifiedInputs !== undefined ? { inputs: Object.fromEntries(Object.entries(a.verifiedInputs).map(([name, hash]) => [name, shaped(hash, SHA256)])) } : {}),
     ...(a.gpuDevices !== undefined ? { gpuDeviceCount: a.gpuDevices.length } : {}),
-    durationMs: duration(a.startedAt, a.endedAt), stages,
+    durationMs: duration(a.startedAt, a.endedAt), stages, ...(reuse === undefined ? {} : {reuse}),
     metrics: (Array.isArray(a.metrics) ? a.metrics : []).map(m => ({ name: m.name, unit: m.unit, value: finite(m.value), provenance: m.provenance === "ares-observed" ? "ares-observed" : "other" })),
     outputs: (Array.isArray(a.outputs) ? a.outputs : []).map(o => ({ sha256: shaped(o.sha256, SHA256), bytes: finite(o.bytes) })),
     sealing: plain(a.sealing) ? { separateContainers: a.sealing.separateContainers === true, evaluatorReadOnly: a.sealing.evaluatorReadOnly === true, candidateHasNoEvaluator: a.sealing.candidateHasNoEvaluator === true } : null,

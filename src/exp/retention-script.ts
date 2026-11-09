@@ -8,6 +8,8 @@ ARCHIVE_BYTES=64*1024
 MAX_FILES=500
 STATE_BYTES=1024*1024
 CAP=1024*1024*1024
+LOOKUP_RECORDS=10000
+LOOKUP_METADATA=4*1024*1024
 
 def fail(message):
     raise ValueError(message)
@@ -295,11 +297,53 @@ def manifest_for(ref,state,store):
     if files!=manifest['files'] or directories!=manifest['directories']: fail('retained payload integrity mismatch')
     return manifest,root
 
+class LookupLimit(Exception): pass
+def reuse_entries(state,store):
+    count=0;records=0;metadata=0
+    for entry in state['entries'].values():
+        count+=1;e=effective_entry(entry,store);metadata+=len(encoded(e))+e.get('_adminBytes',0)
+        if count>LOOKUP_RECORDS or metadata>LOOKUP_METADATA: raise LookupLimit()
+        yield e
+    for aid,record in archives(store):
+        records+=1;metadata+=len(encoded(record))
+        if records>LOOKUP_RECORDS or metadata>LOOKUP_METADATA: raise LookupLimit()
+        if aid in state['attempts']: continue
+        for entry in record['entries'].values():
+            count+=1;e=effective_entry(entry,store);metadata+=len(encoded(e))+e.get('_adminBytes',0)
+            if count>LOOKUP_RECORDS or metadata>LOOKUP_METADATA: raise LookupLimit()
+            yield e
+
+def lookup_identity(raw):
+    fields={'definitionHash','inputHashes','codeTree','image','argvHash','envHash','seed','producerVersion'}
+    if not isinstance(raw,dict) or set(raw)!=fields: fail('invalid reuse execution identity')
+    for field in ('definitionHash','argvHash','envHash'): hexhash(raw[field])
+    if not isinstance(raw['codeTree'],str) or not re.fullmatch(r'[a-f0-9]{40}|[a-f0-9]{64}',raw['codeTree']): fail('invalid reuse code tree')
+    if not isinstance(raw['image'],str) or len(raw['image'])>512 or not re.search(r'@sha256:[a-f0-9]{64}$',raw['image']): fail('invalid reuse image')
+    if type(raw['seed'])!=int or not isinstance(raw['producerVersion'],str) or not raw['producerVersion'] or len(raw['producerVersion'])>128: fail('invalid reuse version or seed')
+    if not isinstance(raw['inputHashes'],dict) or len(raw['inputHashes'])>32: fail('invalid reuse input identities')
+    for port,value in raw['inputHashes'].items(): ident(port);hexhash(value)
+    return raw
+
+def reuse_source(ref,q,state,store):
+    entry=find_entry(ref,state,store)
+    if not entry: return None,'missing'
+    if entry['tombstone']: return None,'pruned'
+    if entry['attemptId']==q['attemptId'] or state['attempts'].get(entry['attemptId'],{}).get('active',False): return None,'ineligible-source'
+    manifest,_=manifest_for(ref,state,store)
+    if 'reuseKey' not in manifest: return None,'unsupported'
+    if manifest['reuseKey']!=q['key']: return None,'corrupt'
+    observation=manifest.get('observed')
+    if not isinstance(observation,dict) or type(observation.get('exitCode'))!=int or observation['exitCode']!=0 or not isinstance(observation.get('containerId'),str) or not re.fullmatch(r'[a-f0-9]{64}',observation['containerId']) or not isinstance(observation.get('endedAt'),str): return None,'corrupt'
+    try: datetime.datetime.fromisoformat(observation['endedAt'].replace('Z','+00:00'))
+    except Exception: return None,'corrupt'
+    if manifest['stage']!=q['stage'] or manifest['identity']!=q['expected'] or manifest['outputs']!=q['outputs']: return None,'ineligible-source'
+    return manifest,None
+
 def perform(q):
     global study
     if not isinstance(q,dict): fail('request object required')
     study=ident(q.get('studyId'),'study');op=q.get('op')
-    if op not in ('reserve','release','seal','verify','materialize','inspect','prune','snapshot'): fail('unsupported retention operation')
+    if op not in ('reserve','release','seal','verify','materialize','inspect','prune','snapshot','lookup'): fail('unsupported retention operation')
     base=physical(sys.argv[1],True)
     study_root=os.path.join(base,study);store=os.path.join(study_root,'.retained')
     if op=='reserve':
@@ -331,7 +375,7 @@ def perform(q):
         if state.get('v')!=1: fail('unsupported retention state')
         def save():
             compact(state,store);atomic(state_path,state,STATE_BYTES)
-        if op not in ('inspect','verify','snapshot'): compact(state,store)
+        if op not in ('inspect','verify','snapshot','lookup'): compact(state,store)
         def usage():
             used=0;administrative=0
             for entry in all_entries(state,store): used+=entry['bytes'];administrative+=entry.get('_adminBytes',0)
@@ -401,6 +445,42 @@ def perform(q):
             return {'op':op,'fingerprint':fingerprint,'pruned':len(keys)}
         aid=ident(q.get('attemptId'),'attempt');attempt=state['attempts'].get(aid)
         if not attempt or not attempt['active']: fail('active retention reservation required')
+        if op=='lookup':
+            q['stage']=ident(q.get('stage'));q['key']=hexhash(q.get('key'));q['expected']=lookup_identity(q.get('expected'))
+            outputs=q.get('outputs')
+            if not isinstance(outputs,dict) or not outputs or len(outputs)>32: fail('invalid reuse output declaration')
+            for port,path in outputs.items(): ident(port);relative(path)
+            if q['stage']=='evaluator': return {'op':op,'hit':False,'reason':'ineligible-source'}
+            selections=attempt.get('reuseSelections',{})
+            if not isinstance(selections,dict) or len(selections)>16: fail('invalid reuse selections')
+            prior=selections.get(q['stage']);chosen=None;miss='missing'
+            try:
+                if prior is not None:
+                    if not isinstance(prior,dict) or set(prior)!={'key','ref'} or prior['key']!=q['key']: return {'op':op,'hit':False,'reason':'ineligible-source'}
+                    manifest,reason=reuse_source(prior['ref'],q,state,store)
+                    if reason: return {'op':op,'hit':False,'reason':reason}
+                    chosen=(prior['ref'],manifest)
+                else:
+                    for entry in reuse_entries(state,store):
+                        if entry.get('reuseKey')!=q['key']: continue
+                        ref=ref_for(entry);manifest,reason=reuse_source(ref,q,state,store)
+                        if reason:
+                            miss=reason
+                            # A matching but malformed source never triggers unbounded payload retries.
+                            if reason in ('corrupt','unsupported'): return {'op':op,'hit':False,'reason':reason}
+                            continue
+                        chosen=(ref,manifest);break
+            except LookupLimit: return {'op':op,'hit':False,'reason':'scan-cap'}
+            except FileNotFoundError: return {'op':op,'hit':False,'reason':'missing'}
+            except ValueError as error: return {'op':op,'hit':False,'reason':'unsupported' if str(error).startswith('unsupported') else 'corrupt'}
+            except (OSError,KeyError,TypeError): return {'op':op,'hit':False,'reason':'corrupt'}
+            if chosen is None: return {'op':op,'hit':False,'reason':miss}
+            ref,manifest=chosen;source_key=key(ref)
+            if prior is None or source_key not in attempt['consumers']:
+                if prior is None and len(selections)>=16: fail('reuse selection bound exceeded')
+                selections[q['stage']]={'key':q['key'],'ref':ref};attempt['reuseSelections']=selections
+                attempt['consumers']=sorted(set(attempt['consumers']+[source_key]));save()
+            return {'op':op,'hit':True,'ref':ref,'manifest':manifest,'sha256':ref['sha256'],'manifestBytes':len(read_bytes(os.path.join(store,'objects',ref['attemptId'],ref['stage'],'manifest.json'),MAX_META))}
         workspace=physical(os.path.join(study_root,aid),True)
         def code_hash(source):
             root=within(source,workspace);physical(root)
@@ -410,6 +490,10 @@ def perform(q):
         stage=ident(q.get('stage'))
         if op=='seal':
             source=within(q['source'],workspace);physical(source)
+            reuse_key=q.get('reuseKey')
+            if reuse_key is not None:
+                hexhash(reuse_key)
+                if stage=='evaluator': fail('evaluator outputs cannot be indexed for reuse')
             observation=q['observed'];identity=q['identity'];outputs=q['outputs'];metadata_limit=q.get('metadataLimit',MAX_META)
             if type(metadata_limit)!=int or metadata_limit<0 or metadata_limit>MAX_META: fail('invalid shared metadata limit')
             if not isinstance(observation,dict) or set(observation)!={'containerId','endedAt','exitCode'} or not isinstance(identity,dict) or set(identity)!={'definitionHash','inputHashes','codeTree','image','argvHash','envHash','seed','producerVersion'}: fail('invalid producing manifest fields')
@@ -430,7 +514,7 @@ def perform(q):
             if k in state['entries']:
                 prior=state['entries'][k]
                 manifest,root=manifest_for(ref_for(prior),state,store)
-                if manifest['identity']!=identity or manifest['observed']!=observation or manifest['outputs']!=outputs: fail('stage already sealed with different provenance')
+                if manifest['identity']!=identity or manifest['observed']!=observation or manifest['outputs']!=outputs or manifest.get('reuseKey')!=reuse_key: fail('stage already sealed with different provenance')
                 sidecars=sum(e['metadataBytes'] for e in state['entries'].values() if e['attemptId']==aid)
                 if sidecars>metadata_limit: fail('cumulative shared metadata limit exceeded')
                 return {'op':op,'manifest':manifest,'sha256':prior['sha256'],'manifestBytes':prior['metadataBytes'],'sidecarBytes':sidecars}
@@ -438,14 +522,14 @@ def perform(q):
             if os.path.lexists(published_root):
                 physical(published_root)
                 raw=read_bytes(os.path.join(published_root,'manifest.json'),MAX_META);manifest=json.loads(raw)
-                if manifest.get('v')!=1 or manifest.get('studyId')!=study or manifest.get('attemptId')!=aid or manifest.get('stage')!=stage or manifest.get('identity')!=identity or manifest.get('observed')!=observation or manifest.get('outputs')!=outputs: fail('unindexed publication provenance mismatch')
+                if manifest.get('v')!=1 or manifest.get('studyId')!=study or manifest.get('attemptId')!=aid or manifest.get('stage')!=stage or manifest.get('identity')!=identity or manifest.get('observed')!=observation or manifest.get('outputs')!=outputs or manifest.get('reuseKey')!=reuse_key: fail('unindexed publication provenance mismatch')
                 files,dirs,total=inventory(os.path.join(published_root,'data'))
                 original,original_dirs,_=selected_inventory(source,paths)
                 if manifest.get('files')!=files or manifest.get('directories')!=dirs or original!=files or original_dirs!=dirs: fail('unindexed publication integrity mismatch')
                 siblings=[e for e in state['entries'].values() if e['attemptId']==aid and not e['tombstone']]
                 if sum(e['payloadBytes'] for e in siblings)+total>MAX_BYTES or sum(e['files'] for e in siblings)+len(files)>MAX_FILES or sum(e['metadataBytes'] for e in siblings)+len(raw)>metadata_limit: fail('cumulative attempt output or metadata limit exceeded')
                 if sum(e['bytes'] for e in siblings)+total+len(raw)>attempt['reservation']: fail('retention reservation exceeded')
-                state['entries'][k]={'attemptId':aid,'stage':stage,'sha256':digest(raw),'bytes':total+len(raw),'payloadBytes':total,'metadataBytes':len(raw),'files':len(files),'tombstone':False};save()
+                state['entries'][k]={'attemptId':aid,'stage':stage,'sha256':digest(raw),'bytes':total+len(raw),'payloadBytes':total,'metadataBytes':len(raw),'files':len(files),'tombstone':False,**({'reuseKey':reuse_key} if reuse_key is not None else {})};save()
                 return {'op':op,'manifest':manifest,'sha256':digest(raw),'manifestBytes':len(raw),'sidecarBytes':sum(e['metadataBytes'] for e in siblings)+len(raw)}
             tmp=os.path.join(store,'quarantine',aid+'-'+stage+'.pending')
             if os.path.lexists(tmp): writable_remove(tmp)
@@ -461,7 +545,7 @@ def perform(q):
                 # Rehash producer bytes without a second payload copy before publication.
                 original,original_dirs,_=selected_inventory(source,paths)
                 if original!=files or original_dirs!=dirs: fail('producer output changed during seal')
-                manifest={'v':1,'studyId':study,'attemptId':aid,'stage':stage,'identity':identity,'observed':observation,'outputs':outputs,'files':files,'directories':dirs}
+                manifest={'v':1,'studyId':study,'attemptId':aid,'stage':stage,'identity':identity,'observed':observation,'outputs':outputs,'files':files,'directories':dirs,**({'reuseKey':reuse_key} if reuse_key is not None else {})}
                 raw=encoded(manifest)
                 siblings=[e for e in state['entries'].values() if e['attemptId']==aid and not e['tombstone']]
                 if sum(e['payloadBytes'] for e in siblings)+total>MAX_BYTES or sum(e['files'] for e in siblings)+len(files)>MAX_FILES or sum(e['metadataBytes'] for e in siblings)+len(raw)>metadata_limit: fail('cumulative attempt output or metadata limit exceeded')
@@ -471,7 +555,7 @@ def perform(q):
                 if os.path.lexists(final): fail('publication changed under retention lock; inspect executor integrity')
                 freeze_dirs(data);os.chmod(os.path.join(tmp,'manifest.json'),0o400)
                 os.rename(tmp,final);syncdir(parent)
-                state['entries'][k]={'attemptId':aid,'stage':stage,'sha256':digest(raw),'bytes':total+len(raw),'payloadBytes':total,'metadataBytes':len(raw),'files':len(files),'tombstone':False}
+                state['entries'][k]={'attemptId':aid,'stage':stage,'sha256':digest(raw),'bytes':total+len(raw),'payloadBytes':total,'metadataBytes':len(raw),'files':len(files),'tombstone':False,**({'reuseKey':reuse_key} if reuse_key is not None else {})}
                 save()
                 return {'op':op,'manifest':manifest,'sha256':digest(raw),'manifestBytes':len(raw),'sidecarBytes':sum(e['metadataBytes'] for e in siblings)+len(raw)}
             finally:

@@ -25,7 +25,9 @@ export async function readAttemptLogs(dir: string, wanted: string, options: LogO
   const result: LogReadResult = { id: attempt.id, logs: [] };
   const sources: { stage: Stage; candidateStage?: string; record?: AttemptStage }[] = [];
   if (attempt.pipeline) {
-    for (const parent of attempt.pipeline.completed) sources.push({ stage: "candidate", candidateStage: parent.name, record: parent.record });
+    const reused = attempt.pipeline.completed.find(parent => parent.reuse && parent.name === options.candidateStage);
+    if (reused) throw new Error(`attempt logs: candidate was reused; read source attempt ${reused.ref.attemptId} with --candidate-stage ${reused.name}`);
+    for (const parent of attempt.pipeline.completed.filter(parent => !parent.reuse)) sources.push({ stage: "candidate", candidateStage: parent.name, record: parent.record });
     if (attempt.stage === "candidate") sources.push({ stage: "candidate", candidateStage: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name, record: attempt.stages.candidate });
   } else sources.push({ stage: "candidate", record: attempt.stages.candidate });
   sources.push({ stage: "evaluator", record: attempt.stages.evaluator });

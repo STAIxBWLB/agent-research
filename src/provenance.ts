@@ -24,7 +24,7 @@ export interface ExecutionReferenceV1 { v: 1; tool: "ares"; projectKey: string; 
 export type ProvenanceState = "current" | "historical" | "corrupt" | "unavailable" | "declared-unresolved";
 export interface ProvenanceProof { file: string; sha256: string; ledgerIndex?: number; recordSha256?: string; sourceBindingSha256?: string; recordType?: string; nativeId?: string }
 export interface ProvenanceNode { ref: ExecutionReferenceV1; state: ProvenanceState; availability: "available" | "receipt-only" | "missing" | "not-read"; proof: ProvenanceProof; data?: Record<string, string | number | boolean | null> }
-export type ProvenanceRelation = "contains" | "retryOf" | "parent" | "cites-attempt" | "produced" | "dispatched" | "observed-in" | "expected-attempt" | "observed-attempt" | "observed-output" | "closed" | "reviewed" | "uses-attempt" | "names-idea" | "uses-closed-result" | "uses-source";
+export type ProvenanceRelation = "contains" | "retryOf" | "parent" | "cites-attempt" | "produced" | "dispatched" | "observed-in" | "expected-attempt" | "observed-attempt" | "observed-output" | "closed" | "reviewed" | "uses-attempt" | "names-idea" | "uses-closed-result" | "uses-source" | "reused-from";
 export interface ProvenanceEdge { from: ExecutionReferenceV1; to: ExecutionReferenceV1; relation: ProvenanceRelation; proof: ProvenanceProof }
 export interface ProvenanceIssue { code: string; message: string; ref?: ExecutionReferenceV1 }
 export interface ProvenancePage {
@@ -197,7 +197,8 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
       const retryInvalid = value.retryOf !== undefined && (typeof value.retryOf !== "string" || !ATTEMPT.test(value.retryOf) || value.retryOf === value.id);
       const outputsInvalid = !Array.isArray(value.outputs) || value.outputs.length > 500 || new Set(value.outputs.map(output => plain(output) ? output.path : undefined)).size !== value.outputs.length || value.outputs.some(output => !plain(output) || typeof output.sha256 !== "string" || !HASH.test(output.sha256) || !Number.isSafeInteger(output.bytes) || output.bytes < 0);
       const issue = (attemptCounts.get(value.id) ?? 0) > 1 ? "duplicate-attempt-id" : retryInvalid ? "corrupt-retry-reference" : outputsInvalid ? "corrupt-output-inventory" : identity ? "attempt-study-identity-mismatch" : start.length === 0 ? "missing-attempt-start-receipt" : start.length > 1 ? "duplicate-attempt-start-receipt" : start[0]!.data.run !== value.run || start[0]!.data.commit !== value.commit || start[0]!.data.seed !== value.seed ? "attempt-start-identity-mismatch" : latest?.data.status !== undefined && latest.data.status !== value.status ? "attempt-receipt-mismatch" : undefined;
-      graph.put({ ref, state: issue ? "corrupt" : "current", availability: "available", proof, data: { status: value.status, stage: value.stage, seed: Number.isSafeInteger(value.seed) ? value.seed : null } });
+      const reuse = issue ? undefined : attemptReuseView(value);
+      graph.put({ ref, state: issue ? "corrupt" : "current", availability: "available", proof, data: { status: value.status, stage: value.stage, seed: Number.isSafeInteger(value.seed) ? value.seed : null, ...(reuse ? {executedStages: reuse.executedStages, reusedStages: reuse.reusedStages, independentSamples: reuse.independentSamples, freshEvaluations: reuse.freshEvaluations} : {}) } });
       if (value.studyId === source.study.id) owned(ref, proof);
       if (issue) graph.issue(issue, ref);
     }
@@ -209,9 +210,11 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
       if (graph.nodes.get(key(ref))?.state !== "current") continue;
       const proof = graph.proof(file);
       if (value.retryOf !== undefined) graph.edge(ref, graph.target("attempt", value.retryOf, proof), "retryOf", proof);
+      const reuse = attemptReuseView(value);
+      for (const source of reuse?.sources ?? []) graph.edge(ref, graph.target("attempt", source.ref.attemptId, proof), "reused-from", proof);
       for (const output of value.outputs) { graph.touch();
         const artifact = graph.ref("artifact", output.sha256, { sha256: output.sha256 });
-        graph.put({ ref: artifact, state: "current", availability: "not-read", proof, data: { bytes: output.bytes, bodyRead: false } }); graph.edge(ref, artifact, "produced", proof);
+        graph.put({ ref: artifact, state: "current", availability: "not-read", proof, data: { bytes: output.bytes, bodyRead: false } }); graph.edge(ref, artifact, reuse?.reusedStages ? "observed-output" : "produced", proof);
       }
     }
     const ideas = foldIdeas(events);
@@ -441,9 +444,53 @@ export function readProvenance(dirArg: string, options: ProvenanceOptions = {}):
   return page;
 }
 
+export interface AttemptReuseView {
+  v: 1; mode: "off" | "eligible"; forceFresh: boolean;
+  executedCandidateStages: number; reusedCandidateStages: number; executedStages: number; reusedStages: number; freshEvaluations: number; independentSamples: number;
+  sources: { candidateStage: string; key: string; ref: {attemptId: string; stage: string; sha256: string}; original: {wallSeconds: number | "unknown"; gpuHours: number | "unknown"; cpuSeconds: "unknown"}; verificationMs: number | "unknown"; materializationMs: number | "unknown" }[];
+  stages: {name: string; outcome: "fresh" | "reused"; reason: string}[];
+  costs: {originalWallSeconds: number | "unknown"; originalGpuHours: number | "unknown"; originalCpuSeconds: "unknown"; verificationMilliseconds: number | "unknown"; materializationMilliseconds: number | "unknown"; observedPreflightFailureMilliseconds: number | "unknown"; totalFailureMilliseconds: "unknown"; clockRelationship: "subsets-of-attempt-wall-do-not-sum"; currentCpuSeconds: "unknown"; storageBytes: "unknown"; transferBytes: "unknown"};
+}
+/** Descriptive projection only: original source computation is never counted as current execution. */
+export function attemptReuseView(value: Attempt): AttemptReuseView | undefined {
+  if (value.v !== 3) return undefined;
+  const raw = value.reuse;
+  const completed = value.pipeline?.completed ?? [];
+  if (completed.length > 16) fail("reuse-view-stage-cap", true);
+  const entries = completed.map(parent => ({parent, receipt: parent.reuse}));
+  if (raw === undefined && entries.every(entry => entry.receipt === undefined)) return undefined;
+  if (!plain(raw) || (raw.mode !== "off" && raw.mode !== "eligible") || typeof raw.forceFresh !== "boolean") fail("malformed-reuse-metadata");
+  const measured = (n: unknown): number | "unknown" => typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : "unknown";
+  const sources: AttemptReuseView["sources"] = [];
+  let executedCandidateStages = 0;
+  for (const {parent, receipt} of entries) {
+    if (receipt === undefined) { if (typeof parent.record.containerId === "string" && HASH.test(parent.record.containerId)) executedCandidateStages++; continue; }
+    if (!plain(receipt) || receipt.v !== 1 || typeof receipt.key !== "string" || !HASH.test(receipt.key) || !plain(receipt.source) || typeof receipt.source.attemptId !== "string" || !ATTEMPT.test(receipt.source.attemptId) || typeof receipt.source.stage !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/.test(receipt.source.stage) || typeof receipt.source.sha256 !== "string" || !HASH.test(receipt.source.sha256) || !plain(receipt.original) || receipt.source.stage !== parent.name || receipt.source.attemptId === value.id || receipt.source.attemptId !== parent.ref.attemptId || receipt.source.stage !== parent.ref.stage || receipt.source.sha256 !== parent.ref.sha256) fail("malformed-reuse-receipt");
+    sources.push({candidateStage: parent.name, key: receipt.key, ref: {attemptId: receipt.source.attemptId, stage: receipt.source.stage, sha256: receipt.source.sha256},
+      original: {wallSeconds: measured(receipt.original.wallSeconds), gpuHours: measured(receipt.original.gpuHours), cpuSeconds: "unknown"}, verificationMs: measured(receipt.verificationMs), materializationMs: measured(receipt.materializationMs)});
+  }
+  if (value.stage === "candidate" && typeof value.stages.candidate?.containerId === "string" && HASH.test(value.stages.candidate.containerId)) executedCandidateStages++;
+  const freshEvaluations = typeof value.stages.evaluator?.containerId === "string" && HASH.test(value.stages.evaluator.containerId) ? 1 : 0;
+  const stageMap = plain(raw.stages) ? raw.stages : {};
+  const stages: AttemptReuseView["stages"] = [];
+  for (const definition of value.pipeline?.definition.candidate.stages ?? []) {
+    const entry = stageMap[definition.name];
+    if (!plain(entry) || (entry.outcome !== "fresh" && entry.outcome !== "reused")) continue;
+    stages.push({name: definition.name, outcome: entry.outcome, reason: typeof entry.reason === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(entry.reason) ? entry.reason : "unknown"});
+  }
+  const total = (key: "wallSeconds" | "gpuHours"): number | "unknown" => {
+    let sum = 0;
+    for (const source of sources) { const n = source.original[key]; if (n === "unknown") return "unknown"; sum += n; }
+    return Number.isFinite(sum) ? sum : "unknown";
+  };
+  return {v: 1, mode: raw.mode, forceFresh: raw.forceFresh, executedCandidateStages, reusedCandidateStages: sources.length, executedStages: executedCandidateStages + freshEvaluations, reusedStages: sources.length, freshEvaluations, independentSamples: value.status === "succeeded" && freshEvaluations === 1 && !sources.length && value.retryOf === undefined ? 1 : 0, sources, stages,
+    costs: {originalWallSeconds: total("wallSeconds"), originalGpuHours: total("gpuHours"), originalCpuSeconds: "unknown", verificationMilliseconds: measured(raw.verificationMs), materializationMilliseconds: measured(raw.materializationMs), observedPreflightFailureMilliseconds: measured(raw.failureMs), totalFailureMilliseconds: "unknown", clockRelationship: "subsets-of-attempt-wall-do-not-sum", currentCpuSeconds: "unknown", storageBytes: "unknown", transferBytes: "unknown"}};
+}
+
 export interface AttemptComparison {
   id: string; code: {commit: string; treeId: string; snapshotSha256: string | null}; protocolHash: string; seed: number; status: Attempt["status"];
   retryOf: string | null; retryAncestry: string[]; sampleGroup: string;
+  reuse?: AttemptReuseView;
   comparabilityReasons: string[]; metrics: Attempt["metrics"]; artifactDigests: string[];
   costs: {wallMilliseconds: number | "unknown"; storageBytes: number | "unknown"; compute: "unknown"; transfer: "unknown"; verification: "unknown"; retention: "unknown"; materialization: "unknown"; idle: "unknown"; person: "unknown"};
 }
@@ -459,7 +506,9 @@ function comparisonAttempt(value: Attempt, attempts: Map<string, Attempt>): Atte
   let protocol: ReturnType<typeof validateProtocolDefinition>;
   try { protocol = value.pipeline ? validateProtocolDefinition(value.pipeline.definition) : validateStoredProtocol(value.protocol); } catch { return fail("malformed-comparison-protocol"); }
   if (protocolHash(protocol) !== value.protocolHash) fail("protocol-hash-mismatch");
+  const reuse = attemptReuseView(value);
   const metricReasons: string[] = [];
+  if (reuse?.reusedStages) metricReasons.push("reused-computation-not-independent");
   if (new Set(value.metrics.map(metric => metric.name)).size !== value.metrics.length) metricReasons.push("duplicate-metric-names");
   if (value.metrics.some(metric => !protocol.metrics.some(declared => declared.name === metric.name && declared.unit === metric.unit))) metricReasons.push("undeclared-metrics");
   if (protocol.metrics.some(declared => !value.metrics.some(metric => metric.name === declared.name && metric.unit === declared.unit))) metricReasons.push("missing-declared-metrics");
@@ -473,7 +522,7 @@ function comparisonAttempt(value: Attempt, attempts: Map<string, Attempt>): Atte
   const start = Date.parse(value.startedAt), end = value.endedAt === undefined ? NaN : Date.parse(value.endedAt), storage = value.outputs.reduce((sum, output) => sum + output.bytes, 0);
   return { id: value.id, code: {commit: value.commit, treeId: value.treeId, snapshotSha256: value.snapshotSha256 ?? null}, protocolHash: value.protocolHash, seed: value.seed, status: value.status,
     retryOf: value.retryOf ?? null, retryAncestry: ancestry, sampleGroup: sha256(canonical([value.commit, value.protocolHash, value.seed])), comparabilityReasons: metricReasons, metrics: value.metrics,
-    artifactDigests: [...new Set(value.outputs.map(output => output.sha256))].sort(), costs: {wallMilliseconds: Number.isFinite(start) && Number.isFinite(end) && end >= start ? end - start : "unknown", storageBytes: (value.status === "succeeded" || value.outputs.length > 0) && Number.isSafeInteger(storage) ? storage : "unknown", compute: "unknown", transfer: "unknown", verification: "unknown", retention: "unknown", materialization: "unknown", idle: "unknown", person: "unknown"} };
+    ...(reuse === undefined ? {} : {reuse}), artifactDigests: [...new Set(value.outputs.map(output => output.sha256))].sort(), costs: {wallMilliseconds: Number.isFinite(start) && Number.isFinite(end) && end >= start ? end - start : "unknown", storageBytes: (value.status === "succeeded" || value.outputs.length > 0) && Number.isSafeInteger(storage) ? storage : "unknown", compute: "unknown", transfer: "unknown", verification: "unknown", retention: "unknown", materialization: "unknown", idle: "unknown", person: "unknown"} };
 }
 /** Descriptive rows only: no arithmetic, new winner, result receipt, executor reads or effects. */
 export function compareLineage(dirArg: string, options: {attempts?: string[]; candidates?: string[]}): LineageComparison {

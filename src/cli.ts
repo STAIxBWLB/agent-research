@@ -266,7 +266,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       count(spec, positional, 1);
       const repo = str("--repo"), commit = str("--commit"), chosenSeed = seed(str("--seed"));
       if (!repo || !commit) throw new Error("attempt run: repo/commit missing; use --repo PATH --commit FULL_40_HEX_SHA");
-      const attempt = await ops.attemptRun(positional[0]!, { repo, commit, ...(chosenSeed !== undefined ? { seed: chosenSeed } : {}), ...(str("--run") !== undefined ? { run: str("--run") } : {}), ...(str("--label") !== undefined ? { label: str("--label") } : {}), ...(str("--retry") !== undefined ? { retry: str("--retry") } : {}), detach: !!flags["--detach"] }, ctx);
+      const attempt = await ops.attemptRun(positional[0]!, { repo, commit, ...(chosenSeed !== undefined ? { seed: chosenSeed } : {}), ...(str("--run") !== undefined ? { run: str("--run") } : {}), ...(str("--label") !== undefined ? { label: str("--label") } : {}), ...(str("--retry") !== undefined ? { retry: str("--retry") } : {}), ...(str("--reuse") !== undefined ? { reuse: str("--reuse") as "off" | "eligible" } : {}), ...(flags["--force-fresh"] ? { forceFresh: true } : {}), detach: !!flags["--detach"] }, ctx);
       if (attempt.status === "deferred") code = 75;
       else if (attempt.status !== "running" && attempt.status !== "succeeded") code = 1;
       result = attempt; break;
