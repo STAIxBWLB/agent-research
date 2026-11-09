@@ -67,5 +67,5 @@ export function inspectLocalEvidence(dir: string, raw: unknown, snapshot?: Retur
     else if (data.family === "investigate") result.outcome = {status: typeof data.winner === "boolean" ? data.winner ? "winner" : "no-winner" : "closed", success: false};
     else result.outcome = {status: ref.kind === "closed-result" || ref.kind === "paper-evidence" ? "closed" : "not-applicable", success: false};
     return result;
-  } catch {return base("unavailable", ref);}
+  } catch (cause) {return base(cause instanceof Error && cause.message.includes("unsupported") ? "unsupported" : "unavailable", ref);}
 }

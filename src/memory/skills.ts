@@ -1,7 +1,7 @@
-import {inspectSkillEvidenceSet, compareSkillInspections, evidenceFingerprint, requireSkillEvidence, type SkillCheckOptions} from "./skill-check.ts";
+import {inspectSkillEvidenceSet, compareSkillInspections, evidenceFingerprint, requireSkillEvidence, unsupportedSourceGuidance, type SkillCheckOptions} from "./skill-check.ts";
 import type {EvidenceInspection} from "./evidence.ts";
 import {canonical} from "../plan/state.ts";
-import {skillMarkdownV2, validateSkillProposalV2, validateSkillInputV2, type SkillProposalV2} from "./skill-format.ts";
+import {skillMarkdownV2, validateSkillProposalV2, validateSkillInputV2, validateSkillInspections, type SkillProposalV2} from "./skill-format.ts";
 import { lstatSync } from "node:fs";
 import { join } from "node:path";
 import { assertWritable, boundedText, commit, onlyKeys, openStudy, plain, readLedger, readTextBounded, sha256, assertStudyReadLock, type Actor, type LedgerEvent } from "../study.ts";
@@ -71,8 +71,7 @@ export function foldSkills(events: LedgerEvent[]): SkillRecord[] {
       if (v === 2 && action === "accept" && (typeof event.data.evidenceFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(event.data.evidenceFingerprint))) bad("v2 acceptance lacks its evidence fingerprint; restore the original decision event");
       let observed: EvidenceInspection[] | undefined, localGeneration: string | null | undefined;
       if (row.skillProposal === 2 && action === "accept") {
-        const {state: _state, sha256: _sha, actor: _actor, at: _at, decision: _decision, skillProposal: _v, evidenceStatus: _status, ...proposal} = row;
-        observed = validateSkillProposalV2({...proposal, inspections: event.data.inspections}).inspections;
+        observed = validateSkillInspections(event.data.inspections, [...row.evidence, ...row.counterevidence]);
         localGeneration = event.data.localGeneration as string | null;
         const hasLocal = observed.some(inspection => inspection.ref?.tool === "ares");
         if (hasLocal ? typeof localGeneration !== "string" || localGeneration.length !== 64 || !/^[a-f0-9]{64}$/.test(localGeneration) : localGeneration !== null) bad("v2 acceptance localGeneration must be a 64-hex digest exactly when inspections include ares refs, otherwise null; restore its original receipt");
@@ -106,7 +105,7 @@ export async function proposeSkill(dirArg: string, raw: unknown, actor: Actor, o
   const refs = [...new Map([...input.evidence, ...input.counterevidence].map(ref => [canonical(ref), ref])).values()];
   const checked = await inspectSkillEvidenceSet(dir, refs, options);
   if (canonical(readSkills(dir).rows) !== canonical(current.rows)) requireSkillEvidence("proposal journal changed during inspection", "propose");
-  if (!checked.recheck()) requireSkillEvidence("local source changed or aggregate source budget exhausted during proposal inspection", "propose");
+  if (!checked.recheck()) requireSkillEvidence(checked.localFailure === "unsupported" ? "unsupported ares source record version" : "local source changed or aggregate source budget exhausted during proposal inspection", "propose", checked.inspections);
   const proposal = validateSkillProposalV2({...input, inspections: checked.inspections}, study.id);
   const content = skillMarkdownV2(proposal), hash = sha256(content);
   const added = commit(dir, [[file(dir, proposal.name), content, SKILL_BYTES]], [{actor, type: "skill.proposed", data: {skillProposal: 2, proposal, sha256: hash}}]);
@@ -115,14 +114,15 @@ export async function proposeSkill(dirArg: string, raw: unknown, actor: Actor, o
 export async function checkSkill(dir: string, name: string, options: SkillCheckOptions = {}) {
   const target = nameOf(name); let row: SkillRecord | undefined;
   try {row = readSkills(dir).rows.find(row => row.name === target);}
-  catch (cause) {return {name: target, state: cause instanceof Error && cause.message.includes("unsupported") ? "unsupported" : "unavailable", inspections: [], acceptReady: false, support: "reviewer-judgment", nextStep: "Restore the versioned study/proposal and its receipts, then run ares skill check again; keep unsupported versions unchanged"};}
+  catch (cause) {return {name: target, state: cause instanceof Error && cause.message.includes("unsupported") ? "unsupported" : "unavailable", inspections: [], acceptReady: false, support: "reviewer-judgment", nextStep: cause instanceof Error && cause.message.includes("unsupported") ? "use a compatible ares version or restore the local record, keeping bytes unchanged; run ares skill check again" : "Restore the versioned study/proposal and its receipts, then run ares skill check again; keep unsupported versions unchanged"};}
   if (!row) return {name: target, state: "missing", inspections: [], acceptReady: false, support: "reviewer-judgment", nextStep: "Select a recorded name with ares skill list or create a new proposal"};
   if (row.skillProposal === 1) return {name: row.name, proposalSha256: row.sha256, skillProposal: 1, state: "unsupported", legacyUnresolved: true, inspections: [], acceptReady: false, support: "reviewer-judgment", nextStep: row.state === "proposed" ? "Legacy bytes/decisions are preserved; create a new v2 proposal for evidence-backed checks" : "Decision is final; create a revised v2 proposal for new evidence. Legacy bytes and the recorded decision remain unchanged"};
   const refs = [...new Map([...row.evidence, ...row.counterevidence].map(ref => [canonical(ref), ref])).values()], checked = await inspectSkillEvidenceSet(dir, refs, options), reasons = compareSkillInspections(row.inspections, checked.inspections);
   try {if (canonical(readSkills(dir).rows.find(current => current.name === row.name)) !== canonical(row)) reasons.push("proposal-changed");} catch {reasons.push("proposal-changed");}
-  if (!checked.recheck()) reasons.push("local-source-changed-or-budget-exhausted");
+  if (!checked.recheck()) reasons.push(checked.localFailure ?? "local-source-changed-or-budget-exhausted");
+  const sourceGuidance = unsupportedSourceGuidance(checked.inspections);
   const sourcesReady = reasons.length === 0, ready = sourcesReady && row.state === "proposed", state = sourcesReady ? "available" : checked.remainingMs <= 0 ? "unavailable" : reasons.some(reason => reason.includes("changed")) ? "changed" : reasons.includes("unsupported") ? "unsupported" : reasons.includes("missing") ? "missing" : "unavailable";
-  return {name: row.name, proposalSha256: row.sha256, skillProposal: 2, state, inspections: checked.inspections, acceptReady: ready, support: "reviewer-judgment", evidenceFingerprint: evidenceFingerprint(row.sha256, checked.inspections, checked.localGeneration), localGeneration: checked.localGeneration, responseBytes: checked.bytes, reasons, nextStep: row.state !== "proposed" ? "Decision is final; create a revised proposal for new evidence" : ready ? "Source integrity is not support: a reviewer decides using the supplied PR reference" : state === "unsupported" ? "Restore supporting source readers (amem >=0.22.1 with screened exact-id amem_show); create a revised proposal with current evidence/counterevidence and honest limitations" : "Create a revised proposal with current evidence/counterevidence and honest limitations"};
+  return {name: row.name, proposalSha256: row.sha256, skillProposal: 2, state, inspections: checked.inspections, acceptReady: ready, support: "reviewer-judgment", evidenceFingerprint: evidenceFingerprint(row.sha256, checked.inspections, checked.localGeneration), localGeneration: checked.localGeneration, responseBytes: checked.bytes, reasons, nextStep: row.state !== "proposed" ? `Decision is final; create a revised proposal for new evidence${sourceGuidance ? `; ${sourceGuidance}` : ""}` : ready ? "Source integrity is not support: a reviewer decides using the supplied PR reference" : state === "unsupported" ? `${sourceGuidance || "use a supporting source reader"}; create a revised proposal with current evidence/counterevidence and honest limitations` : "Create a revised proposal with current evidence/counterevidence and honest limitations"};
 }
 /** Caller holds the owned study lock. Final decisions never open, inspect or merge a PR. */
 export async function decideSkill(dirArg: string, name: string, decision: string, reason: string, pr: string | undefined, actor: Actor, options: SkillCheckOptions = {}): Promise<SkillRecord> {
@@ -133,11 +133,13 @@ export async function decideSkill(dirArg: string, name: string, decision: string
   if (row.skillProposal === 2 && action === "accept") {
     if (!options.lock) requireSkillEvidence("v2 acceptance requires an owned study transaction"); assertStudyReadLock(dir, options.lock);
     const checked = await inspectSkillEvidenceSet(dir, [...new Map([...row.evidence, ...row.counterevidence].map(ref => [canonical(ref), ref])).values()], options), reasons = compareSkillInspections(row.inspections, checked.inspections);
-    if (reasons.length) requireSkillEvidence(`required evidence or counterevidence is changed/unavailable (${[...new Set(reasons)].join(", ")})`);
+    if (reasons.length) requireSkillEvidence(`required evidence or counterevidence is changed/unavailable (${[...new Set(reasons)].join(", ")})`, "accept", checked.inspections);
     if (canonical(readSkills(dir).rows) !== canonical(rows) || !checked.recheck()) requireSkillEvidence("local source/proposal changed or aggregate source budget exhausted before decision");
     assertStudyReadLock(dir, options.lock);
     evidence = {evidenceFingerprint: evidenceFingerprint(row.sha256, checked.inspections, checked.localGeneration), inspections: checked.inspections, localGeneration: checked.localGeneration};
   }
-  const added = commit(dir, [], [{actor, type: "skill.decided", data: {skillProposal: row.skillProposal, name: target, decision: action, reason: why, ...(reference === undefined ? {} : {pr: reference}), ...evidence}}]);
+  const pending = {actor, type: "skill.decided", data: {skillProposal: row.skillProposal, name: target, decision: action, reason: why, ...(reference === undefined ? {} : {pr: reference}), ...evidence}};
+  foldSkills([...events, {v: 1, at: new Date().toISOString(), ...pending}]);
+  const added = commit(dir, [], [pending]);
   return foldSkills([...events, ...added]).find(row => row.name === target)!;
 }

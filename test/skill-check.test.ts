@@ -1,6 +1,6 @@
 import * as studyModule from "../src/study.ts";
 import * as amemShow from "../src/memory/amem-show.ts";
-import {validateSkillProposalV2} from "../src/memory/skill-format.ts";
+import {validateSkillProposalV2, skillMarkdownV2} from "../src/memory/skill-format.ts";
 import {legacySkillFixture} from "./legacy-skill-fixture.ts";
 import {mkdirSync} from "node:fs";
 import {metricProtocol, metricAttempt} from "./metric-fixtures.ts";
@@ -203,4 +203,38 @@ test("proposal journal drift uses proposal guidance while preserving the other w
   const fake = transport(view, () => {legacySkillFixture(f.dir, {name: "other-writer", summary: "Synthetic other proposal", steps: ["Inspect"], evidence: [B]}, f.ctx.actor); afterExternal = bytes(f.dir);});
   let message = ""; try {await ops.skillPropose(f.dir, input([A]), {...f.ctx, runner: fake.runner, now: () => time}, f.env);} catch (cause) {message = (cause as Error).message;}
   expect(message).toStartWith("skill propose:"); expect(message).toContain("journal changed"); expect(message).toContain("revise the proposal input"); expect(message).not.toContain("before deciding"); expect(bytes(f.dir)).toEqual(afterExternal); expect(ops.skillList(f.dir).map(row => row.name)).toEqual(["other-writer"]);
+});
+
+
+test("near-limit proposal accepts a longer fresh timestamp and remains readable without rewriting proposal bytes", async () => {
+  const f = fixture(), fake = transport(); let now = time; const ctx = {...f.ctx, runner: fake.runner, now: () => now};
+  const baseline = await ops.skillPropose(f.dir, input([A]), ctx, f.env); if (baseline.skillProposal !== 2) throw new Error();
+  const template = {...baseline, name: "boundary-procedure", summary: "s", steps: Array(12).fill("x".repeat(1000))}, summaryBytes = SKILL_BYTES - (Buffer.byteLength(skillMarkdownV2(template)) - 1);
+  expect(summaryBytes).toBeGreaterThan(0); expect(summaryBytes).toBeLessThanOrEqual(4000);
+  const proposed = await ops.skillPropose(f.dir, {...input([A]), name: template.name, steps: template.steps, summary: "s".repeat(summaryBytes)}, ctx, f.env); if (proposed.skillProposal !== 2) throw new Error();
+  const file = join(f.dir, "proposals", "skills", proposed.name + ".md"), original = readBytesBounded(file, SKILL_BYTES); expect(original).toHaveLength(SKILL_BYTES);
+  now = Date.parse("+010000-01-01T00:00:00Z");
+  const accepted = await ops.skillDecide(f.dir, proposed.name, "accept", "Reviewed boundary case", pr, ctx, undefined, f.env), inspections = accepted.decision?.inspections; if (!inspections) throw new Error();
+  expect(inspections[0]!.observedAt!.length).toBeGreaterThan(proposed.inspections[0]!.observedAt!.length);
+  expect(Buffer.byteLength(skillMarkdownV2({...proposed, inspections}))).toBeGreaterThan(SKILL_BYTES);
+  expect(accepted.state).toBe("accepted"); expect(ops.skillList(f.dir).find(row => row.name === proposed.name)?.state).toBe("accepted"); expect(provenance.readProvenance(f.dir).status).toBe("ok");
+  expect(readBytesBounded(file, SKILL_BYTES)).toEqual(original); expect(readLedger(f.dir).filter(event => event.type === "skill.decided")).toHaveLength(1);
+});
+
+test("unsupported local source exception is preserved and gives ares-specific check/accept guidance without changing bytes", async () => {
+  const f = fixture(), row = await ops.skillPropose(f.dir, input([f.local]), f.ctx), file = join(f.dir, "executor.json");
+  writeAtomic(file, JSON.stringify({v: 99, kind: "local", workdir: "/synthetic-private-work"}), 8192);
+  const before = bytes(f.dir), source = readBytesBounded(file, 8192), checked = await ops.skillCheck(f.dir, row.name);
+  expect(checked).toMatchObject({state: "unsupported", acceptReady: false}); expect(checked.inspections[0]?.state).toBe("unsupported");
+  expect(checked.nextStep).toContain("compatible ares version"); expect(checked.nextStep).toContain("restore the local record, keeping bytes unchanged"); expect(checked.nextStep).not.toContain("amem");
+  let message = ""; try {await ops.skillDecide(f.dir, row.name, "accept", "Cannot interpret future source", pr, f.ctx);} catch (cause) {message = (cause as Error).message;}
+  expect(message).toContain("unsupported"); expect(message).toContain("compatible ares version"); expect(message).not.toContain("amem"); expect(bytes(f.dir)).toEqual(before); expect(readBytesBounded(file, 8192)).toEqual(source);
+});
+
+test("unsupported amem source guidance names the screened owner contract instead of a local-record repair", async () => {
+  const f = fixture(), initial = transport(), ctx = {...f.ctx, runner: initial.runner, now: () => time}, row = await ops.skillPropose(f.dir, input([A]), ctx, f.env), unsupported = transport(view, undefined, "0.22.0");
+  const checked = await ops.skillCheck(f.dir, row.name, {...ctx, runner: unsupported.runner}, f.env);
+  expect(checked.state).toBe("unsupported"); expect(checked.nextStep).toContain("amem >=0.22.1 with screened exact-id amem_show"); expect(checked.nextStep).not.toContain("restore the local record");
+  const before = bytes(f.dir); let message = ""; try {await ops.skillDecide(f.dir, row.name, "accept", "Reader unsupported", pr, {...ctx, runner: unsupported.runner}, undefined, f.env);} catch (cause) {message = (cause as Error).message;}
+  expect(message).toContain("amem >=0.22.1 with screened exact-id amem_show"); expect(message).not.toContain("compatible ares version"); expect(bytes(f.dir)).toEqual(before);
 });

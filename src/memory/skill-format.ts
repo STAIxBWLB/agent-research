@@ -48,6 +48,13 @@ function inspection(value: unknown, studyId?: string): EvidenceInspection {
   }
   return result;
 }
+/** Decision receipts validate independently of the immutable proposal Markdown ceiling. */
+export function validateSkillInspections(raw: unknown, references: readonly SkillEvidenceReference[], studyId?: string): EvidenceInspection[] {
+  if (!Array.isArray(raw) || raw.length > SKILL_EVIDENCE) bad();
+  const observed = raw.map(value => inspection(value, studyId)), expected = new Set(references.map(value => JSON.stringify(ref(value, studyId)))), keys = observed.map(value => JSON.stringify(value.ref));
+  if (expected.size > SKILL_EVIDENCE || keys.length !== expected.size || new Set(keys).size !== keys.length || keys.some(key => !expected.has(key))) bad();
+  return observed;
+}
 /** New input never supplies source-owned inspection receipts. Historical v1 parsing stays separate. */
 export function validateSkillInputV2(raw: unknown, studyId: string): Omit<SkillProposalV2, "inspections"> {
   const row = object(raw, ["name", "summary", "steps", "evidence", "applicability", "limitations", "counterevidence"]);
@@ -60,9 +67,8 @@ export function validateSkillProposalV2(raw: unknown, studyId?: string): SkillPr
   const row = object(raw, ["name", "summary", "steps", "evidence", "applicability", "limitations", "counterevidence", "inspections"]);
   if (typeof row.name !== "string" || !isHarnessGate(`harness:${row.name}`) || !Array.isArray(row.steps) || !row.steps.length || row.steps.length > 64 || !Array.isArray(row.inspections) || row.inspections.length > SKILL_EVIDENCE) bad();
   const limitations = row.limitations === undefined ? [] : row.limitations; if (!Array.isArray(limitations) || limitations.length > 16) bad();
-  const proposal: SkillProposalV2 = {name: row.name, summary: text(row.summary, 4000), steps: row.steps.map(value => text(value, 1000)), evidence: refs(row.evidence, true, studyId), ...(row.applicability !== undefined ? {applicability: text(row.applicability, 2000)} : {}), limitations: limitations.map(value => text(value, 1000)), counterevidence: refs(row.counterevidence === undefined ? [] : row.counterevidence, false, studyId), inspections: row.inspections.map(value => inspection(value, studyId))};
-  const expected = new Set([...proposal.evidence, ...proposal.counterevidence].map(value => JSON.stringify(value))), observed = proposal.inspections.map(value => JSON.stringify(value.ref));
-  if (expected.size > SKILL_EVIDENCE || observed.length !== expected.size || new Set(observed).size !== observed.length || observed.some(value => !expected.has(value))) bad();
+  const evidence = refs(row.evidence, true, studyId), counterevidence = refs(row.counterevidence === undefined ? [] : row.counterevidence, false, studyId);
+  const proposal: SkillProposalV2 = {name: row.name, summary: text(row.summary, 4000), steps: row.steps.map(value => text(value, 1000)), evidence, ...(row.applicability !== undefined ? {applicability: text(row.applicability, 2000)} : {}), limitations: limitations.map(value => text(value, 1000)), counterevidence, inspections: validateSkillInspections(row.inspections, [...evidence, ...counterevidence], studyId)};
   assertWritable(skillMarkdownV2(proposal), SKILL_BYTES, "skill v2 proposal"); return proposal;
 }
 export function skillMarkdownV2(proposal: SkillProposalV2): string {
