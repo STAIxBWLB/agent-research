@@ -1,5 +1,5 @@
 import {expect, test} from "bun:test";
-import {existsSync, symlinkSync} from "node:fs";
+import {existsSync, mkdirSync, symlinkSync, unlinkSync} from "node:fs";
 import {join} from "node:path";
 import * as ops from "../src/commands.ts";
 import {run} from "../src/cli.ts";
@@ -8,6 +8,7 @@ import {harnessRoundBinding, validateHarnessRound} from "../src/harness/rounds.t
 import {validateHarnessStream, validateExperienceRequest, experienceSourceEligibility, EXPERIENCE_INDEX_BYTES} from "../src/harness/experience.ts";
 import {readTextBounded, readBytesBounded, readLedger, writeAtomic, sha256, gateState} from "../src/study.ts";
 import {canonical} from "../src/plan/state.ts";
+import {lessonFixture, acceptedLesson, lessonIdentity} from "./lesson-fixtures.ts";
 import {fakeHttp, fakeRunner, tempDir} from "./helpers.ts";
 import type {ProcessRunner} from "../src/exp/executor.ts";
 const stream = () => ({v: 1, id: "stream-one", revision: 1, tasks: ["task-a", "task-b", "task-c"]});
@@ -68,7 +69,8 @@ test("temporal checks exclude current/future, cross-study, missing and incompati
 
 test("context binds only the frozen improver identity; legacy round and worker baseline bindings remain distinct", async () => {
   const f = fixture(), legacy = validateHarnessRound(round()), old = harnessRoundBinding(legacy);
-  expect(old).toBe(sha256(canonical(legacy))); expect(legacy.context).toBeUndefined();
+  // Frozen from origin/main base 77a8ad4: actual validateHarnessRound + harnessRoundBinding output.
+  expect(old).toBe("a5534d1f27729072b6913e036064754e14f6cede97632f8198b1a803491be9c6"); expect(legacy.context).toBeUndefined();
   await ops.harnessStreamSet(f.dir, stream(), f.ctx);
   const value = await ops.experienceFreeze(f.dir, request(), f.ctx), context = {streamSha256: value.streamSha256, improverContextHash: value.improverContextHash};
   await expect(ops.harnessSet(f.dir, round(), f.ctx)).rejects.toThrow("requires a frozen context");
@@ -113,7 +115,7 @@ test("strict bounds, privacy and unsupported fields refuse before any write or s
   expect(ledger(f.dir)).toEqual(saved); expect(f.transport.requests).toHaveLength(0);
 });
 
-test("future/missing/corrupt/linked stream and context files are preserved and fail closed", async () => {
+test("future-version stream/context and linked design files are preserved and fail closed", async () => {
   for (const name of ["harness-stream.json", "harness-experience.json"]) {
     const f = fixture(); await ops.harnessStreamSet(f.dir, stream(), f.ctx); await ops.experienceFreeze(f.dir, request(), f.ctx);
     const file = join(f.dir, "design", name); writeAtomic(file, JSON.stringify({v: 99}), EXPERIENCE_INDEX_BYTES); const before = ledger(f.dir), raw = readBytesBounded(file, EXPERIENCE_INDEX_BYTES);
@@ -123,6 +125,31 @@ test("future/missing/corrupt/linked stream and context files are preserved and f
   const f = fixture(), target = tempDir(); symlinkSync(target, join(f.dir, "design")); const before = ledger(f.dir);
   await expect(ops.harnessStreamSet(f.dir, stream(), f.ctx)).rejects.toThrow("linked"); expect(ledger(f.dir)).toEqual(before); expect(existsSync(join(target, "harness-stream.json"))).toBe(false);
 });
+
+for (const name of ["harness-stream.json", "harness-experience.json"]) {
+  for (const damage of ["missing", "malformed", "unreceipted"]) test(`${name} ${damage} refuses reads and freeze without repairing bytes or receipts`, async () => {
+    const native = fixture();
+    await ops.harnessStreamSet(native.dir, stream(), native.ctx);
+    await ops.experienceFreeze(native.dir, request(), native.ctx);
+    let f = native;
+    if (damage === "unreceipted") {
+      f = fixture();
+      if (name === "harness-experience.json") await ops.harnessStreamSet(f.dir, stream(), f.ctx);
+      mkdirSync(join(f.dir, "design"), {recursive: true});
+      // Copy genuine native producer bytes but deliberately omit their corresponding receipt.
+      writeAtomic(join(f.dir, "design", name), readTextBounded(join(native.dir, "design", name), EXPERIENCE_INDEX_BYTES), EXPERIENCE_INDEX_BYTES);
+    } else if (damage === "missing") unlinkSync(join(f.dir, "design", name));
+    else writeAtomic(join(f.dir, "design", name), "{malformed synthetic JSON", EXPERIENCE_INDEX_BYTES);
+    const paths = ["design/harness-stream.json", "design/harness-experience.json"];
+    const capture = () => paths.map(path => existsSync(join(f.dir, path)) ? readBytesBounded(join(f.dir, path), EXPERIENCE_INDEX_BYTES) : null);
+    const before = ledger(f.dir), files = capture();
+    expect(() => ops.harnessStreamShow(f.dir)).toThrow("experience");
+    await expect(ops.experienceFreeze(f.dir, request(), f.ctx)).rejects.toThrow("experience");
+    expect(ledger(f.dir)).toEqual(before); expect(capture()).toEqual(files);
+    expect(f.transport.requests).toHaveLength(0); expect(native.transport.requests).toHaveLength(0);
+    expect(existsSync(join(f.dir, ".ares.lock"))).toBe(false);
+  });
+}
 
 test("CLI/MCP stream, freeze and pre-handoff check share handlers and leave source bodies absent", async () => {
   const f = fixture(), server = createAresMcp(f.env, f.ctx.http, f.ctx), io = {...f.ctx, readStdin: async () => JSON.stringify(stream())};
@@ -138,7 +165,7 @@ test("CLI/MCP stream, freeze and pre-handoff check share handlers and leave sour
   expect(persisted).not.toContain("text\":"); expect(persisted).not.toContain("context\":"); expect(persisted).not.toContain("workerEffectiveInputHash");
 });
 
-test("select ranks existing lessons but screens only explicit exact ids and never promotes them to prior experience", async () => {
+test("select ranks generic lessons but refuses unreceipted selections without an exact-id source read", async () => {
   const f = fixture(); await ops.harnessStreamSet(f.dir, stream(), f.ctx); const before = ledger(f.dir), fullId = "a".repeat(32), otherId = "b".repeat(32), shown: string[] = [];
   const hits = [fullId, otherId].map((id, index) => ({id, kind: "finding", title: "Synthetic lesson", at: "2030-01-01T00:00:00Z", about: [], scoreDetails: {finalScore: 2 - index, recencyFactor: 1}}));
   const calls: string[] = [];
@@ -157,8 +184,8 @@ test("select ranks existing lessons but screens only explicit exact ids and neve
   };
   const ctx = {...f.ctx, runner, now: () => Date.parse("2030-01-02T00:00:00Z")}, raw = {...request(), condition: "prior-experience", selected: [{id: fullId, reason: "Synthetic procedural relevance"}]};
   const result = await ops.experienceSelect(f.dir, raw, ctx, f.env);
-  expect(result.ranked.map(value => value.id)).toEqual([fullId, otherId]); expect(shown).toEqual([fullId]); expect(calls).toEqual(["search", "mcp"]);
-  expect(result).toMatchObject({state: "unavailable", eligible: false, selected: [{sourceState: "available", state: "unavailable"}]});
+  expect(result.ranked.map(value => value.id)).toEqual([fullId, otherId]); expect(shown).toEqual([]); expect(calls).toEqual(["search"]);
+  expect(result).toMatchObject({state: "unavailable", eligible: false, prepareOnly: true, liveEligible: false, transfer: "not-demonstrated", selected: [{id: fullId, state: "unavailable", digest: null}]});
   const server = createAresMcp(f.env, f.ctx.http, ctx);
   const cli = await run(["experience", "select", f.dir, "--file", "-", "--json"], f.env, {...ctx, readStdin: async () => JSON.stringify(raw)});
   expect(JSON.parse(cli.text)).toEqual(await server.handlers.ares_experience_select!({study: f.dir, selection: raw}));
@@ -172,4 +199,29 @@ test("survey and incomplete CLI forms fail before processes or writes", async ()
     await expect(run(argv, g.env, {...g.ctx, readStdin: async () => {inputs++; return "{}";}})).rejects.toThrow("usage:");
   }
   expect(inputs).toBe(0); expect(g.transport.requests).toHaveLength(0); expect(existsSync(join(g.dir, "design"))).toBe(false);
+});
+
+for (const damage of ["missing", "malformed", "unreceipted"] as const) for (const condition of ["baseline", "no-library"] as const) test(`empty ${condition} ignores ${damage} lesson index in freeze, check and select`, async () => {
+  const f = await lessonFixture(true); await acceptedLesson(f);
+  const path = join(f.dir, "proposals", "lessons.json");
+  if (damage === "missing") unlinkSync(path);
+  else writeAtomic(path, damage === "malformed" ? "{malformed synthetic index" : JSON.stringify({v: 1, proposals: []}), EXPERIENCE_INDEX_BYTES);
+  const index = existsSync(path) ? readTextBounded(path, EXPERIENCE_INDEX_BYTES) : null;
+  const raw = {v: 1, round: "empty-later", taskId: "task-later", condition, ...lessonIdentity, selected: []};
+  const frozen = await ops.experienceFreeze(f.dir, raw, f.ctx, f.env), before = ledger(f.dir);
+  expect(frozen.entries).toEqual([]);
+  const checked = await ops.experienceCheck(f.dir, raw.round, lessonIdentity, f.ctx, f.env);
+  expect(checked).toMatchObject({state: "available", context: "", bytes: 0, observations: []});
+  const search = fakeRunner([{exitCode: 0, stdout: "[]", stderr: ""}]);
+  const selected = await ops.experienceSelect(f.dir, {...raw, round: "empty-last", taskId: "task-last"}, {...f.ctx, runner: search.runner}, f.env);
+  expect(selected).toMatchObject({state: "available", selected: []}); expect(search.requests.map(value => value.args[0])).toEqual(["search"]);
+  expect(ledger(f.dir)).toEqual(before); expect(existsSync(path) ? readTextBounded(path, EXPERIENCE_INDEX_BYTES) : null).toBe(index); expect(f.transport.requests).toEqual([]);
+});
+test("CLI and MCP refuse an explicitly empty toolset hash through shared validation", async () => {
+  const f = fixture(); await ops.harnessStreamSet(f.dir, stream(), f.ctx); await ops.experienceFreeze(f.dir, request(), f.ctx, f.env);
+  const before = ledger(f.dir), server = createAresMcp(f.env, f.ctx.http, f.ctx);
+  const cli = run(["experience", "check", f.dir, request().round, "--model", identity.model, "--runtime", identity.runtime, "--toolset-sha256", ""], f.env, f.ctx);
+  await expect(cli).rejects.toThrow("lowercase SHA-256 required");
+  await expect(server.handlers.ares_experience_check!({study: f.dir, round: request().round, ...identity, toolsetSha256: ""})).rejects.toThrow("lowercase SHA-256 required");
+  expect(ledger(f.dir)).toEqual(before); expect(f.transport.requests).toEqual([]);
 });

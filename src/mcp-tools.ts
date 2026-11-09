@@ -79,6 +79,10 @@ const SELECTION = obj({
 const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), parent: text(64), commit: { type: "string", minLength: 40, maxLength: 40 } }, ["id", "title", "hypothesis"]);
 
 export const ARES_TOOLS: readonly McpTool[] = [
+  {name: "ares_lesson_propose", description: "Propose a bounded lesson from a closed native harness round. Inspect required evidence/counterevidence explicitly; fixture-only single-task observations never establish real behavior, success or transfer.", inputSchema: obj({study, proposal: {type: "object"}}, ["study", "proposal"]), annotations: net},
+  {name: "ares_lesson_list", description: "Read stored lesson proposals and dispositions locally, without current source checks. Stored eligibility is not fresh proof; no body or activation.", inputSchema: obj({study}, ["study"]), annotations: read},
+  {name: "ares_lesson_check", description: "Explicitly recheck a lesson's current native closure and screened evidence/counterevidence without writing. Integrity never establishes support; no body is retained.", inputSchema: obj({study, name: text(64)}, ["study", "name"]), annotations: {...read, openWorldHint: true}},
+  {name: "ares_lesson_decide", description: "Record a hash-bound lesson disposition. Acceptance rechecks sources under the study lock and requires exact fixture-strength acknowledgement; not adoption, activation or transfer evidence.", inputSchema: obj({study, name: text(64), decision: obj({decision: {type: "string", enum: ["accept", "reject", "withdraw"]}, proposalSha256: text(64), evidenceFingerprint: text(64), reason: text(2000), acknowledgeStrength: text(1000)}, ["decision", "proposalSha256", "evidenceFingerprint", "reason"])}, ["study", "name", "decision"]), annotations: net},
   { name: "ares_skill_check", description: "Explicit read-only source check of a proposal under one 25s/256KiB aggregate response budget. Evidence and counterevidence share the same owner-screened exact-id/local snapshot rules. Integrity/outcome never imply support; no body, export or installation.", inputSchema: obj({study, name: text(64)}, ["study", "name"]), annotations: {...read, openWorldHint: true} },
   { name: "ares_harness_close", description: "Preview/confirm an immutable baseline-kept, inconclusive or withdrawn closure without any adoption. Record binding, current evidence fingerprint, outcome, actor and reason; source/evidence drift marks it stale and preserves it. Never scientific success or transfer.", inputSchema: obj({study, round: text(64), closure: {type: "object"}, confirm: text(64)}, ["study", "round", "closure"]), annotations: write },
   { name: "ares_harness_contrast", description: "Record an actor-attributed fixture contrast against current admitted probe/output hashes and evidence fingerprint. Subjective judgments stay separate from task checks; no native metric or transfer authority.", inputSchema: obj({study, round: text(64), contrast: {type: "object"}}, ["study", "round", "contrast"]), annotations: write },
@@ -86,9 +90,9 @@ export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_harness_adopt", description: "Preview an experimental fixture-only adoption with a distinct independent deterministic check (unavailable for current fixtures); confirm its returned fingerprint to commit disposition and closure together under the round gate. Does not create correctness, scientific success or demonstrated transfer.", inputSchema: obj({study, round: text(64), decision: {type: "object"}, confirm: text(64)}, ["study", "round", "decision"]), annotations: write },
   { name: "ares_harness_stream_set", description: "Fix an immutable ordered 1..16-task experiment stream before its first harness round. No source reads or execution.", inputSchema: obj({study, stream: {type: "object"}}, ["study", "stream"]), annotations: write },
   { name: "ares_harness_stream_show", description: "Read the receipted immutable local harness stream without writes or source reads.", inputSchema: obj({study}, ["study"]), annotations: read },
-  { name: "ares_experience_select", description: "Rank existing project lessons; exact-id screen only explicit selections. Nonempty prospective experience remains unavailable until native round closure/lesson receipts exist. Stores no bodies and makes no memory writes.", inputSchema: obj({study, selection: {type: "object"}}, ["study", "selection"]), annotations: {...read, openWorldHint: true} },
-  { name: "ares_experience_freeze", description: "Freeze an immutable body-free context before a round starts. Only empty baseline/no-library controls can freeze until native source closure exists. No automatic activation or memory write.", inputSchema: obj({study, context: {type: "object"}}, ["study", "context"]), annotations: write },
-  { name: "ares_experience_check", description: "Pre-handoff local integrity and model/runtime check plus owning screened exact-id source recheck. Unavailable/changed sources block the frozen context. Does not launch improvement or worker sessions.", inputSchema: obj({study, round: text(64), model: text(128), runtime: text(128)}, ["study", "round", "model", "runtime"]), annotations: {...read, openWorldHint: true} },
+  { name: "ares_experience_select", description: "Rank project lessons, then screen only explicit full ids backed by earlier same-study accepted unchanged lesson/archive receipts. Fixture-only preparation, never live/controlled eligibility; stores no bodies or memory writes.", inputSchema: obj({study, selection: {type: "object"}}, ["study", "selection"]), annotations: {...read, openWorldHint: true} },
+  { name: "ares_experience_freeze", description: "Freeze immutable body-free source pins before a round. Empty controls or screened earlier reviewed/archived fixture lessons only; model/runtime/toolset must match. Synthetic context refuses controlled/live use. No activation or memory write.", inputSchema: obj({study, context: {type: "object"}}, ["study", "context"]), annotations: net },
+  { name: "ares_experience_check", description: "Pre-handoff local integrity and model/runtime check plus owning screened exact-id source recheck. Unavailable/changed sources block the frozen context. Does not launch improvement or worker sessions.", inputSchema: obj({study, round: text(64), model: text(128), runtime: text(128), toolsetSha256: text(64)}, ["study", "round", "model", "runtime"]), annotations: {...read, openWorldHint: true} },
   { name: "ares_harness_set", description: "Set an experiment's bounded ares-owned harness round definition; no model/probe launch. Guidance and frozen refs bind a separate harness gate.", inputSchema: obj({study, round: {type: "object"}}, ["study", "round"]), annotations: write },
   { name: "ares_harness_show", description: "Read local harness definitions and synthetic fixture declarations. End-to-end evaluation and real producer import stay unavailable.", inputSchema: obj({study, round: text(64)}, ["study"]), annotations: read },
   { name: "ares_harness_import", description: "Record a declared ares-owned synthetic probe fixture under the round gate. Not producer wire import, host-observed evidence or a matched execution; never starts probes.", inputSchema: obj({study, round: text(64), fixture: {type: "object"}}, ["study", "round", "fixture"]), annotations: write },
@@ -165,6 +169,10 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
   const background = new Map<Promise<void>, () => void>();
   const track = (completion: Promise<void>, terminate: () => void) => { background.set(completion, terminate); void completion.then(() => { background.delete(completion); }); };
   const handlers: Record<string, McpHandler> = {
+    ares_lesson_propose: a => ops.lessonPropose(dir(a), a.proposal, ctx, env),
+    ares_lesson_list: a => ops.lessonList(dir(a)),
+    ares_lesson_check: a => ops.lessonCheck(dir(a), a.name as string, ctx, env),
+    ares_lesson_decide: a => ops.lessonDecide(dir(a), a.name as string, a.decision, ctx, env),
     ares_skill_check: a => ops.skillCheck(dir(a), a.name as string, ctx, env),
     ares_harness_close: a => ops.harnessClose(dir(a), a.round as string, a.closure, a.confirm as string | undefined, ctx),
     ares_harness_contrast: a => ops.harnessContrast(dir(a), a.round as string, a.contrast, ctx),
@@ -172,9 +180,9 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
     ares_harness_adopt: a => ops.harnessAdopt(dir(a), a.round as string, a.decision, a.confirm as string | undefined, ctx),
     ares_harness_stream_set: a => ops.harnessStreamSet(dir(a), a.stream, ctx),
     ares_harness_stream_show: a => ops.harnessStreamShow(dir(a)),
-    ares_experience_select: a => ops.experienceSelect(dir(a), a.selection, ctx, memoryEnv),
-    ares_experience_freeze: a => ops.experienceFreeze(dir(a), a.context, ctx),
-    ares_experience_check: a => ops.experienceCheck(dir(a), a.round as string, {model: a.model as string, runtime: a.runtime as string}, ctx, memoryEnv),
+    ares_experience_select: a => ops.experienceSelect(dir(a), a.selection, ctx, env),
+    ares_experience_freeze: a => ops.experienceFreeze(dir(a), a.context, ctx, env),
+    ares_experience_check: a => ops.experienceCheck(dir(a), a.round as string, {model: a.model as string, runtime: a.runtime as string, ...(a.toolsetSha256 !== undefined ? {toolsetSha256: a.toolsetSha256 as string} : {})}, ctx, env),
     ares_lineage_show: a => ops.lineageShow(dir(a), { ...(a.root === undefined ? {} : { root: a.root as ExecutionReferenceV1 }), ...(a.cursor === undefined ? {} : { cursor: a.cursor as string }) }),
     ares_lineage_compare: a => ops.lineageCompare(dir(a), { ...(a.attempts === undefined ? {} : { attempts: a.attempts as string[] }), ...(a.candidates === undefined ? {} : { candidates: a.candidates as string[] }) }),
     ares_autonomy_show: a => ops.autonomyShow(dir(a)),
@@ -187,7 +195,7 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
     ares_console_list: () => ops.consoleList(env),
     ares_manifest: () => ops.manifest(),
     ares_setup: a => ops.setup(a.target as string, (a.mode ?? "dry-run") as SetupMode, env, { ...(a.root === undefined ? {} : { root: absolute(a.root, "root") }), ...(a.cwd === undefined ? {} : { cwd: absolute(a.cwd, "cwd") }) }),
-    ares_archive: a => ops.archive(dir(a), { ...(a.confirm === undefined ? {} : { confirm: a.confirm as string }) }, ctx, memoryEnv),
+    ares_archive: a => ops.archive(dir(a), { ...(a.confirm === undefined ? {} : { confirm: a.confirm as string }) }, ctx, memoryEnv, undefined, {...runtime, env}),
     ares_lessons: a => ops.lessons(dir(a), { ...(a.for === undefined ? {} : { for: a.for as string }), ...(a.halfLife === undefined ? {} : { halfLife: a.halfLife as number }), ...(a.limit === undefined ? {} : { limit: a.limit as number }) }, ctx, memoryEnv),
     ares_skill_propose: a => ops.skillPropose(dir(a), a.proposal, ctx, env),
     ares_skill_decide: a => ops.skillDecide(dir(a), a.name as string, a.decision as string, a.reason as string, a.pr as string | undefined, ctx, undefined, env),

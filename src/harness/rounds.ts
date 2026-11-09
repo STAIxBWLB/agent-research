@@ -146,13 +146,17 @@ export function importHarnessFixture(dirArg: string, roundId: string, raw: unkno
   commit(current.dir, [], [...approval, {actor, type: "harness.probe.declared", data: {v: 1, round: round.id, binding: binding(round), projectionSha256: hash, sourceStrength: "synthetic-fixture", projection}}]);
   return {round: round.id, binding: binding(round), projectionSha256: hash, sourceStrength: "synthetic-fixture" as const, matched: false as const, endToEndEvaluation: "unavailable" as const, projection};
 }
-export function showHarness(dirArg: string, roundId?: string) {
+export function readHarnessViews(dirArg: string, roundId?: string) {
   const current = read(dirArg), rounds = roundId === undefined ? current.rounds : current.rounds.filter(round => round.id === id(roundId));
   if (roundId !== undefined && !rounds.length) fail("round missing");
   const views = rounds.map(round => {
     const probes = current.probes.filter(probe => probe.round === round.id), active = probes.filter(probe => probe.binding === binding(round)), baseline = active.find(probe => probe.projection.arm === "baseline");
     return {definition: round, binding: binding(round), transitions: transitionView(round, binding(round), active, transitionBucket(current.transitions, round.id, binding(round)), current.transitions.closures.get(round.id)), historicalImports: probes.length - active.length, probes: active, comparisons: active.filter(probe => probe.projection.arm !== "baseline").map(probe => ({arm: probe.projection.arm, ...(baseline ? compareProbeFixtures(baseline.projection, probe.projection) : {compatible: false, matched: false, sourceStrength: "synthetic-fixture", endToEndEvaluation: "unavailable", reasons: ["baseline-unavailable"], confounders: ["producer-unavailable"]})}))};
   });
+  return views;
+}
+export function showHarness(dirArg: string, roundId?: string) {
+  const views = readHarnessViews(dirArg, roundId);
   const result = (visible: typeof views) => ({v: 1, endToEndEvaluation: "unavailable" as const, realImport: "unavailable" as const, rounds: visible, truncated: visible.length !== views.length, remaining: views.length - visible.length});
   const visible: typeof views = [];
   for (const view of views) {if (Buffer.byteLength(JSON.stringify(result([...visible, view]))) > HARNESS_INDEX_BYTES) break; visible.push(view);}
