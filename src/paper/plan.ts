@@ -1,4 +1,4 @@
-import { resolvePointEvidence, type PointEvidenceResolution } from "./point-evidence.ts";
+import { resolvePointEvidence, pointEvidenceAdvice, type PointEvidenceResolution } from "./point-evidence.ts";
 import { lstatSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { commit, openStudy, plain, readBytesBounded, sha256, type Actor } from "../study.ts";
@@ -60,7 +60,7 @@ function points(raw: unknown, scope: ReadonlySet<string>, ids: Set<string>, reso
           if (!resolution || typeof resolution.resolved !== "boolean") invalid("point evidence resolver returned an invalid source result");
           resolutions.set(ref, resolution);
         }
-        if (!resolution.resolved) invalid(`point evidence does not resolve to an existing extraction card or attempt record; ${resolution.reason?.slice(0, 500) ?? "restore it or remove the reference"}`);
+        if (!resolution.resolved) invalid(`point evidence does not resolve to an existing extraction card or attempt record; ${pointEvidenceAdvice(resolution)}`);
         return ref;
       });
     }

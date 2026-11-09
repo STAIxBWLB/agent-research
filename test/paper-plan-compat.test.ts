@@ -143,4 +143,4 @@ test("no-point v1 plans reports and plan-bound evidence remain byte-identical to
     built++;
   }
   expect(built).toBe(2); expect(refused).toBe(1);
-}, 30_000);
+});

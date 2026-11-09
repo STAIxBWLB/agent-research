@@ -4,7 +4,11 @@ import { lstatSync, opendirSync } from "node:fs";
 import { join } from "node:path";
 import { openStudy, readTextBounded } from "../study.ts";
 
-export interface PointEvidenceResolution { resolved: boolean; reason?: string }
+export interface PointEvidenceResolution { resolved: boolean; reason?: string; code?: "run-limit" }
+/** Only typed local failure classes may become advice; never propagate a source's free-text error. */
+export function pointEvidenceAdvice(resolution: PointEvidenceResolution): string {
+  return resolution.code === "run-limit" ? "more than 4096 run directories; archive the study before checking point evidence" : "restore the referenced card or attempt record, or revise the point evidence";
+}
 class PointEvidenceBound extends Error {}
 function physicalDirectory(file: string): boolean {
   try { const stat = lstatSync(file); if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("unsafe attempt directory"); return true; }
@@ -52,7 +56,7 @@ export function resolvePointEvidence(dir: string, reference: string): PointEvide
       return {resolved: true};
     }
   } catch (error) {
-    if (error instanceof PointEvidenceBound) return {resolved: false, reason: error.message};
+    if (error instanceof PointEvidenceBound) return {resolved: false, code: "run-limit", reason: error.message};
     return {resolved: false, reason: "local evidence is missing, malformed or unsupported; restore its last valid card/attempt record and rerun ares paper check"};
   }
   return {resolved: false, reason: "unsupported evidence address; use only current-study card:<paper-id> or attempt:<16-hex-id>"};

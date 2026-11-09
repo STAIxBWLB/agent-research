@@ -115,9 +115,9 @@ test("plan addition and removal stale prior builds while absence retains legacy 
 test("build rechecks plan presence and exact bytes before its single publication commit", async () => {
   for (const fault of ["added", "removed", "changed"] as const) {
     const f = fixture(); if (fault !== "added") await ops.paperPlanSet(f.dir, plan(), ctx); await ops.paperBuild(f.dir, ctx);
-    const paths = paperBuildPaths(f.dir), before = readBytesBounded(paths.evidence, PAPER_EVIDENCE_BYTES), beforeLedger = ledger(f.dir), original = plans.readPaperPlanSnapshot;
+    const paths = paperBuildPaths(f.dir), before = readBytesBounded(paths.evidence, PAPER_EVIDENCE_BYTES), beforeLedger = ledger(f.dir), original = plans.readPaperPlanCheckSnapshot;
     let once = false;
-    const spy = spyOn(plans, "readPaperPlanSnapshot").mockImplementation((...args: Parameters<typeof original>) => {
+    const spy = spyOn(plans, "readPaperPlanCheckSnapshot").mockImplementation((...args: Parameters<typeof original>) => {
       const snapshot = original(...args);
       if (!once) { once = true; if (fault === "removed") unlinkSync(f.file); else writeAtomic(f.file, JSON.stringify(plan()) + (fault === "changed" ? "\n\n" : "\n"), plans.PAPER_PLAN_BYTES); }
       return snapshot;

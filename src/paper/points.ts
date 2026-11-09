@@ -76,7 +76,7 @@ export function paperPointFindings(dir: string, manuscript: string, codeMask: Ui
         evidenceResults.set(ref, resolution);
       }
       if (!resolution.resolved) hits.push({code: "unresolved-point-evidence", severity: "blocking", ...context,
-        message: `point ${point.id} evidence ${ref.slice(0, 80)} does not resolve; ${resolution.reason?.slice(0, 500) ?? "restore the referenced card or attempt record, or revise the point evidence"}`});
+        message: `point ${point.id} evidence ${ref.slice(0, 80)} does not resolve; ${pointEvidence.pointEvidenceAdvice(resolution)}`});
     }
   }
   return hits.sort((a, b) => a.start - b.start || a.code.localeCompare(b.code));
