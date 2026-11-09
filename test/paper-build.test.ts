@@ -77,10 +77,10 @@ test("rebuild repairs missing output and records an absent receipt without inven
   expect((await ops.paperBuild(dir, ctx)).changed).toBe(true); expect(readLedger(dir).filter(e => e.type === "paper.built")).toHaveLength(1);
 });
 
-test("CLI/MCP share build hashes/no-op and manifest declares paperEvidence v1", async () => {
+test("CLI/MCP share build hashes/no-op and manifest declares supported paperEvidence v2", async () => {
   const dir = study(); writeFileSync(manuscriptPath(dir), "Year {{lit:2026}}.");
   const forbidden = async () => { throw new Error("build must not run a process"); }, server = createAresMcp({}, ctx.http, { runner: forbidden });
   const first = await server.handlers.ares_paper_build!({ study: dir }), cli = await run(["paper", "build", dir, "--json"], {}, { http: ctx.http, runner: forbidden });
   expect(JSON.parse(cli.text)).toEqual({ ...(first as object), changed: false }); expect(cli.code).toBe(0);
-  expect(ARES_TOOLS.find(t => t.name === "ares_paper_build")?.annotations).toMatchObject({ readOnlyHint: false, openWorldHint: false }); expect(ops.manifest().formats.paperEvidence).toBe(1);
+  expect(ARES_TOOLS.find(t => t.name === "ares_paper_build")?.annotations).toMatchObject({ readOnlyHint: false, openWorldHint: false }); expect(ops.manifest().formats.paperEvidence).toBe(2);
 });

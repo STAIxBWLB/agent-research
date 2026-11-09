@@ -7,7 +7,9 @@ import * as ops from "../src/commands.ts";
 import {inspectLocalEvidence} from "../src/memory/evidence-local.ts";
 import {ATTEMPT_BYTES} from "../src/exp/attempts.ts";
 import {readProtocol, protocolHash, designBinding} from "../src/exp/protocol.ts";
-import {appendEvent, commit, readBytesBounded, readTextBounded, sha256, writeAtomic} from "../src/study.ts";
+import {appendEvent, commit, readBytesBounded, readTextBounded, readLedger, sha256, writeAtomic} from "../src/study.ts";
+import {SKILL_BYTES} from "../src/memory/skills.ts";
+import {PAPER_EVIDENCE_BYTES, paperBuildPaths} from "../src/paper/build.ts";
 import {type ExecutionReferenceV1} from "../src/provenance.ts";
 import {provenanceFixture, type ProvenanceFixture} from "./provenance-fixtures.ts";
 import {metricAttempt, metricProtocol} from "./metric-fixtures.ts";
@@ -15,6 +17,28 @@ import {fakeHttp, tempDir} from "./helpers.ts";
 
 const reference = (f: ProvenanceFixture, kind: ExecutionReferenceV1["kind"], id: string, sha?: string): ExecutionReferenceV1 => ({v: 1, tool: "ares", projectKey: f.studyId, kind, id, ...(sha ? {sha256: sha} : {})});
 const inspect = (f: ProvenanceFixture, kind: ExecutionReferenceV1["kind"], id: string, sha?: string) => inspectLocalEvidence(f.dir, reference(f, kind, id, sha));
+
+test("plan-bound paper evidence retains its validated v2 version in skill inspections files and ledger", async () => {
+  const f = await provenanceFixture();
+  expect(inspect(f, "paper-evidence", f.paper.evidenceSha256, f.paper.evidenceSha256).sourceVersion?.native).toBe(1);
+  await ops.paperPlanSet(f.dir, {v: 1, sections: []}, f.ctx);
+  const built = await ops.paperBuild(f.dir, f.ctx), paths = paperBuildPaths(f.dir);
+  const body = JSON.parse(readTextBounded(paths.evidence, PAPER_EVIDENCE_BYTES)) as {v: number}; expect(body.v).toBe(2);
+  const graph = ops.lineageShow(f.dir), node = graph.nodes.find(row => row.ref.kind === "paper-evidence" && row.ref.id === built.evidenceSha256)!;
+  expect(node).toMatchObject({state: "current", availability: "available", data: {nativeVersion: 2}});
+  expect(graph.edges.some(edge => edge.from.id === built.evidenceSha256 && edge.relation === "uses-source" && edge.to.kind === "closed-result")).toBe(true);
+  const ref = reference(f, "paper-evidence", built.evidenceSha256, built.evidenceSha256), inspection = inspectLocalEvidence(f.dir, ref);
+  expect(inspection).toMatchObject({state: "available", sourceVersion: {reference: 1, native: 2, ledger: 1}, integrity: "record", outcome: {status: "closed", success: false}, support: "reviewer-judgment"});
+  const proposal = await ops.skillPropose(f.dir, {name: "planned-paper-version", summary: "Synthetic planned paper source", steps: ["Inspect the declared source"], evidence: [ref], limitations: ["Source availability is not claim support"], counterevidence: []}, {
+    ...f.ctx, runner: async () => { throw new Error("local paper inspection must not invoke an external source"); },
+  }, {HOME: tempDir()});
+  expect(proposal.skillProposal).toBe(2); if (proposal.skillProposal !== 2) throw new Error("synthetic fixture requires skill proposal v2");
+  expect(proposal.inspections[0]!.sourceVersion?.native).toBe(2);
+  const markdown = readTextBounded(join(f.dir, "proposals", "skills", `${proposal.name}.md`), SKILL_BYTES);
+  expect(markdown).toContain('"native": 2'); expect(sha256(markdown)).toBe(proposal.sha256);
+  const recorded = readLedger(f.dir).findLast(event => event.type === "skill.proposed" && (event.data.proposal as {name?: string})?.name === proposal.name)!;
+  expect((recorded.data.proposal as {inspections: {sourceVersion: {native: number}}[]}).inspections[0]!.sourceVersion.native).toBe(2);
+});
 
 test("current native records expose filtered metadata and recorded outcome, never scientific support", async () => {
   const f = await provenanceFixture(), file = join(f.dir, "runs", "investigate", "attempts", `${f.ids.retryAttempt}.json`);

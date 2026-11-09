@@ -11,7 +11,7 @@ import { designBinding, protocolHash, readProtocol } from "./exp/protocol.ts";
 import { FORMAT_VERSIONS } from "./manifest.ts";
 import { loadCandidates } from "./lit/candidates.ts";
 import { intentSummary } from "./lit/queries.ts";
-import { PAPER_EVIDENCE_BYTES, paperBuildPaths } from "./paper/build.ts";
+import { PAPER_EVIDENCE_BYTES, paperBuildPaths, paperEvidenceVersion } from "./paper/build.ts";
 import { assertWritable, openStudy, plain, readLedger, readTextBounded, sha256, withLock, writeAtomic, type LedgerEvent } from "./study.ts";
 
 /** Reader bound for every bundle file; writeAtomic refuses anything larger. */
@@ -158,9 +158,11 @@ function evidence(dir: string) {
   if (!existsSync(path)) return null;
   let raw: unknown;
   try { raw = JSON.parse(readTextBounded(path, PAPER_EVIDENCE_BYTES)); } catch { throw new Error("study export: paper/build/evidence.json is unreadable, invalid JSON or oversized; rebuild the paper before exporting"); }
-  if (!plain(raw) || raw.v !== 1 || !Array.isArray(raw.placeholders)) throw new Error("study export: paper/build/evidence.json has an unsupported shape; rebuild the paper before exporting");
+  paperEvidenceVersion(raw);
+  if (!plain(raw) || !Array.isArray(raw.placeholders)) throw new Error("study export: paper/build/evidence.json has an unsupported shape; rebuild the paper before exporting");
   return {
     v: 1, manuscriptSha256: typeof raw.manuscriptSha256 === "string" && SHA256.test(raw.manuscriptSha256) ? raw.manuscriptSha256 : null,
+    ...(raw.v === 2 ? {planSha256: raw.planSha256} : {}),
     placeholders: (raw.placeholders as Record<string, unknown>[]).filter(p => p.kind === "number").map(p => {
       const ref = typeof p.ref === "string" ? p.ref : "", attempt = /^(?:attempt|posthoc):([a-f0-9]{16})\./.exec(ref)?.[1];
       const source = plain(p.source) ? p.source : {};

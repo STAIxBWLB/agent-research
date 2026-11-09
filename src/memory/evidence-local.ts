@@ -48,12 +48,17 @@ export function inspectLocalEvidence(dir: string, raw: unknown, snapshot?: Retur
     if (node.availability === "missing") return base("missing", ref, digest);
     if (node.state === "unavailable" || node.state === "declared-unresolved" || audit.status !== "ok") return base("unavailable", ref, digest);
     const result = base("available", ref, digest);
+    if (ref.kind === "paper-evidence" && node.availability === "available") {
+      const version = node.data?.nativeVersion;
+      if (typeof version !== "number" || !Number.isSafeInteger(version) || version < 1) return base("unavailable", ref, digest);
+      result.sourceVersion!.native = version;
+    }
     if (ref.kind === "harness-closure") result.sourceVersion = {reference: 1, native: 1, ledger: 1};
     if (node.state === "historical" || node.availability === "receipt-only") return result;
     if (node.availability === "not-read" || ref.kind === "artifact") {result.integrity = "receipt-only"; return result;}
     result.integrity = "record";
     if (node.proof.ledgerIndex !== undefined) result.sourceVersion!.ledger = 1;
-    if (["attempt", "closed-result", "paper-evidence", "plan-revision"].includes(ref.kind)) result.sourceVersion!.native = 1;
+    if (["attempt", "closed-result", "plan-revision"].includes(ref.kind)) result.sourceVersion!.native = 1;
     if (ref.kind === "study") result.sourceVersion!.native = study.v;
     const data = node.data ?? {}, metadata: NonNullable<LocalEvidenceInspection["metadata"]> = {};
     if (["investigate", "ablate", "final", "paper"].includes(String(data.family))) metadata.family = String(data.family);
