@@ -31,7 +31,7 @@ test("paper plan versions stored data, preserves exact headings and allows empty
 
 test("closed shape, slug ids, unique headings/ids/keys and exact heading grammar refuse", () => {
   const section = plan().sections[0]!;
-  const invalid = [null, {}, [], { v: 1 as const, sections: {} }, { ...plan(), v: 2 }, { ...plan(), extra: true },
+  const invalid = [null, {}, [], { v: 1 as const, sections: {} }, { ...plan(), v: 3 }, { ...plan(), extra: true },
     { v: 1 as const, sections: [{ ...section, extra: true }] }, { v: 1 as const, sections: [{ ...section, id: "Upper" }] }, { v: 1 as const, sections: [{ ...section, id: "../outside" }] }, { v: 1 as const, sections: [{ ...section, id: "a".repeat(65) }] },
     ...["", " ", " Introduction", "Introduction ", "bad\0heading"].map(heading => ({ v: 1 as const, sections: [{ ...section, heading }] })),
     { v: 1 as const, sections: [section, { ...section, heading: "Other" }] }, { v: 1 as const, sections: [section, { ...section, id: "other" }] },
@@ -142,7 +142,7 @@ test("the formatted byte boundary is shared by validator reader and atomic write
 test("stored version is mandatory and unsupported versions cannot be overwritten", async () => {
   const f = setup(); await withLock(f.dir, () => setPaperPlan(f.dir, {sections: plan().sections}, actor));
   expect(readPaperPlanSnapshot(f.dir)!.plan.v).toBe(1);
-  writeAtomic(f.file, JSON.stringify({...plan(), v: 2}), PAPER_PLAN_BYTES);
+  writeAtomic(f.file, JSON.stringify({...plan(), v: 3}), PAPER_PLAN_BYTES);
   const before = planBytes(f.file), ledger = ledgerBytes(f.dir);
   expect(() => readPaperPlanSnapshot(f.dir)).toThrow("supported v: 1");
   await expect(withLock(f.dir, () => setPaperPlan(f.dir, plan(), actor))).rejects.toThrow("unsupported stored plan version");

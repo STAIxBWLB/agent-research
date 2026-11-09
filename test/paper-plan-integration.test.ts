@@ -42,7 +42,7 @@ test("paper plan file/stdin CLI and MCP share validation, storage and routing co
   expect(validArguments({study: f.dir, plan: raw}, schema)).toBe(true);
   expect(validArguments({study: f.dir, plan: {...raw, unexpected: true}}, schema)).toBe(false);
   const beforePlan = readBytesBounded(f.file, plans.PAPER_PLAN_BYTES), beforeLedger = ledger(f.dir);
-  for (const invalid of [{...raw, v: 2}, {v: 1 as const, sections: [{...raw.sections[0]!, cites: ["unknown"]}]}]) {
+  for (const invalid of [{...raw, v: 3}, {v: 1 as const, sections: [{...raw.sections[0]!, cites: ["unknown"]}]}]) {
     await expect(server.handlers.ares_paper_plan_set!({study: f.dir, plan: invalid})).rejects.toThrow("paper plan");
     await expect(run(["paper", "plan", "set", f.dir, "--file", "-"], {}, {http: ctx.http, readStdin: async () => JSON.stringify(invalid)})).rejects.toThrow("paper plan");
     expect(readBytesBounded(f.file, plans.PAPER_PLAN_BYTES)).toEqual(beforePlan); expect(ledger(f.dir)).toEqual(beforeLedger);
@@ -115,9 +115,9 @@ test("plan addition and removal stale prior builds while absence retains legacy 
 test("build rechecks plan presence and exact bytes before its single publication commit", async () => {
   for (const fault of ["added", "removed", "changed"] as const) {
     const f = fixture(); if (fault !== "added") await ops.paperPlanSet(f.dir, plan(), ctx); await ops.paperBuild(f.dir, ctx);
-    const paths = paperBuildPaths(f.dir), before = readBytesBounded(paths.evidence, PAPER_EVIDENCE_BYTES), beforeLedger = ledger(f.dir), original = plans.readPaperPlanSnapshot;
+    const paths = paperBuildPaths(f.dir), before = readBytesBounded(paths.evidence, PAPER_EVIDENCE_BYTES), beforeLedger = ledger(f.dir), original = plans.readPaperPlanCheckSnapshot;
     let once = false;
-    const spy = spyOn(plans, "readPaperPlanSnapshot").mockImplementation((...args: Parameters<typeof original>) => {
+    const spy = spyOn(plans, "readPaperPlanCheckSnapshot").mockImplementation((...args: Parameters<typeof original>) => {
       const snapshot = original(...args);
       if (!once) { once = true; if (fault === "removed") unlinkSync(f.file); else writeAtomic(f.file, JSON.stringify(plan()) + (fault === "changed" ? "\n\n" : "\n"), plans.PAPER_PLAN_BYTES); }
       return snapshot;

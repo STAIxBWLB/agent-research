@@ -13,7 +13,7 @@ export const FORMAT_VERSIONS = {
   harnessFixtureProjection: 1,
   study: 2,
   paperEvidence: 2,
-  paperPlan: 1,
+  paperPlan: 2,
   skillProposal: 2,
   studyRegistry: 1,
   watchConfig: 1,
