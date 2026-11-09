@@ -57,7 +57,7 @@ test("unsupported study, ledger and attempt semantics refuse safely without rewr
   writeAtomic(ledgerPath, originalLedger, 64 * 1024 * 1024);
   const attempt = metricAttempt(), folder = join(dir, "runs", attempt.run, "attempts"), file = join(folder, `${attempt.id}.json`);
   mkdirSync(folder, { recursive: true });
-  for (const extension of [{ v: 2 }, { status: "future-status" }, { stage: "future-stage" }]) {
+  for (const extension of [{ v: 3 }, { status: "future-status" }, { stage: "future-stage" }]) {
     const newer = JSON.stringify({ ...attempt, ...extension, opaque: true }); writeAtomic(file, newer, ATTEMPT_BYTES);
     const runner = async () => { throw new Error("unsupported records must never reach the executor"); };
     await expect(ops.attemptCancel(dir, attempt.id, undefined, { ...ctx, runner })).rejects.toThrow("use an ares version");
