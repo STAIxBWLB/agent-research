@@ -5,7 +5,7 @@ import * as ops from "../src/commands.ts";
 import { run } from "../src/cli.ts";
 import { createAresMcp } from "../src/mcp-tools.ts";
 import { checkPaper } from "../src/paper/check.ts";
-import { loadCandidates } from "../src/lit/candidates.ts";
+import { loadCandidates, mergeCandidates } from "../src/lit/candidates.ts";
 import { readLedger } from "../src/study.ts";
 import { fakeHttp, fixture, ok, searchRoutes, status, tempDir } from "./helpers.ts";
 
@@ -109,6 +109,32 @@ test("AC4: the markdown table holds only placeholders for numbers and passes pap
   // A label with digits is wrapped as a literal so paper check accepts it in experiment studies too.
   await ops.scope(dir, { question: "Q?", yearFrom: 2020, exclusionCodes: [{ code: "old", label: "Published before 2015" }] }, ctx);
   expect(ops.flowMarkdownView(dir).markdown).toContain("{{lit:Published before 2015}}");
+});
+
+test("bridging records count every absorbed candidate as a duplicate so the flow reconciles", async () => {
+  const doiOnly = { title: "Synthetic bridge paper", authors: ["Ada Example"], year: 2026, doi: "10.1234/bridge", source: "openalex" };
+  const arxivOnly = { title: "A different synthetic title", authors: ["Ada Example"], year: 2026, arxivId: "2601.00001", source: "arxiv" };
+  const bridge = { title: "Synthetic bridge paper", authors: ["Ada Example"], year: 2026, doi: "10.1234/bridge", arxivId: "2601.00001", source: "s2" };
+  const list: Parameters<typeof mergeCandidates>[0] = [];
+  expect(mergeCandidates(list, [doiOnly, arxivOnly, bridge], 100)).toEqual({ added: 2, merged: 1, dropped: 0, linked: 0, absorbed: 1 });
+  expect(list).toHaveLength(1);
+  // Ordinary merges keep the earlier result shape (no absorbed key).
+  expect(Object.keys(mergeCandidates(list, [bridge], 100))).toEqual(["added", "merged", "dropped", "linked"]);
+  // Through a real search: records = unique + duplicates + dropped.
+  const dir = join(tempDir(), "s");
+  ops.init(dir, { question: "Q?", autonomy: "auto" }, { actor: person });
+  const oa = JSON.stringify({ results: [{ id: "https://openalex.org/W1", title: doiOnly.title, doi: "https://doi.org/10.1234/bridge", publication_year: 2026, authorships: [{ author: { display_name: "Ada Example" } }] }] });
+  const s2 = JSON.stringify({ total: 1, data: [{ paperId: "p1", title: doiOnly.title, year: 2026, authors: [{ name: "Ada Example" }], externalIds: { DOI: "10.1234/bridge", ArXiv: "2601.00001" } }] });
+  const arxiv = fixture("arxiv-empty.xml");
+  const http = fakeHttp([["https://api.openalex.org/works", ok(oa)], ["https://api.semanticscholar.org/graph/v1/paper/search", ok(s2)], ["https://export.arxiv.org/api/query?search_query", ok(arxiv)]]).http;
+  await ops.scope(dir, { question: "Q?" }, { actor: person, http });
+  // Seed an arXiv-only candidate so the S2 record bridges it with the OpenAlex DOI candidate.
+  const path = join(dir, "literature", "candidates.json");
+  writeFileSync(path, JSON.stringify([{ id: "arxiv:2601.00001", title: arxivOnly.title, authors: ["Ada Example"], year: 2026, arxivId: "2601.00001", sources: ["arxiv"], addedAt: "2030-01-01T00:00:00Z", status: "new" }], null, 1) + "\n");
+  await ops.search(dir, "bridge", {}, { actor: person, http });
+  const flow = ops.litFlowView(dir), seeded = 1;
+  expect(flow.unique).toBe(1);
+  expect(flow.records + seeded).toBe(flow.unique + flow.duplicates + flow.dropped);
 });
 
 test("AC5: CLI and MCP parity; previous-minor studies produce a flow without codes", async () => {

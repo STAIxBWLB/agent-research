@@ -98,8 +98,8 @@ function link(a: Candidate, b: Candidate): void {
   b.duplicates = [...new Set([...(b.duplicates ?? []), a.id])];
 }
 
-export function mergeCandidates(list: Candidate[], incoming: RawCandidate[], limit: number, now = new Date().toISOString(), firstQuery?: string): { added: number; merged: number; dropped: number; linked: number } {
-  let added = 0, merged = 0, dropped = 0, linked = 0;
+export function mergeCandidates(list: Candidate[], incoming: RawCandidate[], limit: number, now = new Date().toISOString(), firstQuery?: string): { added: number; merged: number; dropped: number; linked: number; absorbed?: number } {
+  let added = 0, merged = 0, dropped = 0, linked = 0, absorbed = 0;
   for (const raw of incoming) {
     const clean = cleanRaw(raw);
     if (!clean) { dropped++; continue; }
@@ -112,6 +112,7 @@ export function mergeCandidates(list: Candidate[], incoming: RawCandidate[], lim
           absorb(primary, other);
           for (const twin of other.duplicates ?? []) { const t = list.find(c => c.id === twin); if (t && t !== primary) { t.duplicates = t.duplicates!.filter(d => d !== other.id); link(primary, t); } }
           list.splice(list.indexOf(other), 1);
+          absorbed++;
         }
         else { link(primary, other); linked++; }
       }
@@ -125,7 +126,8 @@ export function mergeCandidates(list: Candidate[], incoming: RawCandidate[], lim
     list.push({ ...rest, id: candidateId(clean), sources: [source], addedAt: now, status: "new", ...(firstQuery ? { firstQuery } : {}) });
     added++;
   }
-  return { added, merged, dropped, linked };
+  // absorbed counts existing candidates folded away by a bridging record; it is reported only when nonzero, so ordinary searches keep their event shape.
+  return { added, merged, dropped, linked, ...(absorbed ? { absorbed } : {}) };
 }
 
 export function candidatesPath(dir: string): string { return join(dir, "literature", "candidates.json"); }

@@ -30,7 +30,7 @@ const METRIC_KEYS = new Set(["name", "unit", "metric"]);
 /** Closed data keys per ledger event type; unlisted types keep the envelope with empty data. Never host, containerId or hubProject. */
 const LEDGER_KEYS: Record<string, readonly string[]> = {
   "scope.set": ["sha256"], "autonomy.set": ["from", "to", "phase"], "gate.approve": ["gate", "binding"], "gate.reject": ["gate", "binding"],
-  "lit.search": ["intent", "yearFrom", "sources", "added", "merged", "total"], "lit.screen": ["decision", "code"], "lit.card": ["id", "sha256"], "lit.bib": ["entries", "sha256"], "lit.verify": ["verified", "failed"],
+  "lit.search": ["intent", "yearFrom", "sources", "added", "merged", "absorbed", "total"], "lit.screen": ["decision", "code"], "lit.card": ["id", "sha256"], "lit.bib": ["entries", "sha256"], "lit.verify": ["verified", "failed"],
   "archive.exported": ["fingerprint"], "skill.proposed": ["skillProposal", "sha256"], "skill.decided": ["skillProposal", "decision"], "watch.set": ["sha256"],
   "plan.set": ["revision", "state", "sha256"], "plan.gates": ["revision"], "plan.paused": ["revision"], "plan.control": ["revision"], "node.observed": ["revision", "status"], "node.intent": ["revision"],
   "executor.set": ["kind"], "protocol.set": ["sha256", "identitySha256", "protocolHash", "treeHash"], "selection.set": ["sha256", "metric"], "final.seeds.set": ["sha256"],

@@ -20,7 +20,8 @@ export function flowFrom(dir: string, events: LedgerEvent[], candidates: Candida
       const name = typeof s.source === "string" ? s.source : "unknown", row = bySource[name] ??= { searches: 0, ok: 0, records: 0 };
       row.searches++; if (s.ok === true) row.ok++; row.records += count(s.returned); records += count(s.returned);
     }
-    duplicates += count(e.data.merged); dropped += count(e.data.dropped);
+    // A bridging record that folds an earlier candidate away removes one more duplicate than its single merge.
+    duplicates += count(e.data.merged) + count(e.data.absorbed); dropped += count(e.data.dropped);
     if (typeof e.data.yearFrom === "number") yearFrom.add(e.data.yearFrom);
   }
   const included = candidates.filter(c => c.status === "included"), excluded = candidates.filter(c => c.status === "excluded");
