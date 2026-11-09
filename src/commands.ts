@@ -37,6 +37,7 @@ import { readScope, scopeHash, setScope } from "./scope.ts";
 import { boundedText, commit, decideGate, gateState, GATES, initStudy, openStudy, readBytesBounded, readLedger, readTextBounded, requireGate, isHarnessGate, sha256, withLock, readPlanOwner, type Actor, type Binder, type GateName, type Study, STUDY_BYTES } from "./study.ts";
 import { candidatesFile, includedHash, isVerified, loadCandidates, mergeCandidates, sameWork, verifySubject, type Candidate } from "./lit/candidates.ts";
 import { litQueries, nextSearchId, validateIntent } from "./lit/queries.ts";
+import { flowMarkdown, litFlow } from "./lit/flow.ts";
 import { searchSource, SOURCES, type SourceName } from "./lit/sources.ts";
 import { verifyCandidates } from "./lit/verify.ts";
 import { assignCitekeys, renderBib } from "./lit/bibtex.ts";
@@ -279,13 +280,16 @@ async function searchLocked(dirArg: string, query: string, options: { source?: s
   const sources = results.map(r => ({ source: r.source, ok: r.ok, returned: r.records.length, ...(r.error ? { error: r.error } : {}) }));
   // A search where every source failed is recorded but is not a success, so it approves nothing.
   const answered = sources.some(r => r.ok);
-  // Intent is added only when given, so a search without it keeps the earlier event shape.
-  commit(dir, [candidatesFile(dir, list)], [...(answered ? approval : []), { actor: ctx.actor, type: "lit.search", data: { query: q, ...(intent ? { intent } : {}), sources, ...counts } }]);
+  // Intent and year-from are added only when given, so a search without them keeps the earlier event shape.
+  commit(dir, [candidatesFile(dir, list)], [...(answered ? approval : []), { actor: ctx.actor, type: "lit.search", data: { query: q, ...(intent ? { intent } : {}), ...(options.yearFrom !== undefined ? { yearFrom: options.yearFrom } : {}), sources, ...counts } }]);
   return { query: q, ...(intent ? { intent } : {}), sources, ...counts, candidates: list.length };
 
 }
 
 export const queries = (dir: string) => litQueries(dir);
+export const flowMarkdownView = (dir: string) => ({ markdown: flowMarkdown(dir) });
+export const litFlowView = (dir: string) => litFlow(dir);
+export function flow(dir: string, format: "json" | "markdown" = "json") { return format === "markdown" ? flowMarkdownView(dir) : litFlow(dir); }
 export function list(dirArg: string, options: { status?: string; limit?: number }) {
   const { dir } = openStudy(dirArg), limit = options.limit ?? 50;
   if (options.status !== undefined && !["new", "included", "excluded"].includes(options.status)) throw new Error("--status: new, included or excluded");
@@ -302,10 +306,15 @@ export function list(dirArg: string, options: { status?: string; limit?: number 
   };
 }
 
-export async function screen(dirArg: string, values: string[], decision: "include" | "exclude", reason: string | undefined, ctx: Ctx, guard?: () => void) {
+export async function screen(dirArg: string, values: string[], decision: "include" | "exclude", reason: string | undefined, ctx: Ctx, guard?: () => void, code?: string) {
   const { dir, study } = openStudy(dirArg), wanted = ids(values), why = reason === undefined ? undefined : boundedText(reason, "--reason", 500);
+  if (code !== undefined && decision !== "exclude") throw new Error("lit screen: --code applies only with --exclude; drop --code or exclude instead");
   return withLock(dir, () => {
     guard?.();
+    if (code !== undefined) {
+      const declared = readScope(dir)?.exclusionCodes ?? [];
+      if (!declared.some(item => item.code === code)) throw new Error(`lit screen: unknown exclusion code ${JSON.stringify(code).slice(0, 40)}; declare it in scope.json exclusionCodes (${declared.length ? declared.map(item => item.code).join(", ") : "none declared"}) and rerun ares scope, or omit --code`);
+    }
     const all = loadCandidates(dir), at = new Date().toISOString(), status = decision === "include" ? "included" : "excluded";
     for (const id of wanted) find(all, id);
     const approval = requireGate(dir, study, "scope", binder(dir));
@@ -313,8 +322,9 @@ export async function screen(dirArg: string, values: string[], decision: "includ
       const c = find(all, id);
       c.status = status; c.decidedBy = ctx.actor; c.decidedAt = at;
       if (why) c.reason = why; else delete c.reason;
+      if (code !== undefined) c.exclusionCode = code; else delete c.exclusionCode;
     }
-    commit(dir, [candidatesFile(dir, all)], [...approval, { actor: ctx.actor, type: "lit.screen", data: { ids: wanted, decision, ...(why ? { reason: why } : {}) } }]);
+    commit(dir, [candidatesFile(dir, all)], [...approval, { actor: ctx.actor, type: "lit.screen", data: { ids: wanted, decision, ...(why ? { reason: why } : {}), ...(code !== undefined ? { code } : {}) } }]);
     return { decision, ids: wanted, gate: gateState("screen", readLedger(dir), binder(dir)) };
   });
 }

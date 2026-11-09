@@ -6,6 +6,8 @@ import { protocolHash, readProtocol } from "../exp/protocol.ts";
 import { INVESTIGATE_BYTES, investigateResultPath, metricValue, readClosedInvestigation } from "../exp/investigate.ts";
 import { ABLATE_BYTES, ablateResultPath, readClosedAblate } from "../exp/ablate.ts";
 import { FINAL_RESULT_BYTES, finalResultPath, readClosedFinal, requirePosthocClosed } from "../exp/final.ts";
+import { CANDIDATES_BYTES, candidatesPath, loadCandidates } from "../lit/candidates.ts";
+import { flowFrom, flowValue, screenApproved } from "../lit/flow.ts";
 
 export const MANUSCRIPT_BYTES = 2 * 1024 * 1024, MAX_PLACEHOLDERS = 5000;
 interface Position { start: number; end: number; line: number; column: number; raw: string }
@@ -66,6 +68,10 @@ export function resolvePlaceholders(dirArg: string, text: string) {
   const investigate = () => cached("investigate", () => { const closed = readClosedInvestigation(dir); return source(dir, investigateResultPath(dir, closed.result.run), INVESTIGATE_BYTES, closed.result, closed.sha256); });
   const ablate = () => cached("ablate", () => { const closed = readClosedAblate(dir); return source(dir, ablateResultPath(dir), ABLATE_BYTES, closed.result, closed.sha256); });
   const final = () => cached("final", () => { const closed = readClosedFinal(dir); return source(dir, finalResultPath(dir), FINAL_RESULT_BYTES, closed.result, closed.sha256); });
+  const litFlowSource = () => cached("lit.flow", () => {
+    const events = readLedger(dir), candidates = loadCandidates(dir), read = source(dir, candidatesPath(dir), CANDIDATES_BYTES, candidates);
+    return { value: { flow: flowFrom(dir, events, candidates), approved: screenApproved(events, candidates) }, source: read.source };
+  });
   let attemptIndex: Map<string, Attempt[]> | undefined;
   const attempt = (id: string, posthoc: boolean): Source<Attempt> => cached(`attempt:${id}:${posthoc}`, () => {
     if (!attemptIndex) {
@@ -84,9 +90,17 @@ export function resolvePlaceholders(dirArg: string, text: string) {
     if (placeholder.kind === "literal") { literals.push(placeholder); resolved.push({ placeholder, value: placeholder.text, rendered: placeholder.text }); continue; }
     const ref = placeholder.ref;
     try {
+      let match: RegExpExecArray | null;
+      // Selection flow refs work in both modes, only while the screen gate is approved for the current included set.
+      if ((match = /^lit\.flow\.(.+)$/.exec(ref))) {
+        const read = litFlowSource(), value = flowValue(read.value.flow, match[1]!);
+        if (!read.value.approved) throw new Error("screen gate not approved for the current included set");
+        if (value === undefined) throw new Error("unknown flow field");
+        if (placeholder.format !== undefined) { findings.push({ ...placeholder, code: "bad-format", message: `placeholder ${ref}: flow counts take no numeric format; remove |.Nf` }); continue; }
+        resolved.push({ placeholder, value, rendered: String(value), source: read.source }); continue;
+      }
       if (study.mode !== "experiment") throw new Error("experiment refs unavailable in survey");
       let value: unknown, provenance: Source<unknown>, exploratory = false;
-      let match: RegExpExecArray | null;
       if ((match = /^final\.(status|reason|delta|mean|baselineMean)$/.exec(ref))) { const read = final(); provenance = read; value = read.value[match[1] as "status"]; }
       else if ((match = /^final\.attempts\.([a-z]+)$/.exec(ref)) && statuses.includes(match[1]!)) { const read = final(); provenance = read; value = read.value.attempts.filter(a => a.status === match![1]).length; }
       else if ((match = /^investigate\.(winner|reason)$/.exec(ref))) { const read = investigate(); provenance = read; value = match[1] === "winner" ? read.value.winner?.commit.slice(0, 12) : read.value.reason; }
@@ -107,6 +121,7 @@ export function resolvePlaceholders(dirArg: string, text: string) {
       resolved.push({ placeholder, value, rendered, source: provenance.source });
     } catch (error) {
       if (error instanceof CopilotAcceptError) { findings.push({ ...placeholder, code: "unaccepted-draft", message: error.message }); continue; }
+      if (/^lit\.flow\./.test(ref)) { findings.push({ ...placeholder, code: "unresolved-ref", message: `placeholder ${ref}: unknown flow field or screen gate not approved for the current included set; run ares lit flow <dir> for the fields and approve the screen gate (ares gate approve <dir> screen) before retrying` }); continue; }
       findings.push({ ...placeholder, code: "unresolved-ref", message: `placeholder ${ref}: unknown ref or absent, unclosed, stale or invalid source; inspect the attempt and close the current phase results before retrying` });
     }
   }

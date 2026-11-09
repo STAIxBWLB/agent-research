@@ -49,6 +49,7 @@ ares lit search study "citation verification agents" --intent lexical
 ares lit queries study                      # per-query yield by intent
 ares lit list study
 ares lit screen study <id>... --include --reason "on topic"
+ares lit flow study --markdown              # selection flow table with {{n:lit.flow.*}} numbers
 ares lit card study <id> --file card.json   # summary, claims, methods, findings, limitations, relevance
 ares lit verify study
 ares gate approve study screen
@@ -59,6 +60,8 @@ ares cite check study draft.md              # exit 1 on unknown or unverified [@
 `ares playbook` prints the full standalone workflow and its rules. Study commands accept `--json`; see the command list for exact usage.
 
 `lit search --intent lexical|semantic|background` records why a query was issued: exact terms and acronyms, a concept description, or adjacent foundations. Without it the `lit.search` event keeps its earlier shape and reports as `unspecified`. Each candidate a search creates stores that search's id (`firstQuery`, `search-<n>` by order in the ledger); later merges never change it, and candidates from older studies have none. `lit queries` lists every search with its intent, sources, added/merged counts and how many of the candidates it first added are now included, excluded or still new, plus a per-intent summary, the queries with no included yield and the count of unattributed candidates. ares does not write, rank or embed queries. `study export --bundle` keeps query text out and adds the intent to `lit.search` rows and a per-intent summary to `counts.litQueries`.
+
+`lit flow` reports the selection flow from the ledger and candidate file alone: search window (first and last search, `--year-from` values given, scope years), records per source, total records, duplicates merged, unique candidates, screened, excluded by code, unscreened, included, identifier-verified and with extraction cards. `scope.json` may declare `exclusionCodes: [{"code": "off-topic", "label": "Outside the review topic"}]` (at most 30, lower-case slugs); `lit screen --exclude --code off-topic` records one, an undeclared code is refused, and without codes every exclusion counts as one `uncoded` group. Manuscripts cite the counts as `{{n:lit.flow.records}}`, `duplicates`, `unique`, `screened`, `excluded`, `excluded.<code>`, `unscreened`, `included`, `verified` and `cards`; they resolve in survey and experiment studies only while the `screen` gate is approved for the current included set, and give `unresolved-ref` otherwise. `lit flow --markdown` prints a table whose numbers are those placeholders, ready to paste. Searches record `--year-from` only when it is given.
 
 ## Literature watch workflow
 
@@ -778,8 +781,9 @@ ares attempt reconcile <dir> [--json]
 ares attempt logs <dir> <id> [--stage candidate|evaluator] [--candidate-stage NAME] [--stream stdout|stderr] [--tail BYTES] [--json]
 ares lit search <dir> <query> [--source openalex|s2|arxiv|all] [--limit 1..50] [--year-from YYYY] [--intent lexical|semantic|background] [--json]
 ares lit queries <dir> [--json]
+ares lit flow <dir> [--markdown] [--json]
 ares lit list <dir> [--status new|included|excluded] [--limit 1..500] [--json]
-ares lit screen <dir> <id>... --include|--exclude [--reason TEXT] [--json]
+ares lit screen <dir> <id>... --include|--exclude [--code CODE] [--reason TEXT] [--json]
 ares lit card <dir> <id> --file PATH|- [--json]
 ares lit verify <dir> [<id>...] [--json]
 ares lit bib <dir> [--json]
@@ -798,7 +802,7 @@ ares mcp
 <!-- /facts:commands -->
 
 <!-- facts:mcp-tools -->
-The MCP server publishes 81 tools: `ares_retention_inspect`, `ares_retention_prune`, `ares_lesson_propose`, `ares_lesson_list`, `ares_lesson_check`, `ares_lesson_decide`, `ares_skill_check`, `ares_harness_close`, `ares_harness_contrast`, `ares_harness_compose`, `ares_harness_adopt`, `ares_harness_stream_set`, `ares_harness_stream_show`, `ares_experience_select`, `ares_experience_freeze`, `ares_experience_check`, `ares_harness_set`, `ares_harness_show`, `ares_harness_import`, `ares_lineage_show`, `ares_lineage_compare`, `ares_autonomy_show`, `ares_autonomy_set`, `ares_watch_set`, `ares_watch_run`, `ares_watch_show`, `ares_console_add`, `ares_console_remove`, `ares_console_list`, `ares_setup`, `ares_manifest`, `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide`, `ares_skill_list`, `ares_plan_set`, `ares_plan_control`, `ares_plan_show`, `ares_status`, `ares_study_export`, `ares_scope_set`, `ares_gate`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show`, `ares_investigate_close`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_posthoc_show`, `ares_final_close`, `ares_final_seeds`, `ares_selection_set`, `ares_protocol_set`, `ares_executor_set`, `ares_executor_inputs_hash`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile`, `ares_attempt_logs`, `ares_lit_search`, `ares_lit_queries`, `ares_lit_list`, `ares_lit_screen`, `ares_lit_card`, `ares_lit_verify`, `ares_lit_bib`, `ares_review_add`, `ares_review_resolve`, `ares_review_show`, `ares_review_checklist`, `ares_paper_plan_set`, `ares_paper_plan_show`, `ares_paper_build`, `ares_paper_check`, `ares_cite_check`, `ares_playbook`.
+The MCP server publishes 82 tools: `ares_retention_inspect`, `ares_retention_prune`, `ares_lesson_propose`, `ares_lesson_list`, `ares_lesson_check`, `ares_lesson_decide`, `ares_skill_check`, `ares_harness_close`, `ares_harness_contrast`, `ares_harness_compose`, `ares_harness_adopt`, `ares_harness_stream_set`, `ares_harness_stream_show`, `ares_experience_select`, `ares_experience_freeze`, `ares_experience_check`, `ares_harness_set`, `ares_harness_show`, `ares_harness_import`, `ares_lineage_show`, `ares_lineage_compare`, `ares_autonomy_show`, `ares_autonomy_set`, `ares_watch_set`, `ares_watch_run`, `ares_watch_show`, `ares_console_add`, `ares_console_remove`, `ares_console_list`, `ares_setup`, `ares_manifest`, `ares_archive`, `ares_lessons`, `ares_skill_propose`, `ares_skill_decide`, `ares_skill_list`, `ares_plan_set`, `ares_plan_control`, `ares_plan_show`, `ares_status`, `ares_study_export`, `ares_scope_set`, `ares_gate`, `ares_idea_add`, `ares_idea_decide`, `ares_investigate_show`, `ares_investigate_close`, `ares_ablate_add`, `ares_ablate_show`, `ares_ablate_close`, `ares_posthoc_show`, `ares_final_close`, `ares_final_seeds`, `ares_selection_set`, `ares_protocol_set`, `ares_executor_set`, `ares_executor_inputs_hash`, `ares_executor_check`, `ares_attempt_run`, `ares_attempt_list`, `ares_attempt_show`, `ares_attempt_cancel`, `ares_attempt_reconcile`, `ares_attempt_logs`, `ares_lit_search`, `ares_lit_queries`, `ares_lit_flow`, `ares_lit_list`, `ares_lit_screen`, `ares_lit_card`, `ares_lit_verify`, `ares_lit_bib`, `ares_review_add`, `ares_review_resolve`, `ares_review_show`, `ares_review_checklist`, `ares_paper_plan_set`, `ares_paper_plan_show`, `ares_paper_build`, `ares_paper_check`, `ares_cite_check`, `ares_playbook`.
 <!-- /facts:mcp-tools -->
 
 Reviewed harness lesson tools are `ares_lesson_propose`, `ares_lesson_list`, `ares_lesson_check` and `ares_lesson_decide`; their mutations and explicit source checks share the CLI operations. Listing remains local.

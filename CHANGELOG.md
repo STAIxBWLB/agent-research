@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Selection flow report (#104): new read-only `lit flow [--markdown]` (MCP `ares_lit_flow`) derives the search window, records per source, duplicates, unique, screened, excluded by code, unscreened, included, verified and carded counts from the ledger and candidate file. `scope.json` may declare up to 30 `exclusionCodes`; `lit screen --exclude --code` (MCP `code`) records a declared code and refuses others. `{{n:lit.flow.*}}` placeholders resolve in both study modes only while the `screen` gate is approved; `--markdown` emits a table whose numbers are placeholders. `lit.search` now records `yearFrom` when given; the export allowlists it and the screen `code`.
+  - N-1 CLI: existing commands and usage remain; `lit flow` and `lit screen --code` are additive.
+  - N-1 MCP: existing tools remain; `ares_lit_flow` is additive and `ares_lit_screen` gains optional `code`.
+  - N-1 study/ledger formats: study and ledger versions stay unchanged; events without the new optional fields keep their shape. Older readers ignore candidate `exclusionCode`, but an older `scope` reader refuses a `scope.json` with `exclusionCodes`. Studies from the previous minor line report a flow with one uncoded exclusion group.
+
 - Follow-ups from the merged #61/#63/#102 reviews. A retention refusal now appends "inspect retained evidence and restore integrity before retrying" only when the native reason names no next step, so "cap full", "missing output port", "busy" and selection-bound refusals keep their own advice instead of gaining a contradicting one. With `[review] surveyChecklist = "off"`, `review show` omits the survey answers from `checklists` as well as from `surveyAnswers`; an unreadable `study.toml` adds one `review-survey-settings` info note instead of defaulting silently. The separate non-frozen producer fixture also covers a changed code tree, where every sealed source stage misses and reruns fresh while the original record stays unchanged. Gates, exit codes and stored bytes are unchanged.
   - N-1 CLI: no command or usage change; `review show` output only drops a field it already hid from `surveyAnswers`.
   - N-1 MCP: no tool, annotation or schema change; `ares_review_show` output follows the CLI projection.

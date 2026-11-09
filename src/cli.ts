@@ -298,6 +298,11 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       break;
     }
     case "lit queries": count(spec, positional, 1); result = ops.queries(positional[0]!); break;
+    case "lit flow": {
+      count(spec, positional, 1);
+      if (flags["--markdown"]) { if (flags["--json"]) throw new Error("lit flow: choose one of --markdown or --json"); return { text: ops.flowMarkdownView(positional[0]!).markdown.trimEnd(), code: 0 }; }
+      result = ops.flow(positional[0]!); break;
+    }
     case "lit list": {
       count(spec, positional, 1);
       const limit = integer(flags["--limit"], "--limit");
@@ -307,7 +312,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "lit screen": {
       if (positional.length < 2) throw new Error(`usage: ares ${spec.usage}`);
       if (!!flags["--include"] === !!flags["--exclude"]) throw new Error("lit screen: exactly one of --include or --exclude");
-      result = await ops.screen(positional[0]!, positional.slice(1), flags["--include"] ? "include" : "exclude", str("--reason"), ctx);
+      result = await ops.screen(positional[0]!, positional.slice(1), flags["--include"] ? "include" : "exclude", str("--reason"), ctx, undefined, str("--code"));
       break;
     }
     case "lit card": {

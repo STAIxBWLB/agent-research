@@ -18,9 +18,12 @@ export interface Candidate extends Omit<RawCandidate, "source"> {
   duplicates?: string[];
   /** Id (search-<n>) of the lit.search event that created this candidate; absent for candidates created before #103. */
   firstQuery?: string;
+  /** Declared scope exclusion code recorded with --exclude --code; absent for uncoded exclusions. */
+  exclusionCode?: string;
 }
 
-const ABSTRACT_MAX = 2000, TITLE_MAX = 1000, AUTHORS_MAX = 100, AUTHOR_MAX = 300, CANDIDATES_BYTES = 64 * 1024 * 1024;
+const ABSTRACT_MAX = 2000, TITLE_MAX = 1000, AUTHORS_MAX = 100, AUTHOR_MAX = 300;
+export const CANDIDATES_BYTES = 64 * 1024 * 1024;
 const ARXIV_DOI = /^10\.48550\/arxiv\.(.+)$/i;
 
 export function normTitle(title: string): string {
