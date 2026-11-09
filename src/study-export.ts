@@ -42,7 +42,7 @@ for (const t of ["attempt.run", "attempt.snapshot", "attempt.stage.changed", "at
 
 export interface BundleManifest {
   bundle: 1; formats: typeof FORMAT_VERSIONS; studyIdSha256: string; mode: string; protocolHash: string | null; sealBinding: string | null;
-  window: { from: string | null; to: string | null }; counts: { attempts: number; byStatus: Record<AttemptStatus, number>; byRun: Record<string, Record<AttemptStatus, number>>; ledgerEvents: number; reviews: number };
+  window: { from: string | null; to: string | null }; counts: { attempts: number; byStatus: Record<AttemptStatus, number>; byRun: Record<string, Record<AttemptStatus, number>>; ledgerEvents: number; reviews: number; reviewSections: { sections: { sectionSha256: string; rounds: number; pass: boolean }[]; repairs: Record<string, number> } };
   files: Record<string, string>;
 }
 export interface BundleListing { bundle: string; files: string[]; wouldWrite: true }
@@ -125,16 +125,31 @@ function closedResult<T>(name: string, read: () => { result: T }): unknown {
   catch (error) { throw new Error(`study export: ${name} result is not a verified closed result (${(error as Error).message}); fix it as that message says, then export again`); }
 }
 function reviews(events: LedgerEvent[]) {
-  const resolved = new Map<string, number>();
-  for (const e of events) if (e.type === "review.resolved" && typeof e.data.reviewId === "string") resolved.set(e.data.reviewId, (resolved.get(e.data.reviewId) ?? 0) + 1);
+  const resolved = new Map<string, number>(), resolvedIds = new Set<string>();
+  for (const e of events) if (e.type === "review.resolved" && typeof e.data.reviewId === "string") { resolved.set(e.data.reviewId, (resolved.get(e.data.reviewId) ?? 0) + 1); if (typeof e.data.findingId === "string") resolvedIds.add(`${e.data.reviewId}/${e.data.findingId}`); }
   return events.filter(e => e.type === "review.added" && plain(e.data.review)).map(e => {
     const review = e.data.review as Record<string, unknown>, findings = Array.isArray(review.findings) ? review.findings as Record<string, unknown>[] : [];
-    const reviewer = plain(review.reviewer) ? review.reviewer : {}, kinds: Record<string, number> = {};
+    const reviewer = plain(review.reviewer) ? review.reviewer : {}, kinds: Record<string, number> = {}, repairs: Record<string, number> = {};
     for (const f of findings) { const kind = typeof f.kind === "string" && TOKEN.test(f.kind) ? f.kind : "other"; kinds[kind] = (kinds[kind] ?? 0) + 1; }
+    for (const f of findings) { const repair = f.repair === "paragraph" || f.repair === "section" ? f.repair : "edit"; repairs[repair] = (repairs[repair] ?? 0) + 1; }
     const id = typeof e.data.id === "string" ? e.data.id : "";
     const family = typeof reviewer.modelFamily === "string" ? reviewer.modelFamily.trim().toLowerCase() : "";
-    return { idSha256: sha256(id), at: isoAt(e.at), modelFamily: /^[a-z0-9][a-z0-9 ._-]{0,47}$/.test(family) ? family : "other", buildSha256: typeof review.buildSha256 === "string" && HEX.test(review.buildSha256) ? review.buildSha256 : null, findings: findings.length, blocking: findings.filter(f => f.blocking === true).length, kinds, resolved: resolved.get(id) ?? 0 };
+    // Section names are reviewer text: export only their hashes with open-at-build markers, never the names.
+    const sections = [...new Set(findings.flatMap(f => typeof f.section === "string" && f.section.trim() ? [f.section.trim()] : []))];
+    const openSections = [...new Set(findings.flatMap(f => typeof f.section === "string" && f.section.trim() && typeof f.id === "string" && !resolvedIds.has(`${id}/${f.id}`) ? [f.section.trim()] : []))];
+    return { idSha256: sha256(id), at: isoAt(e.at), modelFamily: /^[a-z0-9][a-z0-9 ._-]{0,47}$/.test(family) ? family : "other", buildSha256: typeof review.buildSha256 === "string" && HEX.test(review.buildSha256) ? review.buildSha256 : null, findings: findings.length, blocking: findings.filter(f => f.blocking === true).length, kinds, repairs, resolved: resolved.get(id) ?? 0, sections, openSections };
   });
+}
+/** Content-free per-section rounds and pass at the latest built evidence hash, plus the repair-scope histogram. */
+function reviewSections(rows: ReturnType<typeof reviews>, events: LedgerEvent[]) {
+  const latest = events.filter(e => e.type === "paper.built" && typeof e.data.evidenceSha256 === "string").at(-1)?.data.evidenceSha256 ?? null;
+  const rounds = new Map<string, number>(), open = new Set<string>(), repairs: Record<string, number> = { edit: 0, paragraph: 0, section: 0 };
+  for (const row of rows) {
+    for (const section of row.sections) rounds.set(section, (rounds.get(section) ?? 0) + 1);
+    if (row.buildSha256 !== null && row.buildSha256 === latest) for (const section of row.openSections) open.add(section);
+    for (const [repair, n] of Object.entries(row.repairs)) repairs[repair] = (repairs[repair] ?? 0) + n;
+  }
+  return { sections: [...rounds].map(([section, n]) => ({ sectionSha256: sha256(section), rounds: n, pass: !open.has(section) })).sort((a, b) => a.sectionSha256 < b.sectionSha256 ? -1 : 1), repairs };
 }
 function evidence(dir: string) {
   const path = paperBuildPaths(dir).evidence;
@@ -232,14 +247,14 @@ function readBundle(dirArg: string, maxFileBytes: number) {
       ablate: experiment && existsSync(ablateResultPath(dir)) ? closedResult("ablate", () => readClosedAblate(dir)) : null,
       final: experiment && existsSync(finalResultPath(dir)) ? closedResult("final", () => readClosedFinal(dir)) : null,
     }, null, 2) + "\n",
-    "reviews.jsonl": lines(reviewRows),
+    "reviews.jsonl": lines(reviewRows.map(({ sections: _s, openSections: _o, ...row }) => row)),
     "evidence.json": JSON.stringify(evidence(dir), null, 2) + "\n",
   };
   const manifest: BundleManifest = {
     bundle: 1, formats: { ...FORMAT_VERSIONS }, studyIdSha256: sha256(study.id), mode: study.mode,
     protocolHash: protocol ? protocolHash(protocol) : null, sealBinding: study.mode === "experiment" ? designBinding(dir) ?? null : null,
     window: (() => { const ats = events.map(e => isoAt(e.at)).filter((v): v is string => v !== null); return { from: ats[0] ?? null, to: ats.at(-1) ?? null }; })(),
-    counts: { attempts: attemptLines.length, byStatus, byRun, ledgerEvents: events.length, reviews: reviewRows.length },
+    counts: { attempts: attemptLines.length, byStatus, byRun, ledgerEvents: events.length, reviews: reviewRows.length, reviewSections: reviewSections(reviewRows, events) },
     files: Object.fromEntries(Object.entries(files).map(([name, text]) => [name, sha256(text)])),
   };
   files["manifest.json"] = JSON.stringify(manifest, null, 2) + "\n";

@@ -2,11 +2,16 @@ import { requireCopilotAccept, CopilotAcceptError } from "../copilot.ts";
 import { boundedText, commit, onlyKeys, openStudy, plain, readLedger, sha256, type Actor, type LedgerEvent } from "../study.ts";
 import { readCurrentBuild } from "./build.ts";
 import { checkPaper } from "./check.ts";
+import { DEFAULT_PAPER_SETTINGS, readPaperSettings } from "./hygiene.ts";
 export const REVIEW_KINDS = ["contradiction", "unsupported-claim", "number", "citation", "method", "clarity", "other"] as const;
+export const REPAIR_SCOPES = ["edit", "paragraph", "section"] as const;
+export type RepairScope = typeof REPAIR_SCOPES[number];
+export const OVER_BUDGET_ADVICE = "replan the section or ask a person";
+export interface ReviewFinding { id: string; kind: typeof REVIEW_KINDS[number]; location: string; text: string; blocking: boolean; repair?: RepairScope; section?: string }
 export interface ReviewReport {
   v: 1; reviewer: { id: string; modelFamily: string }; buildSha256: string;
   checklist: { negativeResults: boolean; denominators: boolean; limitations: boolean; reproducibility: boolean };
-  findings: { id: string; kind: typeof REVIEW_KINDS[number]; location: string; text: string; blocking: boolean }[];
+  findings: ReviewFinding[];
 }
 interface Resolution { reason: string; actor: Actor; at: string }
 interface ReviewRecord { id: string; report: ReviewReport; actor: Actor; at: string; resolutions: Record<string, Resolution> }
@@ -34,11 +39,14 @@ export function validateReview(raw: unknown, strict = true): ReviewReport {
     if (!Array.isArray(value.findings) || value.findings.length > 200) bad("findings must be an array of at most 200 entries");
     const ids = new Set<string>();
     const findings = value.findings.map((raw, index) => {
-      const finding = object(raw, ["id", "kind", "location", "text", "blocking"], `finding[${index}]`, strict), id = identifier(finding.id, `finding[${index}].id`);
+      const finding = object(raw, ["id", "kind", "location", "text", "blocking", "repair", "section"], `finding[${index}]`, strict), id = identifier(finding.id, `finding[${index}].id`);
       if (ids.has(id)) bad(`duplicate finding id ${id}`); ids.add(id);
       if (!REVIEW_KINDS.includes(finding.kind as typeof REVIEW_KINDS[number])) bad(`finding ${id} has unknown kind; use ${REVIEW_KINDS.join(", ")}`);
       if (typeof finding.blocking !== "boolean") bad(`finding ${id}.blocking must be a boolean`);
-      return { id, kind: finding.kind as typeof REVIEW_KINDS[number], location: text(finding.location, `finding ${id}.location`), text: text(finding.text, `finding ${id}.text`), blocking: finding.kind === "contradiction" || finding.blocking };
+      if (finding.repair !== undefined && !REPAIR_SCOPES.includes(finding.repair as RepairScope)) bad(`finding ${id} has unknown repair scope; use ${REPAIR_SCOPES.join(", ")} or omit it for edit`);
+      // Optional fields are stored only when given, so reports without them keep their existing bytes.
+      return { id, kind: finding.kind as typeof REVIEW_KINDS[number], location: text(finding.location, `finding ${id}.location`), text: text(finding.text, `finding ${id}.text`), blocking: finding.kind === "contradiction" || finding.blocking,
+        ...(finding.repair !== undefined ? { repair: finding.repair as RepairScope } : {}), ...(finding.section !== undefined ? { section: text(finding.section, `finding ${id}.section`, 256).trim() } : {}) };
     });
     return { v: 1, reviewer: { id: text(reviewer.id, "reviewer.id", 128), modelFamily: text(reviewer.modelFamily, "reviewer.modelFamily", 128).trim().toLowerCase() }, buildSha256, checklist: { negativeResults: checklist.negativeResults as boolean, denominators: checklist.denominators as boolean, limitations: checklist.limitations as boolean, reproducibility: checklist.reproducibility as boolean }, findings };
   } catch (error) {
@@ -118,7 +126,36 @@ export function reviewReadiness(dirArg: string) {
   if (families.length < 2) unmet.push({ code: "model-families", message: "fewer than two distinct model families reviewed the current evidence hash; add current-build reviews from two families" });
   const openBlocking = reviews.flatMap(row => row.report.findings.filter(f => f.blocking && !row.resolutions[f.id]).map(f => ({ reviewId: row.id, findingId: f.id, kind: f.kind, location: f.location, text: f.text })));
   if (openBlocking.length) unmet.push({ code: "blocking-findings", message: `open blocking findings: ${openBlocking.map(f => `${f.reviewId}/${f.findingId} (${f.kind})`).join(", ")}; resolve each with a reason using ares review resolve` });
-  return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, checklists: reviews.map(row => ({ reviewId: row.id, ...row.report.checklist })), claims: "unavailable (STAIxBWLB/agent-hub#931)", unmet };
+  return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, checklists: reviews.map(row => ({ reviewId: row.id, ...row.report.checklist })), claims: "unavailable (STAIxBWLB/agent-hub#931)", unmet, ...roundsView(dir, rows, buildSha256) };
+}
+/** Informational only: rounds never enter unmet, so the gate conditions are unchanged. */
+function roundsView(dir: string, rows: ReviewRecord[], buildSha256: string | undefined) {
+  let budget = DEFAULT_PAPER_SETTINGS.reviewRounds, settingsError: string | undefined;
+  try { budget = readPaperSettings(dir).reviewRounds; } catch (error) { settingsError = error instanceof Error ? error.message : "study.toml unreadable"; }
+  const rounds = sectionRounds(rows, buildSha256, budget), info: { code: string; message: string }[] = [];
+  if (settingsError) info.push({ code: "review-rounds-settings", message: `${settingsError}; the default budget ${budget} is shown` });
+  for (const item of rounds.overBudget) info.push({ code: "review-rounds", message: `section "${item.section.slice(0, 80)}" used ${item.rounds} review rounds, over the budget of ${budget}; ${OVER_BUDGET_ADVICE}` });
+  return { roundBudget: budget, sections: rounds.sections, openBySection: rounds.openBySection, overBudget: rounds.overBudget, info };
+}
+const scope = (finding: ReviewFinding): RepairScope => finding.repair ?? "edit";
+/** Rounds: reports with at least one finding for a section, across all evidence hashes. Pass: no open finding for it at the current hash. */
+export function sectionRounds(rows: ReviewRecord[], buildSha256: string | undefined, budget: number) {
+  const rounds = new Map<string, number>(), open = new Map<string | null, { reviewId: string; findingId: string; kind: string; blocking: boolean; repair: RepairScope }[]>();
+  for (const row of rows) {
+    for (const section of new Set(row.report.findings.flatMap(f => f.section === undefined ? [] : [f.section]))) rounds.set(section, (rounds.get(section) ?? 0) + 1);
+    if (row.report.buildSha256 !== buildSha256) continue;
+    for (const f of row.report.findings) if (!row.resolutions[f.id]) {
+      const key = f.section ?? null, list = open.get(key) ?? [];
+      list.push({ reviewId: row.id, findingId: f.id, kind: f.kind, blocking: f.blocking, repair: scope(f) }); open.set(key, list);
+    }
+  }
+  const sections = [...rounds].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([section, count]) => ({ section, rounds: count, pass: !(open.get(section)?.length), overBudget: count > budget }));
+  const openBySection = [...open].sort(([a], [b]) => a === null ? 1 : b === null ? -1 : a < b ? -1 : 1).map(([section, findings]) => {
+    const byRepair: Record<RepairScope, typeof findings> = { edit: [], paragraph: [], section: [] };
+    for (const f of findings) byRepair[f.repair].push(f);
+    return { section, rounds: section === null ? null : rounds.get(section) ?? 0, byRepair };
+  });
+  return { sections, openBySection, overBudget: sections.filter(s => s.overBudget).map(s => ({ section: s.section, rounds: s.rounds, advice: OVER_BUDGET_ADVICE })) };
 }
 export function requireReviewReady(dir: string): void {
   const report = reviewReadiness(dir), accept = report.unmet.find(item => item.code.startsWith("accept:") || item.code === "accept-source");

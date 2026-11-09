@@ -6,13 +6,13 @@ import { citationOccurrences } from "../lit/cite.ts";
 /** Deterministic citation hygiene codes (#99). Warnings unless listed in study.toml [paper] blocking. */
 export const HYGIENE_CODES = ["adjacent-duplicate-citation", "citation-stack", "repeated-bundle", "bare-identifier", "duplicate-heading"] as const;
 export type HygieneCode = typeof HYGIENE_CODES[number];
-export interface PaperSettings { maxGroup: number; maxBundleRepeats: number; blocking: HygieneCode[] }
-export const DEFAULT_PAPER_SETTINGS: PaperSettings = { maxGroup: 6, maxBundleRepeats: 2, blocking: [] };
+export interface PaperSettings { maxGroup: number; maxBundleRepeats: number; reviewRounds: number; blocking: HygieneCode[] }
+export const DEFAULT_PAPER_SETTINGS: PaperSettings = { maxGroup: 6, maxBundleRepeats: 2, reviewRounds: 3, blocking: [] };
 export const SETTINGS_BYTES = 64 * 1024;
 export interface HygieneHit { code: HygieneCode; start: number; end: number; section: string[]; message: string }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
-function refuse(detail: string): never { throw new Error(`study.toml: ${detail}; fix the [paper] settings (keys maxGroup, maxBundleRepeats, blocking) or remove study.toml to use the defaults`); }
+function refuse(detail: string): never { throw new Error(`study.toml: ${detail}; fix the [paper] settings (keys maxGroup, maxBundleRepeats, reviewRounds, blocking) or remove study.toml to use the defaults`); }
 function count(value: unknown, name: string, min: number): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > 1000) refuse(`paper.${name} must be an integer from ${min} to 1000`);
   return value;
@@ -29,10 +29,11 @@ export function readPaperSettings(dir: string): PaperSettings {
   for (const key of Object.keys(raw)) if (key !== "paper") refuse(`unknown setting ${JSON.stringify(key).slice(0, 80)}`);
   const paper = raw.paper ?? {};
   if (!isRecord(paper)) refuse("paper must be a table");
-  for (const key of Object.keys(paper)) if (!["maxGroup", "maxBundleRepeats", "blocking"].includes(key)) refuse(`unknown setting paper.${JSON.stringify(key).slice(0, 80)}`);
+  for (const key of Object.keys(paper)) if (!["maxGroup", "maxBundleRepeats", "reviewRounds", "blocking"].includes(key)) refuse(`unknown setting paper.${JSON.stringify(key).slice(0, 80)}`);
   const settings: PaperSettings = { ...DEFAULT_PAPER_SETTINGS, blocking: [] };
   if (paper.maxGroup !== undefined) settings.maxGroup = count(paper.maxGroup, "maxGroup", 1);
   if (paper.maxBundleRepeats !== undefined) settings.maxBundleRepeats = count(paper.maxBundleRepeats, "maxBundleRepeats", 1);
+  if (paper.reviewRounds !== undefined) settings.reviewRounds = count(paper.reviewRounds, "reviewRounds", 1);
   if (paper.blocking !== undefined) {
     if (!Array.isArray(paper.blocking)) refuse("paper.blocking must be an array of finding codes");
     for (const code of paper.blocking) {

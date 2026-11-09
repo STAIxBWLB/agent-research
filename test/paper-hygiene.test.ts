@@ -91,7 +91,7 @@ test("AC4: existing studies without settings keep their blocking set and CLI/MCP
   const dir = study(), text = "# Intro\n\nUnknown [@zzz2026] and [@a2026; @a2026].\n", report = check(dir, text);
   expect(report.ok).toBe(false);
   expect(report.findings.filter(f => f.severity === "blocking").map(f => f.code)).toEqual(["unknown-citation"]);
-  expect(report.settings).toEqual({ maxGroup: 6, maxBundleRepeats: 2, blocking: [] });
+  expect(report.settings).toEqual({ maxGroup: 6, maxBundleRepeats: 2, reviewRounds: 3, blocking: [] });
   expect(await createAresMcp({}, ctx.http).handlers.ares_paper_check!({ study: dir })).toEqual(report);
   const blocking = study('[paper]\nblocking = ["adjacent-duplicate-citation"]\n'); check(blocking, text);
   expect(await createAresMcp({}, ctx.http).handlers.ares_paper_check!({ study: blocking })).toEqual(ops.paperCheck(blocking));
