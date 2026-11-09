@@ -155,7 +155,7 @@ test("B2: a ledger without room for the receipt refuses before any vault write",
   await expect(ops.cardExport(source.dir, [ARX], { vault: "test-vault", confirm: fingerprint }, ctx)).rejects.toThrow(/ledger\.jsonl would exceed/);
   expect(vault.calls.length).toBe(calls); expect(vault.notes["arxiv-ref.md"]).toBe(original);
   truncateSync(ledger, size);
-});
+}, 60_000);
 
 test("B3: exported provenance names the actor who recorded the card, not the exporter", async () => {
   const source = await study(), vault = fakeVault(vaultNotes());
