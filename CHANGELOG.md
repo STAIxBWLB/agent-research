@@ -7,6 +7,11 @@
   - N-1 MCP: no tool, annotation or schema change; `ares_review_show` output follows the CLI projection.
   - N-1 study/ledger formats: no change; review report v1 and the ledger versions stay as they are, and existing refusals only gain or keep trailing advice.
 
+- Query intent and per-query yield (#103): `lit search --intent lexical|semantic|background` (MCP `intent`, plan step `args.intent`) records the intent on `lit.search` only when given. New candidates store `firstQuery` (`search-<n>`), set only at creation. New read-only `lit queries` (MCP `ares_lit_queries`) reports per-search and per-intent included/excluded/new yield and zero-included queries. `study export --bundle` adds `intent` to `lit.search` rows and `counts.litQueries`, never query text. No query generation, ranking or embeddings.
+  - N-1 CLI: existing commands and usage remain; `--intent` and `lit queries` are additive.
+  - N-1 MCP: existing tools remain; `ares_lit_search` gains optional `intent` and `ares_lit_queries` is additive.
+  - N-1 study/ledger formats: study and ledger versions stay unchanged. Searches without intent keep the earlier event shape. Older readers ignore the optional `intent` and candidate `firstQuery`; studies written by the previous minor line report as `unspecified` with unattributed candidates. Older `plan set` refuses a step with `args.intent`.
+
 - Optional survey checklist in review reports (#102): `checklist.survey` takes six booleans (`taxonomyPrinciple`, `noEnumeration`, `specificGaps`, `citationRelations`, `selectionReported`, `scopeControl`); unknown keys refuse. New read-only `review checklist` (MCP `ares_review_checklist`) prints the questions. `study.toml` `[review] surveyChecklist = "off" | "show" | "require"` (default `show` for survey studies, `off` for experiments); `require` refuses a report without the block. `review show` adds `surveyChecklist` and `surveyAnswers`; answers never gate. The MCP review schema now also accepts the #100 `repair`/`section` finding fields.
   - N-1 CLI: existing commands and usage are unchanged; `review checklist` is additive.
   - N-1 MCP: existing tools stay; `ares_review_checklist` is additive and the `ares_review_add` input schema gains optional fields only.
