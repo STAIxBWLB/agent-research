@@ -35,7 +35,6 @@ export function resolveDiagnosticFixture(input: unknown): DiagnosticObservation 
   const observed = (completeness: string, nextAction: string): DiagnosticObservation => ({ provenance: { attemptId, head: commit, selectedHead, status, completeness }, nextAction });
   const missingArtifact = () => observed("artifact-missing", artifact?.retention === "pruned" ? "reexecute-from-frozen-inputs" : "restore-or-reexecute-artifact");
   const delivery = plain(value.delivery) ? value.delivery : undefined;
-  if (status === "unknown" && delivery?.acknowledged === false && delivery.effectObserved == null) return observed("delivery-unresolved", "reconcile-dispatch-before-retry");
   const parentId = text(attempt.parentAttemptId);
   if (parentId) {
     const parents = attempts.filter(parent => parent.id === parentId);
@@ -49,6 +48,8 @@ export function resolveDiagnosticFixture(input: unknown): DiagnosticObservation 
     if (artifact?.present === false) return retry(missingArtifact());
     return retry(observed(artifact?.present === true ? "complete" : "artifact-unavailable", artifact?.present === true ? "use-terminal-retry-result" : "inspect-visible-source-records"));
   }
+  // Retry identity must be validated before lost acknowledgement can describe the child.
+  if (status === "unknown" && delivery?.acknowledged === false && delivery.effectObserved == null) return observed("delivery-unresolved", "reconcile-dispatch-before-retry");
   if (status === "succeeded" && artifact?.present === false) return missingArtifact();
   if (status === "succeeded" && artifact?.present === true) return observed("complete", selectedHead && commit !== selectedHead ? "run-fresh-selected-head" : "inspect-terminal-result");
   return observed("pending", status === "running" ? "await-attempt-result" : "inspect-visible-source-records");

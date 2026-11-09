@@ -90,3 +90,41 @@ test("linked terminal retries never wait as pending, and missing successful arti
   payload.attempts[1].status = "unknown";
   expect(resolveDiagnosticFixture(payload)).toMatchObject({ provenance: { completeness: "delivery-unresolved" }, nextAction: "reconcile-dispatch-before-retry" });
 });
+
+
+test("lost acknowledgement preserves a valid unknown retry's parent and sample metadata", () => {
+  const { payload } = fixture(cases.find(row => row.input.includes("retry-terminal"))!);
+  payload.attempts[1].status = "unknown";
+  payload.delivery = { acknowledged: false, effectObserved: null, lastTransportState: "ack-lost" };
+  payload.artifact.present = false;
+  expect(resolveDiagnosticFixture(payload)).toEqual({
+    provenance: { attemptId: payload.attempts[1].id, head: payload.attempts[1].commit, selectedHead: payload.study.selectedHead, status: "unknown", completeness: "delivery-unresolved" },
+    nextAction: "reconcile-dispatch-before-retry", retryOf: payload.attempts[0].id, independentSamples: 1,
+  });
+});
+
+test("retry parent and event conflicts take precedence over an unknown child's lost acknowledgement", () => {
+  for (const fault of ["missing-parent", "duplicate-parent", "missing-event", "wrong-event-parent", "different-commit", "different-seed"] as const) {
+    const { payload } = fixture(cases.find(row => row.input.includes("retry-terminal"))!);
+    payload.attempts[1].status = "unknown";
+    payload.delivery = { acknowledged: false, effectObserved: null, lastTransportState: "ack-lost" };
+    if (fault === "missing-parent") payload.attempts.shift();
+    else if (fault === "duplicate-parent") payload.attempts.push({ ...payload.attempts[0] });
+    else if (fault === "missing-event") payload.events = [];
+    else if (fault === "wrong-event-parent") payload.events[0].sourceAttemptId = "unmatched-parent";
+    else if (fault === "different-commit") payload.attempts[0].commit = "f".repeat(40);
+    else payload.attempts[0].seed = payload.attempts[1].seed + 1;
+    expect(resolveDiagnosticFixture(payload)).toEqual({
+      provenance: { attemptId: null, head: null, selectedHead: payload.study.selectedHead, status: "unknown", completeness: "conflicting-source" },
+      nextAction: "reconcile-visible-source-records",
+    });
+  }
+});
+
+test("plain lost acknowledgement keeps the frozen current-workflow projection unchanged", () => {
+  const { payload, expected } = fixture(cases.find(row => row.input.includes("uncertain-delivery-lost-ack"))!);
+  const actual = resolveDiagnosticFixture(payload);
+  expect<unknown>(actual).toEqual(projection(expected));
+  expect(Object.hasOwn(actual, "retryOf")).toBe(false);
+  expect(Object.hasOwn(actual, "independentSamples")).toBe(false);
+});
