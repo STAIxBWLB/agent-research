@@ -30,8 +30,9 @@ const LINEAGE_ATTEMPTS = { type: "array", minItems: 1, maxItems: 8, items: { ...
 const LINEAGE_CANDIDATES = { type: "array", minItems: 1, maxItems: 8, items: { ...text(40), minLength: 40 } };
 const REVIEW = obj({
   v: { type: "integer", enum: [1] }, reviewer: obj({ id: text(128), modelFamily: text(128) }, ["id", "modelFamily"]), buildSha256: { type: "string", minLength: 64, maxLength: 64 },
-  checklist: obj({ negativeResults: { type: "boolean" }, denominators: { type: "boolean" }, limitations: { type: "boolean" }, reproducibility: { type: "boolean" } }, ["negativeResults", "denominators", "limitations", "reproducibility"]),
-  findings: { type: "array", maxItems: 200, items: obj({ id: text(128), kind: { type: "string", enum: ["contradiction", "unsupported-claim", "number", "citation", "method", "clarity", "other"] }, location: text(4000), text: text(4000), blocking: { type: "boolean" } }, ["id", "kind", "location", "text", "blocking"]) },
+  checklist: obj({ negativeResults: { type: "boolean" }, denominators: { type: "boolean" }, limitations: { type: "boolean" }, reproducibility: { type: "boolean" },
+    survey: obj({ taxonomyPrinciple: { type: "boolean" }, noEnumeration: { type: "boolean" }, specificGaps: { type: "boolean" }, citationRelations: { type: "boolean" }, selectionReported: { type: "boolean" }, scopeControl: { type: "boolean" } }, ["taxonomyPrinciple", "noEnumeration", "specificGaps", "citationRelations", "selectionReported", "scopeControl"]) }, ["negativeResults", "denominators", "limitations", "reproducibility"]),
+  findings: { type: "array", maxItems: 200, items: obj({ id: text(128), kind: { type: "string", enum: ["contradiction", "unsupported-claim", "number", "citation", "method", "clarity", "other"] }, location: text(4000), text: text(4000), blocking: { type: "boolean" }, repair: { type: "string", enum: ["edit", "paragraph", "section"] }, section: text(256) }, ["id", "kind", "location", "text", "blocking"]) },
 }, ["v", "reviewer", "buildSha256", "checklist", "findings"]);
 // Source-specific current-study/exact-id rules are owned by the shared validator; the MCP transport bounds both shapes.
 const SKILL_REF = {...EXECUTION_REFERENCE, type: ["string", "object"], minLength: 1, maxLength: 4096, required: ["v", "tool", "id"], properties: {...EXECUTION_REFERENCE.properties, tool: {type: "string", enum: ["ares", "amem"]}}};
@@ -171,6 +172,7 @@ export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_review_add", description: "Record a bounded current-evidence-hash review with self-reported model family and checklist. Contradictions are always blocking; 100 reports per build, 200 findings per report, 4000-byte texts and a 60 KiB combined payload ceiling. Starts no build or controller.", inputSchema: obj({ study, review: REVIEW }, ["study", "review"]), annotations: write },
   { name: "ares_review_resolve", description: "Resolve a recorded review-id/finding-id with an explicit reason and actor. No votes or automatic contradiction resolution; historical reports stay in the ledger.", inputSchema: obj({ study, target: text(257), reason: text(4000) }, ["study", "target", "reason"]), annotations: write },
   { name: "ares_review_show", description: "Read current build/check readiness, review families, checklists and unresolved blocking findings. Claims readiness is unavailable (agent-hub#931) and nonblocking. Starts no network, build or controller.", inputSchema: obj({ study }, ["study"]), annotations: read },
+  { name: "ares_review_checklist", description: "List the six optional survey checklist keys with their questions, the same wording reviewers answer in checklist.survey. Answers are displayed and never gate. Opens no study.", inputSchema: obj({}, []), annotations: read },
   { name: "ares_paper_build", description: "Check the bounded manuscript and refuse every finding before writing. Commit rendered Markdown, a v1 evidence map with source hashes and paper.built together; identical inputs/outputs record nothing. Unknown evidence versions are preserved. The no-arg paper.build plan step emits the committed evidence {sha256} for downstream gates. Starts no controller, executor or network calls.", inputSchema: obj({ study }, ["study"]), annotations: write },
   { name: "ares_paper_check", description: "Read-only manuscript readiness check: positioned bare-number, placeholder, citation and missing-negative-result findings plus every literal escape. Experiment numbers require closed evidence; survey checks citations and refuses experiment refs. Reads bounded paper/manuscript.md, starts no build/controller/network calls.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_cite_check", description: "Check [@key] citations in a draft against verified references; lists unknown and unverified keys.", inputSchema: obj({ study, draft: { type: "string", minLength: 1, maxLength: 4096 } }, ["study", "draft"]), annotations: read },
@@ -267,6 +269,7 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
     ares_review_add: a => ops.reviewAdd(dir(a), a.review, ctx),
     ares_review_resolve: a => ops.reviewResolve(dir(a), a.target as string, a.reason as string, ctx),
     ares_review_show: a => ops.reviewShow(dir(a)),
+    ares_review_checklist: () => ops.reviewChecklistShow(),
     ares_paper_build: a => ops.paperBuild(dir(a), ctx),
     ares_paper_check: a => ops.paperCheck(dir(a)),
     ares_cite_check: a => ops.cite(dir(a), absolute(a.draft, "draft")),

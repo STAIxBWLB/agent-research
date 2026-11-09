@@ -79,6 +79,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "review add", usage: "review add <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "review resolve", usage: "review resolve <dir> <review-id>/<finding-id> --reason TEXT [--json]", mutates: true, options: { "--reason": "value", ...json } },
   { name: "review show", usage: "review show <dir> [--json]", mutates: false, options: json },
+  { name: "review checklist", usage: "review checklist [--json]", mutates: false, options: json },
   { name: "paper build", usage: "paper build <dir> [--json]", mutates: true, options: json },
   { name: "paper check", usage: "paper check <dir> [--json]", mutates: false, options: json },
   { name: "cite check", usage: "cite check <dir> <draft> [--json]", mutates: false, options: json },

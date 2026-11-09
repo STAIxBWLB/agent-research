@@ -52,7 +52,7 @@ test("AC2: hygiene findings warn by default and block paper check and build only
 test("AC2: unknown settings and codes refuse with the cause and the next step", () => {
   for (const toml of ['[paper]\nblocking = ["bare-number"]\n', "[paper]\nmaxStack = 3\n", "[other]\nx = 1\n", "[paper]\nmaxGroup = 0\n", "not toml ==", '[paper]\nblocking = ["citation-stack", "citation-stack"]\n']) {
     const dir = study(toml);
-    expect(() => check(dir, "# Intro\n")).toThrow(/^study\.toml: .*; fix the \[paper\] settings/);
+    expect(() => check(dir, "# Intro\n")).toThrow(/^study\.toml: .*; fix the \[paper\] or \[review\] settings/);
   }
 });
 
