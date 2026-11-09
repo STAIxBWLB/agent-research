@@ -57,6 +57,8 @@ Protocol v2 opts into fresh serial candidate stages and bounded executor-local a
 
 This validator is structural preflight only. Task paths and code bytes must be checked against frozen snapshots by the execution implementation. The existing bounded `taskTreeHash` refuses symlinks and special files; structural path validation alone cannot attest filesystem contents.
 
+Optional `reuse` declarations use the [T1 pure-artifact contract](stage-reuse.md). They are included in the design seal but do not activate reuse execution or authorize cache hits.
+
 ## Identity
 
 `stageProtocolHash` validates and canonically hashes the entire v2 definition except `budget`. It binds the version, explicit stage order, image, argv, env, seed policy, code source, port names/paths, every ordering/data edge, evaluator, metrics, seeds, limits and network policy. Object key order is irrelevant; array order and argv bytes remain significant. This hash can feed the existing attempt identity formula together with frozen commit/tree, seed, run and retry identity once v2 execution is implemented.

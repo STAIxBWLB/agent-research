@@ -1,3 +1,4 @@
+import { STAGE_REUSE_CONTRACT_SCHEMA } from "./exp/reuse-contract.ts";
 import {HARNESS_MODEL_BYTES} from "./harness/limits.ts";
 import { PROVENANCE_KINDS, type ExecutionReferenceV1 } from "./provenance.ts";
 import { PHASES, AUTONOMY_MODES } from "./autonomy.ts";
@@ -63,7 +64,7 @@ const STAGE_PROTOCOL = obj({ ...PROTOCOL_V1.properties,
   v: { type: "integer", enum: [2] },
   inputs: undefined,
   candidate: obj({ stages: { type: "array", minItems: 1, maxItems: 16, items: obj({
-    name: text(32), image, command: argv, env: { type: "object", maxProperties: 64, properties: {}, additionalProperties: { type: "string", maxLength: 4096 } },
+    name: text(32), reuse: STAGE_REUSE_CONTRACT_SCHEMA, image, command: argv, env: { type: "object", maxProperties: 64, properties: {}, additionalProperties: { type: "string", maxLength: 4096 } },
     seed: { type: "boolean" }, code: { type: "string", enum: ["snapshot"] },
     needs: { type: "array", maxItems: 16, items: text(32) },
     inputs: { type: "object", maxProperties: 32, additionalProperties: { oneOf: [obj({ task: text(256) }, ["task"]), obj({ stage: text(32), output: text(32) }, ["stage", "output"])] } },

@@ -1,3 +1,4 @@
+import { validateReuseContract, type StageReuseContract } from "./reuse-contract.ts";
 import { plain, sha256 } from "../study.ts";
 import { PROTOCOL_BYTES, canonical, validateProtocol, type Protocol } from "./protocol.ts";
 
@@ -13,6 +14,7 @@ export interface CandidateStage {
   needs: string[];
   inputs: Record<string, StageInput>;
   outputs: Record<string, string>;
+  reuse?: StageReuseContract;
 }
 export interface ProtocolV2 extends Omit<Protocol, "v" | "candidate" | "inputs"> {
   v: 2;
@@ -60,13 +62,17 @@ function inputs(raw: unknown, prior: ReadonlyMap<string, CandidateStage>, label:
     return [key, { stage: producer, output }];
   }));
 }
+function reuseContract(raw: unknown, label: string): StageReuseContract {
+  try { return validateReuseContract(raw); }
+  catch (error) { throw new Error(`${label}.reuse: ${error instanceof Error ? error.message : "invalid pure-artifact contract"}`); }
+}
 function candidateStages(raw: unknown, common: Protocol): CandidateStage[] {
   const candidate = object(raw, ["stages"], "candidate");
   if (!Array.isArray(candidate.stages) || !candidate.stages.length || candidate.stages.length > STAGE_LIMIT) throw new Error(`candidate.stages: declare 1..${STAGE_LIMIT} stages in execution order`);
   const prior = new Map<string, CandidateStage>();
   for (const [index, rawStage] of candidate.stages.entries()) {
     const indexLabel = `candidate.stages[${index}]`;
-    const s = object(rawStage, ["name", "image", "command", "env", "seed", "code", "needs", "inputs", "outputs"], indexLabel), stageName = name(s.name, `${indexLabel}.name`);
+    const s = object(rawStage, ["name", "image", "command", "env", "seed", "code", "needs", "inputs", "outputs", "reuse"], indexLabel), stageName = name(s.name, `${indexLabel}.name`);
     const label = `${indexLabel}(${stageName})`;
     if (prior.has(stageName)) throw new Error(`${label}.name: duplicate; give each stage a unique name`);
     if (typeof s.seed !== "boolean" || s.code !== "snapshot") throw new Error(`${label}: declare boolean seed use and code: "snapshot"; mutable code inputs are unsupported`);
@@ -82,7 +88,8 @@ function candidateStages(raw: unknown, common: Protocol): CandidateStage[] {
       throw new Error(message.includes(label) ? message : `${label}: ${message}`);
     }
     prior.set(stageName, { name: stageName, ...execution, seed: s.seed, code: "snapshot", needs,
-      inputs: inputs(s.inputs, prior, `${label}.inputs`), outputs: outputs(s.outputs, `${label}.outputs`) });
+      inputs: inputs(s.inputs, prior, `${label}.inputs`), outputs: outputs(s.outputs, `${label}.outputs`),
+      ...(s.reuse === undefined ? {} : { reuse: reuseContract(s.reuse, label) }) });
   }
   return [...prior.values()];
 }

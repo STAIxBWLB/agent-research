@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { gateDecide, gateList } from "../src/commands.ts";
 import { expect, test } from "bun:test";
 import { run } from "../src/cli.ts";
 import { ARES_TOOLS, createAresMcp } from "../src/mcp-tools.ts";
@@ -46,4 +49,29 @@ test("default stage collector uses the named candidate log namespace", async () 
   });
   expect(evidence.logs.stdout.path).toEndWith("logs/candidate-prepare.stdout.log");
   expect(evidence.outputs).toHaveLength(1);
+});
+
+test("CLI/MCP share the optional declaration-only pure-artifact contract and reopen its design seal", async () => {
+  const reuse = { v: 1, kind: "pure-artifact", inputs: "declared-only", externalState: "none", writableState: "fresh-output-only", modelOutputs: "forbidden", determinism: "byte-exact", toolchain: { description: "Synthetic deterministic toolchain", documentationSha256: "f".repeat(64) } };
+  const value = staged(), raw = { ...value, candidate: { stages: value.candidate.stages.map(stage => ({ ...stage, reuse })) } };
+  const schema = ARES_TOOLS.find(tool => tool.name === "ares_protocol_set")!.inputSchema;
+  expect(validArguments({ study: "/synthetic", protocol: raw }, schema)).toBe(true);
+  expect(validArguments({ study: "/synthetic", protocol: { ...raw, candidate: { stages: raw.candidate.stages.map(stage => ({ ...stage, reuse: { ...reuse, reviewed: true } })) } } }, schema)).toBe(false);
+  const http = fakeHttp([]).http, mcp = createAresMcp({}, http), dirs = [tempDir(), tempDir()];
+  for (const dir of dirs) {
+    await run(["init", dir, "--question", "Synthetic?", "--mode", "experiment"], {}, { http });
+    mkdirSync(join(dir, "task", "evaluator"), { recursive: true }); writeFileSync(join(dir, "task", "task.md"), "synthetic task");
+  }
+  const before = JSON.parse((await run(["protocol", dirs[0]!, "--file", "-", "--json"], {}, { http, readStdin: async () => JSON.stringify(value) })).text);
+  await gateDecide(dirs[0]!, "design", "approve", undefined, { actor: { kind: "person" }, http });
+  expect(gateList(dirs[0]!).find(gate => gate.gate === "design")?.state).toBe("approved");
+  const cli = JSON.parse((await run(["protocol", dirs[0]!, "--file", "-", "--json"], {}, { http, readStdin: async () => JSON.stringify(raw) })).text);
+  const remote = await mcp.handlers.ares_protocol_set!({ study: dirs[1]!, protocol: raw }) as typeof cli;
+  expect(cli.protocolHash).not.toBe(before.protocolHash);
+  expect(gateList(dirs[0]!).find(gate => gate.gate === "design")?.state).toBe("pending");
+  expect(cli.protocol).toEqual(remote.protocol); expect(cli.protocolHash).toBe(remote.protocolHash);
+  const invalid = { ...raw, candidate: { stages: raw.candidate.stages.map(stage => ({ ...stage, reuse: { ...reuse, modelOutputs: "allowed" } })) } };
+  const saved = ["design/protocol.json", "ledger.jsonl"].map(file => readFileSync(join(dirs[1]!, file)));
+  await expect(mcp.handlers.ares_protocol_set!({ study: dirs[1]!, protocol: invalid })).rejects.toThrow("no model-output caching");
+  for (const [i, file] of ["design/protocol.json", "ledger.jsonl"].entries()) expect(readFileSync(join(dirs[1]!, file))).toEqual(saved[i]!);
 });
