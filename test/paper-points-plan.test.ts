@@ -20,7 +20,7 @@ const bytes = (file: string) => readBytesBounded(file, PAPER_PLAN_BYTES);
 const ledger = (dir: string) => readBytesBounded(join(dir, "ledger.jsonl"), 64 * 1024 * 1024);
 
 test("writing points auto-select v2, while absent/empty points normalize to byte-identical v1", () => {
-  const candidates = [reference()], value = raw(), expected = { v: 2, ...value };
+  const candidates = [reference()], value = raw(), expected = { v: 2 as const, ...value };
   expect(validatePaperPlan(value, candidates)).toEqual(expected);
   expect(validatePaperPlan({ v: 2, ...value }, candidates)).toEqual(expected);
   expect(() => validatePaperPlan({ v: 1, ...value }, candidates)).toThrow("version-1 plan cannot contain");
