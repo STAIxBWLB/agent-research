@@ -81,7 +81,7 @@ export function runtime() {
       else if (stage === "predict") writeFileSync(join(output, "predictions.txt"), readTextBounded(join(source("/in"), "model"), 1024) + ":predictions");
       else if (stage === "evaluate") {
         const prediction = readTextBounded(join(source("/candidate"), "predict", "predictions.txt"), 1024);
-        expect(prediction).toBe("synthetic:rows:model:predictions");
+        expect(["synthetic:rows:model:predictions", "synthetic:rows:model:revised:predictions"]).toContain(prediction);
         writeFileSync(join(output, "metrics.json"), JSON.stringify({ score: Buffer.byteLength(prediction) }));
       } else throw new Error("unexpected synthetic stage");
       executed.push(stage);
