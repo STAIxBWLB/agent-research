@@ -1,5 +1,5 @@
 import {expect, test} from "bun:test";
-import {existsSync, symlinkSync} from "node:fs";
+import {existsSync, mkdirSync, symlinkSync, unlinkSync} from "node:fs";
 import {join} from "node:path";
 import * as ops from "../src/commands.ts";
 import {run} from "../src/cli.ts";
@@ -68,7 +68,8 @@ test("temporal checks exclude current/future, cross-study, missing and incompati
 
 test("context binds only the frozen improver identity; legacy round and worker baseline bindings remain distinct", async () => {
   const f = fixture(), legacy = validateHarnessRound(round()), old = harnessRoundBinding(legacy);
-  expect(old).toBe(sha256(canonical(legacy))); expect(legacy.context).toBeUndefined();
+  // Frozen from origin/main base 77a8ad4: actual validateHarnessRound + harnessRoundBinding output.
+  expect(old).toBe("a5534d1f27729072b6913e036064754e14f6cede97632f8198b1a803491be9c6"); expect(legacy.context).toBeUndefined();
   await ops.harnessStreamSet(f.dir, stream(), f.ctx);
   const value = await ops.experienceFreeze(f.dir, request(), f.ctx), context = {streamSha256: value.streamSha256, improverContextHash: value.improverContextHash};
   await expect(ops.harnessSet(f.dir, round(), f.ctx)).rejects.toThrow("requires a frozen context");
@@ -113,7 +114,7 @@ test("strict bounds, privacy and unsupported fields refuse before any write or s
   expect(ledger(f.dir)).toEqual(saved); expect(f.transport.requests).toHaveLength(0);
 });
 
-test("future/missing/corrupt/linked stream and context files are preserved and fail closed", async () => {
+test("future-version stream/context and linked design files are preserved and fail closed", async () => {
   for (const name of ["harness-stream.json", "harness-experience.json"]) {
     const f = fixture(); await ops.harnessStreamSet(f.dir, stream(), f.ctx); await ops.experienceFreeze(f.dir, request(), f.ctx);
     const file = join(f.dir, "design", name); writeAtomic(file, JSON.stringify({v: 99}), EXPERIENCE_INDEX_BYTES); const before = ledger(f.dir), raw = readBytesBounded(file, EXPERIENCE_INDEX_BYTES);
@@ -123,6 +124,31 @@ test("future/missing/corrupt/linked stream and context files are preserved and f
   const f = fixture(), target = tempDir(); symlinkSync(target, join(f.dir, "design")); const before = ledger(f.dir);
   await expect(ops.harnessStreamSet(f.dir, stream(), f.ctx)).rejects.toThrow("linked"); expect(ledger(f.dir)).toEqual(before); expect(existsSync(join(target, "harness-stream.json"))).toBe(false);
 });
+
+for (const name of ["harness-stream.json", "harness-experience.json"]) {
+  for (const damage of ["missing", "malformed", "unreceipted"]) test(`${name} ${damage} refuses reads and freeze without repairing bytes or receipts`, async () => {
+    const native = fixture();
+    await ops.harnessStreamSet(native.dir, stream(), native.ctx);
+    await ops.experienceFreeze(native.dir, request(), native.ctx);
+    let f = native;
+    if (damage === "unreceipted") {
+      f = fixture();
+      if (name === "harness-experience.json") await ops.harnessStreamSet(f.dir, stream(), f.ctx);
+      mkdirSync(join(f.dir, "design"), {recursive: true});
+      // Copy genuine native producer bytes but deliberately omit their corresponding receipt.
+      writeAtomic(join(f.dir, "design", name), readTextBounded(join(native.dir, "design", name), EXPERIENCE_INDEX_BYTES), EXPERIENCE_INDEX_BYTES);
+    } else if (damage === "missing") unlinkSync(join(f.dir, "design", name));
+    else writeAtomic(join(f.dir, "design", name), "{malformed synthetic JSON", EXPERIENCE_INDEX_BYTES);
+    const paths = ["design/harness-stream.json", "design/harness-experience.json"];
+    const capture = () => paths.map(path => existsSync(join(f.dir, path)) ? readBytesBounded(join(f.dir, path), EXPERIENCE_INDEX_BYTES) : null);
+    const before = ledger(f.dir), files = capture();
+    expect(() => ops.harnessStreamShow(f.dir)).toThrow("experience");
+    await expect(ops.experienceFreeze(f.dir, request(), f.ctx)).rejects.toThrow("experience");
+    expect(ledger(f.dir)).toEqual(before); expect(capture()).toEqual(files);
+    expect(f.transport.requests).toHaveLength(0); expect(native.transport.requests).toHaveLength(0);
+    expect(existsSync(join(f.dir, ".ares.lock"))).toBe(false);
+  });
+}
 
 test("CLI/MCP stream, freeze and pre-handoff check share handlers and leave source bodies absent", async () => {
   const f = fixture(), server = createAresMcp(f.env, f.ctx.http, f.ctx), io = {...f.ctx, readStdin: async () => JSON.stringify(stream())};
