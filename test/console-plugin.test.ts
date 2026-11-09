@@ -37,7 +37,8 @@ async function fixtures(home: string) {
   fs.writeFileSync(join(survey, "literature", "candidates.json"), JSON.stringify(candidates));
   await ops.watchSet(survey, { v: 1, queries: [{ id: "synthetic", query: "synthetic", source: "openalex" }], rubric: "Synthetic human rubric" }, ctx);
   appendEvent(survey, actor, "watch.ran", { configSha256: "a".repeat(64), queries: [], added: 3, addedIds: [candidates[0]!.id, candidates[1]!.id, "doi:10.0000/absorbed"], addedIdsTotal: 3, ok: false });
-  await ops.skillPropose(survey, { name: "synthetic-procedure", summary: "Synthetic reusable procedure", steps: ["Inspect synthetic evidence"], evidence: ["a".repeat(32)] }, ctx);
+  const studyId = openStudy(survey).study.id;
+  await ops.skillPropose(survey, { name: "synthetic-procedure", summary: "Synthetic reusable procedure", steps: ["Inspect synthetic evidence"], evidence: [{v: 1, tool: "ares", projectKey: studyId, kind: "study", id: studyId}] }, ctx);
   fs.mkdirSync(join(survey, "paper")); fs.writeFileSync(join(survey, "paper", "manuscript.md"), "Synthetic manuscript.\n"); const build = await ops.paperBuild(survey, ctx);
   await ops.reviewAdd(survey, { v: 1, reviewer: { id: "synthetic", modelFamily: "synthetic" }, buildSha256: build.evidenceSha256,
     checklist: { negativeResults: true, denominators: true, limitations: true, reproducibility: true }, findings: [{ id: "contradiction", kind: "contradiction", location: "Synthetic section", text: "Synthetic open contradiction", blocking: true }] }, ctx);

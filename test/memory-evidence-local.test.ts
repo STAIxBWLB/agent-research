@@ -1,3 +1,4 @@
+import {legacySkillFixture} from "./legacy-skill-fixture.ts";
 import {expect, spyOn, test} from "bun:test";
 import * as fs from "node:fs";
 import * as child from "node:child_process";
@@ -105,7 +106,7 @@ test("inspection writes nothing, reads no output body, and never starts network/
 test("ledger-backed evidence digests bind the record rather than unrelated later appends", async () => {
   const f = await provenanceFixture(), before = inspect(f, "idea", f.ids.parentIdea);
   expect(before.state).toBe("available"); expect(before.digest).toMatch(/^[a-f0-9]{64}$/);
-  await ops.skillPropose(f.dir, {name: "unrelated-evidence-proposal", summary: "Synthetic later proposal", steps: ["Inspect synthetic evidence"], evidence: ["a".repeat(32)]}, f.ctx);
+  legacySkillFixture(f.dir, {name: "unrelated-evidence-proposal", summary: "Synthetic later proposal", steps: ["Inspect synthetic evidence"], evidence: ["a".repeat(32)]}, f.ctx.actor);
   const after = inspect(f, "idea", f.ids.parentIdea, before.digest!);
   expect(after.state).toBe("available"); expect(after.digest).toBe(before.digest);
 });

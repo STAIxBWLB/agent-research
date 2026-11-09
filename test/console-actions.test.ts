@@ -8,7 +8,7 @@ import { startServer } from "../node_modules/@staix/agent-console/src/server.ts"
 import { createPlugin, CONSOLE_ARCHIVE_MS } from "../src/ui/plugin.ts";
 import * as ops from "../src/commands.ts";
 import { addStudy } from "../src/console/registry.ts";
-import { appendEvent, readLedger } from "../src/study.ts";
+import { appendEvent, openStudy, readLedger } from "../src/study.ts";
 import { fakeHttp, fakeRunner, tempDir } from "./helpers.ts";
 
 const person = { kind: "person" as const }, ctx = { actor: person, http: fakeHttp([]).http }, noteId = "a".repeat(32);
@@ -28,7 +28,8 @@ async function fixture(home: string) {
     { id: otherId, doi: "10.0000/action-b", title: "Synthetic action B", authors: [], year: 2024, sources: ["openalex"], status: "new", addedAt: "2030-01-01T00:00:00Z" },
     { id: baselineId, doi: "10.0000/action-baseline", title: "Synthetic included baseline", authors: [], year: 2024, sources: ["openalex"], status: "included", addedAt: "2030-01-01T00:00:00Z" },
   ]));
-  await ops.skillPropose(survey, { name: proposalName, summary: "Synthetic procedure", steps: ["Inspect recorded evidence"], evidence: [noteId] }, ctx);
+  const studyId = openStudy(survey).study.id;
+  await ops.skillPropose(survey, { name: proposalName, summary: "Synthetic procedure", steps: ["Inspect recorded evidence"], evidence: [{v: 1, tool: "ares", projectKey: studyId, kind: "study", id: studyId}] }, ctx);
   await ops.ideaAdd(experiment, { id: "pivot", title: "Synthetic pivot", hypothesis: "Synthetic hypothesis" }, ctx);
   await ops.ideaDecide(experiment, "pivot", { decision: "pivot", reason: "Synthetic abandoned direction", cause: "Recorded cause", retryWhen: "New evidence" }, ctx);
   addStudy(family, survey); addStudy(family, experiment);

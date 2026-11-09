@@ -2,7 +2,7 @@ import { validateAutonomy, validateAutonomyMode, resolveAutonomy, ACCEPT_ARTIFAC
 export type { Autonomy } from "./autonomy.ts";
 import { hostname } from "node:os";
 import { spawnSync } from "node:child_process";
-import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync, lstatSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readSync, renameSync, statSync, unlinkSync, writeSync, appendFileSync, lstatSync, realpathSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 
@@ -164,7 +164,17 @@ const ownedStudyLocks = new Set<() => void>();
 /** MCP termination only: call immediately before process exit, never while continuing async work. */
 export function releaseStudyLocksForExit(): void { for (const release of [...ownedStudyLocks]) release(); }
 export class StudyLockBusyError extends Error {}
-export async function withLock<T>(dir: string, fn: () => Promise<T> | T, inspectOwner: (fd: number) => ReturnType<typeof fstatSync> = fstatSync): Promise<T> {
+export interface StudyReadLock {readonly scope: "owned-study-read"}
+const studyReadLocks = new WeakMap<StudyReadLock, {root: string; file: string; dev: number | bigint; ino: number | bigint}>();
+/** Internal capability, never a caller-supplied lock bypass. Revoked on release and inode-checked on every capture. */
+export function assertStudyReadLock(dir: string, permit: StudyReadLock): void {
+  const owner = studyReadLocks.get(permit);
+  try {
+    if (!owner || realpathSync(owner.root) !== realpathSync(dir)) throw new Error();
+    const current = lstatSync(owner.file); if (current.dev !== owner.dev || current.ino !== owner.ino) throw new Error();
+  } catch {throw new StudyLockBusyError("study read permit is missing, changed or not owned; restore exclusive access and retry inside the current ares study transaction");}
+}
+export async function withLock<T>(dir: string, fn: (permit: StudyReadLock) => Promise<T> | T, inspectOwner: (fd: number) => ReturnType<typeof fstatSync> = fstatSync): Promise<T> {
   const path = join(dir, ".ares.lock");
   let fd: number;
   try { fd = openSync(path, "wx", 0o600); }
@@ -183,18 +193,20 @@ export async function withLock<T>(dir: string, fn: () => Promise<T> | T, inspect
     finally { try { closeSync(fd); } catch { /* preserve the original probe failure */ } }
     throw error;
   }
+  const permit: StudyReadLock = Object.freeze({scope: "owned-study-read"});
+  studyReadLocks.set(permit, {root: resolve(dir), file: path, dev: owner.dev, ino: owner.ino});
   let released = false;
   const release = () => {
     if (released) return; released = true;
     try { const current = lstatSync(path); if (current.dev === owner.dev && current.ino === owner.ino) unlinkSync(path); }
     catch { /* absent or replaced; never remove a different owner's lock */ }
-    finally { try { closeSync(fd); } catch { /* process exit also closes owned descriptors */ } ownedStudyLocks.delete(release); }
+    finally { try { closeSync(fd); } catch { /* process exit also closes owned descriptors */ } ownedStudyLocks.delete(release); studyReadLocks.delete(permit); }
   };
   ownedStudyLocks.add(release);
   try { writeSync(fd, `${process.pid} ${new Date().toISOString()}\n`); }
   catch (error) { release(); throw error; }
   // Keep the descriptor open until release so an unlinked inode cannot be reused by a replacement lock.
-  try { return await fn(); } finally { release(); }
+  try { return await fn(permit); } finally { release(); }
 }
 
 export interface PendingEvent { actor: Actor; type: string; data: Record<string, unknown> }

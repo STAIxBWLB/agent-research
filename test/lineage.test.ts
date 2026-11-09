@@ -1,3 +1,4 @@
+import {legacySkillFixture} from "./legacy-skill-fixture.ts";
 import {expect, test} from "bun:test";
 import * as fs from "node:fs";
 import {join} from "node:path";
@@ -11,7 +12,7 @@ test("#105 stored revision and malformed attempt-shaped skill evidence are expli
   const f = await provenanceFixture(), plan = join(f.dir, "plan.json"), text = readTextBounded(plan, 65_536), raw = JSON.parse(text); delete raw.revision; writeAtomic(plan, JSON.stringify(raw), 65_536);
   let page = readProvenance(f.dir); expect(page.status).toBe("unavailable"); expect(page.issues.some(issue => issue.code === "missing-stored-plan-revision")).toBe(true);
   writeAtomic(plan, text, 65_536);
-  await ops.skillPropose(f.dir, {name: "unresolved-synthetic", summary: "Synthetic", steps: ["Inspect"], evidence: [`ares:${f.studyId}/attempt:invalid-suffix`]}, f.ctx);
+  legacySkillFixture(f.dir, {name: "unresolved-synthetic", summary: "Synthetic", steps: ["Inspect"], evidence: [`ares:${f.studyId}/attempt:invalid-suffix`]}, f.ctx.actor);
   page = readProvenance(f.dir); expect(page.status).toBe("ok"); expect(page.nodes.find(node => node.ref.kind === "skill-proposal" && node.ref.id === "unresolved-synthetic")?.data?.additionalEvidence).toBe("declared-unresolved");
 });
 
