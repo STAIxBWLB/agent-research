@@ -350,7 +350,7 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
   } catch (error) { if (error instanceof TraversalCap) graph.capped = true; else if (error instanceof SourceFailure) graph.issue(error.code); else graph.issue(error instanceof Error && error.message.includes("unsupported") ? "unsupported-source" : "corrupt-provenance"); }
   return graph;
 }
-interface Closure { ref: ExecutionReferenceV1; file: string; hash: string; proof: ProvenanceProof; family: string; latest: boolean; raw?: Record<string, unknown> }
+interface Closure { ref: ExecutionReferenceV1; file: string; hash: string; proof: ProvenanceProof; family: string; latest: boolean; raw?: Record<string, unknown>; nativeVersion?: ReturnType<typeof paperEvidenceVersion> }
 function closures(dir: string, graph: Graph, study: ExecutionReferenceV1): void {
   const source = graph.source, records: Closure[] = [], latest = new Map<string, number>();
   const selected = fileJson(source, "design/selection.json")?.run;
@@ -373,7 +373,7 @@ function closures(dir: string, graph: Graph, study: ExecutionReferenceV1): void 
     if (matches) {
       try {
         record.raw = fileJson(source, record.file);
-        if (record.raw && record.family === "paper" && (record.raw.v === 1 || record.raw.v === 2)) paperEvidenceVersion(record.raw);
+        if (record.raw && record.family === "paper" && (record.raw.v === 1 || record.raw.v === 2)) record.nativeVersion = paperEvidenceVersion(record.raw);
         if (!record.raw || (record.raw.v !== 1 && !(record.family === "paper" && record.raw.v === 2))) { state = "unavailable"; graph.issue("unsupported-closed-version", record.ref); }
         else if (record.family === "paper" ? !Array.isArray(record.raw.placeholders) || typeof record.raw.manuscriptSha256 !== "string" : typeof record.raw.inputsSha256 !== "string" || record.family === "final" && !["qualified", "not_qualified"].includes(String(record.raw.status))) { state = "corrupt"; graph.issue("malformed-closed-artifact", record.ref); }
         else if (record.latest && !(record.family === "investigate" && record.ref.id !== selected)) {
@@ -388,11 +388,11 @@ function closures(dir: string, graph: Graph, study: ExecutionReferenceV1): void 
         } else if (record.family === "investigate" && record.ref.id !== selected) state = "historical";
       } catch { state = "corrupt"; graph.issue("malformed-closed-artifact", record.ref); }
     }
-    graph.put({ ref: record.ref, state, availability, proof: record.proof, data: { family: record.family, receiptMatched: matches, ...(record.family === "final" && typeof record.raw?.status === "string" ? { status: record.raw.status } : {}), ...(record.family === "investigate" && state === "current" && matches && record.raw && Object.hasOwn(record.raw, "winner") ? { winner: record.raw.winner !== null } : {}) } });
+    graph.put({ ref: record.ref, state, availability, proof: record.proof, data: { family: record.family, receiptMatched: matches, ...(record.nativeVersion === undefined ? {} : {nativeVersion: record.nativeVersion}), ...(record.family === "final" && typeof record.raw?.status === "string" ? { status: record.raw.status } : {}), ...(record.family === "investigate" && state === "current" && matches && record.raw && Object.hasOwn(record.raw, "winner") ? { winner: record.raw.winner !== null } : {}) } });
     graph.edge(study, record.ref, "closed", record.proof);
   }
   for (const record of records) {
-    if (!record.raw || source.files.get(record.file)?.sha256 !== record.hash || record.raw.v !== 1 || graph.nodes.get(key(record.ref))?.state === "corrupt") continue;
+    if (!record.raw || source.files.get(record.file)?.sha256 !== record.hash || (record.family === "paper" ? record.nativeVersion === undefined : record.raw.v !== 1) || graph.nodes.get(key(record.ref))?.state === "corrupt") continue;
     const raw = record.raw, proof = graph.proof(record.file);
     const attempt = (id: unknown) => { graph.touch(); if (typeof id === "string" && ATTEMPT.test(id)) graph.edge(record.ref, graph.target("attempt", id, proof), "uses-attempt", proof); };
     const statuses = (value: unknown) => {
