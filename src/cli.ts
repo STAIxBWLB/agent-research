@@ -219,8 +219,8 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     }
     case "harness stream show": count(spec, positional, 1); result = ops.harnessStreamShow(positional[0]!); break;
     case "experience check": {
-      count(spec, positional, 2); const model = str("--model"), runtime = str("--runtime"); if (!model || !runtime) throw new Error(`usage: ares ${spec.usage}`);
-      result = await ops.experienceCheck(positional[0]!, positional[1]!, {model, runtime, ...(str("--toolset-sha256") ? {toolsetSha256: str("--toolset-sha256")} : {})}, ctx, env); break;
+      count(spec, positional, 2); const model = str("--model"), runtime = str("--runtime"), toolsetSha256 = str("--toolset-sha256"); if (!model || !runtime) throw new Error(`usage: ares ${spec.usage}`);
+      result = await ops.experienceCheck(positional[0]!, positional[1]!, {model, runtime, ...(toolsetSha256 !== undefined ? {toolsetSha256} : {})}, ctx, env); break;
     }
     case "harness contrast": case "harness compose": case "harness adopt": case "harness close": {
       count(spec, positional, 2); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);

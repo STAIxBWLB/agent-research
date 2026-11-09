@@ -127,6 +127,7 @@ export function experienceSourceEligibility(stream: HarnessStream, studyId: stri
   return source.completed ? {state: "available" as const, reason: "earlier-reviewed-receipted-fixture-source"} : {state: "unavailable" as const, reason: "completed-round-lesson-receipts-unavailable"};
 }
 async function resolveSelected(current: ReturnType<typeof store>, request: ExperienceRequest, options: ExperienceReadOptions, pins?: readonly FrozenEntry[]) {
+  if (!request.selected.length) return {state: "available" as const, entries: [], observations: [], context: "", bytes: 0};
   const sources = archivedLessonSources(current.dir), budget = sourceBudget(options.now), entries: FrozenEntry[] = [], observations: {id: string; state: string; digest: string | null; observedAt?: string; sourceVersion?: string}[] = [], context: string[] = [];
   try {await recheckLessonExports(current.dir, request.selected.flatMap(selected => {const source = sources.get(selected.id); return source ? [source.noteSha256] : [];}), {...options, budget});}
   catch {return {state: "unavailable" as const, entries, observations: request.selected.map(value => ({id: value.id, state: "unavailable", digest: null})), context: null, bytes: 0};}

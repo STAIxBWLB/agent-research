@@ -8,6 +8,7 @@ import {harnessRoundBinding, validateHarnessRound} from "../src/harness/rounds.t
 import {validateHarnessStream, validateExperienceRequest, experienceSourceEligibility, EXPERIENCE_INDEX_BYTES} from "../src/harness/experience.ts";
 import {readTextBounded, readBytesBounded, readLedger, writeAtomic, sha256, gateState} from "../src/study.ts";
 import {canonical} from "../src/plan/state.ts";
+import {lessonFixture, acceptedLesson, lessonIdentity} from "./lesson-fixtures.ts";
 import {fakeHttp, fakeRunner, tempDir} from "./helpers.ts";
 import type {ProcessRunner} from "../src/exp/executor.ts";
 const stream = () => ({v: 1, id: "stream-one", revision: 1, tasks: ["task-a", "task-b", "task-c"]});
@@ -198,4 +199,29 @@ test("survey and incomplete CLI forms fail before processes or writes", async ()
     await expect(run(argv, g.env, {...g.ctx, readStdin: async () => {inputs++; return "{}";}})).rejects.toThrow("usage:");
   }
   expect(inputs).toBe(0); expect(g.transport.requests).toHaveLength(0); expect(existsSync(join(g.dir, "design"))).toBe(false);
+});
+
+for (const damage of ["missing", "malformed", "unreceipted"] as const) for (const condition of ["baseline", "no-library"] as const) test(`empty ${condition} ignores ${damage} lesson index in freeze, check and select`, async () => {
+  const f = await lessonFixture(true); await acceptedLesson(f);
+  const path = join(f.dir, "proposals", "lessons.json");
+  if (damage === "missing") unlinkSync(path);
+  else writeAtomic(path, damage === "malformed" ? "{malformed synthetic index" : JSON.stringify({v: 1, proposals: []}), EXPERIENCE_INDEX_BYTES);
+  const index = existsSync(path) ? readTextBounded(path, EXPERIENCE_INDEX_BYTES) : null;
+  const raw = {v: 1, round: "empty-later", taskId: "task-later", condition, ...lessonIdentity, selected: []};
+  const frozen = await ops.experienceFreeze(f.dir, raw, f.ctx, f.env), before = ledger(f.dir);
+  expect(frozen.entries).toEqual([]);
+  const checked = await ops.experienceCheck(f.dir, raw.round, lessonIdentity, f.ctx, f.env);
+  expect(checked).toMatchObject({state: "available", context: "", bytes: 0, observations: []});
+  const search = fakeRunner([{exitCode: 0, stdout: "[]", stderr: ""}]);
+  const selected = await ops.experienceSelect(f.dir, {...raw, round: "empty-last", taskId: "task-last"}, {...f.ctx, runner: search.runner}, f.env);
+  expect(selected).toMatchObject({state: "available", selected: []}); expect(search.requests.map(value => value.args[0])).toEqual(["search"]);
+  expect(ledger(f.dir)).toEqual(before); expect(existsSync(path) ? readTextBounded(path, EXPERIENCE_INDEX_BYTES) : null).toBe(index); expect(f.transport.requests).toEqual([]);
+});
+test("CLI and MCP refuse an explicitly empty toolset hash through shared validation", async () => {
+  const f = fixture(); await ops.harnessStreamSet(f.dir, stream(), f.ctx); await ops.experienceFreeze(f.dir, request(), f.ctx, f.env);
+  const before = ledger(f.dir), server = createAresMcp(f.env, f.ctx.http, f.ctx);
+  const cli = run(["experience", "check", f.dir, request().round, "--model", identity.model, "--runtime", identity.runtime, "--toolset-sha256", ""], f.env, f.ctx);
+  await expect(cli).rejects.toThrow("lowercase SHA-256 required");
+  await expect(server.handlers.ares_experience_check!({study: f.dir, round: request().round, ...identity, toolsetSha256: ""})).rejects.toThrow("lowercase SHA-256 required");
+  expect(ledger(f.dir)).toEqual(before); expect(f.transport.requests).toEqual([]);
 });
