@@ -129,7 +129,8 @@ export function experienceSourceEligibility(stream: HarnessStream, studyId: stri
 async function resolveSelected(current: ReturnType<typeof store>, request: ExperienceRequest, options: ExperienceReadOptions, pins?: readonly FrozenEntry[]) {
   if (!request.selected.length) return {state: "available" as const, entries: [], observations: [], context: "", bytes: 0};
   const sources = archivedLessonSources(current.dir), budget = sourceBudget(options.now), entries: FrozenEntry[] = [], observations: {id: string; state: string; digest: string | null; observedAt?: string; sourceVersion?: string}[] = [], context: string[] = [];
-  try {await recheckLessonExports(current.dir, request.selected.flatMap(selected => {const source = sources.get(selected.id); return source ? [source.noteSha256] : [];}), {...options, budget});}
+  let recheckSources = () => false;
+  try {recheckSources = await recheckLessonExports(current.dir, request.selected.flatMap(selected => {const source = sources.get(selected.id); return source ? [source.noteSha256] : [];}), {...options, budget});}
   catch {return {state: "unavailable" as const, entries, observations: request.selected.map(value => ({id: value.id, state: "unavailable", digest: null})), context: null, bytes: 0};}
   for (const selected of request.selected) {
     const source = sources.get(selected.id), p = source?.row.proposal, compat = p?.compatibility;
@@ -143,7 +144,7 @@ async function resolveSelected(current: ReturnType<typeof store>, request: Exper
     context.push(source.note.text);
   }
   const refreshed = archivedLessonSources(current.dir), unchanged = entries.every(value => {const source = refreshed.get(value.id); return source?.row.sha256 === value.lessonSha256 && source.row.disposition?.sha256 === value.dispositionSha256 && source.noteSha256 === value.noteSha256;});
-  const rendered = context.join("\n\n"), available = unchanged && entries.length === request.selected.length && Buffer.byteLength(rendered) <= EXPERIENCE_BYTES && budget.remainingMs() > 0;
+  const rendered = context.join("\n\n"), available = recheckSources() && unchanged && entries.length === request.selected.length && Buffer.byteLength(rendered) <= EXPERIENCE_BYTES && budget.remainingMs() > 0;
   return {state: available ? "available" as const : "unavailable" as const, entries, observations, context: available ? rendered : null, bytes: available ? Buffer.byteLength(rendered) : 0};
 }
 /** Ranking is advisory; only chain-proven explicit selections receive an owning exact-id read. */

@@ -147,10 +147,11 @@ export function boundLessonExportBatch(dir: string, notes: {sha256: string; note
 export async function recheckLessonExports(dir: string, hashes: readonly string[], options: SkillCheckOptions = {}) {
   const pending = eligibleLessonNotes(dir).filter(value => hashes.includes(hash(value.note)));
   const refs = [...new Map(pending.flatMap(value => lessonReferences(value.row.proposal)).map(ref => [canonical(ref), ref])).values()];
-  if (!refs.length) return;
+  if (!refs.length) return () => true;
   const checked = await inspectSkillEvidenceSet(dir, refs, options); if (!checked.recheck()) fail("sources changed or export source budget expired");
   const byRef = new Map(checked.inspections.map(value => [canonical(value.ref), value]));
   for (const {row} of pending) {currentLessonSource(dir, row.proposal); const now = lessonReferences(row.proposal).map(ref => byRef.get(canonical(ref))!); if (compareSkillInspections(row.proposal.inspections, now).length || lessonEvidenceFingerprint(row.proposal, now) !== row.disposition?.evidenceFingerprint) fail("accepted lesson source/counterevidence changed before export");}
+  return checked.recheck;
 }
 export function archivedLessonSources(dir: string) {
   const current = read(dir), receipts = archiveReceiptIndex(current.events), counts = new Map<string, number>(), known = new Map<string, {row: LessonRow; note: AmemNote; noteSha256: string}>();

@@ -2,13 +2,14 @@ import {expect, test} from "bun:test";
 import {join} from "node:path";
 import * as ops from "../src/commands.ts";
 import {candidateNote} from "../src/harness/lesson-candidates.ts";
-import {readTextBounded, readLedger} from "../src/study.ts";
+import {readTextBounded, readLedger, openStudy} from "../src/study.ts";
 import type {ProcessRunner} from "../src/exp/executor.ts";
 import {canonical} from "../src/plan/state.ts";
 import {fakeRunner} from "./helpers.ts";
 import {lessonFixture, acceptedLesson, screenedLessonRunner, lessonIdentity} from "./lesson-fixtures.ts";
-async function archived() {
-  const f = await lessonFixture(true), accepted = await acceptedLesson(f), note = candidateNote(accepted)!;
+async function archived(withLocalCounterevidence = false) {
+  const f = await lessonFixture(true), studyId = openStudy(f.dir).study.id;
+  const accepted = await acceptedLesson(f, {...f.proposal, ...(withLocalCounterevidence ? {counterevidence: [{v: 1, tool: "ares", projectKey: studyId, kind: "study", id: studyId}]} : {})}), note = candidateNote(accepted)!;
   const preview = await ops.archive(f.dir, {}, f.ctx, f.env);
   const index = preview.notes.findIndex(row => canonical(row.note) === canonical(note)); expect(index).toBeGreaterThanOrEqual(0);
   const ids = preview.notes.map((_, i) => (i + 1).toString(16).padStart(32, "0")), transport = fakeRunner(ids.map(id => ({exitCode: 0, stdout: JSON.stringify({id, kind: note.kind}), stderr: ""})));
@@ -56,4 +57,19 @@ for (const field of ["model", "runtime", "toolsetSha256"] as const) test(`incomp
   await expect(ops.experienceFreeze(f.dir, {...f.request, ...incompatible}, f.ctx, f.env)).rejects.toThrow("experience"); expect(durable(f.dir)).toBe(before);
   await ops.experienceFreeze(f.dir, f.request, f.ctx, f.env); const frozen = durable(f.dir);
   expect(await ops.experienceCheck(f.dir, f.request.round, incompatible, f.ctx, f.env)).toMatchObject({state: "unavailable", context: null, bytes: 0}); expect(durable(f.dir)).toBe(frozen);
+});
+
+test("local counterevidence changing during screened amem read blocks the same handoff", async () => {
+  const f = await archived(true); await ops.experienceFreeze(f.dir, f.request, f.ctx, f.env);
+  let changed = false;
+  const runner: ProcessRunner = request => f.screened.runner({...request, stdoutSink: async chunk => {
+    const frame = JSON.parse(Buffer.from(chunk).toString());
+    if (frame.id === 3 && !changed) {await ops.autonomySet(f.dir, "gates", undefined, f.ctx); changed = true;}
+    await request.stdoutSink!(chunk);
+  }});
+  const checked = await ops.experienceCheck(f.dir, f.request.round, lessonIdentity, {...f.ctx, runner}, f.env);
+  expect(changed).toBe(true); expect(openStudy(f.dir).study.autonomy).toBe("gates");
+  expect(checked).toMatchObject({state: "unavailable", context: null, bytes: 0}); expect(checked.nextStep).toContain("Restore the exact screened source");
+  const before = durable(f.dir), next = await ops.experienceCheck(f.dir, f.request.round, lessonIdentity, f.ctx, f.env);
+  expect(next).toMatchObject({state: "unavailable", context: null, bytes: 0}); expect(durable(f.dir)).toBe(before);
 });
