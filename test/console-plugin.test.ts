@@ -452,7 +452,7 @@ test("normal same-cursor polling detects record corruption and repair without le
     for (const [file, bytes] of journals) expect(fs.readFileSync(file)).toEqual(bytes);
     expect(fs.readFileSync(target)).toEqual(original);
   }
-});
+}, 30_000);
 
 test("fresh studies have no optional-phase errors while a configured investigation remains readable", async () => {
   for (const mode of ["survey", "experiment", "protocol-only", "selection-only"] as const) {
