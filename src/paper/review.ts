@@ -2,15 +2,30 @@ import { requireCopilotAccept, CopilotAcceptError } from "../copilot.ts";
 import { boundedText, commit, onlyKeys, openStudy, plain, readLedger, sha256, type Actor, type LedgerEvent } from "../study.ts";
 import { readCurrentBuild } from "./build.ts";
 import { checkPaper } from "./check.ts";
-import { DEFAULT_PAPER_SETTINGS, readPaperSettings } from "./hygiene.ts";
+import { DEFAULT_PAPER_SETTINGS, readPaperSettings, readReviewSettings, type SurveyChecklistMode } from "./hygiene.ts";
 export const REVIEW_KINDS = ["contradiction", "unsupported-claim", "number", "citation", "method", "clarity", "other"] as const;
 export const REPAIR_SCOPES = ["edit", "paragraph", "section"] as const;
 export type RepairScope = typeof REPAIR_SCOPES[number];
 export const OVER_BUDGET_ADVICE = "replan the section or ask a person";
+/** Survey checklist questions, written for ares; answers are displayed and never gate. */
+export const SURVEY_CHECKLIST = [
+  { key: "taxonomyPrinciple", question: "Does the survey state how it classifies the work, with one primary partition that does not mix unrelated axes?" },
+  { key: "noEnumeration", question: "Do the main sections relate neighbouring works to each other instead of summarizing one paper after another?" },
+  { key: "specificGaps", question: "Do the stated gaps and future directions follow from named mechanisms, trade-offs or limitations, and appear outside the conclusion too?" },
+  { key: "citationRelations", question: "When a claim cites several works together, does the text say how they relate (shared mechanism, contrast, lineage, boundary, trade-off, trend or limitation)?" },
+  { key: "selectionReported", question: "Is every corpus-level or 'systematic' claim backed by reported sources, queries, cutoff date, screening counts and inclusion criteria?" },
+  { key: "scopeControl", question: "Is adjacent material justified and kept subordinate to the stated topic?" },
+] as const;
+export type SurveyKey = typeof SURVEY_CHECKLIST[number]["key"];
+export type SurveyAnswers = Record<SurveyKey, boolean>;
+const SURVEY_KEYS: SurveyKey[] = SURVEY_CHECKLIST.map(item => item.key);
+export function reviewChecklist() { return { survey: SURVEY_CHECKLIST.map(item => ({ ...item })) }; }
+/** Unset means show for survey studies and off for experiment studies. */
+export function surveyChecklistMode(dir: string, mode: string): SurveyChecklistMode { return readReviewSettings(dir).surveyChecklist ?? (mode === "survey" ? "show" : "off"); }
 export interface ReviewFinding { id: string; kind: typeof REVIEW_KINDS[number]; location: string; text: string; blocking: boolean; repair?: RepairScope; section?: string }
 export interface ReviewReport {
   v: 1; reviewer: { id: string; modelFamily: string }; buildSha256: string;
-  checklist: { negativeResults: boolean; denominators: boolean; limitations: boolean; reproducibility: boolean };
+  checklist: { negativeResults: boolean; denominators: boolean; limitations: boolean; reproducibility: boolean; survey?: SurveyAnswers };
   findings: ReviewFinding[];
 }
 interface Resolution { reason: string; actor: Actor; at: string }
@@ -32,10 +47,16 @@ export function validateReview(raw: unknown, strict = true): ReviewReport {
   try {
     const value = object(raw, ["v", "reviewer", "buildSha256", "checklist", "findings"], "report", strict);
     if (value.v !== 1) throw new Error("review: unsupported report version; use an ares version that supports this report, keeping the original bytes unchanged");
-    const reviewer = object(value.reviewer, ["id", "modelFamily"], "reviewer", strict), checklist = object(value.checklist, ["negativeResults", "denominators", "limitations", "reproducibility"], "checklist", strict);
+    const reviewer = object(value.reviewer, ["id", "modelFamily"], "reviewer", strict), checklist = object(value.checklist, ["negativeResults", "denominators", "limitations", "reproducibility", "survey"], "checklist", strict);
     const buildSha256 = text(value.buildSha256, "buildSha256", 64);
     if (!/^[a-f0-9]{64}$/.test(buildSha256)) bad("buildSha256 must be the 64-hex current evidence hash; run ares paper build");
     for (const name of ["negativeResults", "denominators", "limitations", "reproducibility"]) if (typeof checklist[name] !== "boolean") bad(`checklist.${name} must be a boolean`);
+    let survey: SurveyAnswers | undefined;
+    if (checklist.survey !== undefined) {
+      const block = object(checklist.survey, SURVEY_KEYS, "checklist.survey", strict);
+      for (const key of SURVEY_KEYS) if (typeof block[key] !== "boolean") bad(`checklist.survey.${key} must be a boolean; run ares review checklist for the six questions`);
+      survey = Object.fromEntries(SURVEY_KEYS.map(key => [key, block[key] as boolean])) as SurveyAnswers;
+    }
     if (!Array.isArray(value.findings) || value.findings.length > 200) bad("findings must be an array of at most 200 entries");
     const ids = new Set<string>();
     const findings = value.findings.map((raw, index) => {
@@ -48,7 +69,7 @@ export function validateReview(raw: unknown, strict = true): ReviewReport {
       return { id, kind: finding.kind as typeof REVIEW_KINDS[number], location: text(finding.location, `finding ${id}.location`), text: text(finding.text, `finding ${id}.text`), blocking: finding.kind === "contradiction" || finding.blocking,
         ...(finding.repair !== undefined ? { repair: finding.repair as RepairScope } : {}), ...(finding.section !== undefined ? { section: text(finding.section, `finding ${id}.section`, 256).trim() } : {}) };
     });
-    return { v: 1, reviewer: { id: text(reviewer.id, "reviewer.id", 128), modelFamily: text(reviewer.modelFamily, "reviewer.modelFamily", 128).trim().toLowerCase() }, buildSha256, checklist: { negativeResults: checklist.negativeResults as boolean, denominators: checklist.denominators as boolean, limitations: checklist.limitations as boolean, reproducibility: checklist.reproducibility as boolean }, findings };
+    return { v: 1, reviewer: { id: text(reviewer.id, "reviewer.id", 128), modelFamily: text(reviewer.modelFamily, "reviewer.modelFamily", 128).trim().toLowerCase() }, buildSha256, checklist: { negativeResults: checklist.negativeResults as boolean, denominators: checklist.denominators as boolean, limitations: checklist.limitations as boolean, reproducibility: checklist.reproducibility as boolean, ...(survey ? { survey } : {}) }, findings };
   } catch (error) {
     const message = error instanceof Error ? error.message : "invalid report";
     if (message.includes("; inspect ares review show") || message.includes("supports this report")) throw error;
@@ -72,9 +93,10 @@ export function foldReviews(events: LedgerEvent[]): ReviewRecord[] {
 }
 /** Caller holds the study lock; report ids are generated, findings never disappear by vote. */
 export function addReview(dirArg: string, raw: unknown, actor: Actor) {
-  const { dir } = openStudy(dirArg);
+  const { dir, study } = openStudy(dirArg);
   requireCopilotAccept(dir, "paper");
   const report = validateReview(raw), current = readCurrentBuild(dir), events = readLedger(dir), rows = foldReviews(events);
+  if (!report.checklist.survey && surveyChecklistMode(dir, study.mode) === "require") bad("checklist.survey is required by study.toml [review] surveyChecklist = \"require\"; add the six survey answers listed by ares review checklist (false answers are allowed)");
   if (report.buildSha256 !== current.evidenceSha256) bad("stale buildSha256; use the evidenceSha256 from the current ares paper build output");
   if (rows.filter(row => row.report.buildSha256 === report.buildSha256).length >= 100) bad("100 reviews already recorded for this build; resolve existing findings or build a revised manuscript");
   const id = sha256(JSON.stringify([report, events.length])).slice(0, 16);
@@ -126,7 +148,15 @@ export function reviewReadiness(dirArg: string) {
   if (families.length < 2) unmet.push({ code: "model-families", message: "fewer than two distinct model families reviewed the current evidence hash; add current-build reviews from two families" });
   const openBlocking = reviews.flatMap(row => row.report.findings.filter(f => f.blocking && !row.resolutions[f.id]).map(f => ({ reviewId: row.id, findingId: f.id, kind: f.kind, location: f.location, text: f.text })));
   if (openBlocking.length) unmet.push({ code: "blocking-findings", message: `open blocking findings: ${openBlocking.map(f => `${f.reviewId}/${f.findingId} (${f.kind})`).join(", ")}; resolve each with a reason using ares review resolve` });
-  return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, checklists: reviews.map(row => ({ reviewId: row.id, ...row.report.checklist })), claims: "unavailable (STAIxBWLB/agent-hub#931)", unmet, ...roundsView(dir, rows, buildSha256) };
+  return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, checklists: reviews.map(row => ({ reviewId: row.id, ...row.report.checklist })), claims: "unavailable (STAIxBWLB/agent-hub#931)", unmet, ...roundsView(dir, rows, buildSha256), ...surveyView(dir, reviews) };
+}
+/** Display only: answers, including false ones, never enter unmet. Off hides the block; require is enforced at review add. */
+function surveyView(dir: string, reviews: ReviewRecord[]) {
+  const studyMode = openStudy(dir).study.mode;
+  let mode: SurveyChecklistMode;
+  try { mode = surveyChecklistMode(dir, studyMode); } catch { mode = studyMode === "survey" ? "show" : "off"; }
+  if (mode === "off") return { surveyChecklist: mode, surveyAnswers: [] };
+  return { surveyChecklist: mode, surveyAnswers: reviews.map(row => ({ reviewId: row.id, modelFamily: row.report.reviewer.modelFamily, survey: row.report.checklist.survey ?? null })) };
 }
 /** Informational only: rounds never enter unmet, so the gate conditions are unchanged. */
 function roundsView(dir: string, rows: ReviewRecord[], buildSha256: string | undefined) {

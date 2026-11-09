@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Optional survey checklist in review reports (#102): `checklist.survey` takes six booleans (`taxonomyPrinciple`, `noEnumeration`, `specificGaps`, `citationRelations`, `selectionReported`, `scopeControl`); unknown keys refuse. New read-only `review checklist` (MCP `ares_review_checklist`) prints the questions. `study.toml` `[review] surveyChecklist = "off" | "show" | "require"` (default `show` for survey studies, `off` for experiments); `require` refuses a report without the block. `review show` adds `surveyChecklist` and `surveyAnswers`; answers never gate. The MCP review schema now also accepts the #100 `repair`/`section` finding fields.
+  - N-1 CLI: existing commands and usage are unchanged; `review checklist` is additive.
+  - N-1 MCP: existing tools stay; `ares_review_checklist` is additive and the `ares_review_add` input schema gains optional fields only.
+  - N-1 study/ledger formats: review report v1 and ledger versions stay unchanged; reports without the block keep identical bytes. Older readers fold stored reports non-strictly and ignore `survey`; an older `review add` refuses a report that carries it. An older reader refuses a `study.toml` with a `[review]` table.
+
 - Scoped repair and per-section review rounds (#100): review findings accept optional `repair` (`edit`/`paragraph`/`section`, default `edit`) and `section`; unknown repair values refuse. `review show` adds `roundBudget`, `sections`, `openBySection`, `overBudget` and `info`; a section past `study.toml` `[paper] reviewRounds` (default 3) gets "replan the section or ask a person" as information only. The review gate conditions are unchanged. `study export --bundle` adds content-free `counts.reviewSections` and per-report `repairs`.
   - N-1 CLI: no command or usage changes; `review show` output is additive.
   - N-1 MCP: no tool or schema changes; `ares_review_show` output is additive.

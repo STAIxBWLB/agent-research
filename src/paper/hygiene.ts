@@ -12,21 +12,36 @@ export const SETTINGS_BYTES = 64 * 1024;
 export interface HygieneHit { code: HygieneCode; start: number; end: number; section: string[]; message: string }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
-function refuse(detail: string): never { throw new Error(`study.toml: ${detail}; fix the [paper] settings (keys maxGroup, maxBundleRepeats, reviewRounds, blocking) or remove study.toml to use the defaults`); }
+function refuse(detail: string): never { throw new Error(`study.toml: ${detail}; fix the [paper] or [review] settings (paper keys maxGroup, maxBundleRepeats, reviewRounds, blocking; review key surveyChecklist) or remove study.toml to use the defaults`); }
 function count(value: unknown, name: string, min: number): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > 1000) refuse(`paper.${name} must be an integer from ${min} to 1000`);
   return value;
 }
 
 /** Optional study.toml; absence keeps the defaults so existing studies keep their blocking set. */
-export function readPaperSettings(dir: string): PaperSettings {
+export function readPaperSettings(dir: string): PaperSettings { return readStudySettings(dir).paper; }
+export const SURVEY_CHECKLIST_MODES = ["off", "show", "require"] as const;
+export type SurveyChecklistMode = typeof SURVEY_CHECKLIST_MODES[number];
+/** [review] settings; `surveyChecklist` is undefined when unset so the caller applies the study-mode default. */
+export interface ReviewSettings { surveyChecklist?: SurveyChecklistMode }
+export function readReviewSettings(dir: string): ReviewSettings { return readStudySettings(dir).review; }
+/** One closed reader for both tables, so an unknown key in either refuses for every caller. */
+function readStudySettings(dir: string): { paper: PaperSettings; review: ReviewSettings } {
   const file = join(dir, "study.toml");
-  if (!existsSync(file)) return { ...DEFAULT_PAPER_SETTINGS, blocking: [] };
+  if (!existsSync(file)) return { paper: { ...DEFAULT_PAPER_SETTINGS, blocking: [] }, review: {} };
   let raw: unknown;
   try { raw = Bun.TOML.parse(readTextBounded(file, SETTINGS_BYTES)); }
   catch { refuse("unreadable, non-regular, larger than 64 KiB or invalid TOML"); }
   if (!isRecord(raw)) refuse("must be a TOML table");
-  for (const key of Object.keys(raw)) if (key !== "paper") refuse(`unknown setting ${JSON.stringify(key).slice(0, 80)}`);
+  for (const key of Object.keys(raw)) if (key !== "paper" && key !== "review") refuse(`unknown setting ${JSON.stringify(key).slice(0, 80)}`);
+  const review = raw.review ?? {};
+  if (!isRecord(review)) refuse("review must be a table");
+  for (const key of Object.keys(review)) if (key !== "surveyChecklist") refuse(`unknown setting review.${JSON.stringify(key).slice(0, 80)}`);
+  const reviewSettings: ReviewSettings = {};
+  if (review.surveyChecklist !== undefined) {
+    if (typeof review.surveyChecklist !== "string" || !(SURVEY_CHECKLIST_MODES as readonly string[]).includes(review.surveyChecklist)) refuse(`review.surveyChecklist must be one of ${SURVEY_CHECKLIST_MODES.join(", ")}`);
+    reviewSettings.surveyChecklist = review.surveyChecklist as SurveyChecklistMode;
+  }
   const paper = raw.paper ?? {};
   if (!isRecord(paper)) refuse("paper must be a table");
   for (const key of Object.keys(paper)) if (!["maxGroup", "maxBundleRepeats", "reviewRounds", "blocking"].includes(key)) refuse(`unknown setting paper.${JSON.stringify(key).slice(0, 80)}`);
@@ -42,7 +57,7 @@ export function readPaperSettings(dir: string): PaperSettings {
       settings.blocking.push(code as HygieneCode);
     }
   }
-  return settings;
+  return { paper: settings, review: reviewSettings };
 }
 
 /**

@@ -329,6 +329,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       result = await ops.reviewResolve(positional[0]!, positional[1]!, reason, ctx); break;
     }
     case "review show": count(spec, positional, 1); result = ops.reviewShow(positional[0]!); break;
+    case "review checklist": count(spec, positional, 0); result = ops.reviewChecklistShow(); break;
     case "paper build": count(spec, positional, 1); result = await ops.paperBuild(positional[0]!, ctx); break;
     case "paper check": {
       count(spec, positional, 1); const report = ops.paperCheck(positional[0]!);

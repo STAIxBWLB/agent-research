@@ -13,7 +13,7 @@ import { proposeSkill, decideSkill, listSkills, checkSkill } from "./memory/skil
 import { rankLessons, type LessonRankOptions } from "./memory/lessons.ts";
 import { createAmemClient } from "./memory/amem.ts";
 import { previewArchive, exportArchive, type ArchivePreview, type ArchiveResult } from "./memory/archive.ts";
-import { addReview, resolveReview, reviewReadiness, reviewBinding, requireReviewReady } from "./paper/review.ts";
+import { addReview, resolveReview, reviewChecklist, reviewReadiness, reviewBinding, requireReviewReady } from "./paper/review.ts";
 import { buildPaper } from "./paper/build.ts";
 import { checkPaper } from "./paper/check.ts";
 import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
@@ -582,6 +582,7 @@ export async function reviewResolve(dirArg: string, target: string, reason: stri
   const { dir } = openStudy(dirArg); return withLock(dir, () => resolveReview(dir, target, reason, ctx.actor));
 }
 export const reviewShow = (dir: string) => reviewReadiness(dir);
+export const reviewChecklistShow = () => reviewChecklist();
 
 /** Preview is read-only; confirmed outward writes and receipts share the study lock. */
 export async function archive(dirArg: string, options: { confirm?: string }, ctx: Pick<Ctx, "actor" | "runner" | "now">, env: NodeJS.ProcessEnv = process.env, guard?: () => void, sourceOptions?: SkillCheckOptions): Promise<ArchivePreview | ArchiveResult> {
