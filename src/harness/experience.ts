@@ -1,3 +1,4 @@
+import {HARNESS_MODEL_BYTES} from "./limits.ts";
 import {archivedLessonSources, recheckLessonExports} from "./lesson-candidates.ts";
 import {sourceBudget} from "../memory/source-budget.ts";
 import {supportsScreenedAmem} from "../memory/amem-show.ts";
@@ -53,13 +54,13 @@ export function validateExperienceRequest(raw: unknown): ExperienceRequest {
   const selected = row.selected.map(value => {const item = object(value, ["id", "reason"]); if (typeof item.id !== "string" || item.id.length !== 32 || !/^[a-f0-9]{32}$/.test(item.id)) fail("full exact amem id required"); return {id: item.id, reason: text(item.reason, 1000)};});
   if (new Set(selected.map(value => value.id)).size !== selected.length) fail("duplicate selected id");
   if (["baseline", "no-library"].includes(row.condition as string) && selected.length) fail("baseline/no-library conditions cannot receive experience");
-  const result = {v: 1 as const, round: id(row.round), taskId: text(row.taskId, 256), condition: row.condition as ExperienceRequest["condition"], model: text(row.model, 128), runtime: text(row.runtime, 128), ...(row.toolsetSha256 !== undefined ? {toolsetSha256: digest(row.toolsetSha256)} : {}), selected};
+  const result = {v: 1 as const, round: id(row.round), taskId: text(row.taskId, 256), condition: row.condition as ExperienceRequest["condition"], model: text(row.model, HARNESS_MODEL_BYTES), runtime: text(row.runtime, 128), ...(row.toolsetSha256 !== undefined ? {toolsetSha256: digest(row.toolsetSha256)} : {}), selected};
   if (Buffer.byteLength(canonical(result)) > EXPERIENCE_BYTES) fail("selection exceeds 16 KiB"); return result;
 }
 function entry(raw: unknown): FrozenEntry {
   const row = object(raw, ["id", "digest", "sourceVersion", "observedAt", "reason", "lesson", "lessonSha256", "dispositionSha256", "noteSha256", "round", "taskId", "roundBinding", "closureSha256", "sourceFingerprint", "model", "runtime", "toolsetSha256", "sourceStrength", "transfer"]);
   if (typeof row.id !== "string" || row.id.length !== 32 || !/^[a-f0-9]{32}$/.test(row.id) || !supportsScreenedAmem(row.sourceVersion) || typeof row.observedAt !== "string" || !Number.isFinite(Date.parse(row.observedAt)) || row.observedAt.length > 64 || row.sourceStrength !== "synthetic-fixture" || row.transfer !== "not-demonstrated") fail("invalid frozen source identity/version/strength");
-  return {id: row.id, digest: digest(row.digest), sourceVersion: row.sourceVersion, observedAt: row.observedAt, reason: text(row.reason, 1000), lesson: id(row.lesson), lessonSha256: digest(row.lessonSha256), dispositionSha256: digest(row.dispositionSha256), noteSha256: digest(row.noteSha256), round: id(row.round), taskId: text(row.taskId, 256), roundBinding: digest(row.roundBinding), closureSha256: digest(row.closureSha256), sourceFingerprint: digest(row.sourceFingerprint), model: text(row.model, 256), runtime: digest(row.runtime), toolsetSha256: digest(row.toolsetSha256), sourceStrength: "synthetic-fixture", transfer: "not-demonstrated"};
+  return {id: row.id, digest: digest(row.digest), sourceVersion: row.sourceVersion, observedAt: row.observedAt, reason: text(row.reason, 1000), lesson: id(row.lesson), lessonSha256: digest(row.lessonSha256), dispositionSha256: digest(row.dispositionSha256), noteSha256: digest(row.noteSha256), round: id(row.round), taskId: text(row.taskId, 256), roundBinding: digest(row.roundBinding), closureSha256: digest(row.closureSha256), sourceFingerprint: digest(row.sourceFingerprint), model: text(row.model, HARNESS_MODEL_BYTES), runtime: digest(row.runtime), toolsetSha256: digest(row.toolsetSha256), sourceStrength: "synthetic-fixture", transfer: "not-demonstrated"};
 }
 function boundedSnapshot(raw: unknown): FrozenExperience {
   const row = object(raw, ["v", "round", "taskId", "condition", "model", "runtime", "toolsetSha256", "streamSha256", "entries", "sourceStrength", "transfer"]);
@@ -129,12 +130,18 @@ export function experienceSourceEligibility(stream: HarnessStream, studyId: stri
 async function resolveSelected(current: ReturnType<typeof store>, request: ExperienceRequest, options: ExperienceReadOptions, pins?: readonly FrozenEntry[]) {
   if (!request.selected.length) return {state: "available" as const, entries: [], observations: [], context: "", bytes: 0};
   const sources = archivedLessonSources(current.dir), budget = sourceBudget(options.now), entries: FrozenEntry[] = [], observations: {id: string; state: string; digest: string | null; observedAt?: string; sourceVersion?: string}[] = [], context: string[] = [];
+  const eligible = request.selected.filter(selected => {
+    const source = sources.get(selected.id), p = source?.row.proposal, compat = p?.compatibility;
+    return p && compat && request.toolsetSha256 === compat.toolsetSha256 && experienceSourceEligibility(current.stream!, current.study.id, request.taskId, {studyId: p.studyId, taskId: p.taskId, ...compat, completed: true}, request).state === "available";
+  });
+  const eligibleIds = new Set(eligible.map(value => value.id));
+  if (!eligible.length) return {state: "unavailable" as const, entries, observations: request.selected.map(value => ({id: value.id, state: "unavailable", digest: null})), context: null, bytes: 0};
   let recheckSources = () => false;
-  try {recheckSources = await recheckLessonExports(current.dir, request.selected.flatMap(selected => {const source = sources.get(selected.id); return source ? [source.noteSha256] : [];}), {...options, budget});}
+  try {recheckSources = await recheckLessonExports(current.dir, eligible.map(selected => sources.get(selected.id)!.noteSha256), {...options, budget});}
   catch {return {state: "unavailable" as const, entries, observations: request.selected.map(value => ({id: value.id, state: "unavailable", digest: null})), context: null, bytes: 0};}
   for (const selected of request.selected) {
     const source = sources.get(selected.id), p = source?.row.proposal, compat = p?.compatibility;
-    if (!source || !p || !compat || request.toolsetSha256 !== compat.toolsetSha256 || experienceSourceEligibility(current.stream!, current.study.id, request.taskId, {studyId: p.studyId, taskId: p.taskId, ...compat, completed: true}, request).state !== "available") {observations.push({id: selected.id, state: "unavailable", digest: null}); continue;}
+    if (!source || !p || !compat || !eligibleIds.has(selected.id)) {observations.push({id: selected.id, state: "unavailable", digest: null}); continue;}
     let bodyMatched = false;
     const observed = await readScreenedAmem(current.dir, selected.id, {...options, budget, onText: text => {bodyMatched = text === source.note.text;}});
     const value = observed.state === "available" && observed.digest && observed.sourceVersion && observed.kind === source.note.kind && bodyMatched ? entry({id: selected.id, digest: observed.digest, sourceVersion: observed.sourceVersion, observedAt: observed.observedAt, reason: selected.reason, lesson: p.name, lessonSha256: source.row.sha256, dispositionSha256: source.row.disposition!.sha256, noteSha256: source.noteSha256, round: p.round, taskId: p.taskId, roundBinding: p.roundBinding, closureSha256: p.closureSha256, sourceFingerprint: p.sourceFingerprint, ...compat, sourceStrength: "synthetic-fixture", transfer: "not-demonstrated"}) : null;
@@ -187,12 +194,12 @@ export function requireRoundExperiences(dir: string, rounds: readonly {id: strin
   }
 }
 export async function checkExperience(dir: string, roundId: string, identity: {model: string; runtime: string; toolsetSha256?: string}, options: ExperienceReadOptions = {}) {
-  const checkedIdentity = object(identity, ["model", "runtime", "toolsetSha256"]); text(checkedIdentity.model, 128); text(checkedIdentity.runtime, 128);
+  const checkedIdentity = object(identity, ["model", "runtime", "toolsetSha256"]); text(checkedIdentity.model, HARNESS_MODEL_BYTES); text(checkedIdentity.runtime, 128);
   const current = store(dir), value = current.snapshots.get(id(roundId)); if (!value) fail("frozen context missing; run ares experience freeze");
   if (checkedIdentity.toolsetSha256 !== undefined) digest(checkedIdentity.toolsetSha256);
   const compatible = value.model === checkedIdentity.model && value.runtime === checkedIdentity.runtime && (!value.entries.length || value.toolsetSha256 === checkedIdentity.toolsetSha256);
   const request: ExperienceRequest = {...requestFields(value), selected: value.entries.map(entry => ({id: entry.id, reason: entry.reason}))};
-  const observed = await resolveSelected(current, request, options, value.entries);
+  const observed = compatible ? await resolveSelected(current, request, options, value.entries) : {state: "unavailable" as const, context: null, bytes: 0, observations: []};
   // Re-read after any policy/source observation. Never serve a context from mixed local generations.
   const after = store(dir); if (canonical([...current.snapshots]) !== canonical([...after.snapshots]) || canonical(current.stream) !== canonical(after.stream)) fail("stream/context changed during recheck");
   return {v: 1, round: value.round, state: compatible ? observed.state : "unavailable", cause: !compatible ? "model-runtime-incompatible" : observed.state === "available" ? null : "frozen-source-chain-unavailable-or-changed", nextStep: !compatible ? "Use the frozen model/runtime/toolset or freeze a new round" : observed.state === "available" ? null : "Restore the exact screened source and its reviewed local receipts, or freeze a new context; fixture entries never qualify a controlled/live trial", streamSha256: value.streamSha256, improverContextHash: hash(value), model: value.model, runtime: value.runtime, sourceStrength: value.sourceStrength ?? null, transfer: "not-demonstrated", prepareOnly: true, workerContext: "baseline-only", retrievalGuidanceSlot: compatible && value.condition === "retrieval-only" ? observed.context : null, condition: value.condition, context: compatible && observed.state === "available" ? observed.context : null, bytes: compatible ? observed.bytes : 0, observations: observed.observations, assurance: "observed-policy-source-only; no distributed atomicity"};

@@ -1,5 +1,8 @@
 import {expect, test} from "bun:test";
 import {join} from "node:path";
+import {ARES_TOOLS, createAresMcp} from "../src/mcp-tools.ts";
+import {validArguments} from "../src/mcp.ts";
+import {run} from "../src/cli.ts";
 import * as ops from "../src/commands.ts";
 import {candidateNote} from "../src/harness/lesson-candidates.ts";
 import {readTextBounded, readLedger, openStudy} from "../src/study.ts";
@@ -7,16 +10,17 @@ import type {ProcessRunner} from "../src/exp/executor.ts";
 import {canonical} from "../src/plan/state.ts";
 import {fakeRunner} from "./helpers.ts";
 import {lessonFixture, acceptedLesson, screenedLessonRunner, lessonIdentity} from "./lesson-fixtures.ts";
-async function archived(withLocalCounterevidence = false) {
-  const f = await lessonFixture(true), studyId = openStudy(f.dir).study.id;
-  const accepted = await acceptedLesson(f, {...f.proposal, ...(withLocalCounterevidence ? {counterevidence: [{v: 1, tool: "ares", projectKey: studyId, kind: "study", id: studyId}]} : {})}), note = candidateNote(accepted)!;
+async function archived(withLocalCounterevidence = false, model = lessonIdentity.model, amemCounterevidence = false, tasks?: string[]) {
+  const f = await lessonFixture(true, model, tasks), studyId = openStudy(f.dir).study.id;
+  const counter = screenedLessonRunner(id => ({id, kind: "finding", text: "Synthetic counterevidence", at: "2030-01-01T00:00:00Z", project: "synthetic-project"}));
+  const accepted = await acceptedLesson(amemCounterevidence ? {...f, ctx: {...f.ctx, runner: counter.runner}} : f, {...f.proposal, ...(withLocalCounterevidence ? {counterevidence: [{v: 1, tool: "ares", projectKey: studyId, kind: "study", id: studyId}]} : {}), ...(amemCounterevidence ? {counterevidence: [{v: 1, tool: "amem", id: "a".repeat(32)}]} : {})}), note = candidateNote(accepted)!;
   const preview = await ops.archive(f.dir, {}, f.ctx, f.env);
   const index = preview.notes.findIndex(row => canonical(row.note) === canonical(note)); expect(index).toBeGreaterThanOrEqual(0);
   const ids = preview.notes.map((_, i) => (i + 1).toString(16).padStart(32, "0")), transport = fakeRunner(ids.map(id => ({exitCode: 0, stdout: JSON.stringify({id, kind: note.kind}), stderr: ""})));
-  await ops.archive(f.dir, {confirm: preview.fingerprint}, {...f.ctx, runner: transport.runner}, f.env);
+  await ops.archive(f.dir, {confirm: preview.fingerprint}, {...f.ctx, runner: transport.runner}, f.env, undefined, amemCounterevidence ? {runner: counter.runner, env: f.env} : undefined);
   const id = ids[index]!, view = {id, kind: note.kind, text: note.text, at: "2030-01-01T00:00:00Z", project: "synthetic-project"};
   const screened = screenedLessonRunner(() => view), ctx = {...f.ctx, runner: screened.runner};
-  const request = {v: 1, round: "round-later", taskId: "task-later", condition: "prior-experience", ...lessonIdentity, selected: [{id, reason: "Earlier synthetic procedure within the same stream"}]};
+  const request = {v: 1, round: "round-later", taskId: "task-later", condition: "prior-experience", ...lessonIdentity, model, selected: [{id, reason: "Earlier synthetic procedure within the same stream"}]};
   return {...f, accepted, note, id, view, screened, ctx, request};
 }
 const durable = (dir: string) => ["ledger.jsonl", "design/harness-experience.json"].map(name => readTextBounded(join(dir, name), 1_048_576)).join("\n");
@@ -72,4 +76,45 @@ test("local counterevidence changing during screened amem read blocks the same h
   expect(checked).toMatchObject({state: "unavailable", context: null, bytes: 0}); expect(checked.nextStep).toContain("Restore the exact screened source");
   const before = durable(f.dir), next = await ops.experienceCheck(f.dir, f.request.round, lessonIdentity, f.ctx, f.env);
   expect(next).toMatchObject({state: "unavailable", context: null, bytes: 0}); expect(durable(f.dir)).toBe(before);
+});
+
+for (const field of ["model", "runtime", "toolsetSha256"] as const) test(`ineligible ${field} skips counterevidence and selected exact-id reads`, async () => {
+  const f = await archived(false, lessonIdentity.model, true), blocked = fakeRunner([]), ctx = {...f.ctx, runner: blocked.runner};
+  const incompatible = {...lessonIdentity, [field]: field === "model" ? "other-model" : "f".repeat(64)}, before = durable(f.dir);
+  await expect(ops.experienceFreeze(f.dir, {...f.request, ...incompatible}, ctx, f.env)).rejects.toThrow("nonempty experience unavailable");
+  expect(blocked.requests).toEqual([]); expect(durable(f.dir)).toBe(before);
+  const search = fakeRunner([{exitCode: 0, stdout: "[]", stderr: ""}]);
+  expect(await ops.experienceSelect(f.dir, {...f.request, ...incompatible}, {...ctx, runner: search.runner}, f.env)).toMatchObject({state: "unavailable", eligible: false});
+  expect(search.requests.map(value => value.args[0])).toEqual(["search"]);
+});
+for (const position of ["current", "future"] as const) test(`${position}-task lesson selection refuses before counterevidence reads`, async () => {
+  const tasks = position === "future" ? ["task-later", "synthetic-task", "task-last"] : undefined;
+  const f = await archived(false, lessonIdentity.model, true, tasks), raw = {...f.request, taskId: position === "current" ? "synthetic-task" : "task-later"};
+  const before = durable(f.dir), transport = fakeRunner([{exitCode: 0, stdout: "[]", stderr: ""}]);
+  expect(await ops.experienceSelect(f.dir, raw, {...f.ctx, runner: transport.runner}, f.env)).toMatchObject({state: "unavailable", eligible: false});
+  expect(transport.requests.map(value => value.args[0])).toEqual(["search"]); expect(durable(f.dir)).toBe(before);
+  if (position === "future") {
+    const blocked = fakeRunner([]); await expect(ops.experienceFreeze(f.dir, raw, {...f.ctx, runner: blocked.runner}, f.env)).rejects.toThrow("nonempty experience unavailable");
+    expect(blocked.requests).toEqual([]); expect(durable(f.dir)).toBe(before);
+  }
+});
+test("incompatible handoff identity refuses locally before any source read", async () => {
+  const f = await archived(false, lessonIdentity.model, true);
+  const counter = screenedLessonRunner(id => id === "a".repeat(32) ? {id, kind: "finding", text: "Synthetic counterevidence", at: "2030-01-01T00:00:00Z", project: "synthetic-project"} : f.view);
+  await ops.experienceFreeze(f.dir, f.request, {...f.ctx, runner: counter.runner}, f.env);
+  const blocked = fakeRunner([]), before = durable(f.dir);
+  expect(await ops.experienceCheck(f.dir, f.request.round, {...lessonIdentity, model: "other-model"}, {...f.ctx, runner: blocked.runner}, f.env)).toMatchObject({state: "unavailable", context: null, bytes: 0});
+  expect(blocked.requests).toEqual([]); expect(durable(f.dir)).toBe(before);
+});
+test("200-byte fixture model survives lesson, select, freeze and CLI/MCP check", async () => {
+  const model = "m".repeat(200), f = await archived(false, model), identity = {...lessonIdentity, model};
+  expect(f.accepted.proposal.compatibility?.model).toBe(model);
+  expect(await ops.experienceSelect(f.dir, f.request, f.ctx, f.env)).toMatchObject({state: "available", eligible: true});
+  const frozen = await ops.experienceFreeze(f.dir, f.request, f.ctx, f.env); expect(frozen.model).toBe(model); expect(frozen.entries[0]?.model).toBe(model);
+  const checked = JSON.parse((await run(["experience", "check", f.dir, f.request.round, "--model", model, "--runtime", identity.runtime, "--toolset-sha256", identity.toolsetSha256, "--json"], f.env, f.ctx)).text);
+  expect(checked).toMatchObject({state: "available", model, context: f.note.text});
+  const tool = ARES_TOOLS.find(tool => tool.name === "ares_experience_check")!, args = {study: f.dir, round: f.request.round, ...identity};
+  expect(validArguments(args, tool.inputSchema)).toBe(true);
+  expect(await createAresMcp(f.env, f.ctx.http, f.ctx).handlers.ares_experience_check!(args)).toMatchObject({state: "available", model, context: f.note.text});
+  expect(validArguments({...args, model: "m".repeat(257)}, tool.inputSchema)).toBe(false);
 });

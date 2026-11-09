@@ -7,21 +7,21 @@ import type {ProcessRunner, ProcessRequest} from "../src/exp/executor.ts";
 import {fakeHttp, fakeRunner, tempDir} from "./helpers.ts";
 export const lessonIdentity = {model: "synthetic-model", runtime: "3".repeat(64), toolsetSha256: "2".repeat(64)};
 export const lessonLedger = (dir: string) => readBytesBounded(join(dir, "ledger.jsonl"), 64 * 1024 * 1024);
-export async function lessonFixture(stream = false) {
+export async function lessonFixture(stream = false, model = lessonIdentity.model, tasks = ["synthetic-task", "task-later", "task-last"]) {
   const home = tempDir(), dir = join(home, "study"), transport = fakeRunner([]), ctx = {actor: {kind: "person" as const, id: "synthetic-reviewer"}, http: fakeHttp([]).http, runner: transport.runner};
   const env = {HOME: home, AGENTHUB_HOME: join(home, "family")};
   ops.init(dir, {mode: "experiment", autonomy: "auto", question: "Synthetic lesson workflow"}, ctx);
   let context: {streamSha256: string; improverContextHash: string} | undefined;
   if (stream) {
-    await ops.harnessStreamSet(dir, {v: 1, id: "stream-one", revision: 1, tasks: ["synthetic-task", "task-later", "task-last"]}, ctx);
-    const frozen = await ops.experienceFreeze(dir, {v: 1, round: "round-one", taskId: "synthetic-task", condition: "baseline", ...lessonIdentity, selected: []}, ctx, env);
+    await ops.harnessStreamSet(dir, {v: 1, id: "stream-one", revision: 1, tasks}, ctx);
+    const frozen = await ops.experienceFreeze(dir, {v: 1, round: "round-one", taskId: "synthetic-task", condition: "baseline", ...lessonIdentity, model, selected: []}, ctx, env);
     context = {streamSha256: frozen.streamSha256, improverContextHash: frozen.improverContextHash};
   }
   const probes = ["baseline", "candidate"].map(name => parseProbeFixture(JSON.parse(readTextBounded(join(import.meta.dir, "fixtures", "harness-rounds", `${name}.json`), 65_536))));
   const [baseline, candidate] = probes;
   const definition = {v: 1, id: "round-one", task: {id: baseline!.taskId, inputSha256: baseline!.taskInputHash}, baseline: {guidanceSha256: baseline!.guidanceHash}, candidates: [{id: "candidate", guidanceSha256: candidate!.guidanceHash}], hypothesis: {deficiency: "Synthetic omission", predictedChange: "Synthetic check"}, experience: [], authoring: "uncontrolled-authoring", ...(context ? {context} : {})};
   await ops.harnessSet(dir, definition, ctx);
-  for (const projection of probes) await ops.harnessImport(dir, definition.id, projection, ctx);
+  for (const projection of probes) await ops.harnessImport(dir, definition.id, {...projection, requestedModel: model, servedModel: model}, ctx);
   const current = () => ops.harnessShow(dir, definition.id).rounds[0]!;
   const evidence = current().probes.map(probe => ({probe: probe.projection.id, projectionSha256: probe.projectionSha256, outputManifestHash: probe.projection.outputManifestHash!}));
   await ops.harnessContrast(dir, definition.id, {v: 1, id: "contrast-one", fingerprint: current().transitions.fingerprint, arm: "candidate", outcome: "regressed", basis: "actor-claim", observations: "Synthetic missing check", uncertainty: "No real behavior measured", explanations: ["Synthetic input difference"], evidence}, ctx);

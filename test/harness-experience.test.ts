@@ -4,6 +4,7 @@ import {join} from "node:path";
 import * as ops from "../src/commands.ts";
 import {run} from "../src/cli.ts";
 import {createAresMcp} from "../src/mcp-tools.ts";
+import {HARNESS_MODEL_BYTES} from "../src/harness/limits.ts";
 import {harnessRoundBinding, validateHarnessRound} from "../src/harness/rounds.ts";
 import {validateHarnessStream, validateExperienceRequest, experienceSourceEligibility, EXPERIENCE_INDEX_BYTES} from "../src/harness/experience.ts";
 import {readTextBounded, readBytesBounded, readLedger, writeAtomic, sha256, gateState} from "../src/study.ts";
@@ -107,7 +108,7 @@ test("strict bounds, privacy and unsupported fields refuse before any write or s
   await ops.harnessStreamSet(f.dir, stream(), f.ctx); const saved = ledger(f.dir);
   const markers = ["ghp_" + "a".repeat(16), "xoxb-" + "a".repeat(12), "AKIA" + "A".repeat(16), "eyJ" + "a".repeat(20), "pk-" + "a".repeat(16), "https://example.invalid/request", "credential=synthetic"];
   for (const marker of markers) await expect(ops.experienceFreeze(f.dir, {...request(), model: marker}, f.ctx)).rejects.toThrow("URL/credential");
-  for (const raw of [{...request(), selected: null}, {...request(), selected: Array(17).fill({id: "a".repeat(32), reason: "Synthetic"})}, {...request(), model: "x".repeat(129)}, {...request(), taskId: "x".repeat(257)}, {...request(), selected: [], body: "forbidden"}]) {
+  for (const raw of [{...request(), selected: null}, {...request(), selected: Array(17).fill({id: "a".repeat(32), reason: "Synthetic"})}, {...request(), model: "x".repeat(HARNESS_MODEL_BYTES + 1)}, {...request(), taskId: "x".repeat(257)}, {...request(), selected: [], body: "forbidden"}]) {
     await expect(ops.experienceFreeze(f.dir, raw, f.ctx)).rejects.toThrow("experience");
   }
   const selected = Array.from({length: 16}, (_, index) => ({id: index.toString(16).padStart(32, "0"), reason: "x".repeat(1000)}));
