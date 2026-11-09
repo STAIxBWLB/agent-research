@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { addStudy, removeStudy, readRegistry } from "./console/registry.ts";
 import { readWatchSnapshot, setWatch, runWatch, showWatch, recordWatchFailure, watchFailureClass, type WatchSnapshot } from "./lit/watch.ts";
 import { runSetup, type SetupMode } from "./setup.ts";
-import { proposeSkill, decideSkill, listSkills } from "./memory/skills.ts";
+import { proposeSkill, decideSkill, listSkills, checkSkill } from "./memory/skills.ts";
 import { rankLessons, type LessonRankOptions } from "./memory/lessons.ts";
 import { createAmemClient } from "./memory/amem.ts";
 import { previewArchive, exportArchive, type ArchivePreview, type ArchiveResult } from "./memory/archive.ts";
@@ -526,12 +526,13 @@ export async function lessons(dirArg: string, options: LessonRankOptions & { for
   return { lessons: ranked, ...(brief === undefined ? {} : { brief }) };
 }
 
-export async function skillPropose(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
-  const { dir } = openStudy(dirArg); return withLock(dir, () => proposeSkill(dir, raw, ctx.actor));
+export async function skillPropose(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor" | "runner" | "now">, env: NodeJS.ProcessEnv = process.env) {
+  const { dir } = openStudy(dirArg); return withLock(dir, lock => proposeSkill(dir, raw, ctx.actor, {...ctx, env, lock}));
 }
-export async function skillDecide(dirArg: string, name: string, decision: string, reason: string, pr: string | undefined, ctx: Pick<Ctx, "actor">, guard?: () => void) {
-  const { dir } = openStudy(dirArg); return withLock(dir, () => { guard?.(); return decideSkill(dir, name, decision, reason, pr, ctx.actor); });
+export async function skillDecide(dirArg: string, name: string, decision: string, reason: string, pr: string | undefined, ctx: Pick<Ctx, "actor" | "runner" | "now">, guard?: () => void, env: NodeJS.ProcessEnv = process.env) {
+  const { dir } = openStudy(dirArg); return withLock(dir, lock => { guard?.(); return decideSkill(dir, name, decision, reason, pr, ctx.actor, {...ctx, env, lock}); });
 }
+export const skillCheck = (dir: string, name: string, ctx: Pick<Ctx, "runner" | "now"> = {}, env: NodeJS.ProcessEnv = process.env) => checkSkill(dir, name, {...ctx, env});
 export const skillList = (dir: string) => listSkills(dir);
 
 export const setup = (target: string, mode: SetupMode, env: NodeJS.ProcessEnv, options: { cwd?: string; root?: string } = {}) => runSetup(target, mode, { ...options, env });

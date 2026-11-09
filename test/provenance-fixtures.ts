@@ -1,3 +1,4 @@
+import {legacySkillFixture} from "./legacy-skill-fixture.ts";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import * as ops from "../src/commands.ts";
@@ -70,8 +71,8 @@ export async function provenanceFixture(dir = tempDir()) {
     checklist: { negativeResults: true, denominators: true, limitations: true, reproducibility: true }, findings: [],
   }, ctx));
   const skillName = "synthetic-evidence-check";
-  await ops.skillPropose(dir, { name: skillName, summary: "Check paired synthetic results and retain failed attempts.", steps: ["Read the closed investigation.", "Read the fresh final and its paired attempts."],
-    evidence: [`ares:${study.id}/attempt:${retry.id}`, `ares:${study.id}/run:investigate`, `ares:${study.id}/run:final`] }, ctx);
+  legacySkillFixture(dir, { name: skillName, summary: "Check paired synthetic results and retain failed attempts.", steps: ["Read the closed investigation.", "Read the fresh final and its paired attempts."],
+    evidence: [`ares:${study.id}/attempt:${retry.id}`, `ares:${study.id}/run:investigate`, `ares:${study.id}/run:final`] }, ctx.actor);
   await ops.planSet(dir, { v: 1, nodes: [{ id: "build", kind: "step", command: "paper.build", args: {} }], edges: [] }, ctx);
   let resumed = false, sleeps = 0;
   const completedPlan = await ops.planRun(dir, {}, { ...ctx, runner: async () => { throw new Error("synthetic provenance fixture must not invoke a process runner"); }, sleep: async () => {

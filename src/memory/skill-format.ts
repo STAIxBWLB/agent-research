@@ -1,4 +1,5 @@
-import {assertWritable, boundedText, onlyKeys, plain} from "../study.ts";
+import {hasHarnessCredential} from "../harness/privacy.ts";
+import {assertWritable, boundedText, onlyKeys, plain, isHarnessGate} from "../study.ts";
 import {SKILL_BYTES, SKILL_EVIDENCE} from "./skills.ts";
 import {skillEvidenceReference, type EvidenceInspection, type SkillEvidenceReference} from "./evidence.ts";
 import {supportsScreenedAmem} from "./amem-show.ts";
@@ -14,9 +15,12 @@ function object(value: unknown, fields: string[]): Record<string, unknown> {
   if (!plain(value)) bad(); try {onlyKeys(value, fields, "skill v2");} catch {bad();} return value;
 }
 function text(value: unknown, bound: number): string {
-  try {const result = boundedText(value, "skill v2 text", bound); if (result.includes("\0") || Buffer.byteLength(result) > bound) bad(); return result;} catch {return bad();}
+  try {const result = boundedText(value, "skill v2 text", bound); if (result.includes("\0") || Buffer.byteLength(result) > bound || hasHarnessCredential(result)) bad(); return result;} catch {return bad();}
 }
-function ref(value: unknown, studyId?: string): SkillEvidenceReference {return skillEvidenceReference(value, studyId) ?? bad();}
+function ref(value: unknown, studyId?: string): SkillEvidenceReference {
+  const reference = skillEvidenceReference(value, studyId) ?? bad();
+  if (Object.values(reference).some(value => typeof value === "string" && hasHarnessCredential(value))) bad(); return reference;
+}
 function refs(value: unknown, required: boolean, studyId?: string): SkillEvidenceReference[] {
   if (!Array.isArray(value) || value.length > SKILL_EVIDENCE || required && !value.length) bad(); return value.map(value => ref(value, studyId));
 }
@@ -44,13 +48,27 @@ function inspection(value: unknown, studyId?: string): EvidenceInspection {
   }
   return result;
 }
+/** Decision receipts validate independently of the immutable proposal Markdown ceiling. */
+export function validateSkillInspections(raw: unknown, references: readonly SkillEvidenceReference[], studyId?: string): EvidenceInspection[] {
+  if (!Array.isArray(raw) || raw.length > SKILL_EVIDENCE) bad();
+  const observed = raw.map(value => inspection(value, studyId)), expected = new Set(references.map(value => JSON.stringify(ref(value, studyId)))), keys = observed.map(value => JSON.stringify(value.ref));
+  if (expected.size > SKILL_EVIDENCE || keys.length !== expected.size || new Set(keys).size !== keys.length || keys.some(key => !expected.has(key))) bad();
+  return observed;
+}
+/** New input never supplies source-owned inspection receipts. Historical v1 parsing stays separate. */
+export function validateSkillInputV2(raw: unknown, studyId: string): Omit<SkillProposalV2, "inspections"> {
+  const row = object(raw, ["name", "summary", "steps", "evidence", "applicability", "limitations", "counterevidence"]);
+  const evidence = refs(row.evidence, true, studyId), counterevidence = refs(row.counterevidence === undefined ? [] : row.counterevidence, false, studyId);
+  const unique = [...new Map([...evidence, ...counterevidence].map(value => [JSON.stringify(value), value])).values()];
+  const placeholders = unique.map(ref => ({ref, state: "unavailable", digest: null, integrity: "unverified", outcome: {status: "unverified", success: false}, support: "reviewer-judgment"}));
+  const {inspections: _unused, ...input} = validateSkillProposalV2({...row, evidence, counterevidence, inspections: placeholders}, studyId); return input;
+}
 export function validateSkillProposalV2(raw: unknown, studyId?: string): SkillProposalV2 {
   const row = object(raw, ["name", "summary", "steps", "evidence", "applicability", "limitations", "counterevidence", "inspections"]);
-  if (typeof row.name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(row.name) || !Array.isArray(row.steps) || !row.steps.length || row.steps.length > 64 || !Array.isArray(row.inspections) || row.inspections.length > SKILL_EVIDENCE) bad();
+  if (typeof row.name !== "string" || !isHarnessGate(`harness:${row.name}`) || !Array.isArray(row.steps) || !row.steps.length || row.steps.length > 64 || !Array.isArray(row.inspections) || row.inspections.length > SKILL_EVIDENCE) bad();
   const limitations = row.limitations === undefined ? [] : row.limitations; if (!Array.isArray(limitations) || limitations.length > 16) bad();
-  const proposal: SkillProposalV2 = {name: row.name, summary: text(row.summary, 4000), steps: row.steps.map(value => text(value, 1000)), evidence: refs(row.evidence, true, studyId), ...(row.applicability !== undefined ? {applicability: text(row.applicability, 2000)} : {}), limitations: limitations.map(value => text(value, 1000)), counterevidence: refs(row.counterevidence === undefined ? [] : row.counterevidence, false, studyId), inspections: row.inspections.map(value => inspection(value, studyId))};
-  const expected = new Set([...proposal.evidence, ...proposal.counterevidence].map(value => JSON.stringify(value))), observed = proposal.inspections.map(value => JSON.stringify(value.ref));
-  if (expected.size > SKILL_EVIDENCE || observed.length !== expected.size || new Set(observed).size !== observed.length || observed.some(value => !expected.has(value))) bad();
+  const evidence = refs(row.evidence, true, studyId), counterevidence = refs(row.counterevidence === undefined ? [] : row.counterevidence, false, studyId);
+  const proposal: SkillProposalV2 = {name: row.name, summary: text(row.summary, 4000), steps: row.steps.map(value => text(value, 1000)), evidence, ...(row.applicability !== undefined ? {applicability: text(row.applicability, 2000)} : {}), limitations: limitations.map(value => text(value, 1000)), counterevidence, inspections: validateSkillInspections(row.inspections, [...evidence, ...counterevidence], studyId)};
   assertWritable(skillMarkdownV2(proposal), SKILL_BYTES, "skill v2 proposal"); return proposal;
 }
 export function skillMarkdownV2(proposal: SkillProposalV2): string {

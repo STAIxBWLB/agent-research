@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, opendirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { parseLedger, plain, readBytesBounded, hashFileBounded, sha256, validateStudy, type LedgerEvent, type Study } from "./study.ts";
+import { parseLedger, plain, readBytesBounded, hashFileBounded, sha256, validateStudy, type LedgerEvent, type Study, assertStudyReadLock, type StudyReadLock } from "./study.ts";
 import { validateAttemptRecord, type Attempt } from "./exp/attempts.ts";
 import { TASK_BYTES, TASK_FILES, METRIC_LIMIT, validateStoredProtocol, protocolHash } from "./exp/protocol.ts";
 import { validateExecutor } from "./exp/executor.ts";
@@ -44,8 +44,9 @@ interface SourceFile { bytes: Buffer; sha256: string }
 interface Snapshot { files: Map<string, SourceFile>; study: Study; events: LedgerEvent[]; hash: string; ledgerPosition: number }
 function decode(bytes: Uint8Array): string { try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { return fail("malformed-source"); } }
 function parsed(file: SourceFile): unknown { try { return JSON.parse(decode(file.bytes)); } catch (error) { if (error instanceof SourceFailure) throw error; return fail("malformed-source"); } }
-function capture(dir: string): Snapshot {
-  if (existsSync(join(dir, ".ares.lock"))) fail("write-in-progress");
+function capture(dir: string, permit?: StudyReadLock): Snapshot {
+  if (permit) assertStudyReadLock(dir, permit);
+  else if (existsSync(join(dir, ".ares.lock"))) fail("write-in-progress");
   const files = new Map<string, SourceFile>(), directories: string[] = []; let total = 0, entries = 0;
   const forbidden: string[] = [];
   const safe = (name: string) => { if (forbidden.some(prefix => !prefix || name === prefix || name.startsWith(prefix + "/"))) fail("executor-overlaps-source"); };
@@ -132,7 +133,8 @@ function capture(dir: string): Snapshot {
   if (existsSync(join(dir, "task"))) task("task", 0);
   for (const name of ["paper/manuscript.md", "paper/build/manuscript.md", "paper/build/evidence.json"]) { safe(name); get(name, name.endsWith("evidence.json") ? 8 * 1024 * 1024 : 2 * 1024 * 1024); }
   for (const event of events) if (event.type === "skill.proposed" && plain(event.data.proposal) && typeof event.data.proposal.name === "string" && RUN.test(event.data.proposal.name)) get(`proposals/skills/${event.data.proposal.name}.md`, 16_384);
-  if (existsSync(join(dir, ".ares.lock"))) fail("write-in-progress");
+  if (permit) assertStudyReadLock(dir, permit);
+  else if (existsSync(join(dir, ".ares.lock"))) fail("write-in-progress");
   return { files, study, events, ledgerPosition: ledger.bytes.length, hash: sha256(canonical({ directories: directories.sort(), files: [...taskHashes, ...[...files].map(([name, file]) => [name, file.sha256])].sort(([a], [b]) => (String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0)) })) };
 }
 class TraversalCap extends Error {}
@@ -506,4 +508,12 @@ export function compareLineage(dirArg: string, options: {attempts?: string[]; ca
     result.rows = []; result.issues = [...result.issues.filter(issue => issue.code === "traversal-capped"), {code, message: `lineage compare ${code}; inspect lineage show and restore valid source records or retry the read`}];
     result.aggregation = {performed: false, available: false, compatible: false, reasons: [code]}; return result;
   }
+}
+
+/** Internal whole-graph read model for a bounded multi-source inspection, never a second store or public page. */
+export function localEvidenceSnapshot(dirArg: string, permit?: StudyReadLock) {
+  const dir = realpathSync(resolve(dirArg)), source = capture(dir, permit), graph = build(dir, source, PROVENANCE_TRAVERSAL), after = capture(dir, permit);
+  const changed = after.hash !== source.hash || after.ledgerPosition !== source.ledgerPosition;
+  const value = {study: source.study, sourceSha256: source.hash, ledgerPosition: source.ledgerPosition, nodes: [...graph.nodes.values()], issues: graph.issues.map(issue => issue.code), status: changed ? "changed" : graph.capped ? "capped" : graph.issues.length ? "unavailable" : "ok"};
+  return {...value, bytes: Buffer.byteLength(JSON.stringify(value)), recheck() {try {const current = capture(dir, permit); return current.hash === source.hash && current.ledgerPosition === source.ledgerPosition;} catch {return false;}}};
 }

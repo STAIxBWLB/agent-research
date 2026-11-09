@@ -396,7 +396,7 @@ export function createPlugin(runtime: Runtime = {}) { return {
           };
           if (target.action === "gate") await ops.gateDecide(target.study, target.gate!, target.decision as "approve" | "reject", target.reason, command, guard);
           else if (target.action === "screen") await ops.screen(target.study, target.ids!, target.decision as "include" | "exclude", target.reason, command, guard);
-          else if (target.action === "skill.decide") await ops.skillDecide(target.study, target.name!, target.decision!, target.reason!, target.pr, command, guard);
+          else if (target.action === "skill.decide") await ops.skillDecide(target.study, target.name!, target.decision!, target.reason!, target.pr, {actor, ...(runtime.runner ? {runner: runtime.runner} : {}), ...(runtime.now ? {now: runtime.now} : {})}, guard, env);
           else await ops.archive(target.study, archive, command, env, guard);
           seen.clear(); return { ok: true, message: `${target.wireAction} recorded; refresh the study to inspect its ledger` };
         } catch (cause) {

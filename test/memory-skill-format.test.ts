@@ -5,6 +5,8 @@ import {commit, readBytesBounded, readLedger, sha256} from "../src/study.ts";
 import {skillMarkdownV2, validateSkillProposalV2} from "../src/memory/skill-format.ts";
 import {foldSkills, SKILL_BYTES} from "../src/memory/skills.ts";
 import {skillEvidenceReference, inspectSkillEvidence} from "../src/memory/evidence.ts";
+import {legacySkillFixture} from "./legacy-skill-fixture.ts";
+import {evidenceFingerprint} from "../src/memory/skill-check.ts";
 import {fakeHttp, fakeRunner, tempDir} from "./helpers.ts";
 
 const ctx = {actor: {kind: "person" as const}, http: fakeHttp([]).http};
@@ -29,31 +31,35 @@ test("v2 refuses private body fields, forged success, inconsistent hashes and un
   const raw = proposal(), receipt = raw.inspections[0]!;
   for (const value of [{...raw, body: "private"}, {...raw, applicability: "x".repeat(2001)}, {...raw, limitations: Array(17).fill("limit")}, {...raw, inspections: []}, {...raw, inspections: [receipt, receipt]}, {...raw, inspections: [{...receipt, text: "private body"}]}, {...raw, inspections: [{...receipt, metadata: {body: "private"}}]}, {...raw, inspections: [{...receipt, outcome: {status: "failed", success: true}}]}, {...raw, inspections: [{...receipt, digest: "b".repeat(64), outcome: {status: "succeeded", success: true}}]}, {...raw, inspections: [{...receipt, state: "unavailable", outcome: {status: "succeeded", success: true}}]}, {...raw, inspections: [{...receipt, ref: {...source(), id: "b".repeat(16)}}]}]) expect(() => validateSkillProposalV2(value)).toThrow("skill v2");
 });
-test("new writes remain v1 and legacy terminal decisions/bytes are never rewritten", async () => {
+test("historical v1 terminal decisions and bytes remain unchanged", async () => {
   const dir = tempDir(); ops.init(dir, {question: "Synthetic compatibility"}, ctx);
-  const legacy = await ops.skillPropose(dir, {name: "legacy-lesson", summary: "Synthetic legacy", steps: ["Read evidence"], evidence: ["a".repeat(32)]}, ctx);
+  const legacy = legacySkillFixture(dir, {name: "legacy-lesson", summary: "Synthetic legacy", steps: ["Read evidence"], evidence: ["a".repeat(32)]}, ctx.actor);
   await ops.skillDecide(dir, legacy.name, "reject", "Synthetic limit", undefined, ctx);
   const files = ["ledger.jsonl", "proposals/skills/legacy-lesson.md"], before = files.map(file => readBytesBounded(join(dir, file), 1024 * 1024));
   expect(ops.skillList(dir)[0]).toMatchObject({skillProposal: 1, state: "rejected", evidenceStatus: "legacy-unresolved"});
   files.forEach((file, i) => expect(readBytesBounded(join(dir, file), 1024 * 1024)).toEqual(before[i]!));
   expect(before[1]!.toString()).toStartWith("---\nskillProposal: 1\n");
-  await expect(ops.skillPropose(dir, proposal(), ctx)).rejects.toThrow("unknown proposal field");
+  await expect(ops.skillPropose(dir, proposal(), ctx)).rejects.toThrow("skill v2");
 });
-test("v2 files replay read-only but T1 never writes decisions without the future bound preflight", async () => {
+test("v2 replay is read-only and unavailable current evidence refuses acceptance without writes", async () => {
   const dir = tempDir(), {study} = ops.init(dir, {question: "Synthetic v2 replay"}, ctx), raw = proposal(study.id), content = skillMarkdownV2(validateSkillProposalV2(raw));
   commit(dir, [[join(dir, "proposals", "skills", raw.name + ".md"), content, SKILL_BYTES]], [{actor: ctx.actor, type: "skill.proposed", data: event(raw).data}]);
   const before = readBytesBounded(join(dir, "ledger.jsonl"), 1024 * 1024);
   expect(ops.skillList(dir)[0]).toMatchObject({skillProposal: 2, evidenceStatus: "inspection-required"});
-  await expect(ops.skillDecide(dir, raw.name, "accept", "Synthetic review", "https://example.test/pr/1", ctx)).rejects.toThrow("T2");
+  await expect(ops.skillDecide(dir, raw.name, "accept", "Synthetic review", "https://example.test/pr/1", ctx)).rejects.toThrow("evidence");
   expect(readBytesBounded(join(dir, "ledger.jsonl"), 1024 * 1024)).toEqual(before);
   const unknown = event(raw, 3); expect(() => foldSkills([unknown])).toThrow("unsupported version");
   expect(readLedger(dir)).toHaveLength(2);
 });
 test("v2 terminal decisions need matching versions and accepted evidence fingerprints", () => {
-  const proposed = event(proposal()), decide = {v: 1 as const, at: proposed.at, actor: ctx.actor, type: "skill.decided", data: {skillProposal: 2, name: "versioned-lesson", decision: "accept", reason: "Synthetic review", pr: "https://example.test/pr/1", evidenceFingerprint: hash}};
-  expect(foldSkills([proposed, decide])[0]).toMatchObject({state: "accepted", decision: {evidenceFingerprint: hash}});
+  const proposed = event(proposal()), decide = {v: 1 as const, at: proposed.at, actor: ctx.actor, type: "skill.decided", data: {skillProposal: 2, name: "versioned-lesson", decision: "accept", reason: "Synthetic review", pr: "https://example.test/pr/1", evidenceFingerprint: evidenceFingerprint(proposed.data.sha256, validateSkillProposalV2(proposal()).inspections, hash), inspections: proposal().inspections, localGeneration: hash}};
+  expect(foldSkills([proposed, decide])[0]).toMatchObject({state: "accepted", decision: {evidenceFingerprint: decide.data.evidenceFingerprint}});
   expect(() => foldSkills([proposed, {...decide, data: {...decide.data, evidenceFingerprint: undefined}}])).toThrow("fingerprint");
   expect(() => foldSkills([proposed, {...decide, data: {...decide.data, skillProposal: 1}}])).toThrow("mismatched-version");
+  for (const localGeneration of [null, undefined, "a".repeat(63), "A".repeat(64), hash + "\n"]) {
+    const supplied = localGeneration as string | null;
+    expect(() => foldSkills([proposed, {...decide, data: {...decide.data, localGeneration, evidenceFingerprint: evidenceFingerprint(proposed.data.sha256, validateSkillProposalV2(proposal()).inspections, supplied)}}])).toThrow("localGeneration");
+  }
 });
 test("compatibility addresses map only one-to-one typed kinds and never cross study or infer paths", async () => {
   const dir = tempDir(), {study} = ops.init(dir, {question: "Synthetic reference scope"}, ctx), display = `ares:${study.id}/attempt:${"a".repeat(16)}`;
@@ -90,4 +96,25 @@ for (const field of ["limitations", "counterevidence"] as const) test(`v2 ${fiel
   expect(() => ops.skillList(dir)).toThrow("skill v2");
   expect(readBytesBounded(ledger, 1024 * 1024)).toEqual(before[0]!);
   expect(readBytesBounded(file, SKILL_BYTES)).toEqual(before[1]!);
+});
+
+test("v2 Markdown retains the inclusive 16 KiB UTF-8 ceiling with source-owned receipts", () => {
+  const raw = {...proposal(), summary: "x", steps: Array(14).fill("x".repeat(1000))};
+  const overhead = Buffer.byteLength(skillMarkdownV2(validateSkillProposalV2(raw))) - 1, remaining = SKILL_BYTES - overhead;
+  expect(remaining).toBeGreaterThan(0); expect(remaining).toBeLessThanOrEqual(4000);
+  const summary = "한".repeat(Math.floor(remaining / 3)) + "x".repeat(remaining % 3);
+  expect(Buffer.byteLength(skillMarkdownV2(validateSkillProposalV2({...raw, summary})))).toBe(SKILL_BYTES);
+  expect(() => validateSkillProposalV2({...raw, summary: summary + "x"})).toThrow("exceed");
+});
+
+
+test("accepted amem-only replay requires null generation, while local counterevidence requires its snapshot digest", () => {
+  const ref = {v: 1 as const, tool: "amem" as const, id: "b".repeat(32)}, inspection = {ref, state: "available", digest: hash, integrity: "screened", outcome: {status: "not-applicable", success: false}, support: "reviewer-judgment", sourceVersion: {reference: 1, amem: "0.22.1"}, observedAt: "2030-01-01T00:00:00Z"};
+  for (const localCounter of [false, true]) {
+    const raw = validateSkillProposalV2({...proposal(), evidence: [ref], counterevidence: localCounter ? [source()] : [], inspections: localCounter ? [inspection, ...proposal().inspections] : [inspection]});
+    const content = skillMarkdownV2(raw), proposed = {v: 1 as const, at: "2030-01-01T00:00:00Z", actor: ctx.actor, type: "skill.proposed", data: {skillProposal: 2, proposal: raw, sha256: sha256(content)}};
+    const decide = (localGeneration: string | null) => ({v: 1 as const, at: proposed.at, actor: ctx.actor, type: "skill.decided", data: {skillProposal: 2, name: raw.name, decision: "accept", reason: "Synthetic reviewed limits", pr: "https://example.test/pr/1", inspections: raw.inspections, localGeneration, evidenceFingerprint: evidenceFingerprint(proposed.data.sha256, raw.inspections, localGeneration)}});
+    expect(foldSkills([proposed, decide(localCounter ? hash : null)])[0]?.state).toBe("accepted");
+    expect(() => foldSkills([proposed, decide(localCounter ? null : hash)])).toThrow("localGeneration");
+  }
 });

@@ -102,15 +102,16 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       if ((result as ReturnType<typeof ops.setup>).actions.some(action => action.change === "refused")) code = 1;
       break;
     }
+    case "skill check": count(spec, positional, 2); result = await ops.skillCheck(positional[0]!, positional[1]!, ctx, env); break;
     case "skill propose": {
       count(spec, positional, 1); const file = str("--file");
       if (file === undefined) throw new Error("skill propose: input missing; pass --file PATH or --file - for proposal JSON");
-      result = await ops.skillPropose(positional[0]!, await readInput(file, io), ctx); break;
+      result = await ops.skillPropose(positional[0]!, await readInput(file, io), ctx, env); break;
     }
     case "skill decide": {
       count(spec, positional, 3); const reason = str("--reason");
       if (reason === undefined) throw new Error("skill decide: reason missing; pass --reason TEXT and --pr URL for accept");
-      result = await ops.skillDecide(positional[0]!, positional[1]!, positional[2]!, reason, str("--pr"), ctx); break;
+      result = await ops.skillDecide(positional[0]!, positional[1]!, positional[2]!, reason, str("--pr"), ctx, undefined, env); break;
     }
     case "skill list": count(spec, positional, 1); result = ops.skillList(positional[0]!); break;
     case "lessons": {

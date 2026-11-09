@@ -16,17 +16,17 @@ export interface EvidenceInspection extends Omit<LocalEvidenceInspection, "ref" 
 /** Compatibility strings are addresses only, never file paths or resolver instructions. */
 export function skillEvidenceReference(raw: unknown, studyId?: string): SkillEvidenceReference | undefined {
   if (typeof raw === "string") {
-    if (/^[a-f0-9]{32}$/.test(raw)) return {v: 1, tool: "amem", id: raw};
+    if (raw.length === 32 && /^[a-f0-9]{32}$/.test(raw)) return {v: 1, tool: "amem", id: raw};
     const match = /^ares:([^/]+)\/([^:]+):(.+)$/.exec(raw);
     if (!match || !(PROVENANCE_KINDS as readonly string[]).includes(match[2]!)) return undefined;
     raw = {v: 1, tool: "ares", projectKey: match[1], kind: match[2], id: match[3]};
   }
-  if (plain(raw) && raw.v === 1 && raw.tool === "amem" && Object.keys(raw).every(key => ["v", "tool", "id"].includes(key)) && typeof raw.id === "string" && /^[a-f0-9]{32}$/.test(raw.id)) return {v: 1, tool: "amem", id: raw.id};
+  if (plain(raw) && raw.v === 1 && raw.tool === "amem" && Object.keys(raw).every(key => ["v", "tool", "id"].includes(key)) && typeof raw.id === "string" && raw.id.length === 32 && /^[a-f0-9]{32}$/.test(raw.id)) return {v: 1, tool: "amem", id: raw.id};
   try {const ref = validateExecutionReference(raw); return studyId === undefined || ref.projectKey === studyId ? ref : undefined;}
   catch {return undefined;}
 }
 const refused = (state: EvidenceInspection["state"], ref?: SkillEvidenceReference): EvidenceInspection => ({...(ref ? {ref} : {}), state, digest: null, integrity: "unverified", outcome: {status: "unverified", success: false}, support: "reviewer-judgment"});
-/** One bounded source inspection; multi-source decision budgets and atomic acceptance belong to T2. */
+/** Single-source compatibility reader. Skill decisions use the aggregate snapshot/budget in skill-check.ts. */
 export async function inspectSkillEvidence(dir: string, raw: unknown, options: {runner?: ProcessRunner; env?: NodeJS.ProcessEnv; now?: () => number} = {}): Promise<EvidenceInspection> {
   let studyId: string, projectDir: string;
   try {const opened = openStudy(dir); studyId = opened.study.id; projectDir = opened.dir;} catch (error) {return refused(error instanceof Error && /unsupported/.test(error.message) ? "unsupported" : "unavailable");}

@@ -91,6 +91,24 @@ export default (host) => {
           ...(typeof study.dir === "string" ? { onOpen: () => go("study", { study: study.dir }) } : {}) });
       }) ?? ui.empty("No registered studies", "Register one with ares console add <dir>. Ares does not scan the disk for studies.")];
   };
+  const skillRef = (value) => {
+    if (typeof value === "string") return value;
+    const ref = record(value), fields = ["v", "tool", "projectKey", "kind", "id", "revision", "sha256"];
+    return JSON.stringify(Object.fromEntries(fields.filter(key => ref[key] !== undefined).map(key => [key, ref[key]])));
+  };
+  const skillList = (values, render = (value) => text(value)) => h("div", {},
+    rows(values).length ? h("ul", {class: "ares-list"}, ...rows(values).slice(0, 64).map(value => h("li", {text: render(value)}))) : h("p", {text: "None recorded"}),
+    rows(values).length > 64 ? ui.notice(`${rows(values).length - 64} more entries; display incomplete.`, "warn") : null);
+  const skillInspections = (values, caption) => h("div", {}, rows(values).length ? ui.table({caption,
+    columns: [{key: "ref", label: "Typed reference"}, {key: "state", label: "Recorded availability"}, {key: "integrity", label: "Integrity"}, {key: "outcome", label: "Recorded outcome"}, {key: "success", label: "Recorded success"}, {key: "support", label: "Support"}, {key: "digest", label: "Digest"}, {key: "versions", label: "Source versions"}, {key: "observed", label: "Observed time"}],
+    rows: rows(values).slice(0, 64).map(value => {
+      const item = record(value), version = record(item.sourceVersion);
+      return {ref: skillRef(item.ref), state: text(item.state), integrity: text(item.integrity), outcome: text(record(item.outcome).status),
+        success: typeof record(item.outcome).success === "boolean" ? String(item.outcome.success) : "Unavailable",
+        support: text(item.support), digest: text(item.digest, "not recorded"),
+        versions: JSON.stringify(Object.fromEntries(["reference", "native", "ledger", "amem"].filter(key => version[key] !== undefined).map(key => [key, version[key]]))), observed: at(item.observedAt)};
+    })}) : ui.empty("No stored inspection receipts"),
+    rows(values).length > 64 ? ui.notice(`${rows(values).length - 64} more receipts; display incomplete.`, "warn") : null);
   const skillRows = (skills, study) => ui.rows(rows(skills), (skill) => ui.detail({
     kind: "Skill proposal", title: text(skill.name), state: { text: text(skill.state), tone: tone(skill.state) }, summary: text(skill.summary, ""),
     actions: skill.state === "proposed" && typeof skill.name === "string" && typeof study === "string" ? [
@@ -98,9 +116,22 @@ export default (host) => {
       ui.button("Reject...", () => askDecision(`Reject ${skill.name}`, { action: "skill.reject", study, name: skill.name }), { tone: "danger" }),
       ui.button("Withdraw...", () => askDecision(`Withdraw ${skill.name}`, { action: "skill.withdraw", study, name: skill.name }), { tone: "danger" }),
     ] : [],
-    sections: [{ title: "Steps", body: h("ol", { class: "ares-list" }, ...rows(skill.steps).map((step) => h("li", { text: String(step) }))) },
-      { title: "Evidence", body: h("ul", { class: "ares-list" }, ...rows(skill.evidence).map((ref) => h("li", { text: String(ref) }))) },
-      ...(skill.decision ? [{ title: "Recorded decision", body: h("pre", { class: "ares-pre", text: JSON.stringify(skill.decision, null, 2) }) }] : [])],
+    sections: [{title: "Evidence status", body: h("div", {},
+      ui.notice(skill.skillProposal === 1 ? "Legacy v1 evidence: legacy-unresolved. Create a new v2 proposal for evidence-backed checks." : "V2 evidence: inspection-required. Stored receipts are not a current privacy check.", "warn"),
+      h("p", {text: `Run explicitly: ares skill check ${text(study, "<dir>")} ${text(skill.name, "<name>")}`}),
+      h("p", {text: "Acceptance reruns evidence and counterevidence under the study lock. Negative/no-winner outcomes are not success; source integrity is not support. Support remains reviewer-judgment."}))},
+      {title: "Applicability", body: h("p", {text: text(skill.applicability, "not recorded")})},
+      {title: "Limitations", body: skillList(skill.limitations)},
+      {title: "Steps", body: skillList(skill.steps)},
+      {title: "Evidence", body: skillList(skill.evidence, skillRef)},
+      {title: "Counterevidence", body: skillList(skill.counterevidence, skillRef)},
+      {title: "Proposal inspection receipts", body: skillInspections(skill.inspections, "Stored proposal inspections")},
+      ...(skill.decision ? [{title: "Recorded decision", body: h("div", {},
+        h("p", {text: `${text(skill.decision.action)}: ${text(skill.decision.reason)}`}),
+        h("p", {text: `Actor: ${text(record(skill.decision.actor).kind)} ${text(record(skill.decision.actor).id, "")} | ${at(skill.decision.at)}`}),
+        h("p", {text: `Evidence fingerprint: ${text(skill.decision.evidenceFingerprint, "not recorded")}`}),
+        h("p", {text: `PR reference supplied (not verified as merged): ${text(skill.decision.pr, "not recorded")}`}))},
+        {title: "Decision inspection receipts", body: skillInspections(skill.decision.inspections, "Stored decision inspections")}] : [])],
     footer: typeof skill.sha256 === "string" ? [skill.sha256] : [],
   })) ?? ui.empty("No skill proposals");
   const studyView = (snapshot) => {

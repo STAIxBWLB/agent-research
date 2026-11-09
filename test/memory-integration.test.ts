@@ -1,3 +1,4 @@
+import {legacySkillFixture} from "./legacy-skill-fixture.ts";
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -6,7 +7,7 @@ import { run } from "../src/cli.ts";
 import { ARES_TOOLS, createAresMcp } from "../src/mcp-tools.ts";
 import { validArguments } from "../src/mcp.ts";
 import { PLAYBOOK } from "../src/playbook.ts";
-import { appendEvent, readLedger } from "../src/study.ts";
+import { appendEvent, readLedger, openStudy } from "../src/study.ts";
 import type { ArchivePreview } from "../src/memory/archive.ts";
 import type { SkillRecord } from "../src/memory/skills.ts";
 import { fakeHttp, fakeRunner, tempDir } from "./helpers.ts";
@@ -26,11 +27,12 @@ function review(dir: string) {
 }
 
 test("MCP schemas expose all A5 commands, closed proposal inputs and safe annotations", () => {
-  for (const name of ["ares_archive", "ares_lessons", "ares_skill_propose", "ares_skill_decide", "ares_skill_list"]) expect(tool(name)).toBeDefined();
+  for (const name of ["ares_archive", "ares_lessons", "ares_skill_propose", "ares_skill_decide", "ares_skill_list", "ares_skill_check"]) expect(tool(name)).toBeDefined();
   expect(tool("ares_archive").annotations).toMatchObject({ readOnlyHint: false, openWorldHint: true });
   expect(tool("ares_lessons").annotations).toMatchObject({ readOnlyHint: true, openWorldHint: true });
   expect(tool("ares_skill_list").annotations).toMatchObject({ readOnlyHint: true, openWorldHint: false });
-  expect(tool("ares_skill_decide").annotations.openWorldHint).toBe(false);
+  expect(tool("ares_skill_decide").annotations.openWorldHint).toBe(true);
+  expect(tool("ares_skill_check").annotations).toMatchObject({readOnlyHint: true, openWorldHint: true});
   expect(validArguments({ study: "/synthetic", proposal }, tool("ares_skill_propose").inputSchema)).toBe(true);
   for (const invalid of [{ ...proposal, unknown: true }, { ...proposal, steps: [] }, { ...proposal, evidence: [] }, { ...proposal, evidence: Array(65).fill(noteId) }]) {
     expect(validArguments({ study: "/synthetic", proposal: invalid }, tool("ares_skill_propose").inputSchema)).toBe(false);
@@ -68,7 +70,8 @@ test("survey MCP lessons matches CLI ranking/brief and never writes the study", 
 
 test("survey MCP skill queue and CLI share validation, all states and local PR references", async () => {
   const dir = study(), fake = fakeRunner([]), env = { AGENTHUB_PEER_ID: "synthetic" }, server = createAresMcp(env, fakeHttp([]).http, { runner: fake.runner });
-  await server.handlers.ares_skill_propose!({ study: dir, proposal });
+  const id = openStudy(dir).study.id, localProposal = {...proposal, evidence: [{v: 1, tool: "ares", projectKey: id, kind: "study", id}]};
+  await server.handlers.ares_skill_propose!({ study: dir, proposal: localProposal });
   await expect(server.handlers.ares_skill_decide!({ study: dir, name: proposal.name, decision: "accept", reason: "reviewed" })).rejects.toThrow("--pr");
   await server.handlers.ares_skill_decide!({ study: dir, name: proposal.name, decision: "accept", reason: "reviewed", pr: "https://github.com/example/synthetic/pull/1" });
   const before = readFileSync(join(dir, "ledger.jsonl")), rows = await server.handlers.ares_skill_list!({ study: dir }) as SkillRecord[];
@@ -93,7 +96,7 @@ test("manifest advertises A5 formats/events and unsupported versions refuse with
   expect(ops.manifest().ledgerEvents).toEqual(["archive.exported", "skill.proposed", "skill.decided", "watch.set", "watch.ran", "autonomy.set", "harness.round.set", "harness.probe.declared", "harness.contrast.recorded", "harness.composition.recorded", "harness.adoption.decided", "harness.round.closed", "experience.stream.set", "experience.frozen"]);
   const snapshot = ops.manifest(); snapshot.ledgerEvents.pop(); expect(ops.manifest().ledgerEvents).toHaveLength(14);
   for (const kind of ["ledger", "proposal-event", "proposal-file"]) {
-    const dir = study(); await ops.skillPropose(dir, proposal, { actor });
+    const dir = study(); legacySkillFixture(dir, proposal, actor);
     const journal = join(dir, "ledger.jsonl"), proposalFile = join(dir, "proposals", "skills", `${proposal.name}.md`);
     if (kind === "proposal-file") writeFileSync(proposalFile, readFileSync(proposalFile, "utf8").replace("skillProposal: 1", "skillProposal: 3"));
     else {
