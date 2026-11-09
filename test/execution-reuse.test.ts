@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { checkReuseTreatmentFixture } from "../scripts/execution-reuse.ts";
+import { checkReuseTreatmentFixture, checkProducerReuseUnitFixture } from "../scripts/execution-reuse.ts";
 import { freshValues } from "../scripts/execution-workload.ts";
 import { COST_FIELDS } from "../scripts/execution-eval.ts";
 import { readTextBounded, sha256 } from "../src/study.ts";
@@ -37,3 +37,24 @@ test("reuse functional checks refuse malformed/unbounded input and undeclared se
   await expect(checkReuseTreatmentFixture(first, 999_999)).rejects.toThrow("seed is not declared");
   await expect(checkReuseTreatmentFixture({ ...first, currentContext: { ...first.currentContext, globalCodeDigest: "../outside" } }, first.workload.seeds[0])).rejects.toThrow("current context");
 });
+
+
+test("separate non-frozen producer unit exercises actual reuse hits through the treatment adapter backend", async () => {
+  const result = await checkProducerReuseUnitFixture();
+  expect(result.sourcePopulation).toBe("separate-unit-fixture"); expect(result.frozenCorpus).toBe(false);
+  expect(result.authority).toBe("functional-fixture-only"); expect(result.kind).toBe("producer-reuse-unit-check");
+  expect(result.sourceAttemptId).not.toBe(result.currentAttemptId);
+  expect(result.sourceRefs).toHaveLength(3); expect(result.reusedRefs).toEqual(result.sourceRefs);
+  expect(result.sourceRefs.every(ref => ref.attemptId === result.sourceAttemptId)).toBe(true);
+  expect(result.sourceObserved).toEqual({ seed: 5, prepare: 11, transform: 51, evaluate: 2611 });
+  expect(result.currentObserved).toEqual(result.sourceObserved);
+  expect(result.currentPayloadDigests).toEqual(result.sourcePayloadDigests);
+  expect(result.sourceRecordUnchanged).toBe(true); expect(result.sourceRecordSha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(result.sourceMetricsSha256).toBe(result.currentMetricsSha256);
+  expect(result.sourceEvaluatorId).not.toBe(result.currentEvaluatorId); expect(result.evaluatorFresh).toBe(true);
+  expect(result.pinsHeldBeforeEvaluation).toBe(true); expect(result.pinsReleased).toBe(true);
+  expect(result.executed).toEqual(["prepare", "transform", "evaluate", "verify", "verify"]);
+  expect(result.counts).toEqual({ sourceExecutedStages: 4, currentExecutedStages: 1, reusedStages: 3, currentIndependentSamples: 0 });
+  expect(Object.values(result.costs).every(value => value === "unknown")).toBe(true);
+  expect(result.candidateEvidenceSha256).toMatch(/^[a-f0-9]{64}$/);
+}, 20_000);

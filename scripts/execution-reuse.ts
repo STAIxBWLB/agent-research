@@ -2,7 +2,7 @@ import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { init, gateDecide } from "../src/commands.ts";
-import { runAttempt, reconcileAttempts, showAttempt, type AttemptContext } from "../src/exp/attempts.ts";
+import { runAttempt, reconcileAttempts, showAttempt, type AttemptContext, type Attempt } from "../src/exp/attempts.ts";
 import { setProtocol } from "../src/exp/protocol.ts";
 import { setSelection } from "../src/exp/selection.ts";
 import { setExecutor, spawnRunner, type ProcessRunner, type ProcessResult } from "../src/exp/executor.ts";
@@ -118,12 +118,14 @@ function transport(env: NodeJS.ProcessEnv) {
   return { ctx, executed, containers, finish() { const current = [...containers.values()].filter(value => value.running); if (current.length !== 1) fail("functional integration expected one active fake container"); clock.value += 1000; current[0]!.running = false; current[0]!.finishedAt = new Date(clock.value).toISOString(); } };
 }
 
-/** One functional first-seed check. No source warmup, treatment trial, measured cost or adoption authority. */
-export async function checkReuseTreatmentFixture(input: unknown, seed: number): Promise<ReuseIntegrationCheck> {
-  if (!plain(input) || Buffer.byteLength(JSON.stringify(input)) > BYTES || !plain(input.currentContext)) fail("input is malformed or exceeds bound", "supply only a bounded frozen input payload");
+interface ProducerFixture {
+  dir: string; repo: string; workdir: string; commit: string; seed: number; fake: ReturnType<typeof transport>;
+}
+async function withProducerFixture<T>(input: Record<string, unknown>, seed: number, maxAttempts: 1 | 2, use: (fixture: ProducerFixture) => Promise<T>): Promise<T> {
+  if (!plain(input.currentContext)) fail("current context is missing");
   const workload: NumericWorkload = numericWorkload(input, seed), context = input.currentContext;
   if (typeof context.globalCodeDigest !== "string" || !/^[a-f0-9]{64}$/.test(context.globalCodeDigest) || typeof context.method !== "string" || !context.method.trim() || context.method.length > 128) fail("frozen current context is invalid");
-  const source = sourceState(input.source), root = realpathSync(mkdtempSync(join(tmpdir(), "ares-reuse-integration-")));
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "ares-producer-fixture-")));
   const dir = join(root, "study"), repo = join(root, "repo"), workdir = join(root, "executor"), home = join(root, "home");
   try {
     for (const folder of [repo, workdir, home]) mkdirSync(folder, { mode: 0o700 });
@@ -140,21 +142,107 @@ export async function checkReuseTreatmentFixture(input: unknown, seed: number): 
       { ...stage, name: "prepare", command: ["/fixture-workload", "prepare"], needs: [], inputs: { values: { task: "values.json" } }, outputs: { value: "value.json" } },
       { ...stage, name: "transform", command: ["/fixture-workload", "transform", String(workload.multiplier), String(workload.offset)], needs: ["prepare"], inputs: { prepared: { stage: "prepare", output: "value" } }, outputs: { value: "value.json" } },
       { ...stage, name: "evaluate", command: ["/fixture-workload", "evaluate", workload.evaluateOperation], needs: ["transform"], inputs: { transformed: { stage: "transform", output: "value" } }, outputs: { value: "value.json" } },
-    ] }, evaluator: { image: `synthetic@sha256:${"b".repeat(64)}`, command: ["/fixture-workload", "verify"] }, metrics: [{ name: "score", unit: "integer", direction: "max" }], seeds: workload.seeds, limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts: 1, maxWallHours: 1, maxGpuHours: 0 } };
+    ] }, evaluator: { image: `synthetic@sha256:${"b".repeat(64)}`, command: ["/fixture-workload", "verify"] }, metrics: [{ name: "score", unit: "integer", direction: "max" }], seeds: workload.seeds, limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts, maxWallHours: 1, maxGpuHours: 0 } };
     await withLock(dir, () => { const normalized = setProtocol(dir, protocol, actor); setExecutor(dir, { v: 1, kind: "local", workdir }, actor); setSelection(dir, { v: 1, run: "investigate", metric: "score", baseline: { commit }, minSeeds: 1, minDelta: 0 }, normalized, actor); });
     await gateDecide(dir, "design", "approve", undefined, { actor, http: offlineHttp });
-    const fake = transport(env); let attempt = await runAttempt(dir, { repo, commit, seed, run: "investigate", reuse: "eligible", detach: true }, fake.ctx);
-    for (let step = 0; step < 4 && attempt.status === "running"; step++) { fake.finish(); await reconcileAttempts(dir, fake.ctx); attempt = showAttempt(dir, attempt.id); }
-    if (attempt.status !== "succeeded" || !attempt.pipeline || fake.executed.join(",") !== "prepare,transform,evaluate,verify") fail("real producer adapter did not complete the fresh fallback pipeline");
-    const observed = { seed, prepare: 0, transform: 0, evaluate: 0 };
-    for (const name of ["prepare", "transform", "evaluate"] as const) { const parent = attempt.pipeline.completed.find(value => value.name === name); if (!parent || parent.reuse) fail("opaque source unexpectedly produced a reuse hit"); const verified = await retainedOperation(attempt.executor, { op: "verify", studyId: attempt.studyId, ref: parent.ref }, fake.ctx.runner!); const value = JSON.parse(readTextBounded(join(workdir, attempt.studyId, ".retained", "objects", parent.ref.attemptId, parent.ref.stage, "data", "value.json"), BYTES)); if (typeof value !== "number" || !Number.isSafeInteger(value) || verified.sha256 !== parent.ref.sha256) fail("fresh fallback artifact is invalid"); observed[name] = value; }
-    if (attempt.metrics[0]?.value !== observed.evaluate || [...fake.containers.values()].filter(value => value.args.includes("verify")).length !== 1) fail("fresh evaluator receipt differs from candidate value");
+    return await use({ dir, repo, workdir, commit, seed, fake: transport(env) });
+  } finally { cleanup(root); }
+}
+async function completeProducer(fixture: ProducerFixture, initial: Attempt, beforeStop?: (attempt: Attempt) => Promise<void>): Promise<Attempt> {
+  let attempt = initial;
+  for (let step = 0; step < 8 && attempt.status === "running"; step++) {
+    const running = [...fixture.fake.containers.values()].filter(value => value.running);
+    if (running.length > 1) fail("functional integration has multiple active fake containers");
+    if (running.length === 1) { await beforeStop?.(attempt); fixture.fake.finish(); }
+    await reconcileAttempts(fixture.dir, fixture.fake.ctx); attempt = showAttempt(fixture.dir, attempt.id);
+  }
+  if (attempt.status !== "succeeded" || !attempt.pipeline) fail("real producer adapter did not complete the functional pipeline");
+  return attempt;
+}
+async function producerValues(fixture: ProducerFixture, attempt: Attempt): Promise<{ observed: FreshValues; payloadDigests: string[] }> {
+  if (!attempt.pipeline || attempt.status !== "succeeded") fail("producer values need a completed pipeline");
+  const observed: FreshValues = { seed: attempt.seed, prepare: 0, transform: 0, evaluate: 0 }, payloadDigests: string[] = [];
+  for (const name of ["prepare", "transform", "evaluate"] as const) {
+    const parent = attempt.pipeline.completed.find(value => value.name === name); if (!parent) fail("candidate artifact receipt missing");
+    const verified = await retainedOperation(attempt.executor, { op: "verify", studyId: attempt.studyId, ref: parent.ref }, fixture.fake.ctx.runner!);
+    const bytes = readBytesBounded(join(fixture.workdir, attempt.studyId, ".retained", "objects", parent.ref.attemptId, parent.ref.stage, "data", "value.json"), BYTES), value: unknown = JSON.parse(bytes.toString("utf8"));
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || verified.sha256 !== parent.ref.sha256) fail("producer artifact is invalid");
+    observed[name] = value; payloadDigests.push(sha256(bytes));
+  }
+  if (attempt.metrics[0]?.value !== observed.evaluate) fail("fresh evaluator receipt differs from candidate value");
+  return { observed, payloadDigests };
+}
+function attemptBytes(fixture: ProducerFixture, attempt: Attempt): Buffer { return readBytesBounded(join(fixture.dir, "runs", "investigate", "attempts", `${attempt.id}.json`), 1024 * 1024); }
+function unknownCosts(): CostRecord { return Object.fromEntries(COST_FIELDS.map(field => [field, "unknown"])) as CostRecord; }
+
+/** One functional first-seed check. No source warmup, treatment trial, measured cost or adoption authority. */
+export async function checkReuseTreatmentFixture(input: unknown, seed: number): Promise<ReuseIntegrationCheck> {
+  if (!plain(input) || Buffer.byteLength(JSON.stringify(input)) > BYTES || !plain(input.currentContext)) fail("input is malformed or exceeds bound", "supply only a bounded frozen input payload");
+  const source = sourceState(input.source);
+  return withProducerFixture<ReuseIntegrationCheck>(input, seed, 1, async fixture => {
+    const { dir, repo, commit, fake } = fixture;
+    const attempt = await completeProducer(fixture, await runAttempt(dir, { repo, commit, seed, run: "investigate", reuse: "eligible", detach: true }, fake.ctx));
+    if (fake.executed.join(",") !== "prepare,transform,evaluate,verify" || attempt.pipeline!.completed.some(parent => parent.reuse)) fail("opaque source unexpectedly produced a reuse hit");
+    const { observed } = await producerValues(fixture, attempt);
+    if ([...fake.containers.values()].filter(value => value.args.includes("verify")).length !== 1) fail("fresh evaluator receipt missing");
     const page = readProvenance(dir), comparison = compareLineage(dir, { attempts: [attempt.id] }), reuse = attemptReuseView(attempt, readLedger(dir));
     if (!reuse || reuse.stages.some(value => value.outcome === "reused")) fail("opaque frozen source was incorrectly counted as reused");
     const chain = { taskSha256: sha256(canonical({ workload: input.workload, currentContext: input.currentContext })), attemptId: attempt.id,
-      attemptRecordSha256: sha256(readBytesBounded(join(dir, "runs", "investigate", "attempts", `${attempt.id}.json`), 1024 * 1024)), artifactDigests: attempt.outputs.map(value => value.sha256), retainedManifestDigests: attempt.pipeline.completed.map(value => value.ref.sha256),
+      attemptRecordSha256: sha256(attemptBytes(fixture, attempt)), artifactDigests: attempt.outputs.map(value => value.sha256), retainedManifestDigests: attempt.pipeline!.completed.map(value => value.ref.sha256),
       provenanceStatus: page.status, provenanceSha256: sha256(canonical(page)), comparisonStatus: comparison.status, comparisonSha256: sha256(canonical(comparison)), evidenceCandidate: "unreviewed-functional-fixture" as const };
-    return { v: 1, kind: "reuse-fixture-integration-check", authority: "functional-fixture-only", ...source, status: "succeeded", observed, reusedStages: [], freshStages: ["prepare", "transform", "evaluate"], evaluatorFresh: true, sourceRefs: [], producerMisses: Object.entries(attempt.reuse?.stages ?? {}).map(([stage, value]) => ({ stage, reason: value.reason })), chain, candidateEvidenceSha256: sha256(canonical({ observed, chain, receipts: attempt.pipeline.completed.map(value => ({ stage: value.name, sha256: value.ref.sha256 })), evaluator: attempt.metrics })), costs: Object.fromEntries(COST_FIELDS.map(field => [field, "unknown"])) as CostRecord,
+    return { v: 1, kind: "reuse-fixture-integration-check", authority: "functional-fixture-only", ...source, status: "succeeded", observed, reusedStages: [], freshStages: ["prepare", "transform", "evaluate"], evaluatorFresh: true, sourceRefs: [], producerMisses: Object.entries(attempt.reuse?.stages ?? {}).map(([stage, value]) => ({ stage, reason: value.reason })), chain, candidateEvidenceSha256: sha256(canonical({ observed, chain, receipts: attempt.pipeline!.completed.map(value => ({ stage: value.name, sha256: value.ref.sha256 })), evaluator: attempt.metrics })), costs: unknownCosts(),
       limitations: ["frozen artifacts are opaque strings, not numeric producer checkpoints; no source was generated or populated", "one current first-seed functional integration only; no treatment trial, comparison estimate, adoption or measured costs", "Docker/container execution is fake; real private Git/tar/Python and ares APIs do not prove native container isolation", "current fresh outputs are verified; positive preregistered reuse eligibility is not established from opaque source bytes"] };
-  } finally { cleanup(root); }
+  });
+}
+
+export interface ProducerReuseUnitCheck {
+  v: 1; kind: "producer-reuse-unit-check"; authority: "functional-fixture-only"; sourcePopulation: "separate-unit-fixture"; frozenCorpus: false;
+  status: "succeeded"; sourceAttemptId: string; currentAttemptId: string; sourceRefs: RetainedRef[]; reusedRefs: RetainedRef[];
+  sourceObserved: FreshValues; currentObserved: FreshValues; sourcePayloadDigests: string[]; currentPayloadDigests: string[];
+  sourceRecordSha256: string; sourceRecordUnchanged: true; sourceMetricsSha256: string; currentMetricsSha256: string;
+  sourceEvaluatorId: string; currentEvaluatorId: string; evaluatorFresh: true; pinsHeldBeforeEvaluation: true; pinsReleased: true;
+  executed: string[]; counts: { sourceExecutedStages: number; currentExecutedStages: number; reusedStages: number; currentIndependentSamples: 0 };
+  candidateEvidenceSha256: string; costs: CostRecord; limitations: string[];
+}
+/** Separate hardcoded producer conformance only. It neither accepts nor reads a frozen corpus source. */
+export async function checkProducerReuseUnitFixture(): Promise<ProducerReuseUnitCheck> {
+  const seed = 5, input = { workload: { values: [1, 2, 3], seeds: [seed], stages: [
+    { id: "prepare", operation: "sum-input-plus-seed" }, { id: "transform", operation: "multiply-plus-offset", multiplier: 4, offset: 7 }, { id: "evaluate", operation: "square-plus-two-seeds" },
+  ] }, currentContext: { method: "separate-producer-reuse-unit-v1", globalCodeDigest: sha256("non-frozen-producer-unit-code-v1") } };
+  return withProducerFixture<ProducerReuseUnitCheck>(input, seed, 2, async fixture => {
+    const { dir, repo, commit, fake } = fixture;
+    const source = await completeProducer(fixture, await runAttempt(dir, { repo, commit, seed, run: "investigate", reuse: "eligible", detach: true }, fake.ctx));
+    if (!source.pipeline || source.pipeline.completed.some(parent => parent.reuse) || fake.executed.join(",") !== "prepare,transform,evaluate,verify") fail("separate unit source was not produced fresh");
+    const sourceBytes = attemptBytes(fixture, source), sourceMetrics = canonical(source.metrics), sourceValues = await producerValues(fixture, source), sourceRefs = source.pipeline.completed.map(parent => ({ ...parent.ref }));
+    let pinsHeldBeforeEvaluation = false;
+    const current = await completeProducer(fixture, await runAttempt(dir, { repo, commit, seed, run: "investigate", reuse: "eligible", retry: source.id, detach: true }, fake.ctx), async attempt => {
+      if (attempt.stage !== "evaluator") return;
+      const inventory = await retainedOperation(attempt.executor, { op: "inspect", studyId: attempt.studyId }, fake.ctx.runner!);
+      pinsHeldBeforeEvaluation = sourceRefs.every(ref => inventory.entries?.some(entry => canonical(entry.ref) === canonical(ref) && entry.active)) && inventory.reservations?.some(entry => entry.attemptId === attempt.id && entry.active) === true;
+      if (!pinsHeldBeforeEvaluation) fail("separate unit source was not pinned until fresh evaluation");
+    });
+    if (!current.pipeline || fake.executed.join(",") !== "prepare,transform,evaluate,verify,verify") fail("separate unit reran a candidate instead of reusing its sealed output");
+    const currentValues = await producerValues(fixture, current), expected = freshValues(input, seed);
+    if (canonical(sourceValues.observed) !== canonical(expected) || canonical(currentValues.observed) !== canonical(expected) || canonical(sourceValues.payloadDigests) !== canonical(currentValues.payloadDigests)) fail("separate unit output equivalence failed");
+    for (const [index, parent] of current.pipeline.completed.entries()) {
+      const original = source.pipeline.completed[index]!;
+      if (!parent.reuse || canonical(parent.ref) !== canonical(original.ref) || canonical(parent.reuse.source) !== canonical(original.ref) || canonical(parent.record) !== canonical(original.record)) fail("separate unit lost original source provenance");
+      const copied = readBytesBounded(join(current.paths.output, parent.name, "value.json"), BYTES);
+      if (sha256(copied) !== sourceValues.payloadDigests[index]) fail("fresh evaluator materialization differs from sealed source bytes");
+    }
+    const after = showAttempt(dir, source.id), view = attemptReuseView(current, readLedger(dir)), sourceView = attemptReuseView(source, readLedger(dir));
+    if (!sourceBytes.equals(attemptBytes(fixture, after)) || canonical(after.metrics) !== sourceMetrics) fail("reuse overwrote original source record or evaluator metrics");
+    if (!view || !sourceView || view.reusedCandidateStages !== 3 || view.executedStages !== 1 || view.independentSamples !== 0 || sourceView.executedStages !== 4) fail("separate unit counts misrepresent prior computation as new work");
+    const sourceEvaluatorId = source.stages.evaluator?.containerId, currentEvaluatorId = current.stages.evaluator?.containerId;
+    if (!sourceEvaluatorId || !currentEvaluatorId || sourceEvaluatorId === currentEvaluatorId || canonical(source.metrics) !== canonical(current.metrics)) fail("current evaluator is not independently fresh");
+    const inventory = await retainedOperation(current.executor, { op: "inspect", studyId: current.studyId }, fake.ctx.runner!);
+    const pinsReleased = sourceRefs.every(ref => inventory.entries?.some(entry => canonical(entry.ref) === canonical(ref) && !entry.active)) && inventory.reservedBytes === 0;
+    if (!pinsReleased || !pinsHeldBeforeEvaluation) fail("separate unit source pin lifecycle is incomplete");
+    const evidence = { sourceAttemptId: source.id, currentAttemptId: current.id, sourceRefs, sourcePayloadDigests: sourceValues.payloadDigests, currentPayloadDigests: currentValues.payloadDigests, sourceEvaluatorId, currentEvaluatorId, counts: { sourceExecutedStages: sourceView.executedStages, currentExecutedStages: view.executedStages, reusedStages: view.reusedCandidateStages, currentIndependentSamples: 0 as const } };
+    return { v: 1, kind: "producer-reuse-unit-check", authority: "functional-fixture-only", sourcePopulation: "separate-unit-fixture", frozenCorpus: false, status: "succeeded", ...evidence,
+      reusedRefs: current.pipeline.completed.map(parent => ({ ...parent.ref })), sourceObserved: sourceValues.observed, currentObserved: currentValues.observed,
+      sourceRecordSha256: sha256(sourceBytes), sourceRecordUnchanged: true, sourceMetricsSha256: sha256(sourceMetrics), currentMetricsSha256: sha256(canonical(current.metrics)),
+      evaluatorFresh: true, pinsHeldBeforeEvaluation: true, pinsReleased: true, executed: [...fake.executed], candidateEvidenceSha256: sha256(canonical(evidence)), costs: unknownCosts(),
+      limitations: ["separate hardcoded unit fixture, outside the frozen corpus; no opaque frozen source is rematerialized", "fake container transport validates producer control/dataflow only; no kernel isolation or native container proof", "no treatment trial, benchmark estimate, measured cost or adoption disposition is produced"] };
+  });
 }

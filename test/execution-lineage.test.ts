@@ -1,16 +1,18 @@
 import { expect, spyOn, test } from "bun:test";
-import { mkdirSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { mkdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import * as lineage from "../src/provenance.ts";
 import { diagnoseTreatment, LINEAGE_TREATMENT_BYTES } from "../scripts/execution-lineage.ts";
 import { resolveDiagnosticFixture, DIAGNOSTIC_BYTES } from "../scripts/execution-diagnose.ts";
 import { init, protocol as setProtocol } from "../src/commands.ts";
 import { designBinding, protocolHash } from "../src/exp/protocol.ts";
+import { ATTEMPT_BYTES } from "../src/exp/attempts.ts";
 import { metricAttempt, metricProtocol } from "./metric-fixtures.ts";
 import { provenanceFixture } from "./provenance-fixtures.ts";
-import { commit, plain, readJsonFile, readTextBounded, sha256, STUDY_BYTES, writeAtomic } from "../src/study.ts";
+import { commit, plain, readJsonFile, readTextBounded, readBytesBounded, sha256, STUDY_BYTES, writeAtomic } from "../src/study.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
 
+const LEDGER_BYTES = 64 * 1024 * 1024;
 const root = resolve(import.meta.dir, ".."), actor = {kind: "person" as const, id: "synthetic-fixture-bootstrap"};
 const corpus = JSON.parse(readTextBounded(join(root, "test/fixtures/execution-eval/corpus.json"), 65_536)) as {cases: {trial: string; input: string}[]};
 const cases = corpus.cases.filter(row => row.trial === "diagnose");
@@ -75,7 +77,7 @@ async function rich() {
   return {f, input};
 }
 test("real product lineage and comparison cross-check producer and retry identities read-only", async () => {
-  const {f, input} = await rich(), file = join(f.dir, "runs", "investigate", "attempts", `${f.ids.retryAttempt}.json`), before = readFileSync(file), ledger = readFileSync(join(f.dir, "ledger.jsonl"));
+  const {f, input} = await rich(), file = join(f.dir, "runs", "investigate", "attempts", `${f.ids.retryAttempt}.json`), before = readBytesBounded(file, ATTEMPT_BYTES), ledger = readBytesBounded(join(f.dir, "ledger.jsonl"), LEDGER_BYTES);
   const result = diagnoseTreatment(f.dir, input);
   expect(result.integration.state).toBe("matched"); expect(result.diagnostic.retryOf).toBe(f.ids.interruptedAttempt);
   expect(result.integration.producerView!.lineage.edges.some(edge => edge.relation === "retryOf" && edge.from.id === f.ids.retryAttempt && edge.to.id === f.ids.interruptedAttempt)).toBe(true);
@@ -84,7 +86,7 @@ test("real product lineage and comparison cross-check producer and retry identit
   expect(diagnoseTreatment(f.dir, conflict)).toMatchObject({integration: {state: "conflicting", reason: "producer-conflict"}, diagnostic: {provenance: {attemptId: null, status: "unknown", completeness: "lineage-conflicting"}}});
   const noParent = {...input, attempts: [{id: f.ids.retryAttempt, commit: f.commits.winner, status: "succeeded", seed: 1}]};
   expect(diagnoseTreatment(f.dir, noParent).integration.reason).toBe("retry-conflict");
-  expect(readFileSync(file)).toEqual(before); expect(readFileSync(join(f.dir, "ledger.jsonl"))).toEqual(ledger);
+  expect(readBytesBounded(file, ATTEMPT_BYTES)).toEqual(before); expect(readBytesBounded(join(f.dir, "ledger.jsonl"), LEDGER_BYTES)).toEqual(ledger);
 }, 20_000);
 
 test("missing corrupt and capped product sources never retain a favorable pure diagnostic", async () => {

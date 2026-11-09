@@ -21,7 +21,11 @@ The callable Reuse fixture adapter goes through the actual attempt/reconcile, re
 
 The frozen source artifacts contain opaque `Synthetic cached bytes fixture-object-*` strings, not numeric stage results or ares retained manifests. A valid digest establishes those opaque bytes only. They are not converted, silently recomputed or relabeled as numeric cache hits. Until a separately reviewed source-establishment method exists, they stay unsupported source bindings and current numeric execution remains fresh. Proposed positive eligibility in the frozen evaluator truth is preserved, not rewritten to disguise this gap. These functional checks establish safe fallback and producer wiring; they do not establish successful treatment reuse across the frozen positive cases.
 
-Any future T3 source-establishment method must retain its real producer identities and account for setup, verification, retention and materialization costs. T3 must rerun both fresh and eligible arms on the same backend in the registered AB/BA order; T2a is not a reusable control sample. No hidden warmup, independent-sample claim from borrowed work or reuse of evaluator metrics is allowed. Missing cost dimensions, person time and native coverage remain unknown.
+Pending: no numeric source established on the frozen corpus.
+
+A clearly separate non-frozen unit fixture calls `checkProducerReuseUnitFixture()` on the same adapter backend. One actual producer attempt seals its own bytes; another eligible attempt consumes the original manifest references and executes only its new evaluator. The test checks source-record preservation and byte-exact outputs. This is producer-hit conformance, not a source setup phase for the frozen corpus or a treatment observation.
+
+Option B would change a preregistered trial method and needs the owner's decision before T3; it is not part of T2b. Any future T3 source-establishment method must retain its real producer identities and account for setup, verification, retention and materialization costs. T3 must rerun both fresh and eligible arms on the same backend in the registered AB/BA order; T2a is not a reusable control sample. No hidden warmup, independent-sample claim from borrowed work or reuse of evaluator metrics is allowed. Missing cost dimensions, person time and native coverage remain unknown.
 
 ## Pending scope
 
