@@ -4,16 +4,16 @@ import {localEvidenceSnapshot} from "../provenance.ts";
 import {inspectLocalEvidence} from "./evidence-local.ts";
 import {readScreenedAmem} from "./amem-show.ts";
 import {skillEvidenceReference, type SkillEvidenceReference, type EvidenceInspection} from "./evidence.ts";
-import {sourceBudget, SOURCE_BYTES} from "./source-budget.ts";
+import {sourceBudget, SOURCE_BYTES, type SourceBudget} from "./source-budget.ts";
 import type {ProcessRunner} from "../exp/executor.ts";
 
-export interface SkillCheckOptions {runner?: ProcessRunner; env?: NodeJS.ProcessEnv; now?: () => number; lock?: StudyReadLock}
+export interface SkillCheckOptions {runner?: ProcessRunner; env?: NodeJS.ProcessEnv; now?: () => number; lock?: StudyReadLock; budget?: SourceBudget}
 const unavailable = (ref: SkillEvidenceReference): EvidenceInspection => ({ref, state: "unavailable", digest: null, integrity: "unverified", outcome: {status: "unverified", success: false}, support: "reviewer-judgment"});
 export function semanticInspection(value: EvidenceInspection) {const {observedAt: _time, ...content} = value; return content;}
 export const evidenceFingerprint = (proposalSha256: string, inspections: EvidenceInspection[], localGeneration: string | null) => sha256(canonical({proposalSha256, inspections, localGeneration}));
 /** One captured local producer view and one aggregate 25s/256KiB response budget across all exact-id reads. */
 export async function inspectSkillEvidenceSet(dirArg: string, raw: readonly SkillEvidenceReference[], options: SkillCheckOptions = {}) {
-  const {dir, study} = openStudy(dirArg), budget = sourceBudget(options.now), refs: SkillEvidenceReference[] = [];
+  const {dir, study} = openStudy(dirArg), budget = options.budget ?? sourceBudget(options.now), refs: SkillEvidenceReference[] = [];
   if (!Array.isArray(raw) || raw.length > 64) throw new Error("skill check: evidence bound exceeded; create a revised proposal with at most 64 sources and honest limitations");
   const unique = new Set<string>();
   for (const value of raw) {const ref = skillEvidenceReference(value, study.id); if (!ref) throw new Error("skill check: unsupported or wrong-study reference; create a revised proposal with current-study typed refs and honest limitations"); const key = canonical(ref); if (!unique.has(key)) {unique.add(key); refs.push(ref);}}

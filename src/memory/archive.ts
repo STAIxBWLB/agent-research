@@ -1,3 +1,5 @@
+import {recheckLessonExports, boundLessonExportBatch} from "../harness/lesson-candidates.ts";
+import type {SkillCheckOptions} from "./skill-check.ts";
 import { ACCEPT_ARTIFACTS } from "../autonomy.ts";
 import { requireCopilotAccept } from "../copilot.ts";
 import { commit, prepareCommit, openStudy, plain, sha256, type Actor, type LedgerEvent } from "../study.ts";
@@ -8,14 +10,14 @@ import type { ProcessRunner } from "../exp/executor.ts";
 
 export const ARCHIVE_NOTES = 200;
 export interface ArchiveReceipt { sha256: string; id: string }
-export interface ArchivePreview { fingerprint: string; notes: { sha256: string; note: AmemNote }[] }
+export interface ArchivePreview { recovery?: string; fingerprint: string; notes: { sha256: string; note: AmemNote }[] }
 export interface ArchiveResult extends ArchivePreview { written: ArchiveReceipt[]; remaining: number }
 /** Carries receipt progress for adapters; CLI/MCP retain the existing retry instruction verbatim. */
 export class ArchivePartialError extends Error {
   readonly failureMessage: string;
   constructor(readonly exportedCount: number, failure: unknown) {
     const detail = failure instanceof Error ? failure.message : "amem failure; check amem --version before retrying";
-    super(`archive: ${exportedCount} note(s) written and receipted; rerun with the same --confirm to continue; ${detail}`);
+    super(`archive: ${exportedCount} note(s) written and receipted; rerun with the same --confirm to continue; ${detail}; receipt-only recovery cannot detect earlier unreceipted writes: reconcile with the owner before retrying an interrupted/crashed archive`);
     this.failureMessage = detail;
   }
 }
@@ -23,7 +25,7 @@ function hex(value: unknown, length: 32 | 64): value is string {
   return typeof value === "string" && value.length === length && /^[a-f0-9]+$/.test(value);
 }
 function badReceipt(): never { throw new Error("archive receipt: malformed or conflicting exported notes; restore the last valid archive.exported ledger event before retrying ares archive"); }
-function exported(events: LedgerEvent[]): Set<string> {
+export function archiveReceiptIndex(events: LedgerEvent[]): Map<string, string> {
   const known = new Map<string, string>();
   for (const event of events) if (event.type === "archive.exported") {
     if (!hex(event.data.fingerprint, 64) || !Array.isArray(event.data.notes) || event.data.notes.length > ARCHIVE_NOTES) badReceipt();
@@ -33,21 +35,23 @@ function exported(events: LedgerEvent[]): Set<string> {
       known.set(row.sha256, row.id);
     }
   }
-  return new Set(known.keys());
+  return known;
 }
 /** No lock, subprocess or write: confirmation binds the full list, receipts only narrow pending writes. */
 export function previewArchive(dir: string): ArchivePreview {
   for (const artifact of ACCEPT_ARTIFACTS) requireCopilotAccept(dir, artifact);
-  const sources = readLessonSources(dir), notes = deriveLessons(sources), known = exported(sources.events);
+  const sources = readLessonSources(dir), notes = deriveLessons(sources), known = new Set(archiveReceiptIndex(sources.events).keys());
   const unique = new Map(notes.map(note => [sha256(canonical(note)), note]));
   const pending = [...unique].filter(([hash]) => !known.has(hash)).map(([sha256, note]) => ({ sha256, note }));
-  return { fingerprint: sha256(canonical(notes)), notes: pending };
+  return {fingerprint: sha256(canonical(notes)), notes: pending, ...(sources.contrastNotes?.length ? {recovery: "Receipt-only dedupe: if an earlier archive was interrupted after amem add, operator reconciliation is required before retry; unreceipted writes cannot be detected and may duplicate"} : {})};
 }
 /** Caller holds the study lock across the confirmed write and its single receipt commit. */
-export async function exportArchive(dirArg: string, fingerprint: string, actor: Actor, runner?: ProcessRunner, env: NodeJS.ProcessEnv = process.env): Promise<ArchiveResult> {
+export async function exportArchive(dirArg: string, fingerprint: string, actor: Actor, runner?: ProcessRunner, env: NodeJS.ProcessEnv = process.env, sourceOptions: SkillCheckOptions = {}): Promise<ArchiveResult> {
   const { dir } = openStudy(dirArg), preview = previewArchive(dir);
   if (!hex(fingerprint, 64) || fingerprint !== preview.fingerprint) throw new Error("archive: stale fingerprint; run ares archive <dir> again and confirm its current fingerprint");
-  const batch = preview.notes.slice(0, ARCHIVE_NOTES);
+  const bounded = preview.notes.slice(0, ARCHIVE_NOTES), batch = openStudy(dirArg).study.mode === "experiment" ? boundLessonExportBatch(dirArg, bounded) : bounded;
+  if (openStudy(dirArg).study.mode === "experiment") await recheckLessonExports(dirArg, batch.map(note => note.sha256), sourceOptions);
+  if (previewArchive(dirArg).fingerprint !== preview.fingerprint) throw new Error("archive: lesson sources changed during preflight; open a fresh preview and reconcile any unreceipted prior write before retrying");
   if (batch.length) {
     try { prepareCommit(dir, [], [{ actor, type: "archive.exported", data: {
       fingerprint, notes: batch.map(note => ({ sha256: note.sha256, id: "f".repeat(32) })),

@@ -102,6 +102,15 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       if ((result as ReturnType<typeof ops.setup>).actions.some(action => action.change === "refused")) code = 1;
       break;
     }
+    case "lesson list": count(spec, positional, 1); result = ops.lessonList(positional[0]!); break;
+    case "lesson check": count(spec, positional, 2); result = await ops.lessonCheck(positional[0]!, positional[1]!, ctx, env); break;
+    case "lesson propose":
+    case "lesson decide": {
+      count(spec, positional, spec.name === "lesson propose" ? 1 : 2); const file = str("--file");
+      if (file === undefined) throw new Error(`${spec.name}: input missing; pass --file PATH or --file - for bounded JSON`);
+      const raw = await readInput(file, io);
+      result = spec.name === "lesson propose" ? await ops.lessonPropose(positional[0]!, raw, ctx, env) : await ops.lessonDecide(positional[0]!, positional[1]!, raw, ctx, env); break;
+    }
     case "skill check": count(spec, positional, 2); result = await ops.skillCheck(positional[0]!, positional[1]!, ctx, env); break;
     case "skill propose": {
       count(spec, positional, 1); const file = str("--file");
@@ -206,12 +215,12 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "harness stream set": case "experience freeze": case "experience select": {
       count(spec, positional, 1); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);
       const raw = await readInput(file, io);
-      result = spec.name === "harness stream set" ? await ops.harnessStreamSet(positional[0]!, raw, ctx) : spec.name === "experience freeze" ? await ops.experienceFreeze(positional[0]!, raw, ctx) : await ops.experienceSelect(positional[0]!, raw, ctx, env); break;
+      result = spec.name === "harness stream set" ? await ops.harnessStreamSet(positional[0]!, raw, ctx) : spec.name === "experience freeze" ? await ops.experienceFreeze(positional[0]!, raw, ctx, env) : await ops.experienceSelect(positional[0]!, raw, ctx, env); break;
     }
     case "harness stream show": count(spec, positional, 1); result = ops.harnessStreamShow(positional[0]!); break;
     case "experience check": {
       count(spec, positional, 2); const model = str("--model"), runtime = str("--runtime"); if (!model || !runtime) throw new Error(`usage: ares ${spec.usage}`);
-      result = await ops.experienceCheck(positional[0]!, positional[1]!, {model, runtime}, ctx, env); break;
+      result = await ops.experienceCheck(positional[0]!, positional[1]!, {model, runtime, ...(str("--toolset-sha256") ? {toolsetSha256: str("--toolset-sha256")} : {})}, ctx, env); break;
     }
     case "harness contrast": case "harness compose": case "harness adopt": case "harness close": {
       count(spec, positional, 2); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);

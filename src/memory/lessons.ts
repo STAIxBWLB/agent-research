@@ -1,3 +1,4 @@
+import {eligibleLessonNotes} from "../harness/lesson-candidates.ts";
 import { openStudy, readLedger, type LedgerEvent, type Study } from "../study.ts";
 import { foldIdeas } from "../exp/ideas.ts";
 import { readProtocol } from "../exp/protocol.ts";
@@ -9,13 +10,13 @@ import type { AmemNote, AmemHit } from "./amem.ts";
 
 export interface LessonSources {
   study: Pick<Study, "id" | "question">; events: LedgerEvent[];
-  investigation?: InvestigateResult; final?: FinalResult; selection?: Selection; finalSeeds?: FinalSeeds;
+  contrastNotes?: AmemNote[]; investigation?: InvestigateResult; final?: FinalResult; selection?: Selection; finalSeeds?: FinalSeeds;
 }
 export const LESSON_EVIDENCE_REFS = 16;
 /** Read current committed sources only. An absent close yields no lesson; an invalid close refuses. */
 export function readLessonSources(dirArg: string): LessonSources {
   const { dir, study } = openStudy(dirArg), events = readLedger(dir), protocol = readProtocol(dir);
-  const sources: LessonSources = { study, events };
+  const sources: LessonSources = {study, events, ...(study.mode === "experiment" ? {contrastNotes: eligibleLessonNotes(dir).map(value => value.note)} : {})};
   if (protocol) {
     sources.selection = readSelection(dir, protocol);
     sources.finalSeeds = readFinalSeeds(dir, protocol);
@@ -65,6 +66,7 @@ export function deriveLessons(sources: LessonSources): AmemNote[] {
         text: `Review contradiction ${review.id}/${finding.id}: ${finding.text}; resolution: ${resolution.reason}`, evidence: [] });
     }
   }
+  notes.push(...(sources.contrastNotes ?? []));
   return notes;
 }
 

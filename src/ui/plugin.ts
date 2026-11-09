@@ -270,7 +270,7 @@ function boundAction(value: Selection) {
     binding = skill; preview.push(`${value.decision} skill ${skill.name}`, `Proposal: ${skill.sha256}`, ...(value.pr ? [`Reviewed PR: ${value.pr}`] : []));
   } else {
     const archive = previewArchive(study); archiveFingerprint = archive.fingerprint; binding = { fingerprint: archive.fingerprint, pending: archive.notes.map(row => row.sha256) };
-    preview.push(`Export ${Math.min(ARCHIVE_NOTES, archive.notes.length)} of ${archive.notes.length} pending lesson(s) to amem`, `Archive fingerprint: ${archive.fingerprint}`);
+    preview.push(`Export ${Math.min(ARCHIVE_NOTES, archive.notes.length)} of ${archive.notes.length} pending lesson(s) to amem`, `Archive fingerprint: ${archive.fingerprint}`, ...(archive.recovery ? [archive.recovery] : []));
   }
   if (value.reason) preview.push(`Reason: ${value.reason}`);
   return { fingerprint: sha256(canonical({ selection: value, study: identity, binding })), preview, archiveFingerprint };
@@ -283,7 +283,13 @@ function readParam(input: Args, name: typeof LINEAGE_PARAMS[number]): string | u
 }
 /** Explicit read panels only; the ordinary overview/inbox polling paths never call these operations. */
 function executionPanel(dir: string, input: Args): Args {
-  if (input.panel === "harness") return {harness: ops.harnessShow(dir, input.round as string | undefined)};
+  if (input.panel === "harness") {
+    const harness = ops.harnessShow(dir, input.round as string | undefined), selected = new Set(harness.rounds.filter(row => typeof input.round === "string" ? row.definition.id === input.round : harness.rounds.length === 1).map(row => row.definition.id));
+    const candidates = ops.lessonList(dir).filter(row => selected.has(row.proposal.round));
+    const lessonCandidates: typeof candidates = [];
+    for (const row of candidates) {if (Buffer.byteLength(JSON.stringify({harness, lessonCandidates: [...lessonCandidates, row], remainingLessonCandidates: candidates.length})) > 1_048_576) break; lessonCandidates.push(row);}
+    return {harness, lessonCandidates, remainingLessonCandidates: candidates.length - lessonCandidates.length};
+  }
   if (input.panel === "compare") {
     if (["rootKind", "rootId", "rootRevision", "rootSha256", "graphCursor"].some(name => input[name] !== undefined)) throw new Error("console compare: use only attempts or candidates selection parameters; clear lineage filters and retry");
     const attempts = readParam(input, "attempts"), candidates = readParam(input, "candidates");
@@ -397,7 +403,7 @@ export function createPlugin(runtime: Runtime = {}) { return {
           if (target.action === "gate") await ops.gateDecide(target.study, target.gate!, target.decision as "approve" | "reject", target.reason, command, guard);
           else if (target.action === "screen") await ops.screen(target.study, target.ids!, target.decision as "include" | "exclude", target.reason, command, guard);
           else if (target.action === "skill.decide") await ops.skillDecide(target.study, target.name!, target.decision!, target.reason!, target.pr, {actor, ...(runtime.runner ? {runner: runtime.runner} : {}), ...(runtime.now ? {now: runtime.now} : {})}, guard, env);
-          else await ops.archive(target.study, archive, command, env, guard);
+          else await ops.archive(target.study, archive, command, env, guard, {...runtime, env});
           seen.clear(); return { ok: true, message: `${target.wireAction} recorded; refresh the study to inspect its ledger` };
         } catch (cause) {
           const message = cause instanceof ArchivePartialError

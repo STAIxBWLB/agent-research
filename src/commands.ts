@@ -1,3 +1,5 @@
+import {proposeLesson, decideLesson, checkLesson, listLessonCandidates} from "./harness/lesson-candidates.ts";
+import type {SkillCheckOptions} from "./memory/skill-check.ts";
 import {setHarnessStream, readHarnessStream, selectExperience, freezeExperience, checkExperience} from "./harness/experience.ts";
 import {harnessRoundBinding, readHarnessRounds, type HarnessRound, setHarnessRound, showHarness, importHarnessFixture, recordHarnessTransition} from "./harness/rounds.ts";
 import { readProvenance, compareLineage, type ProvenanceOptions, type ProvenancePage, type LineageComparison } from "./provenance.ts";
@@ -116,8 +118,8 @@ export const executorCheck = (dir: string, ctx: Ctx) => checkExecutor(dir, ctx.r
 export const harnessStreamSet = (dir: string, raw: unknown, ctx: Ctx) => withLock(dir, () => setHarnessStream(dir, raw, ctx.actor));
 export const harnessStreamShow = (dir: string) => readHarnessStream(dir);
 export const experienceSelect = (dir: string, raw: unknown, ctx: Pick<Ctx, "runner" | "now">, env: NodeJS.ProcessEnv = process.env) => selectExperience(dir, raw, {...ctx, env});
-export const experienceFreeze = (dir: string, raw: unknown, ctx: Ctx) => withLock(dir, () => freezeExperience(dir, raw, ctx.actor));
-export const experienceCheck = (dir: string, round: string, identity: {model: string; runtime: string}, ctx: Pick<Ctx, "runner" | "now">, env: NodeJS.ProcessEnv = process.env) => checkExperience(dir, round, identity, {...ctx, env});
+export const experienceFreeze = (dir: string, raw: unknown, ctx: Ctx, env: NodeJS.ProcessEnv = process.env) => withLock(dir, lock => freezeExperience(dir, raw, ctx.actor, {...ctx, env, lock}));
+export const experienceCheck = (dir: string, round: string, identity: {model: string; runtime: string; toolsetSha256?: string}, ctx: Pick<Ctx, "runner" | "now">, env: NodeJS.ProcessEnv = process.env) => checkExperience(dir, round, identity, {...ctx, env});
 export const harnessSet = (dir: string, raw: unknown, ctx: Ctx) => withLock(dir, () => setHarnessRound(dir, raw, ctx.actor));
 export const harnessContrast = (dir: string, round: string, raw: unknown, ctx: Ctx) => withLock(dir, () => recordHarnessTransition(dir, round, "contrast", raw, ctx.actor));
 export const harnessCompose = (dir: string, round: string, raw: unknown, ctx: Ctx) => withLock(dir, () => recordHarnessTransition(dir, round, "composition", raw, ctx.actor));
@@ -509,10 +511,10 @@ export async function reviewResolve(dirArg: string, target: string, reason: stri
 export const reviewShow = (dir: string) => reviewReadiness(dir);
 
 /** Preview is read-only; confirmed outward writes and receipts share the study lock. */
-export async function archive(dirArg: string, options: { confirm?: string }, ctx: Pick<Ctx, "actor" | "runner">, env: NodeJS.ProcessEnv = process.env, guard?: () => void): Promise<ArchivePreview | ArchiveResult> {
+export async function archive(dirArg: string, options: { confirm?: string }, ctx: Pick<Ctx, "actor" | "runner" | "now">, env: NodeJS.ProcessEnv = process.env, guard?: () => void, sourceOptions?: SkillCheckOptions): Promise<ArchivePreview | ArchiveResult> {
   const { dir } = openStudy(dirArg);
   if (options.confirm === undefined) return previewArchive(dir);
-  return withLock(dir, () => { guard?.(); return exportArchive(dir, options.confirm!, ctx.actor, ctx.runner, env); });
+  return withLock(dir, lock => {guard?.(); return exportArchive(dir, options.confirm!, ctx.actor, ctx.runner, env, {...(sourceOptions ?? ctx), env: sourceOptions?.env ?? env, lock});});
 }
 
 /** The study cwd binds amem's project; search and optional intent brief never write study files. */
@@ -526,6 +528,10 @@ export async function lessons(dirArg: string, options: LessonRankOptions & { for
   return { lessons: ranked, ...(brief === undefined ? {} : { brief }) };
 }
 
+export const lessonPropose = (dir: string, raw: unknown, ctx: Ctx, env: NodeJS.ProcessEnv = process.env) => withLock(dir, lock => proposeLesson(dir, raw, ctx.actor, {...ctx, env, lock}));
+export const lessonList = (dir: string) => listLessonCandidates(dir);
+export const lessonCheck = (dir: string, name: string, ctx: Pick<Ctx, "runner" | "now"> = {}, env: NodeJS.ProcessEnv = process.env) => checkLesson(dir, name, {...ctx, env});
+export const lessonDecide = (dir: string, name: string, raw: unknown, ctx: Ctx, env: NodeJS.ProcessEnv = process.env) => withLock(dir, lock => decideLesson(dir, name, raw, ctx.actor, {...ctx, env, lock}));
 export async function skillPropose(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor" | "runner" | "now">, env: NodeJS.ProcessEnv = process.env) {
   const { dir } = openStudy(dirArg); return withLock(dir, lock => proposeSkill(dir, raw, ctx.actor, {...ctx, env, lock}));
 }

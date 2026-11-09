@@ -12,11 +12,12 @@ import { validatePlan } from "./plan/definition.ts";
 import { canonical, foldPlan } from "./plan/state.ts";
 import { readCurrentBuild } from "./paper/build.ts";
 import { foldReviews } from "./paper/review.ts";
+import {readHarnessViews} from "./harness/rounds.ts";
 import { foldSkills } from "./memory/skills.ts";
 
 export const PROVENANCE_NODE_LIMIT = 100, PROVENANCE_EDGE_LIMIT = 200, PROVENANCE_PAGE_BYTES = 256 * 1024;
 export const PROVENANCE_SOURCE_FILES = 512, PROVENANCE_SOURCE_BYTES = 16 * 1024 * 1024, PROVENANCE_EVENTS = 5000, PROVENANCE_TRAVERSAL = 1000;
-const KINDS = ["study", "plan-revision", "dispatch", "idea", "attempt", "artifact", "closed-result", "paper-evidence", "skill-proposal"] as const;
+const KINDS = ["study", "plan-revision", "dispatch", "idea", "attempt", "artifact", "closed-result", "paper-evidence", "skill-proposal", "harness-closure"] as const;
 export const PROVENANCE_KINDS = KINDS;
 export type ProvenanceKind = typeof KINDS[number];
 export interface ExecutionReferenceV1 { v: 1; tool: "ares"; projectKey: string; kind: ProvenanceKind; id: string; revision?: string; sha256?: string }
@@ -109,6 +110,9 @@ function capture(dir: string, permit?: StudyReadLock): Snapshot {
   for (const name of ["plan.json", "hypotheses.md", "design/protocol.json", "design/selection.json", "design/final.json", "literature/candidates.json"]) get(name, name === "hypotheses.md" ? 2 * 1024 * 1024 : name.startsWith("literature/") ? 8 * 1024 * 1024 : 65_536);
   for (const name of ["plan.json", "design/protocol.json", "design/selection.json", "design/final.json"]) {
     const file = files.get(name); if (file) { const raw = parsed(file); if (!plain(raw)) fail("malformed-source"); if (raw.v !== 1) fail("unsupported-version"); }
+  }
+  for (const [name, bound] of [["design/harness.json", 1_048_576], ["design/harness-stream.json", 16_384], ["design/harness-experience.json", 1_048_576], ["proposals/lessons.json", 1_048_576]] as const) {
+    const file = get(name, bound); if (file) {const raw = parsed(file); if (!plain(raw)) fail("malformed-source"); if (raw.v !== 1) fail("unsupported-version");}
   }
   for (const run of runs) for (const name of ["investigate.json", ...(run === "ablate" ? ["ablate.json"] : []), ...(run === "final" ? ["final.json"] : [])]) get(`runs/${run}/${name}`, 1_048_576);
   const taskHashes: [string, string][] = []; let taskBytes = 0, taskDirectories = 0;
@@ -266,6 +270,20 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
     for (const review of foldReviews(events)) {
       const index = reviewIndexes.get(review.id)!, proof = graph.proof(ledger, index, review.id), hash = review.report.buildSha256;
       graph.edge(study, graph.target("paper-evidence", hash, proof, { sha256: hash }), "reviewed", proof);
+    }
+    if ([...source.files.keys()].some(name => name.startsWith("design/harness")) || events.some(event => event.type.startsWith("harness."))) {
+      // Native replay validates every historical closure; the bounded view supplies current currency only.
+      const view = readHarnessViews(dir);
+      const current = new Set(view.flatMap(round => round.transitions.closure?.current ? [round.transitions.closure.sha256] : []));
+      for (const [index, event] of events.entries()) {
+        if (event.type !== "harness.round.closed") continue;
+        const form = event.data.form;
+        if (!plain(form) || typeof event.data.round !== "string" || typeof event.data.sha256 !== "string") fail("malformed-harness-closure");
+        const ref = graph.ref("harness-closure", event.data.round, {sha256: event.data.sha256}), proof = graph.proof(ledger, index, String(form.id));
+        graph.put({ref, state: current.has(event.data.sha256) ? "current" : "historical", availability: "available", proof,
+          data: {status: "closed", outcome: String(form.outcome), sourceStrength: "synthetic-fixture", actorKind: event.actor.kind, ...(event.actor.id ? {actorId: event.actor.id} : {}), at: event.at}});
+        owned(ref, proof);
+      }
     }
     for (const skill of foldSkills(events)) {
       const index = skillIndexes.get(skill.name)!, proof = graph.proof(ledger, index, skill.name), ref = graph.ref("skill-proposal", skill.name, { sha256: skill.sha256 }), file = source.files.get(`proposals/skills/${skill.name}.md`);

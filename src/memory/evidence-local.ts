@@ -48,6 +48,7 @@ export function inspectLocalEvidence(dir: string, raw: unknown, snapshot?: Retur
     if (node.availability === "missing") return base("missing", ref, digest);
     if (node.state === "unavailable" || node.state === "declared-unresolved" || audit.status !== "ok") return base("unavailable", ref, digest);
     const result = base("available", ref, digest);
+    if (ref.kind === "harness-closure") result.sourceVersion = {reference: 1, native: 1, ledger: 1};
     if (node.state === "historical" || node.availability === "receipt-only") return result;
     if (node.availability === "not-read" || ref.kind === "artifact") {result.integrity = "receipt-only"; return result;}
     result.integrity = "record";
@@ -65,7 +66,7 @@ export function inspectLocalEvidence(dir: string, raw: unknown, snapshot?: Retur
       result.outcome = {status: status === "succeeded" || status === "failed" || status === "cancelled" ? status : status === "running" ? "unfinished" : "unknown", success: status === "succeeded"};
     } else if (data.family === "final") result.outcome = {status: data.status === "qualified" || data.status === "not_qualified" ? data.status : "unknown", success: data.status === "qualified"};
     else if (data.family === "investigate") result.outcome = {status: typeof data.winner === "boolean" ? data.winner ? "winner" : "no-winner" : "closed", success: false};
-    else result.outcome = {status: ref.kind === "closed-result" || ref.kind === "paper-evidence" ? "closed" : "not-applicable", success: false};
+    else result.outcome = {status: ref.kind === "closed-result" || ref.kind === "paper-evidence" || ref.kind === "harness-closure" ? "closed" : "not-applicable", success: false};
     return result;
   } catch (cause) {return base(cause instanceof Error && cause.message.includes("unsupported") ? "unsupported" : "unavailable", ref);}
 }

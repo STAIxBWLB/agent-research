@@ -70,7 +70,7 @@ function showAdvertised(value: unknown): boolean {
   return (id.minLength === undefined || Number.isSafeInteger(id.minLength) && Number(id.minLength) >= 0 && Number(id.minLength) <= 32) && (id.maxLength === undefined || Number.isSafeInteger(id.maxLength) && Number(id.maxLength) >= 32);
 }
 /** Source contract: agent-mem 0.22.1 src/mcp.ts:14 and src/mcp-memory.ts:55,103ff,244ff: startup-scoped, screened curated amem_show. */
-export async function readScreenedAmem(cwd: string, id: string, options: {runner?: ProcessRunner; env?: NodeJS.ProcessEnv; now?: () => number; timeoutMs?: number; maxOutputBytes?: number; budget?: SourceBudget} = {}): Promise<ScreenedAmemInspection> {
+export async function readScreenedAmem(cwd: string, id: string, options: {runner?: ProcessRunner; env?: NodeJS.ProcessEnv; now?: () => number; timeoutMs?: number; maxOutputBytes?: number; budget?: SourceBudget; onText?: (text: string) => void} = {}): Promise<ScreenedAmemInspection> {
   const now = options.now ?? Date.now;
   const observedAt = () => {const value = now(); return Number.isFinite(value) && Math.abs(value) <= 8.64e15 ? new Date(value).toISOString() : new Date().toISOString();};
   let version: string | undefined, responseObservedAt: string | undefined;
@@ -128,6 +128,7 @@ export async function readScreenedAmem(cwd: string, id: string, options: {runner
     if (broken || !plain(response) || response.isError === true || !Array.isArray(response.content) || response.content.length !== 1 || !plain(response.content[0]) || response.content[0].type !== "text" || typeof response.content[0].text !== "string") return result("unavailable");
     let view: unknown; try {view = JSON.parse(response.content[0].text);} catch {return result("unavailable");}
     if (!plain(view) || view.id !== id || typeof view.text !== "string" || typeof view.at !== "string" || !Number.isFinite(Date.parse(view.at)) || typeof view.project !== "string" || !["decision", "finding", "contract", "fail"].includes(String(view.kind)) || Object.hasOwn(view, "view") || Object.hasOwn(view, "capture") || view.evidence === false || view.stale !== undefined && typeof view.stale !== "boolean") return result("unavailable");
+    if (view.stale !== true) options.onText?.(view.text);
     return {...result(view.stale === true ? "changed" : "available", sha256(canonical(view))), kind: view.kind as NonNullable<ScreenedAmemInspection["kind"]>};
   } catch {return result("unavailable");}
   finally {clearTimeout(timer); input.close(); stop.abort(); if (!accounted) options.budget?.exhaust();}

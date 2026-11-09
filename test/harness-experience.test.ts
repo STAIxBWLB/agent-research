@@ -164,7 +164,7 @@ test("CLI/MCP stream, freeze and pre-handoff check share handlers and leave sour
   expect(persisted).not.toContain("text\":"); expect(persisted).not.toContain("context\":"); expect(persisted).not.toContain("workerEffectiveInputHash");
 });
 
-test("select ranks existing lessons but screens only explicit exact ids and never promotes them to prior experience", async () => {
+test("select ranks generic lessons but refuses unreceipted selections without an exact-id source read", async () => {
   const f = fixture(); await ops.harnessStreamSet(f.dir, stream(), f.ctx); const before = ledger(f.dir), fullId = "a".repeat(32), otherId = "b".repeat(32), shown: string[] = [];
   const hits = [fullId, otherId].map((id, index) => ({id, kind: "finding", title: "Synthetic lesson", at: "2030-01-01T00:00:00Z", about: [], scoreDetails: {finalScore: 2 - index, recencyFactor: 1}}));
   const calls: string[] = [];
@@ -183,8 +183,8 @@ test("select ranks existing lessons but screens only explicit exact ids and neve
   };
   const ctx = {...f.ctx, runner, now: () => Date.parse("2030-01-02T00:00:00Z")}, raw = {...request(), condition: "prior-experience", selected: [{id: fullId, reason: "Synthetic procedural relevance"}]};
   const result = await ops.experienceSelect(f.dir, raw, ctx, f.env);
-  expect(result.ranked.map(value => value.id)).toEqual([fullId, otherId]); expect(shown).toEqual([fullId]); expect(calls).toEqual(["search", "mcp"]);
-  expect(result).toMatchObject({state: "unavailable", eligible: false, selected: [{sourceState: "available", state: "unavailable"}]});
+  expect(result.ranked.map(value => value.id)).toEqual([fullId, otherId]); expect(shown).toEqual([]); expect(calls).toEqual(["search"]);
+  expect(result).toMatchObject({state: "unavailable", eligible: false, prepareOnly: true, liveEligible: false, transfer: "not-demonstrated", selected: [{id: fullId, state: "unavailable", digest: null}]});
   const server = createAresMcp(f.env, f.ctx.http, ctx);
   const cli = await run(["experience", "select", f.dir, "--file", "-", "--json"], f.env, {...ctx, readStdin: async () => JSON.stringify(raw)});
   expect(JSON.parse(cli.text)).toEqual(await server.handlers.ares_experience_select!({study: f.dir, selection: raw}));

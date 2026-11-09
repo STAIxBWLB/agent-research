@@ -6,6 +6,7 @@ import { ARES_TOOLS } from "./mcp-tools.ts";
 export const FORMAT_VERSIONS = {
   manifest: 1,
   harnessRound: 1,
+  lessonProposal: 1,
   harnessTransition: 1,
   harnessStream: 1,
   harnessExperience: 1,
@@ -27,7 +28,7 @@ export const FORMAT_VERSIONS = {
   experimentAttempt: 1,
   studyBundle: 1,
 } as const;
-export const MEMORY_LEDGER_EVENTS = ["archive.exported", "skill.proposed", "skill.decided"] as const;
+export const MEMORY_LEDGER_EVENTS = ["archive.exported", "skill.proposed", "skill.decided", "lesson.proposed", "lesson.decided"] as const;
 export const WATCH_LEDGER_EVENTS = ["watch.set", "watch.ran"] as const;
 export const LEDGER_EVENTS = [...MEMORY_LEDGER_EVENTS, ...WATCH_LEDGER_EVENTS, "autonomy.set", "harness.round.set", "harness.probe.declared", "harness.contrast.recorded", "harness.composition.recorded", "harness.adoption.decided", "harness.round.closed", "experience.stream.set", "experience.frozen"] as const;
 export interface Manifest {

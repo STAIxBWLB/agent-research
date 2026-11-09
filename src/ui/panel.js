@@ -367,6 +367,30 @@ export default (host) => {
         ui.table({caption: "Immutable closure records", columns: [{key: "id", label: "Closure"}, {key: "outcome", label: "Recorded outcome"}, {key: "currency", label: "Binding state"}, {key: "binding", label: "Binding"}, {key: "record", label: "Recorded hash / actor / time"}], rows: history.map(entry => ({id: text(record(entry.form).id), outcome: text(record(entry.form).outcome), currency: entry.current === true ? "current" : entry.current === false ? "stale" : "not asserted", binding: text(entry.binding), record: recorded(entry)}))})));
       const remainingClosures = (Number.isSafeInteger(transitions.remainingClosures) && transitions.remainingClosures >= 0 ? transitions.remainingClosures : 0) + rows(transitions.closures).length - history.length;
       if (remainingClosures > 0) sections.push(ui.notice(`${remainingClosures} more closure records; displayed history is incomplete. Inspect the complete immutable history with the CLI.`, "warn"));
+      const lessons = rows(snapshot.lessonCandidates).filter(row => record(row.proposal).round === definition.id), visibleLessons = lessons.slice(0, 32);
+      if (Number(snapshot.remainingLessonCandidates) > 0) sections.push(ui.notice(`${Number(snapshot.remainingLessonCandidates)} more lesson candidates omitted by the bounded snapshot; inspect ares lesson list --json.`, "warn"));
+      sections.push(h("h3", {text: "Linked lesson candidates"}));
+      if (!lessons.length) sections.push(ui.empty("No stored lesson candidates for this round"));
+      for (const lesson of visibleLessons) {
+        const proposal = record(lesson.proposal), changes = rows(proposal.change).slice(0, 16), behavior = rows(proposal.behavior).slice(0, 16), disposition = record(lesson.disposition);
+        sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: `Lesson ${describe(proposal.name)}`}),
+          ui.chip(`Stored disposition: ${text(lesson.state)}`, tone(lesson.state)), ui.chip(lesson.current === true ? "current proposal" : "stale proposal", lesson.current === true ? "neutral" : "warn"),
+          ui.notice("synthetic-fixture; not evidence of real agent behavior. Single-task observation; transfer: not-demonstrated. No success or scientific support is inferred.", "warn"),
+          h("p", {text: `Kind: ${text(proposal.kind)} | evidence label: ${text(proposal.evidenceLabel)} | stored exportable flag: ${String(lesson.exportable === true)}`}),
+          ui.notice(proposal.kind === "no-lesson" ? "No-lesson candidates never export. Stored eligibility is not fresh proof." : "Stored exportability is local eligibility only, not fresh proof. Owner source recheck is required before archive.", "neutral"),
+          h("p", {text: "Needs source recheck: true. Stored inspection receipts are not a current privacy check; this panel performs no source checks or activation."}),
+          h("p", {text: `Summary: ${describe(proposal.summary)}`}), h("p", {text: `Procedure: ${describe(proposal.procedure)}`}),
+          h("p", {text: `Applicability: ${describe(proposal.applicability)}`}), h("p", {text: `Limitations: ${describe(proposal.limitations)}`}),
+          h("p", {text: `When not to use: ${describe(proposal.whenNotToUse)}`}), h("p", {text: `Failure: ${describe(proposal.failure)}`}), h("p", {text: `Retry when: ${describe(proposal.retryWhen)}`}),
+          h("p", {class: "ares-sub", text: `Proposal SHA-256: ${text(lesson.sha256)} | source closure: ${text(proposal.closureSha256)} | round binding: ${text(proposal.roundBinding)} | source fingerprint: ${text(proposal.sourceFingerprint)} | evidence fingerprint: ${text(lesson.evidenceFingerprint)}`}),
+          h("p", {class: "ares-sub", text: recorded(lesson)}),
+          ui.table({caption: "Lesson change references", columns: [{key: "kind", label: "Change kind"}, {key: "id", label: "Native id"}, {key: "hash", label: "Recorded SHA-256"}], rows: changes.map(change => ({kind: text(change.kind), id: text(change.id), hash: text(change.sha256)}))}),
+          ui.table({caption: "Lesson behavior references", columns: [{key: "probe", label: "Declared probe"}, {key: "projection", label: "Projection SHA-256"}, {key: "output", label: "Output manifest SHA-256"}], rows: behavior.map(ref => ({probe: text(ref.probe), projection: text(ref.projectionSha256), output: text(ref.outputManifestHash, "not recorded")}))}),
+          rows(proposal.change).length > changes.length || rows(proposal.behavior).length > behavior.length ? ui.notice("Lesson reference display incomplete; inspect the stored candidate with the CLI.", "warn") : null,
+          skillInspections(proposal.inspections, "Stored lesson inspections"),
+          lesson.disposition ? h("p", {text: `Recorded decision: ${text(disposition.decision)} | reason: ${describe(disposition.reason)} | strength acknowledged: ${describe(disposition.acknowledgeStrength)} | ${recorded(disposition)} | evidence fingerprint: ${text(disposition.evidenceFingerprint)}`}) : null));
+      }
+      if (lessons.length > visibleLessons.length) sections.push(ui.notice(`${lessons.length - visibleLessons.length} more lesson candidates; display incomplete.`, "warn"));
       const successor = record(transitions.successor);
       if (transitions.successor) sections.push(h("section", {class: "ares-card ares-identifiers"}, h("h3", {text: "Successor guidance"}),
         h("p", {text: `SHA-256 ${text(successor.guidanceSha256)} | ${text(successor.execution)}${typeof successor.probeId === "string" ? ` | probe ${successor.probeId}` : ""}`}),
