@@ -157,3 +157,24 @@ test("plan attempt steps propagate reuse controls admitted by the shared command
   const attempt = ops.attemptShow(f.dir, attempts.attempts[0]!.id);
   expect(attempt.v).toBe(3); expect(attempt.reuse).toMatchObject({ mode: "eligible", forceFresh: true });
 }, 10_000);
+
+
+test("plan set refuses invalid reuse controls atomically through shared CLI handler and MCP", async () => {
+  const f = await fixture(), server = createAresMcp({}, ctx.http);
+  const definition = (args: Record<string, unknown>) => ({ v: 1, nodes: [{ id: "run", kind: "step", command: "attempt.run", args: { repo: "/synthetic/repo", commit: "a".repeat(40), ...args } }], edges: [] });
+  await ops.planSet(f.dir, definition({ reuse: "off", "force-fresh": false }), ctx);
+  const before = study.readBytesBounded(join(f.dir, "plan.json"), 65536), ledger = study.readLedger(f.dir);
+  for (const args of [{ reuse: "automatic" }, { reuse: 0 }, { reuse: null }, { "force-fresh": "true" }, { "force-fresh": 1 }, { "force-fresh": null }]) {
+    await expect(ops.planSet(f.dir, definition(args), ctx)).rejects.toThrow("run ares plan set again");
+    await expect(server.handlers.ares_plan_set!({ study: f.dir, plan: definition(args) })).rejects.toThrow("run ares plan set again");
+    expect(study.readBytesBounded(join(f.dir, "plan.json"), 65536)).toEqual(before);
+    expect(study.readLedger(f.dir)).toEqual(ledger);
+  }
+  // A mode accepted before enum validation remains inspectable and can be corrected by plan set.
+  const old = JSON.parse(new TextDecoder().decode(before)); old.nodes[0].args.reuse = "automatic";
+  study.writeAtomic(join(f.dir, "plan.json"), JSON.stringify(old), 65536);
+  for (const mode of ["off", "eligible"]) for (const force of [false, true]) {
+    const result = await ops.planSet(f.dir, definition({ reuse: mode, "force-fresh": force }), ctx);
+    expect(result.definition.nodes[0]).toMatchObject({ args: { reuse: mode, "force-fresh": force } });
+  }
+});

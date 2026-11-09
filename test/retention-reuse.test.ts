@@ -107,3 +107,17 @@ test("lookup scanning is explicitly capped even when history has no indexed entr
   expect(await f.run({ ...f.request, key: "5".repeat(64) })).toMatchObject({ hit: false, reason: "scan-cap" });
   expect(existsSync(join(f.store, "state.json"))).toBe(true);
 }, 20_000);
+
+
+test("reuse selection refusals name the 16-selection bound and retention recovery", async () => {
+  const f = await fixture(), file = join(f.store, "state.json"), original = readFileSync(file);
+  for (const entries of [null, Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`other${i}`, { key: reuseKey, ref: f.ref }])), Object.fromEntries(Array.from({ length: 16 }, (_, i) => [`other${i}`, { key: reuseKey, ref: f.ref }]))]) {
+    const state = JSON.parse(original.toString()); state.attempts[consumerId].reuseSelections = entries;
+    writeFileSync(file, JSON.stringify(state));
+    const before = readFileSync(file);
+    await expect(f.lookup()).rejects.toThrow(entries && Object.keys(entries).length === 16 ? "reuse selection bound exceeded (16 active selections)" : "invalid reuse selections (at most 16 active selections)");
+    await expect(f.lookup()).rejects.toThrow("finish or cancel attempts holding selections, inspect with ares retention inspect");
+    await expect(f.lookup()).rejects.toThrow("ares retention prune");
+    expect(readFileSync(file)).toEqual(before);
+  }
+});

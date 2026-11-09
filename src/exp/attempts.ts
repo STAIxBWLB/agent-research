@@ -450,7 +450,7 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
       attempt = await update(dir, attempt.id, recoveryCtx, current => {
         if (current.status !== "running" || current.stage !== attempt.stage || current.pipeline?.index !== attempt.pipeline?.index || current.launching?.token !== attempt.launching?.token) throw new InputVerificationError("reuse: preflight ownership changed; run ares attempt reconcile <dir> after the active control operation finishes before retrying");
         requireCopilotAccept(dir, "hypotheses");
-        if (designBinding(dir) !== current.sealBinding) throw new InputVerificationError("reuse: design changed before preflight; inspect ares gate list <dir>, restore or approve the intended design, then retry explicitly");
+        if (designBinding(dir) !== current.sealBinding) throw new InputVerificationError("reuse: design changed before preflight; inspect ares gate list <dir>, restore or approve the current design, then run ares attempt reconcile <dir> before retrying");
         requireGate(dir, openStudy(dir).study, "design", () => current.sealBinding);
         if (current.stages[current.stage]!.launchPending) return undefined;
         current.stages[current.stage]!.launchPending = true;
@@ -476,7 +476,7 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
       const index = attempt.pipeline.index, name = attempt.pipeline.definition.candidate.stages[index]!.name;
       attempt = await update(dir, attempt.id, ctx, current => {
         if (current.status !== "running" || current.stage !== "candidate" || current.pipeline?.index !== index || current.pipeline.preflightRevision !== attempt.pipeline!.preflightRevision || current.launching?.token !== attempt.launching?.token) throw new InputVerificationError("reuse: stage ownership changed before admission; run ares attempt reconcile <dir> after the active control operation finishes before retrying");
-        if (designBinding(dir) !== current.sealBinding) throw new InputVerificationError("reuse: current design changed before admission; inspect ares gate list <dir>, restore or approve the intended design, then retry explicitly");
+        if (designBinding(dir) !== current.sealBinding) throw new InputVerificationError("reuse: current design changed before admission; inspect ares gate list <dir>, restore or approve the current design, then run ares attempt reconcile <dir> before retrying");
         requireCopilotAccept(dir, "hypotheses");
         const gate = requireGate(dir, openStudy(dir).study, "design", () => current.sealBinding);
         remainingWallSeconds(dir, current, ctx);
@@ -508,7 +508,7 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
     if (attempt.reuse) attempt = await update(dir, attempt.id, recoveryCtx, current => {
       if (current.status !== "running" || current.stage !== attempt.stage || current.pipeline?.index !== attempt.pipeline?.index || current.launching?.token !== attempt.launching?.token) throw new InputVerificationError("reuse: container launch ownership changed; run ares attempt reconcile <dir> after the active control operation finishes before retrying");
       requireCopilotAccept(dir, "hypotheses");
-      if (designBinding(dir) !== current.sealBinding) throw new InputVerificationError("reuse: design changed before fresh execution; inspect ares gate list <dir>, restore or approve the intended design, then retry explicitly");
+      if (designBinding(dir) !== current.sealBinding) throw new InputVerificationError("reuse: design changed before fresh execution; inspect ares gate list <dir>, restore or approve the current design, then run ares attempt reconcile <dir> before retrying");
       requireGate(dir, openStudy(dir).study, "design", () => current.sealBinding);
       delete current.stages[current.stage]!.launchPending;
       return "attempt.reuse.fresh-intent";
@@ -708,7 +708,7 @@ async function verifyAndLaunchPending(dir: string, pending: Attempt, ctx: Attemp
   try {
     if (pending.reuse) {
       requireCopilotAccept(dir, "hypotheses");
-      if (designBinding(dir) !== pending.sealBinding) throw new InputVerificationError("reuse: design changed before pending consumption; inspect ares gate list <dir>, restore or approve the intended design, then retry explicitly");
+      if (designBinding(dir) !== pending.sealBinding) throw new InputVerificationError("reuse: design changed before pending consumption; inspect ares gate list <dir>, restore or approve the current design, then run ares attempt reconcile <dir> before retrying");
       requireGate(dir, openStudy(dir).study, "design", () => pending.sealBinding);
     }
     const materialized = pending.pipeline ? await materializePipeline(pending, ctx) : undefined;

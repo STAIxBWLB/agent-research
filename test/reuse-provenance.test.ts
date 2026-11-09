@@ -1,12 +1,13 @@
+import { attemptShow, retentionPrune } from "../src/commands.ts";
 import { afterEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { readProvenance, compareLineage, attemptReuseView } from "../src/provenance.ts";
+import { readProvenance, compareLineage, attemptReuseView, retentionDisposalIndex, retentionDisposalView } from "../src/provenance.ts";
 import { exportBundle } from "../src/study-export.ts";
 import { addStudy } from "../src/console/registry.ts";
 import { createPlugin } from "../src/ui/plugin.ts";
 import { runAttempt, reconcileAttempts, showAttempt, type Attempt, type AttemptContext } from "../src/exp/attempts.ts";
-import { writeAtomic } from "../src/study.ts";
+import { readLedger, sha256, writeAtomic, type LedgerEvent } from "../src/study.ts";
 import { cleanupPipelineFixtures, setup } from "./pipeline-fixture.ts";
 
 afterEach(cleanupPipelineFixtures);
@@ -77,3 +78,47 @@ test("default v2 plus force-fresh retry expose the same conservative independent
   expect(snapshot.studies[0]!.attempts.reuse!.independentSamples).toBe(0);
   expect(snapshot.studies[0]!.attempts.reuse!.independentSamples).toBe(view.independentSamples);
 }, 30_000);
+
+
+test("exact successful prune receipts preserve disposed source provenance across show comparison graph and export", async () => {
+  const f = await setup({reuse: true});
+  const source = await finish(f, await runAttempt(f.dir, {...options(f), reuse: "eligible"}, f.fake.ctx));
+  const reused = await finish(f, await runAttempt(f.dir, {...options(f), reuse: "eligible", retry: source.id}, f.fake.ctx));
+  expect(reused.pipeline!.completed.every(parent => !!parent.reuse)).toBe(true);
+  const sourceFile = join(f.dir, "runs", source.run, "attempts", `${source.id}.json`), reusedFile = join(f.dir, "runs", reused.run, "attempts", `${reused.id}.json`);
+  const originalBytes = [readFileSync(sourceFile), readFileSync(reusedFile)];
+  const before = attemptShow(f.dir, reused.id) as Attempt & {reuseView: NonNullable<ReturnType<typeof attemptReuseView>>};
+  expect(before.reuseView.sources.every(item => item.retention.state === "unknown")).toBe(true);
+  const ref = source.pipeline!.completed[0]!.ref, ctx = {...f.fake.ctx, http: (await import("./helpers.ts")).fakeHttp([]).http};
+  const preview = await retentionPrune(f.dir, {refs: [ref]}, ctx);
+  await retentionPrune(f.dir, {refs: [ref], fingerprint: preview.fingerprint!}, ctx);
+  const eventIndex = readLedger(f.dir).findIndex(event => event.type === "retention.pruned");
+  expect(readLedger(f.dir)[eventIndex]!.data.refs).toEqual([[ref.attemptId, ref.stage, ref.sha256]]);
+  const requests = f.fake.requests.length;
+  const shown = attemptShow(f.dir, reused.id) as Attempt & {reuseView: NonNullable<ReturnType<typeof attemptReuseView>>};
+  const disposed = shown.reuseView.sources.find(item => item.ref.sha256 === ref.sha256)!;
+  expect(shown.status).toBe("succeeded"); expect(disposed.retention.state).toBe("disposed");
+  expect(disposed.retention.proof).toMatchObject({file: "ledger.jsonl", ledgerIndex: eventIndex, recordType: "retention.pruned", fingerprint: preview.fingerprint});
+  expect(disposed.retention.proof!.recordSha256).toHaveLength(64);
+  const comparison = compareLineage(f.dir, {attempts: [reused.id]}); expect(comparison.status).toBe("ok");
+  expect(comparison.rows[0]!.attempts[0]!.reuse!.sources.find(item => item.ref.sha256 === ref.sha256)!.retention).toEqual(disposed.retention);
+  const graph = readProvenance(f.dir); expect(graph.status).toBe("ok");
+  const edge = graph.edges.find(edge => edge.from.id === reused.id && edge.relation === "reused-artifact" && edge.reuseSource?.ref.sha256 === ref.sha256)!;
+  expect(edge).toBeDefined(); expect(edge.reuseSource!.retention).toEqual(disposed.retention);
+  const out = join(dirname(f.dir), "disposed-reuse-bundle"); await exportBundle(f.dir, {bundle: out});
+  const exported = readFileSync(join(out, "attempts.jsonl"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+  expect(exported.find(row => row.id === reused.id).reuse.sources.find((item: {ref: {sha256: string}}) => item.ref.sha256 === ref.sha256).retention).toEqual(disposed.retention);
+  expect(f.fake.requests).toHaveLength(requests);
+  expect(readFileSync(sourceFile)).toEqual(originalBytes[0]!); expect(readFileSync(reusedFile)).toEqual(originalBytes[1]!);
+  expect(Object.hasOwn(showAttempt(f.dir, reused.id), "reuseView")).toBe(false);
+}, 30_000);
+
+test("legacy hash-only or nonmatching prune events do not invent disposed or available source state", () => {
+  const ref = {attemptId: "a".repeat(16), stage: "prepare", sha256: "b".repeat(64)};
+  const old: LedgerEvent = {v: 1, at: "2030-01-01T00:00:00Z", actor: {kind: "person"}, type: "retention.pruned", data: {fingerprint: "c".repeat(64), refsSha256: sha256(JSON.stringify([ref])), count: 1}};
+  expect(retentionDisposalView(ref, retentionDisposalIndex([old]))).toEqual({state: "unknown"});
+  const exact: LedgerEvent = {...old, data: {...old.data, refs: [[ref.attemptId, ref.stage, ref.sha256]]}};
+  expect(retentionDisposalView(ref, retentionDisposalIndex([exact])).state).toBe("disposed");
+  expect(retentionDisposalView({...ref, sha256: "d".repeat(64)}, retentionDisposalIndex([exact]))).toEqual({state: "unknown"});
+  expect(retentionDisposalView(ref, retentionDisposalIndex([{...exact, data: {...exact.data, count: 2}}]))).toEqual({state: "unknown"});
+});

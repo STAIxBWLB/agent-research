@@ -452,7 +452,7 @@ def perform(q):
             for port,path in outputs.items(): ident(port);relative(path)
             if q['stage']=='evaluator': return {'op':op,'hit':False,'reason':'ineligible-source'}
             selections=attempt.get('reuseSelections',{})
-            if not isinstance(selections,dict) or len(selections)>16: fail('invalid reuse selections')
+            if not isinstance(selections,dict) or len(selections)>16: fail('invalid reuse selections (at most 16 active selections); finish or cancel attempts holding selections, inspect with ares retention inspect <dir>, restore invalid state, then prune inactive sources with ares retention prune <dir>')
             prior=selections.get(q['stage']);chosen=None;miss='missing'
             try:
                 if prior is not None:
@@ -477,7 +477,7 @@ def perform(q):
             if chosen is None: return {'op':op,'hit':False,'reason':miss}
             ref,manifest=chosen;source_key=key(ref)
             if prior is None or source_key not in attempt['consumers']:
-                if prior is None and len(selections)>=16: fail('reuse selection bound exceeded')
+                if prior is None and len(selections)>=16: fail('reuse selection bound exceeded (16 active selections); finish or cancel attempts holding selections, inspect with ares retention inspect <dir>, then prune inactive sources with ares retention prune <dir> before retrying')
                 selections[q['stage']]={'key':q['key'],'ref':ref};attempt['reuseSelections']=selections
                 attempt['consumers']=sorted(set(attempt['consumers']+[source_key]));save()
             return {'op':op,'hit':True,'ref':ref,'manifest':manifest,'sha256':ref['sha256'],'manifestBytes':len(read_bytes(os.path.join(store,'objects',ref['attemptId'],ref['stage'],'manifest.json'),MAX_META))}
