@@ -11,6 +11,7 @@ import type { RetainedRef } from "./exp/retention.ts";
 import { PLAYBOOK } from "./playbook.ts";
 import { PLAN_ID_BYTES, STEP_COMMANDS } from "./plan/definition.ts";
 import { PLAN_GATE_BYTES } from "./plan/state.ts";
+import { PAPER_PLAN_BYTES, PAPER_PLAN_SECTIONS, PAPER_PLAN_CITES } from "./paper/plan.ts";
 import { detectActor, type Actor } from "./study.ts";
 
 const study = { type: "string", minLength: 1, maxLength: 4096, description: "Absolute path of the study directory (holds study.json)" };
@@ -25,6 +26,10 @@ const obj = (properties: Record<string, unknown>, required: string[]) => ({ type
 const text = (max: number) => ({ type: "string", minLength: 1, maxLength: max });
 const texts = (items: number, max: number) => ({ type: "array", items: text(max), maxItems: items });
 const year = { type: "integer", minimum: 1000, maximum: 2100 };
+const PAPER_PLAN = obj({v: {type: "integer", enum: [1]}, sections: {type: "array", maxItems: PAPER_PLAN_SECTIONS, items: obj({
+  id: {...text(64), pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"}, heading: text(PAPER_PLAN_BYTES),
+  cites: {type: "array", maxItems: PAPER_PLAN_CITES, uniqueItems: true, items: text(PAPER_PLAN_BYTES)},
+}, ["id", "heading", "cites"])}}, ["sections"]);
 const EXECUTION_REFERENCE = obj({ v: { type: "integer", enum: [1] }, tool: { type: "string", enum: ["ares"] }, projectKey: text(256), kind: { type: "string", enum: [...PROVENANCE_KINDS] }, id: text(256), revision: text(128), sha256: { type: "string", minLength: 64, maxLength: 64 } }, ["v", "tool", "projectKey", "kind", "id"]);
 const LINEAGE_ATTEMPTS = { type: "array", minItems: 1, maxItems: 8, items: { ...text(16), minLength: 16 } };
 const LINEAGE_CANDIDATES = { type: "array", minItems: 1, maxItems: 8, items: { ...text(40), minLength: 40 } };
@@ -174,8 +179,10 @@ export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_review_resolve", description: "Resolve a recorded review-id/finding-id with an explicit reason and actor. No votes or automatic contradiction resolution; historical reports stay in the ledger.", inputSchema: obj({ study, target: text(257), reason: text(4000) }, ["study", "target", "reason"]), annotations: write },
   { name: "ares_review_show", description: "Read current build/check readiness, review families, checklists and unresolved blocking findings. Claims readiness is unavailable (agent-hub#931) and nonblocking. Starts no network, build or controller.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_review_checklist", description: "List the six optional survey checklist keys with their questions, the same wording reviewers answer in checklist.survey. Answers are displayed and never gate. Opens no study.", inputSchema: obj({}, []), annotations: read },
-  { name: "ares_paper_build", description: "Check the bounded manuscript and refuse every finding before writing. Commit rendered Markdown, a v1 evidence map with source hashes and paper.built together; identical inputs/outputs record nothing. Unknown evidence versions are preserved. The no-arg paper.build plan step emits the committed evidence {sha256} for downstream gates. Starts no controller, executor or network calls.", inputSchema: obj({ study }, ["study"]), annotations: write },
-  { name: "ares_paper_check", description: "Read-only manuscript readiness check: positioned bare-number, placeholder, citation and missing-negative-result findings plus every literal escape. Experiment numbers require closed evidence; survey checks citations and refuses experiment refs. Reads bounded paper/manuscript.md, starts no build/controller/network calls.", inputSchema: obj({ study }, ["study"]), annotations: read },
+  { name: "ares_paper_plan_set", description: "Validate and atomically store a declared citation routing plan, at most 64 sections/300 keys per section and 64 KiB. Only current included, identifier-verified bibliography keys; no automatic routing or relevance judgment. Starts no build/controller/network calls.", inputSchema: obj({study, plan: PAPER_PLAN}, ["study", "plan"]), annotations: write },
+  { name: "ares_paper_plan_show", description: "Read the optional paper citation plan and routing coverage (included references routed/total). Revalidates current references; starts no build/controller/network calls or writes.", inputSchema: obj({study}, ["study"]), annotations: read },
+  { name: "ares_paper_build", description: "Check the bounded manuscript and refuse blocking findings before writing. Commit rendered Markdown, v1 evidence without a plan or v2 plan-bound evidence, and paper.built together; identical inputs/outputs record nothing. Unknown evidence versions are preserved. The no-arg paper.build plan step emits the committed evidence {sha256} for downstream gates. Starts no controller, executor or network calls.", inputSchema: obj({ study }, ["study"]), annotations: write },
+  { name: "ares_paper_check", description: "Read-only manuscript readiness check: positioned bare-number, placeholder, citation, optional paper-plan scope and missing-negative-result findings plus every literal escape. Experiment numbers require closed evidence; survey checks citations and refuses experiment refs. Reads bounded paper/manuscript.md, starts no build/controller/network calls.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_cite_check", description: "Check [@key] citations in a draft against verified references; lists unknown and unverified keys.", inputSchema: obj({ study, draft: { type: "string", minLength: 1, maxLength: 4096 } }, ["study", "draft"]), annotations: read },
   { name: "ares_playbook", description: "Standalone literature, experiment and plan/conductor workflows, CLI-only controller startup, gate rules and evidence boundaries.", inputSchema: obj({}, []), annotations: read },
 ];
@@ -273,6 +280,8 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
     ares_review_show: a => ops.reviewShow(dir(a)),
     ares_review_checklist: () => ops.reviewChecklistShow(),
     ares_paper_build: a => ops.paperBuild(dir(a), ctx),
+    ares_paper_plan_set: a => ops.paperPlanSet(dir(a), a.plan, ctx),
+    ares_paper_plan_show: a => ops.paperPlanShow(dir(a)),
     ares_paper_check: a => ops.paperCheck(dir(a)),
     ares_cite_check: a => ops.cite(dir(a), absolute(a.draft, "draft")),
     ares_playbook: () => ({ playbook: PLAYBOOK }),

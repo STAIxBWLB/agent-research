@@ -16,6 +16,7 @@ import { previewArchive, exportArchive, type ArchivePreview, type ArchiveResult 
 import { addReview, resolveReview, reviewChecklist, reviewReadiness, reviewBinding, requireReviewReady } from "./paper/review.ts";
 import { buildPaper } from "./paper/build.ts";
 import { checkPaper } from "./paper/check.ts";
+import { setPaperPlan, showPaperPlan } from "./paper/plan.ts";
 import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
 import { setFinalSeeds, finalGateBinding, requireFinalInputs, closeFinal, showPosthoc } from "./exp/final.ts";
 import { addIdea, decideIdea } from "./exp/ideas.ts";
@@ -574,6 +575,10 @@ export async function finalClose(dirArg: string, ctx: Pick<Ctx, "actor">) {
 export const posthocShow = (dir: string) => showPosthoc(dir);
 
 export const paperCheck = (dir: string) => checkPaper(dir);
+export async function paperPlanSet(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
+  const { dir } = openStudy(dirArg); return withLock(dir, () => setPaperPlan(dir, raw, ctx.actor));
+}
+export const paperPlanShow = (dir: string) => showPaperPlan(dir);
 
 export async function paperBuild(dirArg: string, ctx: Pick<Ctx, "actor">) {
   const { dir } = openStudy(dirArg); return withLock(dir, () => buildPaper(dir, ctx.actor));

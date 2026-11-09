@@ -10,14 +10,16 @@ import { investigateResultPath, readClosedInvestigation } from "../exp/investiga
 import { finalResultPath } from "../exp/final.ts";
 import { MANUSCRIPT_BYTES, parsePlaceholders, resolvePlaceholders } from "./placeholders.ts";
 import { hygieneFindings, readPaperSettings, type HygieneCode } from "./hygiene.ts";
+import { readPaperPlanSnapshot } from "./plan.ts";
+import { paperPlanFindings, type ScopeFindingCode } from "./scopes.ts";
 
 export const MAX_CODE_NUMBERS = 500;
-export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "unaccepted-draft" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result" | HygieneCode; severity: "blocking" | "warning"; section?: string[]; start: number; end: number; line: number; column: number; message: string }
+export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "unaccepted-draft" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result" | HygieneCode | ScopeFindingCode; severity: "blocking" | "warning"; section?: string[]; sectionId?: string; start: number; end: number; line: number; column: number; message: string }
 function blank(text: string, mask: Uint8Array): string { return text.split("").map((char, index) => mask[index] && char !== "\n" && char !== "\r" ? " " : char).join(""); }
 function mark(mask: Uint8Array, start: number, end: number) { mask.fill(1, start, end); }
 function escaped(text: string, index: number): boolean { let slashes = 0; while (index > 0 && text[--index] === "\\") slashes++; return slashes % 2 === 1; }
 /** Masks syntax-only destinations and code while retaining original offsets. Visible link labels remain prose. */
-function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Array; code: Uint8Array; hidden: Uint8Array } {
+function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Array; code: Uint8Array; hidden: Uint8Array; headingHidden: Uint8Array } {
   const mask = new Uint8Array(text.length), protectedText = new Uint8Array(text.length), tokens = parsePlaceholders(text);
   for (const token of [...tokens.placeholders, ...tokens.findings]) mark(protectedText, token.start, token.end);
   let fence: { char: string; length: number } | undefined, paragraph = false, indented = false;
@@ -51,6 +53,7 @@ function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Arra
       }
     }
   }
+  const blockCode = mask.slice();
   // Backtick runs must have an exactly matching closer; unmatched delimiters remain prose.
   const runs = [...text.matchAll(/`+/g)].filter(hit => !mask[hit.index] && !protectedText[hit.index] && !knownHidden?.[hit.index]);
   const regions: number[] = []; let region = 0, previous = 0;
@@ -115,7 +118,8 @@ function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Arra
   }
   // Reclassify once with non-code comments excluded, so a fence inside a comment cannot hide later prose.
   if (!knownHidden && hasComment) return markdownMask(text, hidden);
-  return { mask, code, hidden };
+  const headingHidden = blockCode.slice(); for (let i = 0; i < hidden.length; i++) if (hidden[i]) headingHidden[i] = 1;
+  return { mask, code, hidden, headingHidden };
 }
 export function manuscriptPath(dir: string): string { return join(dir, "paper", "manuscript.md"); }
 export function checkPaper(dirArg: string) {
@@ -144,7 +148,8 @@ export function checkPaper(dirArg: string) {
     if (placeholder.kind === "number") mark(citationMask, placeholder.start, placeholder.end);
   }
   for (const problem of parsed.findings) { mark(numberMask, problem.start, problem.end); mark(citationMask, problem.start, problem.end); }
-  const citationText = blank(manuscript, citationMask), citations = checkCitations(citationText, loadCandidates(dir));
+  const citationText = blank(manuscript, citationMask), candidates = loadCandidates(dir), citations = checkCitations(citationText, candidates);
+  const plan = readPaperPlanSnapshot(dir, candidates);
   const groups = new Map<number, number>();
   for (const hit of citationOccurrences(citationText)) {
     mark(numberMask, hit.start, hit.end); groups.set(hit.groupStart, hit.groupEnd);
@@ -180,8 +185,9 @@ export function checkPaper(dirArg: string) {
   for (const hit of hygieneFindings(manuscript, hiddenCode, masks.mask, citationText, settings)) {
     findings.push({ code: hit.code, severity: settings.blocking.includes(hit.code) ? "blocking" : "warning", section: hit.section, start: hit.start, end: hit.end, ...location(hit.start), message: hit.message });
   }
+  if (plan) for (const hit of paperPlanFindings(manuscript, masks.headingHidden, citationText, plan.plan, candidates)) findings.push({...hit, ...location(hit.start)});
   let rendered = "", cursor = 0;
   for (const entry of resolution.placeholders) { rendered += manuscript.slice(cursor, entry.placeholder.start) + entry.rendered; cursor = entry.placeholder.end; }
   rendered += manuscript.slice(cursor);
-  return { ok: !findings.some(f => f.severity === "blocking"), settings, manuscriptSha256: sha256(manuscript), rendered, placeholders: resolution.placeholders, findings: findings.sort((a, b) => a.start - b.start || a.code.localeCompare(b.code)), literals: resolution.literals, codeNumbers, codeNumberCount, citations };
+  return { ok: !findings.some(f => f.severity === "blocking"), settings, manuscriptSha256: sha256(manuscript), ...(plan ? {planSha256: plan.sha256} : {}), rendered, placeholders: resolution.placeholders, findings: findings.sort((a, b) => a.start - b.start || a.code.localeCompare(b.code)), literals: resolution.literals, codeNumbers, codeNumberCount, citations };
 }

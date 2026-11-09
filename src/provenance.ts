@@ -10,7 +10,8 @@ import { readClosedFinal } from "./exp/final.ts";
 import { readClosedAblate } from "./exp/ablate.ts";
 import { validatePlan } from "./plan/definition.ts";
 import { canonical, foldPlan } from "./plan/state.ts";
-import { readCurrentBuild } from "./paper/build.ts";
+import { paperEvidenceVersion, readCurrentBuild } from "./paper/build.ts";
+import { PAPER_PLAN_BYTES } from "./paper/plan.ts";
 import { foldReviews } from "./paper/review.ts";
 import {readHarnessViews} from "./harness/rounds.ts";
 import { foldSkills } from "./memory/skills.ts";
@@ -139,6 +140,7 @@ function capture(dir: string, permit?: StudyReadLock): Snapshot {
     } finally { directory.closeSync(); }
   };
   if (existsSync(join(dir, "task"))) task("task", 0);
+  get("paper/plan.json", PAPER_PLAN_BYTES);
   for (const name of ["paper/manuscript.md", "paper/build/manuscript.md", "paper/build/evidence.json"]) { safe(name); get(name, name.endsWith("evidence.json") ? 8 * 1024 * 1024 : 2 * 1024 * 1024); }
   for (const event of events) if (event.type === "skill.proposed" && plain(event.data.proposal) && typeof event.data.proposal.name === "string" && RUN.test(event.data.proposal.name)) get(`proposals/skills/${event.data.proposal.name}.md`, 16_384);
   if (permit) assertStudyReadLock(dir, permit);
@@ -371,7 +373,8 @@ function closures(dir: string, graph: Graph, study: ExecutionReferenceV1): void 
     if (matches) {
       try {
         record.raw = fileJson(source, record.file);
-        if (!record.raw || record.raw.v !== 1) { state = "unavailable"; graph.issue("unsupported-closed-version", record.ref); }
+        if (record.raw && record.family === "paper" && (record.raw.v === 1 || record.raw.v === 2)) paperEvidenceVersion(record.raw);
+        if (!record.raw || (record.raw.v !== 1 && !(record.family === "paper" && record.raw.v === 2))) { state = "unavailable"; graph.issue("unsupported-closed-version", record.ref); }
         else if (record.family === "paper" ? !Array.isArray(record.raw.placeholders) || typeof record.raw.manuscriptSha256 !== "string" : typeof record.raw.inputsSha256 !== "string" || record.family === "final" && !["qualified", "not_qualified"].includes(String(record.raw.status))) { state = "corrupt"; graph.issue("malformed-closed-artifact", record.ref); }
         else if (record.latest && !(record.family === "investigate" && record.ref.id !== selected)) {
           try {

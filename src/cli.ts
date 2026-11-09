@@ -332,6 +332,15 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "review show": count(spec, positional, 1); result = ops.reviewShow(positional[0]!); break;
     case "review checklist": count(spec, positional, 0); result = ops.reviewChecklistShow(); break;
     case "paper build": count(spec, positional, 1); result = await ops.paperBuild(positional[0]!, ctx); break;
+    case "paper plan set": {
+      count(spec, positional, 1); const file = str("--file");
+      if (file === undefined) throw new Error("paper plan set: input missing; pass --file PATH or --file - with a bounded version-1 paper-plan JSON");
+      let plan: unknown;
+      try { plan = await readInput(file, io); }
+      catch { throw new Error("paper plan set: input is unreadable, non-regular, invalid UTF-8/JSON or larger than 64 KiB; restore a bounded JSON file or stdin, then retry ares paper plan set <dir> --file PATH|-"); }
+      result = await ops.paperPlanSet(positional[0]!, plan, ctx); break;
+    }
+    case "paper plan show": count(spec, positional, 1); result = ops.paperPlanShow(positional[0]!); break;
     case "paper check": {
       count(spec, positional, 1); const report = ops.paperCheck(positional[0]!);
       if (!report.ok) code = 1;
