@@ -32,7 +32,7 @@ function immutableSources() {
   if (!plain(manifest) || !Array.isArray(manifest.files) || manifest.files.length > 64) throw new Error("bounded synthetic baseline manifest required");
   let total = 0;
   const baselineHashes = manifest.files.map(file => {
-    if (!plain(file) || typeof file.path !== "string" || !/^[a-z0-9-]+\.json$/.test(file.path) || !Number.isSafeInteger(file.bytes) || (file.bytes as number) < 0 || (file.bytes as number) > 256 * 1024) throw new Error("bounded synthetic baseline file required");
+    if (!plain(file) || typeof file.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(file.sha256) || typeof file.path !== "string" || !/^[a-z0-9-]+\.json$/.test(file.path) || !Number.isSafeInteger(file.bytes) || (file.bytes as number) < 0 || (file.bytes as number) > 256 * 1024) throw new Error("bounded synthetic baseline file required");
     total += file.bytes as number; if (total > 2 * 1024 * 1024) throw new Error("baseline preservation hash snapshot exceeds 2 MiB");
     // Hash only: never parse baseline observations or treat them as T3 controls.
     const bytes = readBytesBounded(join(root, baseline, file.path), file.bytes as number), digest = sha256(bytes);

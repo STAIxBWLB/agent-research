@@ -68,7 +68,7 @@ test("file reader is bounded, no-follow and strict about UTF-8/JSON while changi
 
 
 test("initial counts are empty and closed readers reject hidden/accessor/symbol fields before reading values", () => {
-  const initial = { evaluations: 0, observations: 0, deduped: 0, suppressed: 0, gap: 0, workerTurns: 0, actionWrites: 0, notifications: 0 };
+  const initial = { evaluations: 0, observations: 0, deduped: 0, suppressed: 0, gap: 0, workerTurns: 0 as const, actionWrites: 0 as const, notifications: 0 as const };
   expect(readShadowCounts(initial)).toEqual(initial);
   for (const field of ["observations", "gap", "deduped", "suppressed"]) expect(() => readShadowCounts({ ...initial, [field]: 1 })).toThrow("zero evaluations");
   const hidden = snapshot(); Object.defineProperty(hidden, "private", { value: "synthetic private body", enumerable: false });
