@@ -9,9 +9,10 @@ import { readSelection } from "../exp/selection.ts";
 import { investigateResultPath, readClosedInvestigation } from "../exp/investigate.ts";
 import { finalResultPath } from "../exp/final.ts";
 import { MANUSCRIPT_BYTES, parsePlaceholders, resolvePlaceholders } from "./placeholders.ts";
+import { hygieneFindings, readPaperSettings, type HygieneCode } from "./hygiene.ts";
 
 export const MAX_CODE_NUMBERS = 500;
-export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "unaccepted-draft" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result"; start: number; end: number; line: number; column: number; message: string }
+export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "unaccepted-draft" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result" | HygieneCode; severity: "blocking" | "warning"; section?: string[]; start: number; end: number; line: number; column: number; message: string }
 function blank(text: string, mask: Uint8Array): string { return text.split("").map((char, index) => mask[index] && char !== "\n" && char !== "\r" ? " " : char).join(""); }
 function mark(mask: Uint8Array, start: number, end: number) { mask.fill(1, start, end); }
 function escaped(text: string, index: number): boolean { let slashes = 0; while (index > 0 && text[--index] === "\\") slashes++; return slashes % 2 === 1; }
@@ -118,7 +119,7 @@ function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Arra
 }
 export function manuscriptPath(dir: string): string { return join(dir, "paper", "manuscript.md"); }
 export function checkPaper(dirArg: string) {
-  const { dir, study } = openStudy(dirArg), file = manuscriptPath(dir);
+  const { dir, study } = openStudy(dirArg), file = manuscriptPath(dir), settings = readPaperSettings(dir);
   let manuscript: string;
   try { manuscript = readTextBounded(file, MANUSCRIPT_BYTES); }
   catch { throw new Error("paper manuscript: missing, unreadable, invalid UTF-8, non-regular or larger than 2 MiB; restore paper/manuscript.md as a bounded UTF-8 regular file before paper check"); }
@@ -128,7 +129,7 @@ export function checkPaper(dirArg: string) {
     let lo = 0, hi = lines.length; while (lo + 1 < hi) { const mid = (lo + hi) >>> 1; if (lines[mid]! <= start) lo = mid; else hi = mid; }
     return { line: lo + 1, column: start - lines[lo]! + 1 };
   };
-  const finding = (code: PaperFinding["code"], start: number, end: number, message: string): PaperFinding => ({ code, start, end, ...location(start), message });
+  const finding = (code: PaperFinding["code"], start: number, end: number, message: string): PaperFinding => ({ code, severity: "blocking", start, end, ...location(start), message });
   const findings: PaperFinding[] = resolution.findings.map(f => finding(f.code, f.start, f.end, f.message));
   const codeNumbers: { value: string; line: number; column: number }[] = [];
   let codeNumberCount = 0;
@@ -174,8 +175,13 @@ export function checkPaper(dirArg: string) {
       }
     } catch (error) { findings.push(error instanceof CopilotAcceptError ? finding("unaccepted-draft", 0, 0, error.message) : finding("unresolved-ref", 0, 0, "experiment design or selection is invalid; restore the current validated inputs before paper check")); }
   }
+  // Code and comments only: link targets stay visible so headings and bare-identifier masking use the full prose mask.
+  const hiddenCode = masks.code.slice(); for (let i = 0; i < hiddenCode.length; i++) if (masks.hidden[i]) hiddenCode[i] = 1;
+  for (const hit of hygieneFindings(manuscript, hiddenCode, masks.mask, citationText, settings)) {
+    findings.push({ code: hit.code, severity: settings.blocking.includes(hit.code) ? "blocking" : "warning", section: hit.section, start: hit.start, end: hit.end, ...location(hit.start), message: hit.message });
+  }
   let rendered = "", cursor = 0;
   for (const entry of resolution.placeholders) { rendered += manuscript.slice(cursor, entry.placeholder.start) + entry.rendered; cursor = entry.placeholder.end; }
   rendered += manuscript.slice(cursor);
-  return { ok: findings.length === 0, manuscriptSha256: sha256(manuscript), rendered, placeholders: resolution.placeholders, findings: findings.sort((a, b) => a.start - b.start || a.code.localeCompare(b.code)), literals: resolution.literals, codeNumbers, codeNumberCount, citations };
+  return { ok: !findings.some(f => f.severity === "blocking"), settings, manuscriptSha256: sha256(manuscript), rendered, placeholders: resolution.placeholders, findings: findings.sort((a, b) => a.start - b.start || a.code.localeCompare(b.code)), literals: resolution.literals, codeNumbers, codeNumberCount, citations };
 }
