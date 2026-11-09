@@ -89,3 +89,12 @@ test("one accepted lesson enters the existing archive fingerprint and receipt pa
   expect(readLedger(f.dir).filter(event => event.type === "archive.exported")).toHaveLength(1);
   expect(openStudy(f.dir).study.mode).toBe("experiment");
 });
+
+test("duplicate normalized counterevidence or the mandatory closure ref refuses before any receipt or source call", async () => {
+  const f = await lessonFixture(), before = lessonLedger(f.dir), id = "a".repeat(32);
+  const closure = {v: 1, tool: "ares", projectKey: openStudy(f.dir).study.id, kind: "harness-closure", id: f.proposal.round, sha256: f.proposal.closureSha256};
+  for (const counterevidence of [[{v: 1, tool: "amem", id}, {v: 1, tool: "amem", id}], [id, {v: 1, tool: "amem", id}], [closure]]) {
+    await expect(ops.lessonPropose(f.dir, {...f.proposal, counterevidence}, f.ctx, f.env)).rejects.toThrow("remove repeated refs");
+    expect(lessonLedger(f.dir)).toEqual(before); expect(existsSync(join(f.dir, "proposals", "lessons.json"))).toBe(false); expect(f.transport.requests).toEqual([]);
+  }
+});

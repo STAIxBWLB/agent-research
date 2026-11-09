@@ -42,6 +42,8 @@ function input(raw: unknown, studyId: string): LessonInput {
   const counterevidence = list(row.counterevidence).map(raw => {const ref = skillEvidenceReference(raw, studyId); if (!ref || Object.values(ref).some(value => typeof value === "string" && hasHarnessCredential(value))) fail("unsupported/wrong-study counterevidence"); return ref;});
   const reflection = row.reflection === undefined ? undefined : object(row.reflection, ["model", "sourceExecution"]);
   const result: LessonInput = {v: 1, name: id(row.name), round: id(row.round), closureSha256: digest(row.closureSha256), kind: row.kind as LessonInput["kind"], summary: text(row.summary, 2000), procedure: list(row.procedure).map(value => text(value)), applicability: text(row.applicability, 2000), limitations: list(row.limitations).map(value => text(value)), whenNotToUse: list(row.whenNotToUse).map(value => text(value)), failure: text(row.failure), retryWhen: text(row.retryWhen), change, behavior, counterevidence, ...(reflection ? {reflection: {model: text(reflection.model, 256), sourceExecution: validateHarnessExecution(reflection.sourceExecution)}} : {})};
+  const refs = lessonReferences({...result, studyId}).map(canonical);
+  if (new Set(refs).size !== refs.length) fail("duplicate evidence/counterevidence ref; remove repeated refs, including the mandatory harness-closure ref, from the proposal input");
   if (result.kind !== "no-lesson" && (!result.procedure.length || !change.length || !behavior.length)) fail("exportable lessons require procedure and concrete change/behavior refs");
   if (Buffer.byteLength(canonical(result)) > LESSON_BYTES) fail("proposal exceeds 16 KiB"); return result;
 }
@@ -53,7 +55,7 @@ export function currentLessonSource(dir: string, value: Pick<LessonProposal, "ro
   for (const ref of value.behavior) {const probe = round.probes.find(r => r.projection.id === ref.probe); if (!probe || probe.projectionSha256 !== ref.projectionSha256 || ref.outputManifestHash !== undefined && ref.outputManifestHash !== probe.projection.outputManifestHash) fail("behavior ref is missing or changed");}
   return round;
 }
-export function lessonReferences(value: LessonProposal): SkillEvidenceReference[] {return [{v: 1, tool: "ares", projectKey: value.studyId, kind: "harness-closure", id: value.round, sha256: value.closureSha256}, ...value.counterevidence];}
+export function lessonReferences(value: Pick<LessonProposal, "studyId" | "round" | "closureSha256" | "counterevidence">): SkillEvidenceReference[] {return [{v: 1, tool: "ares", projectKey: value.studyId, kind: "harness-closure", id: value.round, sha256: value.closureSha256}, ...value.counterevidence];}
 export function lessonEvidenceFingerprint(value: LessonProposal, inspections = value.inspections, currentFingerprint = value.sourceFingerprint): string {return hash({proposal: hash(value), source: currentFingerprint, inspections: inspections.map(semanticInspection)});}
 function parseProposal(raw: unknown, studyId: string): LessonProposal {
   const row = object(raw, [...INPUT, "studyId", "taskId", "taskInputSha256", "roundBinding", "sourceFingerprint", "sourceStrength", "transfer", "evidenceLabel", "compatibility", "inspections"]);

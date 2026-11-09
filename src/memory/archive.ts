@@ -45,11 +45,16 @@ export function previewArchive(dir: string): ArchivePreview {
   const pending = [...unique].filter(([hash]) => !known.has(hash)).map(([sha256, note]) => ({ sha256, note }));
   return {fingerprint: sha256(canonical(notes)), notes: pending, ...(sources.contrastNotes?.length ? {recovery: "Receipt-only dedupe: if an earlier archive was interrupted after amem add, operator reconciliation is required before retry; unreceipted writes cannot be detected and may duplicate"} : {})};
 }
+/** Preview and confirmed export use the same note/source bounds and ordered prefix. */
+export function archiveExportBatch(dir: string, notes: ArchivePreview["notes"]) {
+  const bounded = notes.slice(0, ARCHIVE_NOTES);
+  return openStudy(dir).study.mode === "experiment" ? boundLessonExportBatch(dir, bounded) : bounded;
+}
 /** Caller holds the study lock across the confirmed write and its single receipt commit. */
 export async function exportArchive(dirArg: string, fingerprint: string, actor: Actor, runner?: ProcessRunner, env: NodeJS.ProcessEnv = process.env, sourceOptions: SkillCheckOptions = {}): Promise<ArchiveResult> {
   const { dir } = openStudy(dirArg), preview = previewArchive(dir);
   if (!hex(fingerprint, 64) || fingerprint !== preview.fingerprint) throw new Error("archive: stale fingerprint; run ares archive <dir> again and confirm its current fingerprint");
-  const bounded = preview.notes.slice(0, ARCHIVE_NOTES), batch = openStudy(dirArg).study.mode === "experiment" ? boundLessonExportBatch(dirArg, bounded) : bounded;
+  const batch = archiveExportBatch(dir, preview.notes);
   if (openStudy(dirArg).study.mode === "experiment") await recheckLessonExports(dirArg, batch.map(note => note.sha256), sourceOptions);
   if (previewArchive(dirArg).fingerprint !== preview.fingerprint) throw new Error("archive: lesson sources changed during preflight; open a fresh preview and reconcile any unreceipted prior write before retrying");
   if (batch.length) {

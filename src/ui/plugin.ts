@@ -9,7 +9,7 @@ import { foldPlan, canonical, PLAN_GATE_BYTES } from "../plan/state.ts";
 import { readRegistry, MAX_REGISTERED_STUDIES } from "../console/registry.ts";
 import { readAttemptRecords, type Attempt } from "../exp/attempts.ts";
 import { createHttp } from "../http.ts";
-import { previewArchive, ARCHIVE_NOTES, ArchivePartialError } from "../memory/archive.ts";
+import { previewArchive, archiveExportBatch, ArchivePartialError } from "../memory/archive.ts";
 import { spawnRunner, type ProcessRunner } from "../exp/executor.ts";
 import { readProtocol } from "../exp/protocol.ts";
 import { readSelection, selectionPath } from "../exp/selection.ts";
@@ -270,7 +270,7 @@ function boundAction(value: Selection) {
     binding = skill; preview.push(`${value.decision} skill ${skill.name}`, `Proposal: ${skill.sha256}`, ...(value.pr ? [`Reviewed PR: ${value.pr}`] : []));
   } else {
     const archive = previewArchive(study); archiveFingerprint = archive.fingerprint; binding = { fingerprint: archive.fingerprint, pending: archive.notes.map(row => row.sha256) };
-    preview.push(`Export ${Math.min(ARCHIVE_NOTES, archive.notes.length)} of ${archive.notes.length} pending lesson(s) to amem`, `Archive fingerprint: ${archive.fingerprint}`, ...(archive.recovery ? [archive.recovery] : []));
+    preview.push(`Export ${archiveExportBatch(study, archive.notes).length} of ${archive.notes.length} pending lesson(s) to amem`, `Archive fingerprint: ${archive.fingerprint}`, ...(archive.recovery ? [archive.recovery] : []));
   }
   if (value.reason) preview.push(`Reason: ${value.reason}`);
   return { fingerprint: sha256(canonical({ selection: value, study: identity, binding })), preview, archiveFingerprint };
