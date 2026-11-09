@@ -42,7 +42,8 @@ test("AC1: flow counts match a scripted study", async () => {
   const flow = ops.flow(dir) as ReturnType<typeof ops.litFlowView>;
   const events = readLedger(dir).filter(e => e.type === "lit.search"), candidates = loadCandidates(dir);
   const returned = events.flatMap(e => e.data.sources as { returned: number }[]).reduce((n, s) => n + s.returned, 0);
-  const merged = events.reduce((n, e) => n + (e.data.merged as number), 0);
+  const merged = events.reduce((n, e) => n + (e.data.merged as number) + ((e.data.absorbed as number | undefined) ?? 0), 0);
+  expect(returned).toBe(candidates.length + merged + events.reduce((n, e) => n + (e.data.dropped as number), 0));
   expect(flow).toMatchObject({
     records: returned, duplicates: merged, unique: candidates.length,
     screened: 4, excluded: 1, excludedByCode: { "off-topic": 1, "no-eval": 0, uncoded: 0 },
