@@ -347,12 +347,12 @@ export async function cardExport(dirArg: string, ids: string[], options: { vault
   const { dir } = openStudy(dirArg), extractor = { kind: ctx.actor.kind, ...(options.modelFamily ? { modelFamily: options.modelFamily } : {}) };
   if (options.confirm === undefined) { const { payloads: _p, ...preview } = previewCardExport(dir, options.vault, ids, extractor); return { ...preview, wouldWrite: true }; }
   const client = createVaultClient(options.vault, dir, ctx.runner, env);
-  return withLock(dir, () => exportCards(dir, options.vault, ids, options.confirm!, ctx.actor, client, options.modelFamily));
+  return exportCards(dir, options.vault, ids, options.confirm, ctx.actor, client, options.modelFamily);
 }
 /** Copies cards from vault reference notes for included, identifier-verified candidates; verification, screening and gates are untouched. */
 export async function cardImport(dirArg: string, ids: string[], options: { vault: string }, ctx: Pick<Ctx, "actor" | "runner">, env: NodeJS.ProcessEnv = process.env) {
   const { dir } = openStudy(dirArg), client = createVaultClient(options.vault, dir, ctx.runner, env);
-  return withLock(dir, () => importCards(dir, options.vault, ids, ctx.actor, client));
+  return importCards(dir, options.vault, ids, ctx.actor, client);
 }
 export const cardList = (dir: string) => listCards(dir);
 
