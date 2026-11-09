@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, opendirSync, realpathSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, resolve, sep, posix } from "node:path";
 import { parseLedger, plain, readBytesBounded, hashFileBounded, sha256, validateStudy, type LedgerEvent, type Study, assertStudyReadLock, type StudyReadLock } from "./study.ts";
 import { validateAttemptRecord, type Attempt } from "./exp/attempts.ts";
 import { TASK_BYTES, TASK_FILES, METRIC_LIMIT, validateStoredProtocol, validateProtocolDefinition, protocolHash } from "./exp/protocol.ts";
@@ -24,7 +24,7 @@ export interface ExecutionReferenceV1 { v: 1; tool: "ares"; projectKey: string; 
 export type ProvenanceState = "current" | "historical" | "corrupt" | "unavailable" | "declared-unresolved";
 export interface ProvenanceProof { file: string; sha256: string; ledgerIndex?: number; recordSha256?: string; sourceBindingSha256?: string; recordType?: string; nativeId?: string }
 export interface ProvenanceNode { ref: ExecutionReferenceV1; state: ProvenanceState; availability: "available" | "receipt-only" | "missing" | "not-read"; proof: ProvenanceProof; data?: Record<string, string | number | boolean | null> }
-export type ProvenanceRelation = "contains" | "retryOf" | "parent" | "cites-attempt" | "produced" | "dispatched" | "observed-in" | "expected-attempt" | "observed-attempt" | "observed-output" | "closed" | "reviewed" | "uses-attempt" | "names-idea" | "uses-closed-result" | "uses-source" | "reused-from";
+export type ProvenanceRelation = "contains" | "retryOf" | "parent" | "cites-attempt" | "produced" | "dispatched" | "observed-in" | "expected-attempt" | "observed-attempt" | "observed-output" | "closed" | "reviewed" | "uses-attempt" | "names-idea" | "uses-closed-result" | "uses-source" | "reused-from" | "reused-artifact";
 export interface ProvenanceEdge { from: ExecutionReferenceV1; to: ExecutionReferenceV1; relation: ProvenanceRelation; proof: ProvenanceProof }
 export interface ProvenanceIssue { code: string; message: string; ref?: ExecutionReferenceV1 }
 export interface ProvenancePage {
@@ -164,13 +164,53 @@ class Graph {
   }
 }
 function fileJson(source: Snapshot, file: string): Record<string, unknown> | undefined { const value = source.files.get(file); if (!value) return undefined; const raw = parsed(value); if (!plain(raw)) fail("malformed-source"); return raw; }
+/** Attribute each inventory row from its recorded stage/path relationship, never from a shared hash alone. */
+function attemptOutputAttributions(value: Attempt, file: string, graph: Graph, reuseReceipts: Map<string, number>, ledger: string) {
+  const proof = graph.proof(file), result = new Map<string, {relation: "produced" | "reused-artifact"; proof: ProvenanceProof}>();
+  const outputKey = (output: {path: string; sha256: string; bytes: number}) => canonical([output.path, output.sha256, output.bytes]);
+  if (!value.pipeline) { for (const output of value.outputs) result.set(outputKey(output), {relation: "produced", proof}); return result; }
+  const root = posix.join(value.executor.workdir, value.studyId, value.id);
+  const under = (path: string, base: string): string | undefined => {
+    const local = posix.relative(base, path);
+    return local && local !== ".." && !local.startsWith("../") && !posix.isAbsolute(local) && posix.join(base, local) === path ? local : undefined;
+  };
+  const fresh = (record: Attempt["stages"]["candidate"], outputRoot: string) => {
+    if (!record?.containerId || !HASH.test(record.containerId)) return;
+    for (const output of record.evidence?.outputs ?? []) { graph.touch(); if (under(output.path, outputRoot)) result.set(outputKey(output), {relation: "produced", proof}); }
+  };
+  for (const parent of value.pipeline.completed) {
+    const receipt = parent.reuse;
+    if (!receipt) { fresh(parent.record, posix.join(root, "stages", parent.name, "output")); continue; }
+    const index = reuseReceipts.get(canonical([value.id, parent.name, receipt.key, receipt.source.attemptId, receipt.source.stage, receipt.source.sha256]));
+    if (index === undefined) { graph.issue("missing-stage-reuse-receipt", graph.ref("attempt", value.id)); continue; }
+    const reuseProof = graph.proof(ledger, index), source = graph.target("attempt", receipt.source.attemptId, reuseProof);
+    graph.edge(graph.ref("attempt", value.id), source, "reused-from", reuseProof);
+    const definition = value.pipeline.definition.candidate.stages.find(stage => stage.name === parent.name);
+    if (!definition) continue;
+    const originalRoot = posix.join(value.executor.workdir, value.studyId, receipt.source.attemptId, "stages", receipt.source.stage, "output");
+    const retainedRoot = posix.join(value.executor.workdir, value.studyId, ".retained", "objects", receipt.source.attemptId, receipt.source.stage, "data");
+    for (const original of parent.record.evidence?.outputs ?? []) {
+      graph.touch(); const local = under(original.path, originalRoot);
+      if (!local || !Object.values(definition.outputs).some(declared => local === declared || local.startsWith(`${declared}/`))) continue;
+      result.set(outputKey({...original, path: posix.join(retainedRoot, local)}), {relation: "reused-artifact", proof: reuseProof});
+    }
+  }
+  if (value.stage === "candidate") fresh(value.stages.candidate, posix.join(root, "stages", value.pipeline.definition.candidate.stages[value.pipeline.index]!.name, "output"));
+  const evaluator = value.stages.evaluator, resultRoot = posix.join(root, "result");
+  if (evaluator?.containerId && HASH.test(evaluator.containerId) && value.paths.result === resultRoot) for (const output of value.outputs) {
+    graph.touch(); if (under(output.path, resultRoot)) result.set(outputKey(output), {relation: "produced", proof});
+  }
+  return result;
+}
 function build(dir: string, source: Snapshot, limit: number): Graph {
   const graph = new Graph(source, limit), study = graph.ref("study", source.study.id), ledger = "ledger.jsonl";
   graph.put({ ref: study, state: "current", availability: "available", proof: graph.proof("study.json"), data: { mode: source.study.mode } });
   const owned = (ref: ExecutionReferenceV1, proof: ProvenanceProof) => graph.edge(study, ref, "contains", proof);
   const events = source.events;
+  const stageReuseReceipts = new Map<string, number>();
   const addedIdeas = new Map<string, number>(), decisions = new Map<string, number[]>(), latestAttempts = new Map<string, LedgerEvent>(), attemptReceipts = new Map<string, { index: number; event: LedgerEvent }>(), starts = new Map<string, LedgerEvent[]>(), reviewIndexes = new Map<string, number>(), skillIndexes = new Map<string, number>();
   for (const [index, event] of events.entries()) {
+    if (event.type === "attempt.stage.reused") stageReuseReceipts.set(canonical([event.data.id, event.data.candidateStage, event.data.key, event.data.sourceAttemptId, event.data.sourceStage, event.data.sourceSha256]), index);
     if (event.type.startsWith("attempt.")) {
       if (typeof event.data.id !== "string" || !ATTEMPT.test(event.data.id)) graph.issue("malformed-attempt-receipt");
       else if (!attemptReceipts.has(event.data.id)) attemptReceipts.set(event.data.id, { index, event });
@@ -210,11 +250,12 @@ function build(dir: string, source: Snapshot, limit: number): Graph {
       if (graph.nodes.get(key(ref))?.state !== "current") continue;
       const proof = graph.proof(file);
       if (value.retryOf !== undefined) graph.edge(ref, graph.target("attempt", value.retryOf, proof), "retryOf", proof);
-      const reuse = attemptReuseView(value);
-      for (const source of reuse?.sources ?? []) graph.edge(ref, graph.target("attempt", source.ref.attemptId, proof), "reused-from", proof);
+      const attributions = attemptOutputAttributions(value, file, graph, stageReuseReceipts, ledger);
       for (const output of value.outputs) { graph.touch();
-        const artifact = graph.ref("artifact", output.sha256, { sha256: output.sha256 });
-        graph.put({ ref: artifact, state: "current", availability: "not-read", proof, data: { bytes: output.bytes, bodyRead: false } }); graph.edge(ref, artifact, reuse?.reusedStages ? "observed-output" : "produced", proof);
+        const artifact = graph.ref("artifact", output.sha256, { sha256: output.sha256 }), attribution = attributions.get(canonical([output.path, output.sha256, output.bytes]));
+        graph.put({ ref: artifact, state: "current", availability: "not-read", proof: attribution?.proof ?? proof, data: { bytes: output.bytes, bodyRead: false } });
+        if (attribution) graph.edge(ref, artifact, attribution.relation, attribution.proof);
+        else { graph.issue("unattributed-attempt-output", ref); graph.edge(ref, artifact, "contains", proof); }
       }
     }
     const ideas = foldIdeas(events);

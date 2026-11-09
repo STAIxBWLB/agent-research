@@ -1,3 +1,5 @@
+import { executionView } from "../src/exp/pipeline.ts";
+import { createAresMcp } from "../src/mcp-tools.ts";
 import { afterEach, expect, test } from "bun:test";
 import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -15,13 +17,13 @@ afterEach(cleanupPipelineFixtures);
 type Fixture = Awaited<ReturnType<typeof setup>>;
 const runOptions = (f: Fixture) => ({ repo: f.repo, commit: f.commit, run: "investigate", detach: true });
 const operation = (request: Fixture["fake"]["requests"][number]) => request.command === "python3" && request.stdin instanceof Uint8Array ? (JSON.parse(new TextDecoder().decode(request.stdin)) as Record<string, unknown>).op : undefined;
-async function finish(f: Fixture, initial: Attempt): Promise<Attempt> {
+async function finish(f: Fixture, initial: Attempt, ctx = f.fake.ctx): Promise<Attempt> {
   let attempt = initial;
   for (let step = 0; step < 32 && attempt.status === "running"; step++) {
     const running = [...f.fake.containers.values()].filter(container => container.running);
     expect(running.length).toBeLessThanOrEqual(1);
     if (running.length) f.fake.finish();
-    await reconcileAttempts(f.dir, f.fake.ctx); attempt = showAttempt(f.dir, attempt.id);
+    await reconcileAttempts(f.dir, ctx); attempt = showAttempt(f.dir, attempt.id);
   }
   expect(attempt.status).not.toBe("running");
   return attempt;
@@ -333,3 +335,90 @@ test("a local stage edit reuses only unaffected upstream work and matches a full
   expect(readBytesBounded(join(partial.paths.result, "metrics.json"), 65536)).toEqual(readBytesBounded(join(fresh.paths.result, "metrics.json"), 65536));
   expect(attemptReuseView(partial)).toMatchObject({ reusedStages: 1, executedCandidateStages: 2, freshEvaluations: 1, independentSamples: 0 });
 }, 30_000);
+
+
+test("force-fresh MCP redelivery preserves running and terminal attempts while changed controls require explicit retry", async () => {
+  const f = await setup({ reuse: true }), { actor: _actor, ...runtime } = f.fake.ctx;
+  const server = createAresMcp({}, fakeHttp([]).http, runtime);
+  const request = { study: f.dir, repo: f.repo, commit: f.commit, run: "investigate", reuse: "eligible", forceFresh: true };
+  const first = await server.handlers.ares_attempt_run!(request) as Attempt;
+  const path = join(f.dir, "runs", first.run, "attempts", `${first.id}.json`);
+  const runningBytes = readBytesBounded(path, 1024 * 1024), runningLedger = readLedger(f.dir);
+  expect((await server.handlers.ares_attempt_run!(request) as Attempt).id).toBe(first.id);
+  expect(readBytesBounded(path, 1024 * 1024)).toEqual(runningBytes); expect(readLedger(f.dir)).toEqual(runningLedger);
+  expect(f.fake.executed).toEqual(["prepare"]);
+  const done = await finish(f, first), before = readBytesBounded(path, 1024 * 1024), ledger = readLedger(f.dir), count = f.fake.executed.length;
+  expect((await server.handlers.ares_attempt_run!(request) as Attempt).id).toBe(done.id);
+  expect(readBytesBounded(path, 1024 * 1024)).toEqual(before); expect(readLedger(f.dir)).toEqual(ledger); expect(f.fake.executed).toHaveLength(count);
+  await expect(server.handlers.ares_attempt_run!({ ...request, reuse: "off" })).rejects.toThrow("recorded reuse=eligible, forceFresh=true");
+  await expect(server.handlers.ares_attempt_run!({ ...request, forceFresh: false })).rejects.toThrow(`--retry ${done.id}`);
+  const retried = await server.handlers.ares_attempt_run!({ ...request, reuse: "off", retry: done.id }) as Attempt;
+  expect(retried.id).not.toBe(done.id); expect(retried.retryOf).toBe(done.id);
+}, 30_000);
+
+test("wall exhaustion or stale design during a verified lookup cannot admit a hit and releases its pin", async () => {
+  for (const fault of ["wall", "design"] as const) {
+    const f = await setup({ reuse: true }), first = await source(f), original = f.fake.ctx.runner!;
+    const sourcePath = join(f.dir, "runs", first.run, "attempts", `${first.id}.json`), sourceBytes = readBytesBounded(sourcePath, 1024 * 1024);
+    let hit = false;
+    const interrupted = { ...f.fake.ctx, runner: async (request: Parameters<typeof original>[0]) => {
+      const result = await original(request);
+      if (!hit && operation(request) === "lookup") {
+        const response = JSON.parse(result.stdout); expect(response.hit).toBe(true); hit = true;
+        const view = await retainedOperation(first.executor, { op: "inspect", studyId: first.studyId }, original);
+        expect(view.entries!.find(entry => entry.ref.attemptId === first.id && entry.ref.stage === "prepare")?.active).toBe(true);
+        if (fault === "wall") f.fake.clock.value += 121_000;
+        else {
+          const changed = readProtocol(f.dir)!; changed.budget.maxAttempts++;
+          await withLock(f.dir, () => setProtocol(f.dir, changed, actor));
+        }
+      }
+      return result;
+    } };
+    const failed = await runAttempt(f.dir, { ...runOptions(f), reuse: "eligible", retry: first.id }, interrupted);
+    expect(hit).toBe(true); expect(failed.status).toBe("failed");
+    expect(failed.reason).toBe(fault === "wall" ? "wall-clock" : "evidence-read");
+    expect(failed.pipeline!.completed).toEqual([]); expect(failed.metrics).toEqual([]);
+    expect(readLedger(f.dir).some(event => event.type === "attempt.stage.reused" && event.data.id === failed.id)).toBe(false);
+    expect(f.fake.executed).toEqual(["prepare", "train", "predict", "evaluate"]);
+    expect((await retainedOperation(first.executor, { op: "inspect", studyId: first.studyId }, original)).reservedBytes).toBe(0);
+    expect(readBytesBounded(sourcePath, 1024 * 1024)).toEqual(sourceBytes);
+    expect(failed.error).toMatch(fault === "wall" ? /budget exhausted/ : /gate list.*retry/);
+  }
+}, 30_000);
+
+test("executor manifest disagreement with local producing evidence is a reasoned fresh miss", async () => {
+  const f = await setup({ reuse: true }), first = await source(f), original = f.fake.ctx.runner!;
+  const sourcePath = join(f.dir, "runs", first.run, "attempts", `${first.id}.json`);
+  let hit = false;
+  const tampered = { ...f.fake.ctx, runner: async (request: Parameters<typeof original>[0]) => {
+    const result = await original(request);
+    if (!hit && operation(request) === "lookup") {
+      const response = JSON.parse(result.stdout); expect(response.hit).toBe(true); hit = true;
+      const changed = showAttempt(f.dir, first.id);
+      changed.pipeline!.completed[0]!.record.evidence!.outputs[0]!.sha256 = "e".repeat(64);
+      writeAtomic(sourcePath, JSON.stringify(changed, null, 2) + "\n", 1024 * 1024);
+    }
+    return result;
+  } };
+  const current = await finish(f, await runAttempt(f.dir, { ...runOptions(f), reuse: "eligible", retry: first.id }, tampered), tampered);
+  expect(hit).toBe(true); expect(current.status).toBe("succeeded");
+  expect(current.reuse!.stages.prepare).toMatchObject({ outcome: "fresh", reason: "invalid-hit" });
+  expect(current.pipeline!.completed.every(parent => !parent.reuse)).toBe(true);
+  expect(f.fake.executed).toEqual(["prepare", "train", "predict", "evaluate", "prepare", "train", "predict", "evaluate"]);
+}, 30_000);
+
+
+test("legacy fresh requests also preserve new control intent for identical redelivery", async () => {
+  const f = await setup({ reuse: true }), current = readProtocol(f.dir)!;
+  const legacy = executionView(current); legacy.candidate.command = ["/synthetic", "unsupported-synthetic-stage"];
+  await withLock(f.dir, () => setProtocol(f.dir, legacy, actor));
+  await gateDecide(f.dir, "design", "approve", undefined, { actor, http: fakeHttp([]).http });
+  const request = { ...runOptions(f), reuse: "eligible" as const, forceFresh: true };
+  const first = await runAttempt(f.dir, request, f.fake.ctx);
+  expect(first.v).toBe(1); expect(first.freshRequest).toEqual({ reuse: "eligible", forceFresh: true });
+  const before = readLedger(f.dir), executions = f.fake.executed.length;
+  expect((await runAttempt(f.dir, request, f.fake.ctx)).id).toBe(first.id);
+  expect(readLedger(f.dir)).toEqual(before); expect(f.fake.executed).toHaveLength(executions);
+  await expect(runAttempt(f.dir, { ...request, reuse: "off" }, f.fake.ctx)).rejects.toThrow("recorded reuse=eligible");
+});

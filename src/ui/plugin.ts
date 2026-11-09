@@ -104,17 +104,15 @@ export function gateWaitingTimes(events: LedgerEvent[], inputs: GateInputs, obse
 function attempts(dir: string, all: boolean) {
   const byStatus = { running: 0, succeeded: 0, failed: 0, cancelled: 0, unknown: 0 }, rows: Pick<Attempt, "id" | "status" | "reason">[] = [];
   let total = 0;
-  const freshSamples = new Set<string>();
   const reuse = {attempts: 0, executedStages: 0, reusedStages: 0, freshEvaluations: 0, independentSamples: 0};
   for (const row of readAttemptRecords(dir)) {
     total++; byStatus[row.status]++;
     const view = attemptReuseView(row);
-    if (view) { reuse.attempts++; reuse.executedStages += view.executedStages; reuse.reusedStages += view.reusedStages; reuse.freshEvaluations += view.freshEvaluations; if (row.status === "succeeded" && view.freshEvaluations === 1 && !view.reusedStages) freshSamples.add(sha256(canonical([row.commit, row.protocolHash, row.seed]))); }
+    if (view) { reuse.attempts++; reuse.executedStages += view.executedStages; reuse.reusedStages += view.reusedStages; reuse.freshEvaluations += view.freshEvaluations; reuse.independentSamples += view.independentSamples; }
     if (!all || (row.status !== "failed" && row.status !== "unknown")) continue;
     if (row.reason !== undefined && (typeof row.reason !== "string" || row.reason.length > 500)) throw new Error("attempt inbox: malformed reason; restore the last valid bounded attempt record and refresh");
     rows.push({ id: row.id, status: row.status, ...(row.reason === undefined ? {} : { reason: row.reason }) });
   }
-  reuse.independentSamples = freshSamples.size;
   return { total, byStatus, rows, ...(reuse.attempts ? {reuse} : {}) };
 }
 /** Presence is not validity: any present artifact is still checked by its existing bounded reader. */
