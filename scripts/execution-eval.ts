@@ -148,14 +148,18 @@ if (import.meta.main) {
   void (async () => {
   const [command, output, ...extra] = process.argv.slice(2), root = fileURLToPath(new URL("..", import.meta.url));
   try {
-    if (command === "baseline") {
+    if (command === "integration-check") {
+      if (output !== undefined || extra.length) fail("integration-check accepts no operands", "use bun scripts/execution-eval.ts integration-check; it never launches treatment trials");
+      const { validateTreatmentIntegration } = await import("./execution-treatment.ts");
+      console.log(JSON.stringify(await validateTreatmentIntegration(root)));
+    } else if (command === "baseline") {
       if (!output || output.startsWith("-") || !isAbsolute(output) || extra.some(value => value !== "--emit") || extra.length > 1) fail("baseline arguments require an absolute output operand followed only by optional --emit", "use bun scripts/execution-eval.ts baseline /absolute/fresh-directory [--emit]; no other flags are supported");
       const { runBaseline, emitBaseline, BASELINE_BUNDLE_PREFIX } = await import("./execution-baseline.ts");
       const receipt = runBaseline(root, output, process.env.EXECUTION_EVAL_IMAGE_DIGEST ?? "");
       if (extra.includes("--emit")) console.log(BASELINE_BUNDLE_PREFIX + emitBaseline(output));
       else console.log(JSON.stringify({ authority: receipt.authority, codeSha256: receipt.code.codeSha256, registrationReceiptSha256: receipt.registrationReceiptSha256, denominators: receipt.denominators }));
     } else {
-      if (extra.length || !["freeze", "verify"].includes(command ?? "")) fail("usage is bun scripts/execution-eval.ts freeze|verify [receipt.json], or baseline OUTSIDE_DIR [--emit]; no treatment or supervision command");
+      if (extra.length || !["freeze", "verify"].includes(command ?? "")) fail("usage is bun scripts/execution-eval.ts freeze|verify [receipt.json], baseline OUTSIDE_DIR [--emit], or integration-check; no treatment-run or supervision command");
       const file = resolve(output ?? join(root, FROZEN_RECEIPT));
       const receipt = command === "freeze" ? freezePreregistration(root, file) : verifyPreregistration(root, file);
       console.log(JSON.stringify({ command, status: receipt.status, receiptSha256: receipt.receiptSha256 }));
