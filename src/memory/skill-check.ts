@@ -34,7 +34,10 @@ export async function inspectSkillEvidenceSet(dirArg: string, raw: readonly Skil
     try {if (options.lock) assertStudyReadLock(dir, options.lock); if (canonical(openStudy(dir).study) !== canonical(study) || (local ? !local.recheck() : refs.some(ref => ref.tool === "ares"))) return false;} catch {return false;}
     return budget.remainingMs() > 0;
   };
-  if (!recheck()) for (let i = 0; i < inspections.length; i++) {const row = inspections[i]!; if (row.ref?.tool === "ares" || budget.remainingMs() <= 0) inspections[i] = {...row, state: budget.remainingMs() <= 0 ? "unavailable" : "changed", integrity: "unverified", outcome: {status: "unverified", success: false}};}
+  if (!recheck()) for (let i = 0; i < inspections.length; i++) {
+    const row = inspections[i]!, expired = budget.remainingMs() <= 0;
+    if (row.ref?.tool === "ares" || expired) inspections[i] = {...row, state: expired ? "unavailable" : "changed", digest: expired ? null : row.digest, integrity: "unverified", outcome: {status: "unverified", success: false}};
+  }
   return {inspections, localGeneration: local?.sourceSha256 ?? null, bytes: SOURCE_BYTES - budget.remainingBytes, remainingMs: budget.remainingMs(), recheck};
 }
 export function compareSkillInspections(pinned: EvidenceInspection[], current: EvidenceInspection[]) {
@@ -43,4 +46,7 @@ export function compareSkillInspections(pinned: EvidenceInspection[], current: E
   for (const row of current) {const before = expected.get(canonical(row.ref)); if (!before || row.state !== "available" || before.state !== "available" || canonical(semanticInspection(row)) !== canonical(semanticInspection(before))) reasons.push(row.state === "available" ? "changed-source" : row.state);}
   if (expected.size !== current.length) reasons.push("source-set-changed"); return reasons;
 }
-export function requireSkillEvidence(why: string): never {throw new Error(`skill accept: ${why}; create a revised proposal with current evidence/counterevidence and honest limitations, then run ares skill check before deciding${why.includes("unsupported") ? "; restore supporting source readers (amem >=0.22.1 with screened exact-id amem_show) first" : ""}`);}
+export function requireSkillEvidence(why: string, operation: "accept" | "propose" = "accept"): never {
+  const next = operation === "propose" ? "retry ares skill propose after restoring source access/budget, or revise the proposal input with honest limitations" : "create a revised proposal with current evidence/counterevidence and honest limitations, then run ares skill check before deciding";
+  throw new Error(`skill ${operation}: ${why}; ${next}${why.includes("unsupported") ? "; restore supporting source readers (amem >=0.22.1 with screened exact-id amem_show) first" : ""}`);
+}

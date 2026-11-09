@@ -104,9 +104,10 @@ export async function proposeSkill(dirArg: string, raw: unknown, actor: Actor, o
   if (current.rows.length >= SKILL_PROPOSALS) bad("100-proposal limit reached; start a new study for further proposals");
   if (current.rows.some(row => row.name === input.name) || lstatSync(file(dir, input.name), {throwIfNoEntry: false})) bad("name or proposal file already exists; choose a new name without replacing prior work");
   const refs = [...new Map([...input.evidence, ...input.counterevidence].map(ref => [canonical(ref), ref])).values()];
-  const checked = await inspectSkillEvidenceSet(dir, refs, options), proposal = validateSkillProposalV2({...input, inspections: checked.inspections}, study.id);
-  if (canonical(readSkills(dir).rows) !== canonical(current.rows)) requireSkillEvidence("proposal journal changed during inspection");
-  if (!checked.recheck()) requireSkillEvidence("local source changed or aggregate source budget exhausted during proposal inspection");
+  const checked = await inspectSkillEvidenceSet(dir, refs, options);
+  if (canonical(readSkills(dir).rows) !== canonical(current.rows)) requireSkillEvidence("proposal journal changed during inspection", "propose");
+  if (!checked.recheck()) requireSkillEvidence("local source changed or aggregate source budget exhausted during proposal inspection", "propose");
+  const proposal = validateSkillProposalV2({...input, inspections: checked.inspections}, study.id);
   const content = skillMarkdownV2(proposal), hash = sha256(content);
   const added = commit(dir, [[file(dir, proposal.name), content, SKILL_BYTES]], [{actor, type: "skill.proposed", data: {skillProposal: 2, proposal, sha256: hash}}]);
   return foldSkills([...current.events, ...added]).find(row => row.name === proposal.name)!;

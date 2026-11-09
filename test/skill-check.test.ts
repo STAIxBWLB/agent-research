@@ -1,3 +1,7 @@
+import * as studyModule from "../src/study.ts";
+import * as amemShow from "../src/memory/amem-show.ts";
+import {validateSkillProposalV2} from "../src/memory/skill-format.ts";
+import {legacySkillFixture} from "./legacy-skill-fixture.ts";
 import {mkdirSync} from "node:fs";
 import {metricProtocol, metricAttempt} from "./metric-fixtures.ts";
 import {readProtocol, protocolHash, designBinding} from "../src/exp/protocol.ts";
@@ -168,4 +172,35 @@ test("accepted, rejected and withdrawn proposals never report acceptReady even w
     expect(checked).toMatchObject({state: "available", acceptReady: false}); expect(checked.nextStep).toContain("Decision is final"); expect(checked.nextStep).toContain("revised proposal for new evidence");
     expect(checked.inspections[0]?.state).toBe("available"); expect(bytes(f.dir)).toEqual(before);
   }
+});
+
+
+function expireAtFinalRecheck() {
+  let now = time, expire = false; const states: string[] = [], originalRead = amemShow.readScreenedAmem, originalOpen = studyModule.openStudy;
+  const read = spyOn(amemShow, "readScreenedAmem").mockImplementation(async (cwd, id, options) => {const result = await originalRead(cwd, id, options); states.push(result.state); expire = true; return result;});
+  const open = spyOn(studyModule, "openStudy").mockImplementation(dir => {const result = originalOpen(dir); if (expire) {now = time + 26_000; expire = false;} return result;});
+  return {states, now: () => now, restore() {open.mockRestore(); read.mockRestore();}};
+}
+
+test("expiry during final recheck clears an already available amem digest and returns valid unavailable receipts", async () => {
+  const f = fixture(), initial = transport(), row = await ops.skillPropose(f.dir, input([A]), {...f.ctx, runner: initial.runner, now: () => time}, f.env), fake = transport(), expired = expireAtFinalRecheck(), before = bytes(f.dir);
+  try {
+    const checked = await ops.skillCheck(f.dir, row.name, {runner: fake.runner, now: expired.now}, f.env);
+    expect(expired.states).toEqual(["available"]); expect(checked).toMatchObject({state: "unavailable", acceptReady: false});
+    expect(checked.inspections[0]).toMatchObject({state: "unavailable", digest: null, integrity: "unverified", outcome: {status: "unverified", success: false}});
+    expect(() => validateSkillProposalV2({...input([{v: 1, tool: "amem", id: A}]), inspections: checked.inspections})).not.toThrow(); expect(bytes(f.dir)).toEqual(before);
+  } finally {expired.restore();}
+});
+
+test("proposal expiry after an available amem response reports its real budget cause and proposal-specific retry guidance", async () => {
+  const f = fixture(), fake = transport(), expired = expireAtFinalRecheck(), before = bytes(f.dir); let message = "";
+  try {await ops.skillPropose(f.dir, input([A]), {...f.ctx, runner: fake.runner, now: expired.now}, f.env);} catch (cause) {message = (cause as Error).message;} finally {expired.restore();}
+  expect(expired.states).toEqual(["available"]); expect(message).toStartWith("skill propose:"); expect(message).toContain("aggregate source budget exhausted"); expect(message).toContain("retry ares skill propose"); expect(message).toContain("revise the proposal input"); expect(message).not.toContain("invalid or over-bound"); expect(message).not.toContain("before deciding"); expect(bytes(f.dir)).toEqual(before);
+});
+
+test("proposal journal drift uses proposal guidance while preserving the other writer's committed record", async () => {
+  const f = fixture(); let afterExternal!: Buffer;
+  const fake = transport(view, () => {legacySkillFixture(f.dir, {name: "other-writer", summary: "Synthetic other proposal", steps: ["Inspect"], evidence: [B]}, f.ctx.actor); afterExternal = bytes(f.dir);});
+  let message = ""; try {await ops.skillPropose(f.dir, input([A]), {...f.ctx, runner: fake.runner, now: () => time}, f.env);} catch (cause) {message = (cause as Error).message;}
+  expect(message).toStartWith("skill propose:"); expect(message).toContain("journal changed"); expect(message).toContain("revise the proposal input"); expect(message).not.toContain("before deciding"); expect(bytes(f.dir)).toEqual(afterExternal); expect(ops.skillList(f.dir).map(row => row.name)).toEqual(["other-writer"]);
 });
