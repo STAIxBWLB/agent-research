@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Scoped repair and per-section review rounds (#100): review findings accept optional `repair` (`edit`/`paragraph`/`section`, default `edit`) and `section`; unknown repair values refuse. `review show` adds `roundBudget`, `sections`, `openBySection`, `overBudget` and `info`; a section past `study.toml` `[paper] reviewRounds` (default 3) gets "replan the section or ask a person" as information only. The review gate conditions are unchanged. `study export --bundle` adds content-free `counts.reviewSections` and per-report `repairs`.
+  - N-1 CLI: no command or usage changes; `review show` output is additive.
+  - N-1 MCP: no tool or schema changes; `ares_review_show` output is additive.
+  - N-1 study/ledger formats: review report v1 and ledger versions stay unchanged. Reports without the new fields keep identical bytes. Older readers fold stored reports non-strictly and ignore the optional fields, so existing review gates keep their state; an older `review add` refuses a new report that uses them. The bundle manifest stays `bundle: 1` with an additive count.
+
 
 - Eligible stage-artifact reuse (#64): default fresh behavior is preserved; optional `attempt run --reuse eligible` and `--force-fresh` (MCP `reuse`/`forceFresh`) add current-policy, source-verified investigation reuse with atomic local source receipts, bounded study-local lookup/pins, reasoned misses and a fresh evaluator. Original and current costs and executed/reused/sample counts remain distinct; unmeasured costs remain unknown. GPU ABI reuse stays unsupported/fresh. The measured pilot is not included.
   - N-1 CLI: required commands/usage are retained; the reuse controls are optional and existing retry/final identity rules remain. Existing off/default v1/v2 execution and no-contract hashes remain unchanged.
