@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { lstatSync, type Stats } from "node:fs";
 import { join } from "node:path";
 import { boundedText, onlyKeys, plain, readTextBounded, sha256 } from "../study.ts";
 
@@ -41,11 +41,18 @@ export function validateProvenance(raw: unknown, what: string): CardProvenance {
 
 /** A stored card file: the user fields plus id and, for imported cards, the reuse record. */
 export function readCard(dir: string, id: string): StoredCard | undefined {
-  const path = cardPath(dir, id);
-  if (!existsSync(path)) return undefined;
+  const path = cardPath(dir, id), where = join("literature", "cards");
+  const notRegular = () => new Error(`card ${id}: ${where} holds a link or special file; a card must be a regular physical file, so remove the link and restore the card from the ledger's lit.card hash or record the card again`);
+  let stat: Stats;
+  try { stat = lstatSync(path); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw new Error(`card ${id}: unreadable card path; restore ${where} from the ledger's lit.card hash or record the card again`); }
+  if (!stat.isFile() || stat.isSymbolicLink()) throw notRegular();
   let raw: unknown;
-  try { raw = JSON.parse(readTextBounded(path, CARD_BYTES)); }
-  catch { throw new Error(`card ${id}: unreadable, invalid JSON or larger than 64 KiB; restore ${join("literature", "cards")} from the ledger's lit.card hash or record the card again`); }
+  try { raw = JSON.parse(readTextBounded(path, CARD_BYTES, {noFollow: true})); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ELOOP") throw notRegular();
+    throw new Error(`card ${id}: unreadable, invalid JSON or larger than 64 KiB; restore ${where} from the ledger's lit.card hash or record the card again`);
+  }
   if (!plain(raw) || raw.id !== id) throw new Error(`card ${id}: malformed or belongs to another candidate; record the card again with ares lit card`);
   const { id: _id, reused, ...fields } = raw;
   const card: StoredCard = { id, ...validateCard(fields) };

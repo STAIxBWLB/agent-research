@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Extraction cards are read as physical files: every reader, including `lit card list`, `lit card export`, `lit card import`, `paper check`'s cited-card pass and point evidence, refuses a card path that is a link or special file with the cause and the next step instead of following it out of `literature/cards`, and a dangling link no longer reads as a missing card. A regular card reads as before and an absent card is still missing.
+  - N-1 CLI: no command or usage change; a linked card path refuses where an N-1 reader followed it.
+  - N-1 MCP: no tool, annotation or schema change; `ares_lit_card_list` and `ares_paper_check` inherit the same refusal.
+  - N-1 study/ledger formats: no change; an N-1 reader still follows a linked card path, so a study relying on the refusal needs the newer line.
+
 - Card reuse through vault-mem (#101): `lit card export <dir> <id>... --vault ID [--confirm FINGERPRINT]` previews, then writes own, identifier-verified cards with hashed-study provenance to the single matching vault-mem reference note (`doi`/`arxiv_id`), guarded by the note hash. `lit card import` copies a card back only for an included candidate verified in this study, stored with a `reused` record. `lit card list` and `paper check`'s `reusedCards` show the provenance; `unreadableCards` lists cited cards that cannot be read. ArXiv-only papers resolve their note through the arXiv DOI, citekey, id or title (vault-mem does not index `arxiv_id`) with an exact frontmatter match. The study lock is held only for planning and the commit, not across vmem calls. Both commands need the scope gate and carry any automatic approval into their commit; export preflights its receipt before writing to the vault, and provenance names the actor of the recording `lit.card` event. Reused cards never touch verification, screening, gates or the bibliography. Cards gain optional `datasets`, `results` and `motivation`. MCP adds `ares_lit_card_export`, `ares_lit_card_import` and `ares_lit_card_list`. Tests use a fake vmem only.
   - N-1 CLI: existing commands and usage remain; the three `lit card` subcommands are additive.
   - N-1 MCP: existing tools remain; the three card tools are additive and the `ares_lit_card` card schema gains optional fields only.
