@@ -4,10 +4,10 @@ This is [#63 T2b](https://github.com/STAIxBWLB/agent-research/issues/63), author
 
 ```sh
 bun scripts/execution-eval.ts integration-check
-bun test test/execution-treatment.test.ts test/execution-diagnose.test.ts test/execution-lineage.test.ts test/execution-reuse.test.ts
+bun test test/execution-treatment.test.ts test/execution-diagnose.test.ts test/execution-lineage.test.ts test/execution-reuse.test.ts test/execution-supervision.test.ts
 ```
 
-The first command is read-only: it verifies the existing frozen receipt, retains the ordered 12 Diagnose and 12 Reuse cases, checks the adapter exports and binds the clean committed source. It does not invoke either arm, write a receipt or accept trial arguments. Evaluator truth remains outside the adapter payload: it receives the frozen candidate input and input/expected digests, not expected outcomes. The tests exercise the callable adapters with private synthetic producer fixtures. Run these checks through the workspace resource admission, one job per worktree, two CPU workers and no GPU. Exit 75 is a deferral, not permission for an alternative local run.
+The first command is read-only: it verifies the existing frozen receipt, retains the ordered 12 Diagnose, 12 Reuse and 12 Supervision cases, checks the adapter/record-reader/scorer exports and binds the clean committed source. It classifies Supervision fact coverage from candidate-visible payloads only; it does not invoke Diagnose or Reuse, call the shadow rule evaluator, score evaluator truth, write a receipt or accept trial arguments. Evaluator truth remains outside the adapter payload: it receives the frozen candidate input and input/expected digests, not expected outcomes. The tests exercise the callable adapters with private synthetic producer fixtures. Run these checks through the workspace resource admission, one job per worktree, two CPU workers and no GPU. Exit 75 is a deferral, not permission for an alternative local run.
 
 ## Diagnose
 
@@ -27,6 +27,16 @@ A clearly separate non-frozen unit fixture calls `checkProducerReuseUnitFixture(
 
 Option B would change a preregistered trial method and needs the owner's decision before T3; it is not part of T2b. Any future T3 source-establishment method must retain its real producer identities and account for setup, verification, retention and materialization costs. T3 must rerun both fresh and eligible arms on the same backend in the registered AB/BA order; T2a is not a reusable control sample. No hidden warmup, independent-sample claim from borrowed work or reuse of evaluator metrics is allowed. Missing cost dimensions, person time and native coverage remain unknown.
 
+## Supervision record integration
+
+The earlier pending stub named agent-hub#1220. The actual producer is [agent-hub#1221 T1](https://github.com/STAIxBWLB/agent-hub/issues/1221), pinned to `bc6f46b077dd3a255debaee8152fa17f1f13b79c`. Its contract is `docs/design/supervision.md` and its source is `src/hub/supervision-rules.ts` at that commit. The ares boundary reader owns its closed record types locally; it does not import the hub evaluator or translate fixture states into hub-owned history, deliverable measurements or overlap facts.
+
+`integration-check` reports `integrated-record-reader`. It checks `readShadowSnapshot` and `scoreSupervisionRecords` export availability without calling either, and classifies the frozen candidate payloads with `classifySupervisionFixture`. All 12 frozen inputs describe task-state observations rather than admitted T1 rule facts. Their coverage rows preserve case ids and input/expected digests and report `unsupported` with reason `task-state-not-admitted-rule-facts`; covered is 0 and unsupported is 12. Those rows are not observations, missed triggers or correct non-triggers. Helpful, false and missed remain `null`, while person decisions are the literal shadow-mode value 0.
+
+Separate synthetic unit vectors live outside the sealed corpus under `test/fixtures/execution-supervision`. They exercise the pinned record shapes, deduplication identities, each gap path, suppression and retention bounds, closed refusal behavior and scoring only against separately supplied covered truth. These are deterministic record-consumer conformance checks, not new evaluations of the hub rules or measured treatment benefit. No private task body, hidden task, live hub, daemon, model or network is read at runtime.
+
+The T1 method/corpus/threshold seal, every frozen input and expected file, and all checked-in T2a baseline observation bytes remain unchanged. New integration code is bound per run by the existing committed code reader. Before T3, the owner must decide whether to re-express the frozen Supervision corpus in actual T1 rule facts under a newly reviewed method; this implementation does not build that translation or infer coverage from expected labels.
+
 ## Pending scope
 
-At implementation start, [agent-hub#1220](https://github.com/STAIxBWLB/agent-hub/issues/1220) was OPEN. Supervision is therefore pending, with no fake H2 shadow arm or observations. That is a dated dependency observation, not an automatic runtime capability claim. Native/account/model runs, treatment trials, measured cost/speedup claims and adoption remain pending their own authorization and evidence. No actor, gate, final-result or cross-tool record is written by the check-only command.
+Treatment trials, native/account/model runs, measured cost/speedup claims and adoption remain pending their own authorization and evidence. The frozen Supervision task-state corpus remains unsupported by the pinned T1 rule inputs; the record consumer does not make that mismatch disappear. No actor, gate, final-result or cross-tool record is written by the check-only command, and `trialExecutions` and `treatmentObservations` stay 0.

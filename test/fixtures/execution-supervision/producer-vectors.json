@@ -1,0 +1,4823 @@
+{
+  "v": 1,
+  "provenance": {
+    "repository": "STAIxBWLB/agent-hub",
+    "commit": "bc6f46b077dd3a255debaee8152fa17f1f13b79c",
+    "paths": [
+      "docs/design/supervision.md",
+      "src/hub/supervision-rules.ts",
+      "test/supervision-rules.test.ts"
+    ],
+    "kind": "separate-synthetic-producer-record-vectors",
+    "frozenCorpus": false,
+    "note": "Hand-authored retained record snapshots derived from pinned producer vector assertions and closed record contracts. No evaluator execution, hub runtime import, treatment trial, or frozen corpus mutation."
+  },
+  "vectors": [
+    {
+      "id": "repeated-first",
+      "sourceVector": "AC1: equal classified failures repeat once per revision, and a replay or a third equal failure adds nothing",
+      "snapshot": {
+        "observations": [
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 7,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          }
+        ],
+        "gap": [],
+        "counts": {
+          "evaluations": 1,
+          "observations": 1,
+          "deduped": 0,
+          "suppressed": 0,
+          "gap": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      },
+      "truth": [
+        {
+          "rule": "repeated_failure",
+          "task": 7,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "repeated-first:0",
+          "expected": true,
+          "coverage": "covered"
+        }
+      ]
+    },
+    {
+      "id": "repeated-replay",
+      "sourceVector": "AC1: equal classified failures repeat once per revision, and a replay or a third equal failure adds nothing",
+      "snapshot": {
+        "observations": [
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 7,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          }
+        ],
+        "gap": [],
+        "counts": {
+          "evaluations": 2,
+          "observations": 1,
+          "deduped": 1,
+          "suppressed": 0,
+          "gap": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      },
+      "truth": [
+        {
+          "rule": "repeated_failure",
+          "task": 7,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "repeated-replay:0",
+          "expected": true,
+          "coverage": "covered"
+        }
+      ]
+    },
+    {
+      "id": "repeated-third-equal",
+      "sourceVector": "AC1: equal classified failures repeat once per revision, and a replay or a third equal failure adds nothing",
+      "snapshot": {
+        "observations": [
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 7,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          }
+        ],
+        "gap": [],
+        "counts": {
+          "evaluations": 3,
+          "observations": 1,
+          "deduped": 2,
+          "suppressed": 0,
+          "gap": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      },
+      "truth": [
+        {
+          "rule": "repeated_failure",
+          "task": 7,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "repeated-third-equal:0",
+          "expected": true,
+          "coverage": "covered"
+        }
+      ]
+    },
+    {
+      "id": "deliverable-invalidated",
+      "sourceVector": "a changed deliverable invalidates the check recorded on that revision",
+      "snapshot": {
+        "observations": [
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 14,
+            "revision": "1:none",
+            "trigger": "check:d-0123456789ab",
+            "refs": [
+              "history:4",
+              "deliverable:d-0123456789ab"
+            ],
+            "limits": {
+              "records": 2,
+              "truncated": false
+            },
+            "action": "recheck",
+            "reason": "stale_check"
+          }
+        ],
+        "gap": [],
+        "counts": {
+          "evaluations": 1,
+          "observations": 1,
+          "deduped": 0,
+          "suppressed": 0,
+          "gap": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      },
+      "truth": [
+        {
+          "rule": "deliverable_invalidated_check",
+          "task": 14,
+          "revision": "1:none",
+          "trigger": "check:d-0123456789ab",
+          "id": "deliverable-invalidated:0",
+          "expected": true,
+          "coverage": "covered"
+        }
+      ]
+    },
+    {
+      "id": "declared-overlap",
+      "sourceVector": "declared overlap that outlived both acceptances and recorded no integration is observed once per pair",
+      "snapshot": {
+        "observations": [
+          {
+            "rule": "declared_overlap_without_integration",
+            "version": 1,
+            "task": 20,
+            "revision": "1:none",
+            "trigger": "overlap:20:21",
+            "refs": [
+              "task:21",
+              "history:2",
+              "history:2"
+            ],
+            "limits": {
+              "records": 1,
+              "truncated": false
+            },
+            "action": "request_integration",
+            "reason": "unintegrated_overlap"
+          }
+        ],
+        "gap": [],
+        "counts": {
+          "evaluations": 1,
+          "observations": 1,
+          "deduped": 0,
+          "suppressed": 0,
+          "gap": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      },
+      "truth": [
+        {
+          "rule": "declared_overlap_without_integration",
+          "task": 20,
+          "revision": "1:none",
+          "trigger": "overlap:20:21",
+          "id": "declared-overlap:0",
+          "expected": true,
+          "coverage": "covered"
+        }
+      ]
+    },
+    {
+      "id": "coverage-gaps",
+      "sourceVector": "unmeasured deliverable; overlap outside fact set; clipped overlap window",
+      "snapshot": {
+        "observations": [],
+        "gap": [
+          {
+            "rule": "declared_overlap_without_integration",
+            "version": 1,
+            "task": 28,
+            "revision": "1:none",
+            "reason": "no-history"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 15,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "declared_overlap_without_integration",
+            "version": 1,
+            "task": 70,
+            "revision": "1:none",
+            "reason": "history-truncated"
+          }
+        ],
+        "counts": {
+          "evaluations": 1,
+          "observations": 0,
+          "deduped": 0,
+          "suppressed": 0,
+          "gap": 3,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      },
+      "truth": [
+        {
+          "id": "gap:no-history",
+          "rule": "declared_overlap_without_integration",
+          "task": 28,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-history"
+        },
+        {
+          "id": "gap:no-deliverable-measurement",
+          "rule": "deliverable_invalidated_check",
+          "task": 15,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "gap:history-truncated",
+          "rule": "declared_overlap_without_integration",
+          "task": 70,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "history-truncated"
+        }
+      ]
+    },
+    {
+      "id": "per-rule-revision-cap",
+      "sourceVector": "one revision is bounded: the per-revision cap counts what it refused instead of storing it",
+      "snapshot": {
+        "observations": [
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 31,
+            "revision": "1:none",
+            "trigger": "failures:check:a",
+            "refs": [
+              "history:3",
+              "history:4"
+            ],
+            "limits": {
+              "records": 12,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 31,
+            "revision": "1:none",
+            "trigger": "failures:check:b",
+            "refs": [
+              "history:6",
+              "history:7"
+            ],
+            "limits": {
+              "records": 12,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 31,
+            "revision": "1:none",
+            "trigger": "failures:check:c",
+            "refs": [
+              "history:9",
+              "history:10"
+            ],
+            "limits": {
+              "records": 12,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          }
+        ],
+        "gap": [],
+        "counts": {
+          "evaluations": 1,
+          "observations": 3,
+          "deduped": 0,
+          "suppressed": 1,
+          "gap": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      },
+      "truth": [
+        {
+          "rule": "repeated_failure",
+          "task": 31,
+          "revision": "1:none",
+          "trigger": "failures:check:a",
+          "id": "cap:a",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 31,
+          "revision": "1:none",
+          "trigger": "failures:check:b",
+          "id": "cap:b",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 31,
+          "revision": "1:none",
+          "trigger": "failures:check:c",
+          "id": "cap:c",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 31,
+          "revision": "1:none",
+          "trigger": "failures:check:d",
+          "id": "cap:d",
+          "expected": true,
+          "coverage": "covered"
+        }
+      ]
+    },
+    {
+      "id": "observation-retention-cap",
+      "sourceVector": "MAX_OBSERVATIONS=100; ShadowSupervisor.observe retention branch, separate synthetic task ids",
+      "snapshot": {
+        "observations": [
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 100,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 101,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 102,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 103,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 104,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 105,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 106,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 107,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 108,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 109,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 110,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 111,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 112,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 113,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 114,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 115,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 116,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 117,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 118,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 119,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 120,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 121,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 122,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 123,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 124,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 125,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 126,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 127,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 128,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 129,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 130,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 131,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 132,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 133,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 134,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 135,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 136,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 137,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 138,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 139,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 140,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 141,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 142,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 143,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 144,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 145,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 146,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 147,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 148,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 149,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 150,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 151,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 152,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 153,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 154,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 155,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 156,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 157,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 158,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 159,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 160,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 161,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 162,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 163,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 164,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 165,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 166,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 167,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 168,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 169,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 170,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 171,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 172,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 173,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 174,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 175,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 176,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 177,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 178,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 179,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 180,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 181,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 182,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 183,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 184,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 185,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 186,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 187,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 188,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 189,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 190,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 191,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 192,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 193,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 194,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 195,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 196,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 197,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 198,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          },
+          {
+            "rule": "repeated_failure",
+            "version": 1,
+            "task": 199,
+            "revision": "1:none",
+            "trigger": "failures:check:implement",
+            "refs": [
+              "history:4",
+              "history:6"
+            ],
+            "limits": {
+              "records": 5,
+              "truncated": false
+            },
+            "action": "escalate",
+            "reason": "repeated_failure"
+          }
+        ],
+        "gap": [],
+        "counts": {
+          "evaluations": 1,
+          "observations": 100,
+          "deduped": 0,
+          "suppressed": 1,
+          "gap": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      },
+      "truth": [
+        {
+          "rule": "repeated_failure",
+          "task": 100,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:100",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 101,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:101",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 102,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:102",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 103,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:103",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 104,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:104",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 105,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:105",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 106,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:106",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 107,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:107",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 108,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:108",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 109,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:109",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 110,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:110",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 111,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:111",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 112,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:112",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 113,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:113",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 114,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:114",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 115,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:115",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 116,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:116",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 117,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:117",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 118,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:118",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 119,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:119",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 120,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:120",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 121,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:121",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 122,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:122",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 123,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:123",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 124,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:124",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 125,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:125",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 126,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:126",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 127,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:127",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 128,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:128",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 129,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:129",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 130,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:130",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 131,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:131",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 132,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:132",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 133,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:133",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 134,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:134",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 135,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:135",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 136,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:136",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 137,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:137",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 138,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:138",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 139,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:139",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 140,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:140",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 141,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:141",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 142,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:142",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 143,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:143",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 144,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:144",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 145,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:145",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 146,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:146",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 147,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:147",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 148,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:148",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 149,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:149",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 150,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:150",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 151,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:151",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 152,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:152",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 153,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:153",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 154,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:154",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 155,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:155",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 156,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:156",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 157,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:157",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 158,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:158",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 159,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:159",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 160,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:160",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 161,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:161",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 162,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:162",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 163,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:163",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 164,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:164",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 165,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:165",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 166,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:166",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 167,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:167",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 168,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:168",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 169,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:169",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 170,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:170",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 171,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:171",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 172,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:172",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 173,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:173",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 174,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:174",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 175,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:175",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 176,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:176",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 177,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:177",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 178,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:178",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 179,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:179",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 180,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:180",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 181,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:181",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 182,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:182",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 183,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:183",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 184,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:184",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 185,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:185",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 186,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:186",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 187,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:187",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 188,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:188",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 189,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:189",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 190,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:190",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 191,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:191",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 192,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:192",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 193,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:193",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 194,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:194",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 195,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:195",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 196,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:196",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 197,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:197",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 198,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:198",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 199,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:199",
+          "expected": true,
+          "coverage": "covered"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 200,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "retention:200",
+          "expected": true,
+          "coverage": "covered"
+        }
+      ]
+    },
+    {
+      "id": "gap-retention-cap",
+      "sourceVector": "AC2: retained gaps are bounded too, and a refused gap is counted instead of stored",
+      "snapshot": {
+        "observations": [],
+        "gap": [
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 200,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 201,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 202,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 203,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 204,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 205,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 206,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 207,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 208,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 209,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 210,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 211,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 212,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 213,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 214,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 215,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 216,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 217,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 218,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 219,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 220,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 221,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 222,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 223,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 224,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 225,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 226,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 227,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 228,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 229,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 230,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 231,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 232,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 233,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 234,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 235,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 236,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 237,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 238,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 239,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 240,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 241,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 242,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 243,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 244,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 245,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 246,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 247,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 248,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 249,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 250,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 251,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 252,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 253,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 254,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 255,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 256,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 257,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 258,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 259,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 260,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 261,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 262,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 263,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 264,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 265,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 266,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 267,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 268,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 269,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 270,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 271,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 272,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 273,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 274,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 275,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 276,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 277,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 278,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 279,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 280,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 281,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 282,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 283,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 284,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 285,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 286,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 287,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 288,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 289,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 290,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 291,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 292,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 293,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 294,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 295,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 296,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 297,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 298,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          },
+          {
+            "rule": "deliverable_invalidated_check",
+            "version": 1,
+            "task": 299,
+            "revision": "1:none",
+            "reason": "no-deliverable-measurement"
+          }
+        ],
+        "counts": {
+          "evaluations": 1,
+          "observations": 0,
+          "deduped": 0,
+          "suppressed": 1,
+          "gap": 100,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      },
+      "truth": [
+        {
+          "id": "retained-gap:200",
+          "rule": "deliverable_invalidated_check",
+          "task": 200,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:201",
+          "rule": "deliverable_invalidated_check",
+          "task": 201,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:202",
+          "rule": "deliverable_invalidated_check",
+          "task": 202,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:203",
+          "rule": "deliverable_invalidated_check",
+          "task": 203,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:204",
+          "rule": "deliverable_invalidated_check",
+          "task": 204,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:205",
+          "rule": "deliverable_invalidated_check",
+          "task": 205,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:206",
+          "rule": "deliverable_invalidated_check",
+          "task": 206,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:207",
+          "rule": "deliverable_invalidated_check",
+          "task": 207,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:208",
+          "rule": "deliverable_invalidated_check",
+          "task": 208,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:209",
+          "rule": "deliverable_invalidated_check",
+          "task": 209,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:210",
+          "rule": "deliverable_invalidated_check",
+          "task": 210,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:211",
+          "rule": "deliverable_invalidated_check",
+          "task": 211,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:212",
+          "rule": "deliverable_invalidated_check",
+          "task": 212,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:213",
+          "rule": "deliverable_invalidated_check",
+          "task": 213,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:214",
+          "rule": "deliverable_invalidated_check",
+          "task": 214,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:215",
+          "rule": "deliverable_invalidated_check",
+          "task": 215,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:216",
+          "rule": "deliverable_invalidated_check",
+          "task": 216,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:217",
+          "rule": "deliverable_invalidated_check",
+          "task": 217,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:218",
+          "rule": "deliverable_invalidated_check",
+          "task": 218,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:219",
+          "rule": "deliverable_invalidated_check",
+          "task": 219,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:220",
+          "rule": "deliverable_invalidated_check",
+          "task": 220,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:221",
+          "rule": "deliverable_invalidated_check",
+          "task": 221,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:222",
+          "rule": "deliverable_invalidated_check",
+          "task": 222,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:223",
+          "rule": "deliverable_invalidated_check",
+          "task": 223,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:224",
+          "rule": "deliverable_invalidated_check",
+          "task": 224,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:225",
+          "rule": "deliverable_invalidated_check",
+          "task": 225,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:226",
+          "rule": "deliverable_invalidated_check",
+          "task": 226,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:227",
+          "rule": "deliverable_invalidated_check",
+          "task": 227,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:228",
+          "rule": "deliverable_invalidated_check",
+          "task": 228,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:229",
+          "rule": "deliverable_invalidated_check",
+          "task": 229,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:230",
+          "rule": "deliverable_invalidated_check",
+          "task": 230,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:231",
+          "rule": "deliverable_invalidated_check",
+          "task": 231,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:232",
+          "rule": "deliverable_invalidated_check",
+          "task": 232,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:233",
+          "rule": "deliverable_invalidated_check",
+          "task": 233,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:234",
+          "rule": "deliverable_invalidated_check",
+          "task": 234,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:235",
+          "rule": "deliverable_invalidated_check",
+          "task": 235,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:236",
+          "rule": "deliverable_invalidated_check",
+          "task": 236,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:237",
+          "rule": "deliverable_invalidated_check",
+          "task": 237,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:238",
+          "rule": "deliverable_invalidated_check",
+          "task": 238,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:239",
+          "rule": "deliverable_invalidated_check",
+          "task": 239,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:240",
+          "rule": "deliverable_invalidated_check",
+          "task": 240,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:241",
+          "rule": "deliverable_invalidated_check",
+          "task": 241,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:242",
+          "rule": "deliverable_invalidated_check",
+          "task": 242,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:243",
+          "rule": "deliverable_invalidated_check",
+          "task": 243,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:244",
+          "rule": "deliverable_invalidated_check",
+          "task": 244,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:245",
+          "rule": "deliverable_invalidated_check",
+          "task": 245,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:246",
+          "rule": "deliverable_invalidated_check",
+          "task": 246,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:247",
+          "rule": "deliverable_invalidated_check",
+          "task": 247,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:248",
+          "rule": "deliverable_invalidated_check",
+          "task": 248,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:249",
+          "rule": "deliverable_invalidated_check",
+          "task": 249,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:250",
+          "rule": "deliverable_invalidated_check",
+          "task": 250,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:251",
+          "rule": "deliverable_invalidated_check",
+          "task": 251,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:252",
+          "rule": "deliverable_invalidated_check",
+          "task": 252,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:253",
+          "rule": "deliverable_invalidated_check",
+          "task": 253,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:254",
+          "rule": "deliverable_invalidated_check",
+          "task": 254,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:255",
+          "rule": "deliverable_invalidated_check",
+          "task": 255,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:256",
+          "rule": "deliverable_invalidated_check",
+          "task": 256,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:257",
+          "rule": "deliverable_invalidated_check",
+          "task": 257,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:258",
+          "rule": "deliverable_invalidated_check",
+          "task": 258,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:259",
+          "rule": "deliverable_invalidated_check",
+          "task": 259,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:260",
+          "rule": "deliverable_invalidated_check",
+          "task": 260,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:261",
+          "rule": "deliverable_invalidated_check",
+          "task": 261,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:262",
+          "rule": "deliverable_invalidated_check",
+          "task": 262,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:263",
+          "rule": "deliverable_invalidated_check",
+          "task": 263,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:264",
+          "rule": "deliverable_invalidated_check",
+          "task": 264,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:265",
+          "rule": "deliverable_invalidated_check",
+          "task": 265,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:266",
+          "rule": "deliverable_invalidated_check",
+          "task": 266,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:267",
+          "rule": "deliverable_invalidated_check",
+          "task": 267,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:268",
+          "rule": "deliverable_invalidated_check",
+          "task": 268,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:269",
+          "rule": "deliverable_invalidated_check",
+          "task": 269,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:270",
+          "rule": "deliverable_invalidated_check",
+          "task": 270,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:271",
+          "rule": "deliverable_invalidated_check",
+          "task": 271,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:272",
+          "rule": "deliverable_invalidated_check",
+          "task": 272,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:273",
+          "rule": "deliverable_invalidated_check",
+          "task": 273,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:274",
+          "rule": "deliverable_invalidated_check",
+          "task": 274,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:275",
+          "rule": "deliverable_invalidated_check",
+          "task": 275,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:276",
+          "rule": "deliverable_invalidated_check",
+          "task": 276,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:277",
+          "rule": "deliverable_invalidated_check",
+          "task": 277,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:278",
+          "rule": "deliverable_invalidated_check",
+          "task": 278,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:279",
+          "rule": "deliverable_invalidated_check",
+          "task": 279,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:280",
+          "rule": "deliverable_invalidated_check",
+          "task": 280,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:281",
+          "rule": "deliverable_invalidated_check",
+          "task": 281,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:282",
+          "rule": "deliverable_invalidated_check",
+          "task": 282,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:283",
+          "rule": "deliverable_invalidated_check",
+          "task": 283,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:284",
+          "rule": "deliverable_invalidated_check",
+          "task": 284,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:285",
+          "rule": "deliverable_invalidated_check",
+          "task": 285,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:286",
+          "rule": "deliverable_invalidated_check",
+          "task": 286,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:287",
+          "rule": "deliverable_invalidated_check",
+          "task": 287,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:288",
+          "rule": "deliverable_invalidated_check",
+          "task": 288,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:289",
+          "rule": "deliverable_invalidated_check",
+          "task": 289,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:290",
+          "rule": "deliverable_invalidated_check",
+          "task": 290,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:291",
+          "rule": "deliverable_invalidated_check",
+          "task": 291,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:292",
+          "rule": "deliverable_invalidated_check",
+          "task": 292,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:293",
+          "rule": "deliverable_invalidated_check",
+          "task": 293,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:294",
+          "rule": "deliverable_invalidated_check",
+          "task": 294,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:295",
+          "rule": "deliverable_invalidated_check",
+          "task": 295,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:296",
+          "rule": "deliverable_invalidated_check",
+          "task": 296,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:297",
+          "rule": "deliverable_invalidated_check",
+          "task": 297,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:298",
+          "rule": "deliverable_invalidated_check",
+          "task": 298,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:299",
+          "rule": "deliverable_invalidated_check",
+          "task": 299,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        },
+        {
+          "id": "retained-gap:300",
+          "rule": "deliverable_invalidated_check",
+          "task": 300,
+          "revision": "1:none",
+          "trigger": "unavailable",
+          "expected": false,
+          "coverage": "unsupported",
+          "reason": "no-deliverable-measurement"
+        }
+      ]
+    },
+    {
+      "id": "ordinary-progress",
+      "sourceVector": "AC1: ordinary progress, unequal failures and a cleared streak trigger nothing",
+      "snapshot": {
+        "observations": [],
+        "gap": [],
+        "counts": {
+          "evaluations": 1,
+          "observations": 0,
+          "deduped": 0,
+          "suppressed": 0,
+          "gap": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      },
+      "truth": [
+        {
+          "rule": "repeated_failure",
+          "task": 8,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "id": "ordinary-progress:no-trigger",
+          "expected": false,
+          "coverage": "covered"
+        }
+      ]
+    }
+  ]
+}
