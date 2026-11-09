@@ -315,6 +315,17 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       result = await ops.screen(positional[0]!, positional.slice(1), flags["--include"] ? "include" : "exclude", str("--reason"), ctx, undefined, str("--code"));
       break;
     }
+    case "lit card export": case "lit card import": {
+      if (positional.length < 2) throw new Error(`usage: ares ${spec.usage}`);
+      const vault = str("--vault");
+      if (vault === undefined) throw new Error(`${spec.name}: --vault is required; pass the registered vault id (vmem vaults list)`);
+      const confirm = str("--confirm"), family = str("--model-family");
+      result = spec.name === "lit card export"
+        ? await ops.cardExport(positional[0]!, positional.slice(1), { vault, ...(confirm !== undefined ? { confirm } : {}), ...(family !== undefined ? { modelFamily: family } : {}) }, ctx, env)
+        : await ops.cardImport(positional[0]!, positional.slice(1), { vault }, ctx, env);
+      break;
+    }
+    case "lit card list": count(spec, positional, 1); result = ops.cardList(positional[0]!); break;
     case "lit card": {
       count(spec, positional, 2);
       const file = str("--file");

@@ -43,6 +43,7 @@ import { verifyCandidates } from "./lit/verify.ts";
 import { assignCitekeys, renderBib } from "./lit/bibtex.ts";
 import { checkCitations } from "./lit/cite.ts";
 import { cardPath, validateCard } from "./lit/cards.ts";
+import { createVaultClient, exportCards, importCards, listCards, previewCardExport } from "./memory/vault-cards.ts";
 import { designBinding, protocolHash, readDesign, setProtocol } from "./exp/protocol.ts";
 import { requireExperiment } from "./study.ts";
 import { checkExecutor, setExecutor, readExecutor, hashExecutorInput, type InputManifest } from "./exp/executor.ts";
@@ -340,6 +341,20 @@ export async function card(dirArg: string, id: string, raw: unknown, ctx: Ctx) {
     return { id, path };
   });
 }
+
+/** Read-only without --confirm; with the current fingerprint, writes each card to its vault reference note under the study lock. */
+export async function cardExport(dirArg: string, ids: string[], options: { vault: string; confirm?: string; modelFamily?: string }, ctx: Pick<Ctx, "actor" | "runner">, env: NodeJS.ProcessEnv = process.env) {
+  const { dir } = openStudy(dirArg), extractor = { kind: ctx.actor.kind, ...(options.modelFamily ? { modelFamily: options.modelFamily } : {}) };
+  if (options.confirm === undefined) { const { payloads: _p, ...preview } = previewCardExport(dir, options.vault, ids, extractor); return { ...preview, wouldWrite: true }; }
+  const client = createVaultClient(options.vault, dir, ctx.runner, env);
+  return withLock(dir, () => exportCards(dir, options.vault, ids, options.confirm!, ctx.actor, client, options.modelFamily));
+}
+/** Copies cards from vault reference notes for included, identifier-verified candidates; verification, screening and gates are untouched. */
+export async function cardImport(dirArg: string, ids: string[], options: { vault: string }, ctx: Pick<Ctx, "actor" | "runner">, env: NodeJS.ProcessEnv = process.env) {
+  const { dir } = openStudy(dirArg), client = createVaultClient(options.vault, dir, ctx.runner, env);
+  return withLock(dir, () => importCards(dir, options.vault, ids, ctx.actor, client));
+}
+export const cardList = (dir: string) => listCards(dir);
 
 /**
  * Without ids: included candidates never checked, checked against other identifiers, or left unknown, up to 200.
