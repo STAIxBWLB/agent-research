@@ -58,7 +58,7 @@ test("citation reports reuse verification and locate every unknown/unverified oc
   const dir = study(); references(dir);
   const report = draft(dir, "Known [@good2026].\nUnknown [@missing2026; @failed2026, p. 2; @missing2026].");
   expect(report.citations).toMatchObject({ unknown: ["missing2026"], notVerified: ["failed2026"], citations: 4 });
-  expect(report.findings.map(f => f.code)).toEqual(["unknown-citation", "unverified-citation", "unknown-citation"]);
+  expect(report.findings.filter(f => f.severity === "blocking").map(f => f.code)).toEqual(["unknown-citation", "unverified-citation", "unknown-citation"]);
   expect(report.findings.every(f => f.line === 2)).toBe(true);
   expect(draft(dir, "{{lit:Year 2026 [@missing2026]}}").findings[0]?.code).toBe("unknown-citation");
 });

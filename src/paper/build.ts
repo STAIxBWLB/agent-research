@@ -33,8 +33,9 @@ function evidenceBytes(dir: string): string | undefined {
 function calculatePaper(dir: string) {
   const report = checkPaper(dir);
   if (!report.ok) {
-    const reasons = report.findings.slice(0, 10).map(f => `${f.code} at ${f.line}:${f.column}`).join(", ");
-    throw new Error(`paper build: paper check found ${report.findings.length} finding(s): ${reasons}; run ares paper check <dir> --json and fix every finding before rebuilding`);
+    const blocking = report.findings.filter(f => f.severity === "blocking");
+    const reasons = blocking.slice(0, 10).map(f => `${f.code} at ${f.line}:${f.column}`).join(", ");
+    throw new Error(`paper build: paper check found ${blocking.length} blocking finding(s): ${reasons}; run ares paper check <dir> --json and fix every finding before rebuilding`);
   }
   const evidence: PaperEvidence = { v: 1, manuscriptSha256: report.manuscriptSha256, placeholders: report.placeholders.map(entry => {
     const token = entry.placeholder;
