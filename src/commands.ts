@@ -138,9 +138,12 @@ function retentionExecutor(dirArg: string) {
   return { dir, study, executor };
 }
 /** Read-only study operation; the executor serializes inventory with producer/consumer/prune state. */
-export async function retentionInspect(dirArg: string, ctx: Pick<Ctx, "runner">): Promise<RetentionResult> {
+export async function retentionInspect(dirArg: string, ctx: Pick<Ctx, "runner">, options: { offset?: number; limit?: number } = {}): Promise<RetentionResult> {
+  if (!plain(options)) throw new Error("retention inspect: options object required");
+  onlyKeys(options, ["offset", "limit"], "retention inspect");
+  if (options.offset !== undefined && (!Number.isSafeInteger(options.offset) || options.offset < 0 || options.offset > 16_000_000) || options.limit !== undefined && (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 500)) throw new Error("retention inspect: use offset 0..16000000 and limit 1..500");
   const { study, executor } = retentionExecutor(dirArg);
-  return retainedOperation(executor, { op: "inspect", studyId: study.id }, ctx.runner ?? spawnRunner);
+  return retainedOperation(executor, { op: "inspect", studyId: study.id, ...options }, ctx.runner ?? spawnRunner);
 }
 /** Preview has no local receipt. Confirmation checks current policy and records only a validated disposal. */
 export async function retentionPrune(dirArg: string, options: { refs: RetainedRef[]; fingerprint?: string }, ctx: Ctx): Promise<RetentionResult> {

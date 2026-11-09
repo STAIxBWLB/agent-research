@@ -206,7 +206,11 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       if (file === undefined) throw new Error("selection: input missing; pass --file PATH or --file - for a JSON rule");
       result = await ops.selection(positional[0]!, await readInput(file, io), ctx); break;
     }
-    case "retention inspect": count(spec, positional, 1); result = await ops.retentionInspect(positional[0]!, ctx); break;
+    case "retention inspect": {
+      count(spec, positional, 1); const offset = str("--offset"), limit = integer(flags["--limit"], "--limit");
+      if (offset !== undefined && !/^[0-9]{1,8}$/.test(offset)) throw new Error("retention inspect: offset must be in 0..16000000");
+      result = await ops.retentionInspect(positional[0]!, ctx, { ...(offset === undefined ? {} : { offset: Number(offset) }), ...(limit === undefined ? {} : { limit }) }); break;
+    }
     case "retention prune": {
       count(spec, positional, 1); const file = str("--file"), fingerprint = str("--confirm");
       if (file === undefined) throw new Error("retention prune: --file PATH|- is required for explicit retained references");

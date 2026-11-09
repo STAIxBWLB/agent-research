@@ -97,7 +97,7 @@ const SELECTION = obj({
 const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), parent: text(64), commit: { type: "string", minLength: 40, maxLength: 40 } }, ["id", "title", "hypothesis"]);
 
 export const ARES_TOOLS: readonly McpTool[] = [
-  { name: "ares_retention_inspect", description: "Inspect executor-local retained identities, quota reservations and tombstones without a study write. Active sources/consumers remain explicit; no artifact bodies are returned.", inputSchema: obj({study}, ["study"]), annotations: {...read, openWorldHint: true} },
+  { name: "ares_retention_inspect", description: "Inspect executor-local retained identities, quota reservations and tombstones without a study write. Active sources/consumers remain explicit; no artifact bodies are returned.", inputSchema: obj({study, offset: integer(0, 16_000_000), limit: integer(1, 500)}, ["study"]), annotations: {...read, openWorldHint: true} },
   { name: "ares_retention_prune", description: "Preview explicit retained references by default. Confirm the returned fingerprint to dispose bytes under current design policy; active producers/consumers refuse. Tombstones preserve provenance. Executor tombstones remain authoritative after a crash before the local audit receipt; inspect them before retrying.", inputSchema: obj({study, refs: RETAINED_REFS, fingerprint: {...text(64), minLength: 64}}, ["study", "refs"]), annotations: {...net, destructiveHint: true} },
   {name: "ares_lesson_propose", description: "Propose a bounded lesson from a closed native harness round. Inspect required evidence/counterevidence explicitly; fixture-only single-task observations never establish real behavior, success or transfer.", inputSchema: obj({study, proposal: {type: "object"}}, ["study", "proposal"]), annotations: net},
   {name: "ares_lesson_list", description: "Read stored lesson proposals and dispositions locally, without current source checks. Stored eligibility is not fresh proof; no body or activation.", inputSchema: obj({study}, ["study"]), annotations: read},
@@ -189,7 +189,7 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
   const background = new Map<Promise<void>, () => void>();
   const track = (completion: Promise<void>, terminate: () => void) => { background.set(completion, terminate); void completion.then(() => { background.delete(completion); }); };
   const handlers: Record<string, McpHandler> = {
-    ares_retention_inspect: a => ops.retentionInspect(dir(a), ctx),
+    ares_retention_inspect: a => ops.retentionInspect(dir(a), ctx, { ...(a.offset === undefined ? {} : { offset: a.offset as number }), ...(a.limit === undefined ? {} : { limit: a.limit as number }) }),
     ares_retention_prune: a => ops.retentionPrune(dir(a), {refs: a.refs as RetainedRef[], ...(a.fingerprint === undefined ? {} : {fingerprint: a.fingerprint as string})}, ctx),
     ares_lesson_propose: a => ops.lessonPropose(dir(a), a.proposal, ctx, env),
     ares_lesson_list: a => ops.lessonList(dir(a)),

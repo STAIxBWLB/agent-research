@@ -1,9 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { spawnRunner, type Executor } from "../src/exp/executor.ts";
-import { retainedOperation, type RetainedIdentity, type RetainedRef, type RetentionRequest } from "../src/exp/retention.ts";
+import { retainedOperation, RETENTION_RESERVATION, type RetainedIdentity, type RetainedRef, type RetentionRequest } from "../src/exp/retention.ts";
 import { sha256 } from "../src/study.ts";
 
 const roots: string[] = [];
@@ -43,6 +44,7 @@ test("retention seals bounded terminated outputs atomically, verifies before con
   const target = join(f.stage, "inputs");
   const receipt = await f.run({ op: "materialize", attemptId, stage: "train", target, taskRoot: join(f.workspace, "task"), inputs } as Omit<RetentionRequest, "studyId">);
   expect(Object.keys(receipt.inputHashes ?? {}).sort()).toEqual(["data", "rows"]);
+  expect(receipt.inputHashes?.rows).toBe(ref.sha256);
   expect(readFileSync(join(target, "rows"), "utf8")).toBe("synthetic rows");
   expect((await f.run({ op: "materialize", attemptId, stage: "train", target, taskRoot: join(f.workspace, "task"), inputs } as Omit<RetentionRequest, "studyId">)).inputHashes).toEqual(receipt.inputHashes);
   await expect(f.run({ op: "seal", attemptId, stage: "prepare", source: f.source, outputs: { rows: "rows.txt" }, identity: { ...identity, seed: 2 }, observed } as Omit<RetentionRequest, "studyId">)).rejects.toThrow("different provenance");
@@ -142,7 +144,7 @@ test("retention rechecks the frozen code snapshot beyond the artifact file-count
   writeFileSync(join(code, "source-0.txt"), "tampered frozen source");
   await expect(f.run(request as Omit<RetentionRequest, "studyId">)).rejects.toThrow("frozen code snapshot integrity mismatch");
   const state = await f.run({ op: "inspect" });
-  expect(state.reservations).toEqual([{ attemptId, active: true, reservationBytes: 256 * 1024 * 1024 + 256 * 1024 }]);
+  expect(state.reservations).toEqual([{ attemptId, active: true, reservationBytes: RETENTION_RESERVATION }]);
 });
 
 test("synthetic prune crash state keeps tombstones authoritative before physical disposal", async () => {
@@ -150,9 +152,8 @@ test("synthetic prune crash state keeps tombstones authoritative before physical
   await f.run({ op: "reserve", attemptId } as Omit<RetentionRequest, "studyId">);
   const sealed = await f.seal(), ref: RetainedRef = { attemptId, stage: "prepare", sha256: sealed.sha256! };
   await f.run({ op: "release", attemptId } as Omit<RetentionRequest, "studyId">);
-  const stateFile = join(f.root, studyId, ".retained", "state.json"), state = JSON.parse(readFileSync(stateFile, "utf8"));
-  // Synthetic state injection models the committed tombstone before byte deletion, without killing a process.
-  state.entries[`${attemptId}/prepare`].tombstone = true; writeFileSync(stateFile, JSON.stringify(state));
+  // Synthetic state injection models the committed immutable tombstone before byte deletion, without killing a process.
+  writeFileSync(join(f.root, studyId, ".retained", "objects", attemptId, "prepare", "tombstone.json"), JSON.stringify({ ref: { attemptId: ref.attemptId, sha256: ref.sha256, stage: ref.stage }, v: 1 }));
   const data = join(f.root, studyId, ".retained", "objects", attemptId, "prepare", "data");
   expect(existsSync(data)).toBe(true);
   await expect(f.run({ op: "verify", ref } as Omit<RetentionRequest, "studyId">)).rejects.toThrow("pruned");
@@ -161,7 +162,9 @@ test("synthetic prune crash state keeps tombstones authoritative before physical
   const preview = await f.run({ op: "prune", refs: [ref] } as Omit<RetentionRequest, "studyId">);
   await f.run({ op: "prune", refs: [ref], fingerprint: preview.fingerprint } as Omit<RetentionRequest, "studyId">);
   expect(existsSync(data)).toBe(false);
-  expect((await f.run({ op: "inspect" })).usedBytes).toBe(sealed.manifestBytes);
+  const disposed = await f.run({ op: "inspect" });
+  expect(disposed.usedBytes).toBe(sealed.manifestBytes! + disposed.administrativeBytes!);
+  expect(disposed.administrativeBytes).toBeGreaterThan(0);
 });
 
 
@@ -172,3 +175,58 @@ test("retention refuses an impossible new-store reservation before creating dire
   await expect(retainedOperation(f.executor, { op: "reserve", studyId: absentStudy, attemptId, capBytes: 0 }, spawnRunner)).rejects.toThrow("invalid retention cap");
   expect(existsSync(join(f.root, absentStudy))).toBe(false);
 });
+
+
+test("code snapshot hashes tracked symlinks and unusual Git names without following link targets", async () => {
+  const f = fixture(), repo = join(f.workspace, "repo"), code = join(f.workspace, "snapshot");
+  mkdirSync(repo, { mode: 0o700 }); mkdirSync(code, { mode: 0o700 });
+  writeFileSync(join(f.workspace, "outside.txt"), "outside snapshot bytes");
+  writeFileSync(join(repo, "source.txt"), "synthetic source");
+  writeFileSync(join(repo, "odd\\name.txt"), "synthetic unusual filename");
+  symlinkSync("../outside.txt", join(repo, "reference"));
+  const git = (args: string[]) => {
+    const result = spawnSync("git", ["-C", repo, "-c", "commit.gpgsign=false", ...args], { maxBuffer: 1024 * 1024, env: { ...process.env, HOME: f.root, GIT_CONFIG_GLOBAL: join(f.root, "synthetic-git-config"), GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "Synthetic", GIT_AUTHOR_EMAIL: "synthetic@example.invalid", GIT_COMMITTER_NAME: "Synthetic", GIT_COMMITTER_EMAIL: "synthetic@example.invalid" } });
+    expect(result.status).toBe(0); return result;
+  };
+  git(["init", "-q"]); git(["add", "."]);
+  git(["-c", "user.name=Synthetic", "-c", "user.email=synthetic@example.invalid", "commit", "-qm", "Synthetic snapshot"]);
+  const archive = git(["archive", "HEAD"]);
+  expect(spawnSync("tar", ["-xf", "-", "-C", code], { input: archive.stdout }).status).toBe(0);
+  await f.run({ op: "reserve", attemptId } as Omit<RetentionRequest, "studyId">);
+  const first = await f.run({ op: "snapshot", attemptId, source: code } as Omit<RetentionRequest, "studyId">);
+  writeFileSync(join(f.workspace, "outside.txt"), "changed outside snapshot");
+  expect((await f.run({ op: "snapshot", attemptId, source: code } as Omit<RetentionRequest, "studyId">)).sha256).toBe(first.sha256);
+  unlinkSync(join(code, "reference")); symlinkSync("../different.txt", join(code, "reference"));
+  expect((await f.run({ op: "snapshot", attemptId, source: code } as Omit<RetentionRequest, "studyId">)).sha256).not.toBe(first.sha256);
+});
+
+test("near-bound retention history compacts into immutable shards without bricking new work", async () => {
+  const f = fixture(); writeFileSync(join(f.source, "rows.txt"), "synthetic rows");
+  await f.run({ op: "reserve", attemptId } as Omit<RetentionRequest, "studyId">);
+  const stateFile = join(f.root, studyId, ".retained", "state.json"), state = JSON.parse(readFileSync(stateFile, "utf8"));
+  for (let i = 1; i <= 250; i++) {
+    const archivedId = i.toString(16).padStart(16, "0");
+    state.attempts[archivedId] = { reservation: 0, active: false, consumers: [] };
+    for (let stage = 0; stage < 16; stage++) {
+      const name = `stage${stage}`;
+      state.entries[`${archivedId}/${name}`] = { attemptId: archivedId, stage: name, sha256: "7".repeat(64), bytes: 1, payloadBytes: 0, metadataBytes: 1, files: 0, tombstone: true };
+    }
+  }
+  const legacy = JSON.stringify(state);
+  expect(Buffer.byteLength(legacy)).toBeGreaterThan(850_000);
+  expect(Buffer.byteLength(legacy)).toBeLessThan(1024 * 1024);
+  writeFileSync(stateFile, legacy);
+  await f.run({ op: "reserve", attemptId: otherId } as Omit<RetentionRequest, "studyId">);
+  expect(readFileSync(stateFile).length).toBeLessThan(10_000);
+  const sealed = await f.seal(), ref: RetainedRef = { attemptId, stage: "prepare", sha256: sealed.sha256! };
+  const page = await f.run({ op: "inspect", limit: 2 } as Omit<RetentionRequest, "studyId">);
+  expect(page.entries).toHaveLength(2); expect(page.total).toBe(4001); expect(page.remaining).toBe(3999);
+  expect(page.archivedReservations).toBe(250);
+  const archiveFile = join(f.root, studyId, ".retained", "archive", "00", "0000000000000001.json");
+  expect(JSON.parse(readFileSync(archiveFile, "utf8")).entries["0000000000000001/stage0"].tombstone).toBe(true);
+  await f.run({ op: "release", attemptId } as Omit<RetentionRequest, "studyId">);
+  const preview = await f.run({ op: "prune", refs: [ref] } as Omit<RetentionRequest, "studyId">);
+  expect((await f.run({ op: "prune", refs: [ref], fingerprint: preview.fingerprint } as Omit<RetentionRequest, "studyId">)).pruned).toBe(1);
+  expect((await f.run({ op: "inspect", offset: 4000, limit: 2 } as Omit<RetentionRequest, "studyId">)).entries).toHaveLength(1);
+  await expect(f.run({ op: "verify", ref } as Omit<RetentionRequest, "studyId">)).rejects.toThrow("pruned");
+}, 60_000);

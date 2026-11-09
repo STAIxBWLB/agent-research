@@ -1,17 +1,17 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { afterEach, expect, test } from "bun:test";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { gateDecide, init } from "../src/commands.ts";
-import { cancelAttempt, reconcileAttempts, runAttempt, showAttempt, type Attempt, type AttemptContext } from "../src/exp/attempts.ts";
-import { setExecutor, spawnRunner, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
+import { budgetUsage, cancelAttempt, reconcileAttempts, runAttempt, showAttempt, type Attempt, type AttemptContext } from "../src/exp/attempts.ts";
+import { buildContainerArgs, setExecutor, spawnRunner, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
 import { parseMetrics } from "../src/exp/metrics.ts";
-import { setProtocol } from "../src/exp/protocol.ts";
+import { canonical, setProtocol } from "../src/exp/protocol.ts";
 import { retainedOperation } from "../src/exp/retention.ts";
-import { readBytesBounded, readLedger, readTextBounded, sha256, withLock } from "../src/study.ts";
-import { fakeHttp } from "./helpers.ts";
+import { readBytesBounded, readLedger, readTextBounded, sha256, withLock, writeAtomic } from "../src/study.ts";
+import { deferred, fakeHttp } from "./helpers.ts";
 
 const pipelineRoots: string[] = [];
 afterEach(() => {
@@ -119,7 +119,7 @@ function runtime() {
     running[0]!.running = false; running[0]!.exitCode = 0; running[0]!.finishedAt = new Date(clock.value).toISOString();
   } };
 }
-async function setup() {
+async function setup(withCodeLink = false) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "ares-pipeline-"))); pipelineRoots.push(root);
   const dir = join(root, "study"), repo = join(root, "repo"), workdir = join(root, "executor");
   mkdirSync(repo, { mode: 0o700 }); mkdirSync(workdir, { mode: 0o700 });
@@ -127,7 +127,9 @@ async function setup() {
     const result = spawnSync("git", ["-C", repo, ...args], { encoding: "utf8", env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" } });
     if (result.status !== 0) throw new Error(`synthetic git failed: ${result.stderr}`); return result.stdout.trim();
   };
-  git(["init", "-q"]); writeFileSync(join(repo, "code.txt"), "synthetic frozen implementation"); git(["add", "code.txt"]);
+  git(["init", "-q"]); writeFileSync(join(repo, "code.txt"), "synthetic frozen implementation");
+  if (withCodeLink) symlinkSync("code.txt", join(repo, "code-link.txt"));
+  git(["add", "."]);
   git(["-c", "user.name=Synthetic Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "Synthetic fixture"]);
   const commit = git(["rev-parse", "HEAD"]);
   init(dir, { question: "Synthetic byte-exact stages?", mode: "experiment" }, { actor });
@@ -151,7 +153,20 @@ test("v2 fake executor runs three fresh stages in order with sealed input hashes
     const sealed = attempt.pipeline!.completed[index]!;
     const result = await retainedOperation(attempt.executor, { op: "verify", studyId: attempt.studyId, ref: sealed.ref }, fake.ctx.runner!);
     expect(result.manifest?.observed.containerId).toBe(sealed.record.containerId);
-    expect(result.manifest?.identity.inputHashes).toBeDefined();
+    const manifestPath = join(attempt.executor.workdir, attempt.studyId, ".retained", "objects", sealed.ref.attemptId, sealed.ref.stage, "manifest.json");
+    expect(sha256(readBytesBounded(manifestPath, 256 * 1024))).toBe(sealed.ref.sha256);
+    expect(result.sha256).toBe(sealed.ref.sha256);
+    if (index === 0) {
+      const taskProjection = { files: [{ path: "", bytes: 9, sha256: sha256("synthetic") }], directories: [] };
+      expect(result.manifest?.identity.inputHashes.data).toBe(sha256(canonical(taskProjection)));
+      expect(attempt.pipeline!.inputHashes.rows).toBe(sealed.ref.sha256);
+    } else if (index === 1) {
+      expect(result.manifest?.identity.inputHashes.rows).toBe(attempt.pipeline!.completed[0]!.ref.sha256);
+      expect(attempt.pipeline!.inputHashes.model).toBe(sealed.ref.sha256);
+    } else {
+      expect(result.manifest?.identity.inputHashes.model).toBe(attempt.pipeline!.completed[1]!.ref.sha256);
+      for (const parent of attempt.pipeline!.completed) expect(attempt.pipeline!.inputHashes[parent.name]).toBe(parent.ref.sha256);
+    }
     expect(result.manifest?.identity.codeTree).toBe(attempt.treeId);
   }
   expect(attempt.stage).toBe("evaluator");
@@ -201,9 +216,11 @@ test("v2 corrupt or missing retained bytes never launch a consumer or create eva
     // Train already owns a private materialization. Its success may seal, but evaluator must reverify all parents.
     attempt = await terminateAndReconcile(fixture, attempt);
     fake.finish();
-    await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow();
+    await reconcileAttempts(dir, fake.ctx);
     expect(fake.executed).toEqual(["prepare", "train", "predict"]);
-    expect(showAttempt(dir, attempt.id).metrics).toEqual([]);
+    const failed = showAttempt(dir, attempt.id);
+    expect(failed.status).toBe("failed"); expect(failed.reason).toBe("evidence-read"); expect(failed.metrics).toEqual([]);
+    expect((await retainedOperation(failed.executor, { op: "inspect", studyId: failed.studyId }, fake.ctx.runner!)).reservedBytes).toBe(0);
   }
 }, 20_000);
 
@@ -211,9 +228,11 @@ test("v2 code tampering between stages prevents the next consumer", async () => 
   const f = await setup(), attempt = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx);
   writeFileSync(join(attempt.paths.snapshot, "code.txt"), "tampered frozen implementation");
   f.fake.finish();
-  await expect(reconcileAttempts(f.dir, f.fake.ctx)).rejects.toThrow();
+  await reconcileAttempts(f.dir, f.fake.ctx);
   expect(f.fake.executed).toEqual(["prepare"]);
-  expect(showAttempt(f.dir, attempt.id).metrics).toEqual([]);
+  const failed = showAttempt(f.dir, attempt.id);
+  expect(failed.status).toBe("failed"); expect(failed.reason).toBe("evidence-read"); expect(failed.metrics).toEqual([]);
+  expect((await retainedOperation(failed.executor, { op: "inspect", studyId: failed.studyId }, f.fake.ctx.runner!)).reservedBytes).toBe(0);
 });
 
 test("v2 aggregate deadlines bound verification and reject a slow stopped evaluator", async () => {
@@ -227,7 +246,8 @@ test("v2 aggregate deadlines bound verification and reject a slow stopped evalua
   const collector = f.fake.ctx.collectEvaluation!;
   f.fake.ctx.collectEvaluation = async (current, runner) => { const result = await collector(current, runner); f.fake.clock.value += 121_000; return result; };
   attempt = await terminateAndReconcile(f, attempt);
-  expect(attempt.status).toBe("failed"); expect(attempt.metrics).toEqual([]);
+  expect(attempt.status).toBe("failed"); expect(attempt.reason).toBe("wall-clock"); expect(attempt.metrics).toEqual([]);
+  expect((await retainedOperation(attempt.executor, { op: "inspect", studyId: attempt.studyId }, f.fake.ctx.runner!)).reservedBytes).toBe(0);
 });
 
 test("v2 failed preparation releases reservations and terminal release can be reconciled", async () => {
@@ -250,3 +270,264 @@ test("v2 failed preparation releases reservations and terminal release can be re
   await reconcileAttempts(f.dir, f.fake.ctx);
   expect((await retainedOperation(attempt.executor, { op: "inspect", studyId: attempt.studyId }, original)).reservedBytes).toBe(0);
 }, 20_000);
+
+function retentionRequest(request: ProcessRequest): Record<string, unknown> | undefined {
+  if (request.command !== "python3" || !(request.stdin instanceof Uint8Array)) return undefined;
+  return JSON.parse(new TextDecoder().decode(request.stdin)) as Record<string, unknown>;
+}
+async function assertNoReservation(f: Awaited<ReturnType<typeof setup>>, attempt: Attempt) {
+  expect((await retainedOperation(attempt.executor, { op: "inspect", studyId: attempt.studyId }, f.fake.ctx.runner!)).reservedBytes).toBe(0);
+}
+
+test("v2 missing declared output and stopped-stage wall expiry terminate with their causes and release capacity", async () => {
+  for (const cause of ["missing-output", "wall-expiry"] as const) {
+    const f = await setup();
+    const attempt = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx);
+    if (cause === "missing-output") unlinkSync(join(attempt.paths.output, "rows.txt"));
+    f.fake.finish();
+    if (cause === "wall-expiry") f.fake.clock.value += 121_000;
+    await reconcileAttempts(f.dir, f.fake.ctx);
+    const failed = showAttempt(f.dir, attempt.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.reason).toBe(cause === "missing-output" ? "evidence-read" : "wall-clock");
+    expect(failed.metrics).toEqual([]); expect(f.fake.executed).toEqual(["prepare"]);
+    await assertNoReservation(f, failed);
+  }
+}, 20_000);
+
+test("v2 a negative remaining metadata allowance is a terminal artifact-limit failure", async () => {
+  const f = await setup(), attempt = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx);
+  // Synthetic persisted metadata represents earlier stage outputs using the shared ceiling.
+  // An existing evidence receipt skips recollection and reaches the seal's negative allowance.
+  const log = { path: join(f.workdir, "synthetic.log"), sha256: sha256(""), bytes: 0, truncated: false };
+  attempt.stages.candidate!.evidence = { logs: { stdout: log, stderr: log }, outputs: [] };
+  attempt.outputs = Array.from({ length: 76 }, (_, index) => ({ path: join(f.workdir, `${index}-${"x".repeat(3500)}`), sha256: sha256(""), bytes: 0 }));
+  expect(Buffer.byteLength(JSON.stringify(attempt.outputs, null, 2))).toBeGreaterThan(256 * 1024);
+  const record = join(f.dir, "runs", attempt.run, "attempts", `${attempt.id}.json`);
+  writeAtomic(record, JSON.stringify(attempt, null, 2) + "\n", 1024 * 1024);
+  f.fake.finish(); await reconcileAttempts(f.dir, f.fake.ctx);
+  const failed = showAttempt(f.dir, attempt.id);
+  expect(failed.status).toBe("failed"); expect(failed.reason).toBe("artifact-limit");
+  expect(f.fake.executed).toEqual(["prepare"]); await assertNoReservation(f, failed);
+});
+
+test("v2 preclaim materialization integrity and budget refusals fail without launching a descendant", async () => {
+  for (const cause of ["integrity", "budget"] as const) {
+    const f = await setup(), attempt = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx), original = f.fake.ctx.runner!;
+    const interrupted: AttemptContext = { ...f.fake.ctx, runner: async request => {
+      const operation = retentionRequest(request);
+      if (operation?.op === "materialize" && operation.stage === "train") {
+        if (cause === "budget") f.fake.clock.value += 121_000;
+        return { exitCode: 1, stdout: '{"error":"retained payload integrity mismatch"}', stderr: "" };
+      }
+      return original(request);
+    } };
+    f.fake.finish(); await reconcileAttempts(f.dir, interrupted);
+    const failed = showAttempt(f.dir, attempt.id);
+    expect(failed.status).toBe("failed"); expect(failed.reason).toBe(cause === "integrity" ? "evidence-read" : "wall-clock");
+    expect(f.fake.executed).toEqual(["prepare"]); expect(failed.metrics).toEqual([]);
+    await assertNoReservation(f, failed);
+  }
+}, 20_000);
+
+test("v2 postclaim transient materialization refusal stays retryable rather than becoming unknown lost", async () => {
+  for (const cause of ["flock", "ssh", "timeout"] as const) {
+    const f = await setup(), attempt = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx), original = f.fake.ctx.runner!;
+    let trainMaterializations = 0;
+    const interrupted: AttemptContext = { ...f.fake.ctx, runner: async request => {
+      const operation = retentionRequest(request);
+      if (operation?.op === "materialize" && operation.stage === "train" && ++trainMaterializations === 2) {
+        if (cause === "ssh") return { exitCode: 255, stdout: "", stderr: "synthetic SSH connection dropped" };
+        if (cause === "timeout") return { exitCode: -1, stdout: "", stderr: "", timedOut: true };
+        return { exitCode: 1, stdout: '{"error":"retention operation busy; retry after its owner finishes"}', stderr: "" };
+      }
+      return original(request);
+    } };
+    f.fake.finish(); await reconcileAttempts(f.dir, interrupted);
+    const pending = showAttempt(f.dir, attempt.id);
+    expect(trainMaterializations).toBe(2); expect(f.fake.executed).toEqual(["prepare"]);
+    expect(pending.status).toBe("running"); expect(pending.reason).toBe("executor-preflight");
+    expect(pending.stages.candidate?.launchPending).toBe(true); expect(pending.launching).toBeUndefined();
+    expect(pending.error).toBeDefined();
+    await reconcileAttempts(f.dir, f.fake.ctx);
+    const recovered = showAttempt(f.dir, attempt.id);
+    expect(recovered.status).toBe("running"); expect(recovered.reason).not.toBe("lost");
+    expect(recovered.stages.candidate?.containerId).toBeDefined();
+    expect(recovered.stages.candidate?.launchPending).toBeUndefined();
+    expect(f.fake.executed).toEqual(["prepare", "train"]);
+    expect(readLedger(f.dir).filter(event => event.type === "attempt.unknown")).toHaveLength(0);
+  }
+}, 30_000);
+
+test("v2 reservation admission is fenced against concurrent recordless reservation reconciliation", async () => {
+  const f = await setup(), original = f.fake.ctx.runner!;
+  let concurrent: Promise<Attempt[]> | undefined, releasedWithoutRecord = false;
+  const interleaved: AttemptContext = { ...f.fake.ctx, runner: async request => {
+    const operation = retentionRequest(request);
+    if (operation?.op === "release") {
+      const record = join(f.dir, "runs", "main", "attempts", `${String(operation.attemptId)}.json`);
+      if (!existsSync(record)) releasedWithoutRecord = true;
+    }
+    const result = await original(request);
+    if (operation?.op === "reserve") {
+      expect(existsSync(join(f.dir, ".ares.lock"))).toBe(true);
+      // Start the contender without awaiting it while admission owns the study lock.
+      concurrent = reconcileAttempts(f.dir, interleaved).catch(error => {
+        expect(error instanceof Error).toBe(true);
+        expect((error as Error).message).toMatch(/lock|active/);
+        return [];
+      });
+      await Promise.resolve();
+    }
+    return result;
+  } };
+  const attempt = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, interleaved);
+  await concurrent;
+  expect(releasedWithoutRecord).toBe(false); expect(attempt.status).toBe("running");
+  const view = await retainedOperation(attempt.executor, { op: "inspect", studyId: attempt.studyId }, original);
+  expect(view.reservedBytes).toBeGreaterThan(0); expect(f.fake.executed).toEqual(["prepare"]);
+});
+
+test("v2 GPU accounting includes every completed candidate stage and the current evaluator", async () => {
+  const f = await setup(); let attempt = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx);
+  for (let index = 0; index < 3; index++) attempt = await terminateAndReconcile(f, attempt);
+  const synthetic = structuredClone(attempt), start = Date.parse(attempt.startedAt);
+  synthetic.pipeline!.completed.forEach((parent, index) => {
+    parent.record.startedAt = new Date(start + index * 10_000).toISOString();
+    parent.record.endedAt = new Date(start + (index + 1) * 10_000).toISOString();
+    parent.record.limits = { ...parent.record.limits, gpus: 2 };
+  });
+  synthetic.stages.evaluator!.startedAt = new Date(start + 30_000).toISOString();
+  synthetic.stages.evaluator!.endedAt = new Date(start + 40_000).toISOString();
+  synthetic.stages.evaluator!.limits = { ...synthetic.stages.evaluator!.limits, gpus: 2 };
+  synthetic.endedAt = new Date(start + 40_000).toISOString();
+  const usage = budgetUsage([synthetic], start + 40_000);
+  expect(usage.gpuHours).toBeCloseTo(80 / 3600, 10); expect(usage.wallHours).toBeCloseTo(40 / 3600, 10);
+});
+
+
+test("v2 frozen Git code snapshots hash symlinks as links without following them", async () => {
+  const f = await setup(true), attempt = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx);
+  expect(attempt.status).toBe("running"); expect(f.fake.executed).toEqual(["prepare"]);
+  const link = join(attempt.paths.snapshot, "code-link.txt");
+  expect(lstatSync(link).isSymbolicLink()).toBe(true);
+  unlinkSync(link); symlinkSync("other-code.txt", link);
+  f.fake.finish(); await reconcileAttempts(f.dir, f.fake.ctx);
+  const failed = showAttempt(f.dir, attempt.id);
+  expect(failed.status).toBe("failed"); expect(failed.reason).toBe("evidence-read");
+  expect(f.fake.executed).toEqual(["prepare"]); await assertNoReservation(f, failed);
+});
+
+test("v2 a stale preflight cannot claim or overwrite the next candidate stage", async () => {
+  const f = await setup(), initial = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx), original = f.fake.ctx.runner!;
+  const trainEntered = deferred(), resumeTrain = deferred(), predictEntered = deferred(), resumePredict = deferred();
+  let blockedTrain = false, blockedPredict = false;
+  const staleContext: AttemptContext = { ...f.fake.ctx, runner: async request => {
+    const result = await original(request), operation = retentionRequest(request);
+    if (!blockedTrain && operation?.op === "materialize" && operation.stage === "train") {
+      blockedTrain = true; trainEntered.resolve(); await resumeTrain.promise;
+    }
+    return result;
+  } };
+  f.fake.finish();
+  const oldPreflight = reconcileAttempts(f.dir, staleContext);
+  await trainEntered.promise;
+  await reconcileAttempts(f.dir, f.fake.ctx);
+  expect(f.fake.executed).toEqual(["prepare", "train"]);
+  f.fake.finish();
+  const nextContext: AttemptContext = { ...f.fake.ctx, runner: async request => {
+    const result = await original(request), operation = retentionRequest(request);
+    if (!blockedPredict && operation?.op === "materialize" && operation.stage === "predict") {
+      blockedPredict = true; predictEntered.resolve(); await resumePredict.promise;
+    }
+    return result;
+  } };
+  const nextPreflight = reconcileAttempts(f.dir, nextContext);
+  await predictEntered.promise;
+  const before = showAttempt(f.dir, initial.id);
+  expect(before.pipeline?.index).toBe(2); expect(before.stages.candidate?.launchPending).toBe(true);
+  resumeTrain.resolve(); await oldPreflight;
+  const after = showAttempt(f.dir, initial.id);
+  expect(after.pipeline?.index).toBe(2);
+  expect(after.pipeline?.inputHashes).toEqual(before.pipeline!.inputHashes);
+  expect(after.pipeline?.preflightRevision).toBe(before.pipeline!.preflightRevision);
+  expect(after.stages.candidate?.argv).toEqual(["/synthetic", "predict"]);
+  expect(after.stages.candidate?.launchPending).toBe(true);
+  expect(f.fake.executed).toEqual(["prepare", "train"]);
+  resumePredict.resolve(); await nextPreflight;
+  expect(f.fake.executed).toEqual(["prepare", "train", "predict"]);
+  expect(showAttempt(f.dir, initial.id).pipeline?.inputHashes.model).toBe(showAttempt(f.dir, initial.id).pipeline!.completed[1]!.ref.sha256);
+}, 20_000);
+
+test("v2 a stale integrity error cannot finish a competing uncertain launch", async () => {
+  const f = await setup(), initial = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx), original = f.fake.ctx.runner!;
+  const entered = deferred(), resume = deferred();
+  let blocked = false;
+  const staleContext: AttemptContext = { ...f.fake.ctx, runner: async request => {
+    const result = await original(request), operation = retentionRequest(request);
+    if (!blocked && operation?.op === "materialize" && operation.stage === "train") {
+      blocked = true; entered.resolve(); await resume.promise;
+      return { exitCode: 1, stdout: '{"error":"retained payload integrity mismatch"}', stderr: "" };
+    }
+    return result;
+  } };
+  f.fake.finish();
+  const stalePreflight = reconcileAttempts(f.dir, staleContext);
+  await entered.promise;
+  const pending = showAttempt(f.dir, initial.id);
+  expect(pending.pipeline?.index).toBe(1);
+  const args = buildContainerArgs({ protocol: pending.protocol, stage: "candidate", studyId: pending.studyId, attemptId: pending.id,
+    user: pending.stages.candidate!.user, seed: pending.seed, paths: pending.paths,
+    pipeline: { name: "train", inputRoot: join(f.workdir, pending.studyId, pending.id, "stages", "train", "inputs"), seed: true } });
+  // Simulate a competing claimed start whose Docker response and follow-up inspection were lost.
+  await original({ command: "docker", args });
+  await withLock(f.dir, () => {
+    const current = showAttempt(f.dir, initial.id);
+    current.pipeline!.preflightRevision = (current.pipeline!.preflightRevision ?? 0) + 1;
+    current.pipeline!.inputHashes = { rows: current.pipeline!.completed[0]!.ref.sha256 };
+    current.reason = "executor-start-uncertain"; current.error = "synthetic start response and inspection unavailable";
+    delete current.launching; delete current.stages.candidate!.launchPending; delete current.stages.candidate!.containerId;
+    writeAtomic(join(f.dir, "runs", current.run, "attempts", `${current.id}.json`), JSON.stringify(current, null, 2) + "\n", 1024 * 1024);
+  });
+  resume.resolve(); await stalePreflight;
+  const uncertain = showAttempt(f.dir, initial.id);
+  expect(uncertain.status).toBe("running"); expect(uncertain.reason).toBe("executor-start-uncertain");
+  expect(uncertain.stages.candidate?.launchPending).toBeUndefined();
+  expect([...f.fake.containers.values()].filter(container => container.running)).toHaveLength(1);
+  expect(f.fake.executed).toEqual(["prepare", "train"]);
+  await expect(runAttempt(f.dir, { repo: f.repo, commit: f.commit, seed: 2, detach: true }, f.fake.ctx)).rejects.toThrow("another attempt is running");
+  expect((await retainedOperation(uncertain.executor, { op: "inspect", studyId: uncertain.studyId }, original)).reservedBytes).toBeGreaterThan(0);
+}, 20_000);
+
+test("v2 crossing the deadline after evidence capture fails as wall-clock before sealing", async () => {
+  const f = await setup(), attempt = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx);
+  const collect = f.fake.ctx.collectStageEvidence!;
+  f.fake.ctx.collectStageEvidence = async (current, stage, runner) => {
+    const evidence = await collect(current, stage, runner);
+    f.fake.clock.value += 121_000;
+    return evidence;
+  };
+  f.fake.finish(); await reconcileAttempts(f.dir, f.fake.ctx);
+  const failed = showAttempt(f.dir, attempt.id);
+  expect(failed.status).toBe("failed"); expect(failed.reason).toBe("wall-clock");
+  expect(failed.pipeline?.completed).toEqual([]); expect(failed.metrics).toEqual([]);
+  expect(f.fake.executed).toEqual(["prepare"]); await assertNoReservation(f, failed);
+});
+
+test("v2 a kill acknowledgement without observed termination keeps the attempt and reservation active", async () => {
+  const f = await setup(), attempt = await runAttempt(f.dir, { repo: f.repo, commit: f.commit, detach: true }, f.fake.ctx), original = f.fake.ctx.runner!;
+  f.fake.clock.value += 121_000;
+  const killAcknowledgedOnly: AttemptContext = { ...f.fake.ctx, runner: request => request.command === "docker" && request.args[0] === "kill"
+    ? Promise.resolve({ exitCode: 0, stdout: "", stderr: "" }) : original(request) };
+  await expect(reconcileAttempts(f.dir, killAcknowledgedOnly)).rejects.toThrow();
+  const live = showAttempt(f.dir, attempt.id);
+  expect(live.status).toBe("running"); expect(live.error).toContain("termination is not yet observed");
+  expect([...f.fake.containers.values()].some(container => container.running)).toBe(true);
+  expect((await retainedOperation(live.executor, { op: "inspect", studyId: live.studyId }, original)).reservedBytes).toBeGreaterThan(0);
+  await expect(runAttempt(f.dir, { repo: f.repo, commit: f.commit, seed: 2, detach: true }, f.fake.ctx)).rejects.toThrow("another attempt is running");
+  await reconcileAttempts(f.dir, f.fake.ctx);
+  const stopped = showAttempt(f.dir, attempt.id);
+  expect(stopped.status).toBe("failed"); expect(stopped.reason).toBe("wall-clock");
+  expect([...f.fake.containers.values()].some(container => container.running)).toBe(false);
+  await assertNoReservation(f, stopped);
+});

@@ -209,7 +209,7 @@ Each candidate receives frozen code at `/workspace`, named read-only inputs at `
 
 The attempt shares 500 output files, 256 MiB payload, 256 KiB total output metadata including manifest sidecars, a 1 MiB record, and aggregate wall/compute budgets. Seals are published atomically after observed successful termination and bounded verification. Consumption rechecks code, task and parent snapshots and copies selected inputs to private read-only snapshots. Same-user/executor tampering is an integrity limit; permissions alone are not attestation.
 
-Retention defaults to a 1 GiB study cap including in-flight reservations. Configure an explicit cap with `ares executor set <dir> --kind local --workdir PATH --retention-cap-bytes BYTES` (up to 1 TiB). Full capacity refuses admission and never evicts evidence. `ares retention inspect <dir> --json` returns identities, capacity, reservations and tombstones. Save selected `{attemptId,stage,sha256}` references as a JSON array, preview `ares retention prune <dir> --file refs.json --json`, then add `--confirm FINGERPRINT` for the exact reviewed selection. Active producers/consumers refuse disposal; tombstones preserve provenance. Current design approval is checked at confirmation.
+Retention defaults to a 1 GiB study cap including in-flight reservations. Configure an explicit cap with `ares executor set <dir> --kind local --workdir PATH --retention-cap-bytes BYTES` (up to 1 TiB). Full capacity refuses admission and never evicts evidence. `ares retention inspect <dir> --json` returns a bounded page of identities, capacity, active reservations and archived-history counts; use `--offset N --limit N` to page through retained evidence and tombstones. Released history is preserved in immutable shards, keeping the active index bounded; administration bytes count against quota. Save selected `{attemptId,stage,sha256}` references as a JSON array, preview `ares retention prune <dir> --file refs.json --json`, then add `--confirm FINGERPRINT` for the exact reviewed selection. Active producers/consumers refuse disposal; tombstones preserve provenance. Current design approval is checked at confirmation.
 
 After an interrupted release, explicit `ares attempt reconcile <dir>` can free terminal or orphan reservation holds only after the executor confirms no owned live container. Unknown work is never rerun. Prune commits executor tombstones before disposal; a crash before the local audit commit leaves authoritative remote tombstones and no false local success or automatic approval. Inspect and preview again before retrying. This is not an atomic transaction spanning the executor and study filesystem.
 
@@ -660,7 +660,7 @@ The implemented CLI surface below comes from `src/commands-table.ts`; `ares --he
 
 <!-- facts:commands -->
 ```text
-ares retention inspect <dir> [--json]
+ares retention inspect <dir> [--offset N] [--limit N] [--json]
 ares retention prune <dir> --file PATH|- [--confirm FINGERPRINT] [--json]
 ares skill check <dir> <name> [--json]
 ares harness close <dir> <round> --file PATH|- [--confirm FINGERPRINT] [--json]

@@ -1,3 +1,4 @@
+import { run as runCli } from "../src/cli.ts";
 import { expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -87,4 +88,16 @@ test("invalid reference selection and unsupported study mode refuse before execu
   const survey = tempDir(); init(survey, {question: "Synthetic?", mode: "survey"}, base);
   await expect(retentionInspect(survey, ctx)).rejects.toThrow("mode must be experiment");
   expect(fake.requests).toEqual([]);
+});
+
+
+test("retention inventory pages are shared by CLI and MCP and reject unsafe bounds before transport", async () => {
+  const dir = await study(), fake = transport(), ctx = { ...base, runner: fake.runner }, server = createAresMcp({}, base.http, { runner: fake.runner });
+  expect(await server.handlers.ares_retention_inspect!({ study: dir, offset: 200, limit: 25 })).toEqual(await retentionInspect(dir, ctx, { offset: 200, limit: 25 }));
+  const cli = await runCli(["retention", "inspect", dir, "--offset", "200", "--limit", "25", "--json"], {}, { http: base.http, runner: fake.runner });
+  expect(JSON.parse(cli.text).op).toBe("inspect");
+  expect(fake.requests.map(request => [request.offset, request.limit])).toEqual([[200, 25], [200, 25], [200, 25]]);
+  const before = fake.requests.length;
+  for (const options of [{ offset: -1 }, { offset: 16000001 }, { limit: 0 }, { limit: 501 }]) await expect(retentionInspect(dir, ctx, options)).rejects.toThrow("offset");
+  expect(fake.requests).toHaveLength(before);
 });

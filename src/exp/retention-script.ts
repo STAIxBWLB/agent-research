@@ -3,6 +3,8 @@ export const RETENTION_SCRIPT = String.raw`
 import os,sys,json,re,stat,hashlib,uuid,fcntl,datetime
 MAX_BYTES=256*1024*1024
 MAX_META=256*1024
+MAX_ADMIN=256*1024
+ARCHIVE_BYTES=64*1024
 MAX_FILES=500
 STATE_BYTES=1024*1024
 CAP=1024*1024*1024
@@ -70,13 +72,13 @@ def atomic(path,value,bound):
         os.replace(tmp,path);syncdir(os.path.dirname(path))
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
-def inventory(root,copy_to=None,max_bytes=MAX_BYTES,max_files=MAX_FILES,max_directories=1000):
+def inventory(root,copy_to=None,max_bytes=MAX_BYTES,max_files=MAX_FILES,max_directories=1000,code=False):
     files=[]; directories=[]; count=0; total=0
     def walk(path,rel,depth):
         nonlocal count,total
         if depth>64: fail('artifact nesting exceeds bound')
         before=os.lstat(path)
-        if stat.S_ISLNK(before.st_mode) or before.st_uid!=os.getuid(): fail('artifact link or ownership refused')
+        if (stat.S_ISLNK(before.st_mode) and not code) or before.st_uid!=os.getuid(): fail('artifact link or ownership refused')
         if stat.S_ISDIR(before.st_mode):
             if len(directories)>=max_directories: fail('artifact directory bound exceeded')
             if rel: directories.append(rel)
@@ -88,8 +90,15 @@ def inventory(root,copy_to=None,max_bytes=MAX_BYTES,max_files=MAX_FILES,max_dire
                     entries.append(entry.name)
             for entry in sorted(entries):
                 child=entry if not rel else rel+'/'+entry
-                relative(child)
+                if code:
+                    if len(os.fsencode(child))>4096: fail('code snapshot path bound exceeded')
+                else: relative(child)
                 walk(os.path.join(path,entry),child,depth+1)
+        elif code and stat.S_ISLNK(before.st_mode):
+            if count>=max_files: fail('code snapshot entry bound exceeded')
+            target=os.fsencode(os.readlink(path));count+=1;total+=len(target)
+            if total>max_bytes: fail('code snapshot payload bound exceeded')
+            files.append({'path':rel,'bytes':len(target),'sha256':digest(target),'kind':'symlink'})
         elif stat.S_ISREG(before.st_mode):
             if before.st_nlink!=1 or count>=max_files or before.st_size>max_bytes-total: fail('artifact file or payload bound exceeded')
             count+=1; amount=0; h=hashlib.sha256()
@@ -112,7 +121,9 @@ def inventory(root,copy_to=None,max_bytes=MAX_BYTES,max_files=MAX_FILES,max_dire
             finally:
                 os.close(fd)
                 if target: target.close()
-            total+=amount;files.append({'path':rel,'bytes':amount,'sha256':h.hexdigest()})
+            total+=amount;record={'path':rel,'bytes':amount,'sha256':h.hexdigest()}
+            if code: record['mode']=stat.S_IMODE(before.st_mode)
+            files.append(record)
         else: fail('artifact special file refused')
         if stamp(os.lstat(path))!=stamp(before): fail('artifact changed during verification')
     physical(root)
@@ -186,9 +197,79 @@ def key(ref):
     return ident(ref['attemptId'],'attempt')+'/'+ident(ref['stage'])
 def ref_for(entry):
     return {'attemptId':entry['attemptId'],'stage':entry['stage'],'sha256':entry['sha256']}
+def archive_path(store,aid):
+    ident(aid,'attempt')
+    return os.path.join(store,'archive',aid[:2],aid+'.json')
+def immutable(path,value,bound=MAX_META):
+    if os.path.lexists(path):
+        if read_bytes(path,bound)!=encoded(value): fail('immutable retention provenance mismatch')
+    else:
+        atomic(path,value,bound);os.chmod(path,0o400)
+def read_archive(store,aid):
+    path=archive_path(store,aid)
+    if not os.path.lexists(path): return None
+    if os.path.realpath(path)!=path: fail('unsafe retention archive path')
+    record=json.loads(read_bytes(path,ARCHIVE_BYTES))
+    if record.get('v')!=1 or record.get('attemptId')!=aid or not isinstance(record.get('entries'),dict): fail('invalid retention archive shard')
+    return record
+def archives(store):
+    base=os.path.join(store,'archive')
+    if not os.path.lexists(base): return
+    physical(base,True);count=0
+    with os.scandir(base) as prefixes:
+        for prefix in prefixes:
+            if not re.fullmatch(r'[a-f0-9]{2}',prefix.name): fail('invalid retention archive prefix')
+            physical(prefix.path,True)
+            with os.scandir(prefix.path) as records:
+                for item in records:
+                    if not re.fullmatch(r'[a-f0-9]{16}\.json',item.name) or item.name[:2]!=prefix.name: fail('invalid retention archive filename')
+                    count+=1
+                    if count>1000000: fail('retention archive exceeds bounded record count; archive this study before adding evidence')
+                    aid=item.name[:-5]
+                    yield aid,read_archive(store,aid)
+def effective_entry(entry,store):
+    result=dict(entry);result['_adminBytes']=0;root=os.path.join(store,'objects',ident(entry['attemptId'],'attempt'),ident(entry['stage']))
+    for name in ('tombstone','disposed'):
+        marker=os.path.join(root,name+'.json')
+        if os.path.lexists(marker):
+            if os.path.realpath(marker)!=marker: fail('unsafe retention disposal provenance')
+            marker_bytes=read_bytes(marker,4096);result['_adminBytes']+=len(marker_bytes)
+            record=json.loads(marker_bytes)
+            if record!={'v':1,'ref':ref_for(entry)}: fail('retention disposal provenance mismatch')
+            result['tombstone']=True
+            if name=='disposed':
+                if os.path.lexists(os.path.join(root,'data')): fail('disposed retention payload unexpectedly remains')
+                result['bytes']=result['metadataBytes']
+    return result
+def all_entries(state,store):
+    for entry in state['entries'].values(): yield effective_entry(entry,store)
+    for aid,record in archives(store):
+        if aid in state['attempts']: continue
+        for entry in record['entries'].values(): yield effective_entry(entry,store)
+def find_entry(ref,state,store):
+    k=key(ref)
+    entry=state['entries'].get(k)
+    if entry is None:
+        archive=read_archive(store,ref['attemptId'])
+        entry=archive['entries'].get(k) if archive else None
+    if entry and (entry['attemptId']!=ref['attemptId'] or entry['stage']!=ref['stage']): fail('retention index provenance mismatch')
+    return effective_entry(entry,store) if entry else None
+def compact(state,store):
+    released=[aid for aid,a in state['attempts'].items() if not a['active'] and a['reservation']==0]
+    if not released: return
+    base=mkdir(os.path.join(store,'archive'))
+    for aid in released:
+        entries={k:e for k,e in state['entries'].items() if e['attemptId']==aid}
+        if len(entries)>16: fail('unsupported released attempt stage count; retain the original index for compatible recovery')
+        record={'v':1,'attemptId':aid,'reservation':state['attempts'][aid],'entries':entries}
+        prefix=mkdir(os.path.join(base,aid[:2]));immutable(archive_path(store,aid),record,ARCHIVE_BYTES)
+    # Publishing a shard before removing its active-index rows is crash-safe: readers deduplicate by attempt id.
+    for aid in released: del state['attempts'][aid]
+    state['entries']={k:e for k,e in state['entries'].items() if e['attemptId'] not in released}
+
 def manifest_for(ref,state,store):
     k=key(ref);hexhash(ref['sha256'])
-    entry=state['entries'].get(k)
+    entry=find_entry(ref,state,store)
     if not entry or entry['tombstone'] or entry['sha256']!=ref['sha256']: fail('retained source missing, pruned or digest mismatch')
     root=physical(os.path.join(store,'objects',entry['attemptId'],entry['stage']))
     raw=read_bytes(os.path.join(root,'manifest.json'),MAX_META)
@@ -210,8 +291,8 @@ def perform(q):
     base=physical(sys.argv[1],True)
     study_root=os.path.join(base,study);store=os.path.join(study_root,'.retained')
     if op=='reserve':
-        amount=q.get('reservationBytes',MAX_BYTES+MAX_META)
-        if type(amount)!=int or amount<1 or amount>MAX_BYTES+MAX_META: fail('invalid retention cap or reservation')
+        amount=q.get('reservationBytes',MAX_BYTES+MAX_META+MAX_ADMIN)
+        if type(amount)!=int or amount<1 or amount>MAX_BYTES+MAX_META+MAX_ADMIN: fail('invalid retention cap or reservation')
         requested_cap=q.get('capBytes',CAP)
         if type(requested_cap)!=int or requested_cap<1 or requested_cap>1024*CAP: fail('invalid retention cap or reservation')
         # New-store admission has no prior state: reject impossible capacity before any directory creation.
@@ -227,44 +308,57 @@ def perform(q):
         lock_fd=os.open(lock,os.O_RDWR|os.O_CREAT|os.O_NOFOLLOW,0o600)
         lock_stat=os.fstat(lock_fd)
         if not stat.S_ISREG(lock_stat.st_mode) or lock_stat.st_nlink!=1 or lock_stat.st_uid!=os.getuid(): fail('invalid retention lock')
-        fcntl.flock(lock_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        try: fcntl.flock(lock_fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        except BlockingIOError: fail('retention operation busy; retry after the current owner finishes')
+    except ValueError: raise
     except Exception: fail('retention operation active or invalid lock; reconcile its owner before retrying')
     try:
         state_path=os.path.join(store,'state.json')
         if os.path.exists(state_path): state=json.loads(read_bytes(state_path,STATE_BYTES))
         else: state={'v':1,'capBytes':CAP,'attempts':{},'entries':{}}
         if state.get('v')!=1: fail('unsupported retention state')
-        def save(): atomic(state_path,state,STATE_BYTES)
+        def save():
+            compact(state,store);atomic(state_path,state,STATE_BYTES)
+        if op not in ('inspect','verify','snapshot'): compact(state,store)
         def usage():
-            used=sum(e['bytes'] for e in state['entries'].values())
+            used=0;administrative=0
+            for entry in all_entries(state,store): used+=entry['bytes'];administrative+=entry.get('_adminBytes',0)
+            administrative+=sum(os.lstat(archive_path(store,aid)).st_size for aid,_ in archives(store))
+            used+=administrative
             remaining=0
             for aid,a in state['attempts'].items():
                 own=sum(e['bytes'] for e in state['entries'].values() if e['attemptId']==aid and not e['tombstone'])
                 remaining+=max(0,a['reservation']-own)
-            return used,remaining
+            return used,remaining,administrative
         if op=='reserve':
-            aid=ident(q.get('attemptId'),'attempt');amount=q.get('reservationBytes',MAX_BYTES+MAX_META);cap=q.get('capBytes',state['capBytes'])
-            if type(amount)!=int or amount<1 or amount>MAX_BYTES+MAX_META or type(cap)!=int or cap<1 or cap>1024*CAP: fail('invalid retention cap or reservation')
+            aid=ident(q.get('attemptId'),'attempt');amount=q.get('reservationBytes',MAX_BYTES+MAX_META+MAX_ADMIN);cap=q.get('capBytes',state['capBytes'])
+            if type(amount)!=int or amount<1 or amount>MAX_BYTES+MAX_META+MAX_ADMIN or type(cap)!=int or cap<1 or cap>1024*CAP: fail('invalid retention cap or reservation')
+            if read_archive(store,aid) is not None and aid not in state['attempts']: fail('completed reservation cannot be reopened')
             if aid in state['attempts']:
                 if not state['attempts'][aid]['active']: fail('completed reservation cannot be reopened')
                 if state['attempts'][aid]['reservation']!=amount or state['capBytes']!=cap: fail('reservation identity changed during duplicate admission')
                 return {'op':op}
-            used,reserved=usage()
+            used,reserved,administrative=usage()
             if used+reserved+amount>cap: fail('study retention cap full; prune explicit evidence or raise cap before admission')
             state['capBytes']=cap;state['attempts'][aid]={'reservation':amount,'active':True,'consumers':[]};save()
             return {'op':op}
         if op=='release':
             aid=ident(q.get('attemptId'),'attempt');a=state['attempts'].get(aid)
-            if not a: fail('reservation missing')
+            if not a:
+                if read_archive(store,aid) is not None: return {'op':op}
+                fail('reservation missing')
             a['reservation']=0;a['active']=False;a['consumers']=[];save();return {'op':op}
         if op=='inspect':
-            used,reserved=usage()
-            entries=[]
-            for k,e in sorted(state['entries'].items()):
-                active=state['attempts'].get(e['attemptId'],{}).get('active',False) or any(a['active'] and k in a['consumers'] for a in state['attempts'].values())
-                entries.append({'ref':ref_for(e),'bytes':e['bytes'],'tombstone':e['tombstone'],'active':active})
+            used,reserved,administrative=usage();offset=q.get('offset',0);limit=q.get('limit',200)
+            if type(offset)!=int or offset<0 or offset>16000000 or type(limit)!=int or limit<1 or limit>500: fail('invalid retention inventory page')
+            entries=[];total=0
+            for e in all_entries(state,store):
+                active=state['attempts'].get(e['attemptId'],{}).get('active',False) or any(a['active'] and key(ref_for(e)) in a['consumers'] for a in state['attempts'].values())
+                if total>=offset and len(entries)<limit: entries.append({'ref':ref_for(e),'bytes':e['bytes'],'tombstone':e['tombstone'],'active':active})
+                total+=1
             reservations=[{'attemptId':aid,'active':a['active'],'reservationBytes':a['reservation']} for aid,a in sorted(state['attempts'].items())]
-            result={'op':op,'entries':entries,'reservations':reservations,'usedBytes':used,'reservedBytes':reserved,'capBytes':state['capBytes']}
+            archived=sum(1 for aid,_ in archives(store) if aid not in state['attempts'])
+            result={'op':op,'entries':entries,'reservations':reservations,'archivedReservations':archived,'offset':offset,'limit':limit,'total':total,'remaining':max(0,total-offset-len(entries)),'usedBytes':used,'reservedBytes':reserved,'administrativeBytes':administrative,'capBytes':state['capBytes']}
             if len(encoded(result))>STATE_BYTES: fail('retention inventory exceeds response bound')
             return result
         if op=='verify':
@@ -276,19 +370,21 @@ def perform(q):
             keys=[key(ref) for ref in refs]
             if len(keys)!=len(set(keys)): fail('duplicate prune references')
             for ref in refs:
-                k=key(ref);entry=state['entries'].get(k)
+                k=key(ref);entry=find_entry(ref,state,store)
                 if not entry or entry['sha256']!=hexhash(ref['sha256']): fail('prune source identity missing')
                 if state['attempts'].get(entry['attemptId'],{}).get('active',False) or any(a['active'] and k in a['consumers'] for a in state['attempts'].values()): fail('active producer or consumer prevents prune')
-            fingerprint=digest(encoded({'state':state,'refs':sorted(refs,key=key)}))
+            fingerprint=digest(encoded({'state':state,'refs':sorted(refs,key=key),'entries':[find_entry(ref,state,store) for ref in sorted(refs,key=key)]}))
             if q.get('fingerprint') is None: return {'op':op,'fingerprint':fingerprint,'pruned':0}
             if q['fingerprint']!=fingerprint: fail('stale prune fingerprint')
-            # Commit tombstones before deleting bytes: a crash cannot leave a consumable half-disposed seal.
-            for k in keys: state['entries'][k]['tombstone']=True
-            save()
+            # Immutable tombstones precede byte deletion; a crash cannot expose half-disposed payloads.
             for ref in refs:
-                root=os.path.join(store,'objects',ref['attemptId'],ref['stage'],'data')
-                if os.path.exists(root): writable_remove(root)
-                state['entries'][key(ref)]['bytes']=state['entries'][key(ref)]['metadataBytes']
+                root=physical(os.path.join(store,'objects',ref['attemptId'],ref['stage']))
+                immutable(os.path.join(root,'tombstone.json'),{'v':1,'ref':ref_for(find_entry(ref,state,store))},4096)
+            for ref in refs:
+                root=os.path.join(store,'objects',ref['attemptId'],ref['stage'])
+                data=os.path.join(root,'data')
+                if os.path.exists(data): writable_remove(data)
+                immutable(os.path.join(root,'disposed.json'),{'v':1,'ref':ref_for(find_entry(ref,state,store))},4096)
             save()
             return {'op':op,'fingerprint':fingerprint,'pruned':len(keys)}
         aid=ident(q.get('attemptId'),'attempt');attempt=state['attempts'].get(aid)
@@ -296,7 +392,7 @@ def perform(q):
         workspace=physical(os.path.join(study_root,aid),True)
         def code_hash(source):
             root=within(source,workspace);physical(root)
-            files,dirs,_=inventory(root,max_bytes=MAX_BYTES,max_files=100000,max_directories=100000)
+            files,dirs,_=inventory(root,max_bytes=MAX_BYTES,max_files=100000,max_directories=100000,code=True)
             return digest(encoded({'files':files,'directories':dirs}))
         if op=='snapshot': return {'op':op,'sha256':code_hash(q['source'])}
         stage=ident(q.get('stage'))
@@ -412,7 +508,7 @@ def perform(q):
                     part,part_dirs,_=bounded_copy(source)
                     expected=digest(encoded({'files':part,'directories':part_dirs}))
                     actual_files,actual_dirs,_=bounded_copy(os.path.join(target,port))
-                    if expected!=receipt['inputHashes'][port] or digest(encoded({'files':actual_files,'directories':actual_dirs}))!=expected: fail('consumer source or payload changed since materialization')
+                    if expected!=receipt['payloadHashes'][port] or receipt['inputHashes'][port]!=(descriptor['ref']['sha256'] if 'ref' in descriptor else expected) or digest(encoded({'files':actual_files,'directories':actual_dirs}))!=expected: fail('consumer source or payload changed since materialization')
                 verify_task();verify_code()
                 return {'op':op,'inputHashes':receipt['inputHashes'],'files':files}
             # Record consumer references before any copy; a crash keeps the source protected.
@@ -421,19 +517,19 @@ def perform(q):
             if os.path.lexists(tmp): writable_remove(tmp)
             os.mkdir(tmp,0o700)
             try:
-                hashes={};total=0;count=0
+                hashes={};payload_hashes={};total=0;count=0
                 for port,source,descriptor in sources:
                     files,dirs,size=bounded_copy(source,os.path.join(tmp,port));count+=len(files);total+=size
                     if count>MAX_FILES or total>MAX_BYTES: fail('materialized inputs exceed aggregate bounds')
-                    hashes[port]=digest(encoded({'files':files,'directories':dirs}))
+                    payload_hashes[port]=digest(encoded({'files':files,'directories':dirs}));hashes[port]=descriptor['ref']['sha256'] if 'ref' in descriptor else payload_hashes[port]
                     if 'ref' in descriptor: manifest_for(descriptor['ref'],state,store)
                 files,dirs,_=inventory(tmp)
                 if sorted(os.listdir(tmp))!=sorted(inputs): fail('undeclared materialized input')
                 for port in inputs:
                     actual_files,actual_dirs,_=bounded_copy(os.path.join(tmp,port))
-                    if digest(encoded({'files':actual_files,'directories':actual_dirs}))!=hashes[port]: fail('consumer payload changed before publication')
+                    if digest(encoded({'files':actual_files,'directories':actual_dirs}))!=payload_hashes[port]: fail('consumer payload changed before publication')
                 verify_task();verify_code()
-                receipt={'sources':digest(encoded(inputs)),'inputHashes':hashes,'files':files,'directories':dirs}
+                receipt={'sources':digest(encoded(inputs)),'inputHashes':hashes,'payloadHashes':payload_hashes,'files':files,'directories':dirs}
                 atomic(marker,receipt,MAX_META)
                 freeze_dirs(tmp);os.rename(tmp,target);syncdir(parent)
                 return {'op':op,'inputHashes':hashes,'files':files}

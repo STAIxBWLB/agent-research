@@ -2,7 +2,7 @@
 export interface CommandSpec { name: string; usage: string; mutates: boolean | "network"; options: Record<string, "flag" | "value"> }
 const json = { "--json": "flag" } as const;
 export const COMMANDS: readonly CommandSpec[] = [
-  { name: "retention inspect", usage: "retention inspect <dir> [--json]", mutates: "network", options: json },
+  { name: "retention inspect", usage: "retention inspect <dir> [--offset N] [--limit N] [--json]", mutates: "network", options: { "--offset": "value", "--limit": "value", ...json } },
   { name: "retention prune", usage: "retention prune <dir> --file PATH|- [--confirm FINGERPRINT] [--json]", mutates: "network", options: { "--file": "value", "--confirm": "value", ...json } },
   { name: "skill check", usage: "skill check <dir> <name> [--json]", mutates: "network", options: json },
   { name: "harness close", usage: "harness close <dir> <round> --file PATH|- [--confirm FINGERPRINT] [--json]", mutates: true, options: { "--file": "value", "--confirm": "value", ...json } },

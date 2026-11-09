@@ -1,5 +1,5 @@
-import { executionView, materializePipeline, sealPipeline, pipelinePaths, pipelineInputRoot, pipelineRoot, type PipelineState } from "./pipeline.ts";
-import { retainedOperation } from "./retention.ts";
+import { executionView, materializePipeline, sealPipeline, pipelinePaths, pipelineInputRoot, type PipelineState } from "./pipeline.ts";
+import { retainedOperation, RetentionError } from "./retention.ts";
 import { validateStageProtocol } from "./stages.ts";
 import { requireCopilotAccept } from "../copilot.ts";
 import { resolveAutonomy } from "../autonomy.ts";
@@ -9,7 +9,7 @@ import { hostname } from "node:os";
 import { join, posix } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, requireExperiment, requireGate, sha256, withLock, type Actor, type PendingEvent } from "../study.ts";
+import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, requireExperiment, requireGate, sha256, withLock, StudyLockBusyError, type Actor, type PendingEvent } from "../study.ts";
 import { canonical, designBinding, sameProtocolInputs, frozenProtocol, validateStoredProtocol, protocolHash, readProtocol, readDesign, type Protocol } from "./protocol.ts";
 import { buildContainerArgs, probeGpuAdmission, GpuAdmissionDeferred, validateGpuDevices, validateContainerInputSources, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
 import { resolveSnapshot, transferSnapshot, transferTask } from "./snapshot.ts";
@@ -89,6 +89,7 @@ export function validateAttemptRecord(raw: unknown, run: string, wanted: string)
     if (!plain(raw.pipeline) || !Number.isSafeInteger(raw.pipeline.index) || !Array.isArray(raw.pipeline.completed)) throw new Error("pipeline: malformed attempt state; restore its last valid record");
     const definition = validateStageProtocol(raw.pipeline.definition);
     if (!plain(raw.pipeline.inputHashes) || typeof raw.pipeline.taskTreeHash !== "string" || !/^[a-f0-9]{64}$/.test(raw.pipeline.taskTreeHash)) throw new Error("pipeline: invalid input snapshot identities");
+    if (raw.pipeline.preflightRevision !== undefined && (!Number.isSafeInteger(raw.pipeline.preflightRevision) || (raw.pipeline.preflightRevision as number) < 0)) throw new Error("pipeline: invalid launch revision");
     const completed = raw.pipeline.completed;
     if (completed.length !== (raw.pipeline.index as number) + (raw.stage === "evaluator" ? 1 : 0)) throw new Error("pipeline: completed stage receipts do not match current stage");
     for (const [index, parent] of completed.entries()) if (!plain(parent) || parent.name !== definition.candidate.stages[index]?.name || !plain(parent.ref) || parent.ref.attemptId !== wanted || parent.ref.stage !== parent.name || typeof parent.ref.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(parent.ref.sha256) || !plain(parent.record) || parent.record.exitCode !== 0 || typeof parent.record.containerId !== "string" || typeof parent.record.endedAt !== "string") throw new Error("pipeline: malformed completed-stage provenance");
@@ -144,6 +145,7 @@ export function showAttempt(dirArg: string, attemptId: string): Attempt {
   return found;
 }
 function save(dir: string, attempt: Attempt, ctx: AttemptContext, event: string, approvals: PendingEvent[] = []): void {
+  if (attempt.pipeline && attempt.status === "running" && Buffer.byteLength(JSON.stringify(attempt, null, 2) + "\n") > ATTEMPT_BYTES - 1024) throw new EvidenceError("artifact-limit", "pipeline: reserve terminal receipt capacity within the 1 MiB attempt record");
   commit(dir, [[file(dir, attempt), JSON.stringify(attempt, null, 2) + "\n", ATTEMPT_BYTES]], [...approvals, { actor: ctx.actor, type: event, data: { id: attempt.id, run: attempt.run, stage: attempt.stage, status: attempt.status, ...(attempt.reason ? { reason: attempt.reason } : {}) } }]);
 }
 export function budgetUsage(attempts: Attempt[], time = Date.now()) {
@@ -298,7 +300,7 @@ async function recordVerifiedStage(dir: string, attempt: Attempt, state: Observe
     if (current.status !== "running" || current.stage !== attempt.stage) return undefined;
     const stage = current.stages[current.stage]!;
     stage.containerId = state.id; if (state.startedAt) stage.startedAt = state.startedAt;
-    if (current.reason === "executor-start" || current.reason === "executor-start-uncertain") { delete current.reason; delete current.error; }
+    if (current.reason === "executor-start" || current.reason === "executor-start-uncertain" || current.reason === "executor-preflight") { delete current.reason; delete current.error; }
     delete current.launching;
     if (current.stage === "candidate") {
       current.sealing.candidateHasNoEvaluator = true;
@@ -359,8 +361,43 @@ function remainingWallSeconds(dir: string, attempt: Attempt, ctx: AttemptContext
     (budget.maxWallHours - usage.wallHours) * 3600,
     attempt.protocol.limits.gpus > 0 ? (budget.maxGpuHours - usage.gpuHours) * 3600 / attempt.protocol.limits.gpus : Infinity,
   ));
-  if (seconds < 1) throw new Error("pipeline: aggregate wall budget exhausted");
+  if (seconds < 1) throw new EvidenceError("wall-clock", "pipeline: aggregate wall budget exhausted");
   return seconds;
+}
+function pipelineFailure(error: unknown): EvidenceError {
+  if (error instanceof EvidenceError) return error;
+  const message = error instanceof Error ? error.message : "pipeline verification failed";
+  if (/budget exhausted|deadline/i.test(message)) return new EvidenceError("wall-clock", message);
+  if (/metadata.*limit|payload.*bound|file.*bound|output budget|reservation exceeded|output.*limit/i.test(message)) return new EvidenceError("artifact-limit", message);
+  return new EvidenceError("evidence-read", message);
+}
+function pipelineFailureAt(dir: string, attempt: Attempt, error: unknown, ctx: AttemptContext): EvidenceError {
+  try { remainingWallSeconds(dir, attempt, ctx); } catch (budget) { return pipelineFailure(budget); }
+  return pipelineFailure(error);
+}
+function retryablePipelineFailure(error: unknown): boolean {
+  if (error instanceof RetentionError) return error.retryable;
+  const message = error instanceof Error ? error.message : "";
+  return /retention operation active|executor operation failed|malformed executor receipt|mismatched executor receipt|process start failed/i.test(message);
+}
+async function recordPipelinePreflightFailure(dir: string, attempt: Attempt, error: unknown, ctx: AttemptContext): Promise<Attempt> {
+  try { remainingWallSeconds(dir, attempt, ctx); } catch (budget) { error = budget; }
+  const failure = pipelineFailure(error), retryable = retryablePipelineFailure(error) && failure.reason !== "wall-clock";
+  return update(dir, attempt.id, ctx, current => {
+    if (current.status !== "running" || current.stage !== attempt.stage || current.pipeline?.index !== attempt.pipeline?.index || current.stages[current.stage]?.containerId) return undefined;
+    if ((current.pipeline?.preflightRevision ?? 0) !== (attempt.pipeline?.preflightRevision ?? 0)) return undefined;
+    if (attempt.launching) { if (current.launching?.token !== attempt.launching.token) return undefined; }
+    else if (!current.stages[current.stage]?.launchPending || current.launching) return undefined;
+    current.error = failure.message;
+    delete current.launching;
+    if (retryable) {
+      current.stages[current.stage]!.launchPending = true; current.reason = "executor-preflight";
+      return "attempt.executor-error";
+    }
+    delete current.stages[current.stage]!.launchPending;
+    finish(current, "failed", failure.reason, ctx);
+    return "attempt.failed";
+  });
 }
 async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptContext, verifiedProtocol?: Protocol): Promise<Attempt> {
   const recoveryCtx = { ...ctx, runner: recoveryRunners.get(ctx) ?? ctx.runner };
@@ -374,11 +411,12 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
       remainingWallSeconds(dir, attempt, ctx);
       if (JSON.stringify(hashes) !== JSON.stringify(attempt.pipeline.inputHashes)) throw new InputVerificationError("pipeline: verified input identities changed before consumption");
     }
-    const currentProtocol = executionProtocol(dir, attempt), protocol = verifiedProtocol ?? currentProtocol;
+    const currentProtocol = executionProtocol(dir, attempt), protocol = attempt.pipeline ? currentProtocol : verifiedProtocol ?? currentProtocol;
     if (!sameProtocolInputs(currentProtocol, protocol)) throw new InputVerificationError("attempt inputs: identities changed after verification; restore the frozen input identities and retry ares attempt reconcile <dir>");
     // Keep configuration refusals outside the uncertain container-start catch.
     args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths, ...(attempt.gpuDevices ? { gpuDevices: attempt.gpuDevices } : {}), ...(attempt.pipeline && attempt.stage === "candidate" ? { pipeline: { name: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name, inputRoot: pipelineInputRoot(attempt)!, seed: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.seed } } : {}) });
   } catch (error) {
+    if (attempt.pipeline) return recordPipelinePreflightFailure(dir, attempt, error, recoveryCtx);
     if (error instanceof InputVerificationError) await update(dir, attempt.id, ctx, current => {
       if (current.status !== "running" || current.stage !== attempt.stage || current.stages[current.stage]?.containerId || current.launching?.token !== attempt.launching?.token) return undefined;
       const stage = current.stages[current.stage]!;
@@ -435,6 +473,7 @@ async function captureStage(dir: string, attempt: Attempt, ctx: AttemptContext, 
 }
 
 export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: AttemptContext): Promise<Attempt> {
+  const controlCtx = ctx;
   const cleanupRunner = ctx.runner ?? spawnRunner;
   const dir = studyDir(dirArg), { study } = openStudy(dir);
   const frozen = await withLock(dir, () => {
@@ -471,18 +510,9 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     }
     gpuDevices = admission.devices;
   }
-  if (definition.v === 2 && !existing) {
-    await withLock(dir, () => {
-      const study = openStudy(dir).study;
-      requireGate(dir, study, "design", () => initialBinding);
-      enforceBudget(protocol, load(dir), now(ctx));
-      if (load(dir).some(a => a.status === "running")) throw new Error("attempt: another attempt is running");
-    });
-    await retainedOperation(executor, { op: "reserve", studyId: study.id, attemptId: wanted, ...(executor.retentionCapBytes === undefined ? {} : { capBytes: executor.retentionCapBytes }) }, ctx.runner ?? spawnRunner);
-  }
-  let created = false;
+  let created = false, reserved = false;
   let attempt: Attempt;
-  try { attempt = await withLock(dir, () => {
+  try { attempt = await withLock(dir, async () => {
     requireCopilotAccept(dir, "hypotheses");
     if (run === "posthoc") requirePosthocClosed(dir);
     if (finalAuthorization && authorizeFinalAttempt(dir, options.commit, seed).binding !== finalAuthorization.binding) throw new Error("final inputs changed during snapshot resolution; approve the current final gate before retrying");
@@ -492,6 +522,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     if (attempts.some(a => a.status === "running")) throw new Error("attempt: another attempt is running; reconcile or cancel it before starting a new one");
     const binding = designBinding(dir), approval = requireGate(dir, openStudy(dir).study, "design", () => binding);
     enforceBudget(protocol, attempts, now(ctx));
+    if (definition.v === 2) { await retainedOperation(executor, { op: "reserve", studyId: study.id, attemptId: wanted, ...(executor.retentionCapBytes === undefined ? {} : { capBytes: executor.retentionCapBytes }) }, cleanupRunner); reserved = true; }
     const root = posix.join(executor.workdir, study.id, wanted);
     const record: Attempt = { v: definition.v, ...(definition.v === 2 ? { pipeline: { definition, index: 0, completed: [], inputHashes: {}, taskTreeHash: frozen.treeHash } } : {}), id: wanted, studyId: study.id, run, protocolHash: hash, sealBinding: binding!, ...snapshot, seed, label, ...(options.retry ? { retryOf: options.retry } : {}), executor, ...(gpuDevices ? { gpuDevices } : {}), protocol: frozenProtocol(protocol), ...(verifiedInputs !== undefined ? { verifiedInputs } : {}), paths: { snapshot: posix.join(root, "snapshot"), output: posix.join(root, "output"), evaluator: posix.join(root, "task", "evaluator"), result: posix.join(root, "result") }, status: "running", stage: "candidate", startedAt: at(ctx), stages: {}, metrics: [], outputs: [], sealing: { separateContainers: false, evaluatorReadOnly: false, candidateHasNoEvaluator: false, verifiedBy: "ares-observed" }, launching: owner(ctx) };
     if (record.pipeline) record.paths = pipelinePaths(record);
@@ -500,7 +531,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     commit(dir, [[file(dir, record), JSON.stringify(record, null, 2) + "\n", ATTEMPT_BYTES]], [{ actor: ctx.actor, type: "attempt.started", data: { id: wanted, run, seed, commit: record.commit, treeId: record.treeId } }]);
     created = true; return record;
   }); } catch (error) {
-    if (definition.v === 2 && !existing) await withLock(dir, async () => {
+    if (reserved) await withLock(dir, async () => {
       if (!load(dir).some(record => record.id === wanted)) await retainedOperation(executor, { op: "release", studyId: study.id, attemptId: wanted }, cleanupRunner);
     });
     throw error;
@@ -519,6 +550,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
       preparationStep = "snapshot transfer";
       const transferred = await transferSnapshot(options.repo, snapshot.commit, executor, attempt.paths.snapshot, ctx.runner ?? spawnRunner);
       if (attempt.pipeline) {
+        preparationStep = "code snapshot verification";
         const receipt = await retainedOperation(attempt.executor, { op: "snapshot", studyId: attempt.studyId, attemptId: attempt.id, source: attempt.paths.snapshot }, ctx.runner ?? spawnRunner);
         if (!receipt.sha256 || !/^[a-f0-9]{64}$/.test(receipt.sha256)) throw new Error("pipeline: invalid frozen code snapshot receipt");
         attempt = await update(dir, attempt.id, ctx, current => { current.pipeline!.codeSnapshotHash = receipt.sha256; return "attempt.pipeline.code"; });
@@ -542,19 +574,18 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
         return launch(dir, current, checked.user, ctx, protocol);
       });
     } catch (error) {
-      if (error instanceof InputVerificationError) throw error;
-      attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = startupError(current, preparationStep); finish(current, "failed", "preparation", ctx); return "attempt.failed"; });
+      if (!attempt.pipeline && error instanceof InputVerificationError) throw error;
+      const failure = attempt.pipeline ? pipelineFailure(error) : undefined;
+      attempt = await update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = failure ? `${preparationStep}: ${failure.message}` : startupError(current, preparationStep); finish(current, "failed", failure?.reason ?? "preparation", ctx); return "attempt.failed"; });
     }
   }
-  if (attempt.pipeline && attempt.status === "failed" && !Object.keys(attempt.stages).length) {
-    await retainedOperation(attempt.executor, { op: "release", studyId: attempt.studyId, attemptId: attempt.id }, cleanupRunner);
-  }
+  if (attempt.pipeline && attempt.status === "failed") await reconcileRetentionReservations(dir, controlCtx);
   if (!options.detach) {
     let delay = 1000;
     while (attempt.status === "running") {
       await (ctx.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms))))(delay);
       const previousStage = attempt.stage;
-      await reconcileAttempts(dir, ctx); attempt = showAttempt(dir, wanted);
+      await reconcileAttempts(dir, controlCtx); attempt = showAttempt(dir, wanted);
       delay = attempt.stage === previousStage ? Math.min(delay * 2, 30_000) : 1000;
     }
   }
@@ -564,15 +595,23 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
 async function verifyAndLaunchPending(dir: string, pending: Attempt, ctx: AttemptContext): Promise<Attempt | undefined> {
   ctx = boundedPipelineContext(dir, pending, ctx);
   const protocol = executionProtocol(dir, pending);
-  const hashes = pending.pipeline ? await materializePipeline(pending, ctx) : undefined;
-  validateContainerInputSources(protocol, pending.paths);
-  await verifyExecutorInputs(pending.executor, protocol, ctx.runner ?? spawnRunner);
+  let hashes: Record<string, string> | undefined;
+  try {
+    hashes = pending.pipeline ? await materializePipeline(pending, ctx) : undefined;
+    validateContainerInputSources(protocol, pending.paths);
+    await verifyExecutorInputs(pending.executor, protocol, ctx.runner ?? spawnRunner);
+  } catch (error) {
+    if (!pending.pipeline) throw error;
+    return withControl(dir, () => recordPipelinePreflightFailure(dir, pending, error, ctx));
+  }
   return withControl(dir, async () => {
     const current = showAttempt(dir, pending.id);
     if (current.status !== "running" || current.stage !== pending.stage || !current.stages[current.stage]?.launchPending || alive(current, ctx)) return undefined;
+    if (pending.pipeline && (current.pipeline?.index !== pending.pipeline.index || current.protocolHash !== pending.protocolHash || (current.pipeline?.preflightRevision ?? 0) !== (pending.pipeline.preflightRevision ?? 0) || canonical(current.protocol) !== canonical(protocol))) return undefined;
     executionProtocol(dir, current); // Recheck the frozen identities after hashing, under the fresh launch fence.
     const claimed = await update(dir, current.id, ctx, value => {
       if (hashes) value.pipeline!.inputHashes = hashes;
+      if (value.pipeline) value.pipeline.preflightRevision = (value.pipeline.preflightRevision ?? 0) + 1;
       delete value.stages[value.stage]!.launchPending; value.launching = owner(ctx);
       return "attempt.stage.retry-intent";
     });
@@ -587,8 +626,10 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
   const changed: Attempt[] = [];
   for (let attempt of load(dir).filter(a => a.status === "running")) {
     if (alive(attempt, ctx)) continue;
+    let observedState: ObservedStage | undefined;
     try {
       let state = await inspect(dir, attempt, ctx);
+      observedState = state;
       if (!state) {
         if (attempt.stages[attempt.stage]?.launchPending) pending.push(attempt);
         else changed.push(await update(dir, attempt.id, ctx, current => { finish(current, "unknown", "lost", ctx); return "attempt.unknown"; }));
@@ -601,9 +642,15 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
       const deadline = (attempt.pipeline ? Date.parse(attempt.startedAt) : Date.parse(stage.startedAt)) + stage.limits.wallSeconds * 1000;
       const usage = attempt.pipeline ? budgetUsage(load(dir), now(ctx)) : undefined;
       const exhausted = usage && (usage.wallHours >= attempt.protocol.budget.maxWallHours || (attempt.protocol.limits.gpus > 0 && usage.gpuHours >= attempt.protocol.budget.maxGpuHours));
-      if ((state.running && (now(ctx) >= deadline || exhausted)) || (!state.running && state.finishedAt !== undefined && Date.parse(state.finishedAt) >= deadline)) {
-        if (state.running) { await command(attempt, "wall-clock kill", "docker", ["kill", state.id], ctx); const stopped = await inspect(dir, attempt, ctx); if (stopped) state = stopped; }
-        attempt = await captureStage(dir, attempt, ctx, true);
+      if ((state.running && (now(ctx) >= deadline || exhausted)) || (!state.running && ((attempt.pipeline && (now(ctx) >= deadline || exhausted)) || (state.finishedAt !== undefined && Date.parse(state.finishedAt) >= deadline)))) {
+        if (state.running) {
+          await command(attempt, "wall-clock kill", "docker", ["kill", state.id], ctx);
+          const stopped = await inspect(dir, attempt, ctx);
+          if (stopped) state = stopped;
+          else if (attempt.pipeline) state = { ...state, running: false, exitCode: 137, finishedAt: at(ctx) };
+          if (attempt.pipeline && state.running) throw new EvidenceError("executor-stop", "pipeline: container termination is not yet observed; active attempt and retention reservation remain held");
+        }
+        if (!attempt.pipeline) attempt = await captureStage(dir, attempt, ctx, true);
         const ended = state;
         changed.push(await update(dir, attempt.id, ctx, current => { if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; if (!ended.running) current.stages[current.stage]!.exitCode = ended.exitCode; finish(current, "failed", "wall-clock", ctx); return "attempt.failed"; })); continue;
       }
@@ -614,7 +661,7 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
       if (state.exitCode !== 0) { attempt = await captureStage(dir, attempt, ctx, true); const ended = state; changed.push(await update(dir, attempt.id, ctx, current => { current.stages[current.stage]!.exitCode = ended.exitCode; if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt; finish(current, "failed", `${current.stage}-exit`, ctx); return "attempt.failed"; })); continue; }
       try { attempt = await captureStage(dir, attempt, boundedPipelineContext(dir, attempt, ctx), false); }
       catch (error) {
-        const failure = error as EvidenceError, ended = state;
+        const failure = attempt.pipeline ? pipelineFailureAt(dir, attempt, error, ctx) : error as EvidenceError, ended = state;
         changed.push(await update(dir, attempt.id, ctx, current => {
           current.stages[current.stage]!.exitCode = ended.exitCode;
           if (ended.finishedAt) current.stages[current.stage]!.endedAt = ended.finishedAt;
@@ -654,7 +701,11 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
           evaluation = await (ctx.collectEvaluation ?? defaultEvaluationCollector)(attempt, bounded.runner ?? spawnRunner);
           if (attempt.pipeline) remainingWallSeconds(dir, attempt, ctx);
         }
-        catch (error) { evaluation = undefined; failure = error instanceof EvidenceError ? error : new MetricsError("invalid-metrics", "evaluator result validation failed or aggregate budget exhausted"); }
+        catch (error) {
+          evaluation = undefined;
+          if (attempt.pipeline) failure = pipelineFailureAt(dir, attempt, error, ctx);
+          else failure = error instanceof EvidenceError ? error : new MetricsError("invalid-metrics", "evaluator result validation failed");
+        }
         changed.push(await update(dir, attempt.id, ctx, current => {
           current.stages.evaluator!.exitCode = 0;
           if (state.finishedAt) current.stages.evaluator!.endedAt = state.finishedAt;
@@ -666,8 +717,18 @@ export async function reconcileAttempts(dirArg: string, ctx: AttemptContext): Pr
         }));
       }
     } catch (error) {
+      if (attempt.pipeline && observedState && !observedState.running) {
+        const failure = pipelineFailureAt(dir, attempt, error, ctx);
+        changed.push(await update(dir, attempt.id, ctx, current => {
+          if (current.status !== "running") return undefined;
+          const stage = current.stages[current.stage];
+          if (stage) { stage.exitCode = observedState!.exitCode; stage.endedAt = observedState!.finishedAt ?? at(ctx); delete stage.launchPending; }
+          current.error = failure.message; finish(current, "failed", failure.reason, ctx); return "attempt.failed";
+        }));
+        continue;
+      }
       if (error instanceof InputVerificationError) throw error;
-      await update(dir, attempt.id, ctx, current => { delete current.launching; return "attempt.executor-error"; });
+      await update(dir, attempt.id, ctx, current => { delete current.launching; current.error = error instanceof Error ? error.message : hostError(current, "reconcile").message; if (current.pipeline && error instanceof EvidenceError) current.reason = error.reason; return "attempt.executor-error"; });
       throw hostError(attempt, "reconcile");
     }
   }
@@ -691,13 +752,13 @@ async function reconcileRetentionReservations(dir: string, ctx: AttemptContext):
     if (!reservation.active) continue;
     const attempt = load(dir).find(value => value.id === reservation.attemptId);
     if (attempt?.status === "running") continue;
-    await withControl(dir, async () => {
+    try { await withControl(dir, () => withLock(dir, async () => {
       const current = load(dir).find(value => value.id === reservation.attemptId);
       if (current?.status === "running") return;
       const live = await runOnExecutor(executor, "docker", ["ps", "--filter", `label=ares.study=${study.id}`, "--filter", `label=ares.attempt=${reservation.attemptId}`, "--format", "{{.ID}}"], ctx.runner ?? spawnRunner);
       if (live.exitCode !== 0 || live.timedOut || live.truncated || live.stdout.trim()) return;
       await retainedOperation(executor, { op: "release", studyId: study.id, attemptId: reservation.attemptId }, ctx.runner ?? spawnRunner);
-    });
+    })); } catch (error) { if (!(error instanceof StudyLockBusyError)) throw error; }
   }
 }
 export async function cancelAttempt(dirArg: string, wanted: string, reason: string | undefined, ctx: AttemptContext, completion?: (attempt: Attempt) => PendingEvent[]): Promise<Attempt> {

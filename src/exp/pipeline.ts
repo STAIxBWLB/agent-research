@@ -5,12 +5,13 @@ import { type ProtocolV2 } from "./stages.ts";
 import { retainedOperation, type RetainedRef, type RetainedInput } from "./retention.ts";
 import type { Attempt, AttemptContext, AttemptStage } from "./attempts.ts";
 import { spawnRunner, type ContainerPaths } from "./executor.ts";
-import { OUTPUT_METADATA_BYTES } from "./metrics.ts";
+import { EvidenceError, OUTPUT_METADATA_BYTES } from "./metrics.ts";
 import { version } from "../../package.json";
 
 export interface PipelineState {
   definition: ProtocolV2;
   index: number;
+  preflightRevision?: number;
   completed: { name: string; record: AttemptStage; ref: RetainedRef }[];
   inputHashes: Record<string, string>;
   taskTreeHash: string;
@@ -59,8 +60,10 @@ export async function materializePipeline(attempt: Attempt, ctx: AttemptContext)
 export async function sealPipeline(attempt: Attempt, ctx: AttemptContext): Promise<RetainedRef> {
   const pipeline = attempt.pipeline!, stage = pipeline.definition.candidate.stages[pipeline.index]!, record = attempt.stages.candidate!;
   if (!record.containerId || !record.endedAt || record.exitCode !== 0) throw new Error(`pipeline ${stage.name}: observed successful termination required before sealing`);
+  const metadataLimit = OUTPUT_METADATA_BYTES - Buffer.byteLength(JSON.stringify(attempt.outputs, null, 2));
+  if (metadataLimit < 0) throw new EvidenceError("artifact-limit", "pipeline: output metadata exhausts the shared sidecar budget");
   const result = await retainedOperation(attempt.executor, { op: "seal", studyId: attempt.studyId, attemptId: attempt.id, stage: stage.name,
-    source: attempt.paths.output, outputs: stage.outputs, metadataLimit: OUTPUT_METADATA_BYTES - Buffer.byteLength(JSON.stringify(attempt.outputs, null, 2)), observed: { containerId: record.containerId, endedAt: record.endedAt, exitCode: 0 },
+    source: attempt.paths.output, outputs: stage.outputs, metadataLimit, observed: { containerId: record.containerId, endedAt: record.endedAt, exitCode: 0 },
     identity: { definitionHash: sha256(canonical(stage)), inputHashes: pipeline.inputHashes, codeTree: attempt.treeId, image: stage.image,
       argvHash: sha256(canonical(stage.command)), envHash: sha256(canonical(stage.env ?? {})), seed: attempt.seed, producerVersion: version } }, ctx.runner ?? spawnRunner);
   if (!result.manifest || result.manifest.files.some(file => !attempt.outputs.some(observed => observed.path === posix.join(attempt.paths.output, file.path) && observed.sha256 === file.sha256 && observed.bytes === file.bytes))) throw new Error(`pipeline ${stage.name}: retained bytes differ from observed output evidence`);
