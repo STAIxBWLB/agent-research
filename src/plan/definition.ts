@@ -159,7 +159,9 @@ export function readPlan(dir: string): PlanDefinition | undefined {
 }
 /** Caller holds the study lock; definition and initial state share one transaction. */
 export function setPlan(dir: string, raw: unknown, actor: Actor) {
-  const definition = validatePlan(raw), previous = readPlan(dir);
+  const definition = validatePlan(raw);
+  for (const node of definition.nodes) if (node.kind === "step" && node.command === "attempt.run" && node.args.reuse !== undefined && node.args.reuse !== "off" && node.args.reuse !== "eligible") throw new Error(`plan step ${node.id} (attempt.run).args.reuse: off or eligible required; correct args.reuse and run ares plan set again`);
+  const previous = readPlan(dir);
   definition.revision = (previous?.revision ?? 0) + 1;
   if (!Number.isSafeInteger(definition.revision)) throw new Error("plan.revision: exhausted; create a new study before setting another plan");
   const text = JSON.stringify(definition, null, 2) + "\n";

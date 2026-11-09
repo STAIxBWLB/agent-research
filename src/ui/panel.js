@@ -74,7 +74,8 @@ export default (host) => {
     if (value.available === false) return h("section", { class: "ares-card" }, h("h3", { text: "Attempts unavailable" }),
       ui.notice(line(value.reason) || "Attempt records could not be read. Inspect the study records and refresh.", "err"));
     return h("section", { class: "ares-card" }, h("h3", { text: `Attempts: ${number(value.total)}` }),
-      ui.rows(Object.entries(byStatus), ([state, count]) => ui.row({ title: state, sub: number(count), chip: { text: state, tone: tone(state) } })) ?? ui.empty("No attempt status details"));
+      ui.rows(Object.entries(byStatus), ([state, count]) => ui.row({ title: state, sub: number(count), chip: { text: state, tone: tone(state) } })) ?? ui.empty("No attempt status details"),
+      value.reuse ? h("p", {class: "ares-sub", text: `Reuse-controlled attempts: ${number(value.reuse.attempts)} | executed stages: ${number(value.reuse.executedStages)} | reused stages: ${number(value.reuse.reusedStages)} | fresh evaluations: ${number(value.reuse.freshEvaluations)} | independent samples: ${number(value.reuse.independentSamples)}`}) : null);
   };
   const studies = (snapshot) => {
     const list = rows(snapshot.studies);
@@ -253,22 +254,25 @@ export default (host) => {
       }), errors);
     const comparison = snapshot.comparison;
     if (!comparison) return [...sections, ui.empty("Choose records to compare", "Failed and unknown attempts remain visible; retries are not independent samples.")];
-    sections.push(...readNotices(comparison, "compare"), h("p", { class: "ares-sub ares-identifiers", text: `Source sha256: ${text(comparison.sourceSha256)} | ledger bytes: ${number(comparison.ledgerPosition)}` }), ui.notice("Aggregation unavailable; performed: false. These descriptive rows do not pool retries or create a verdict. Existing closed investigation and fresh final remain the result authorities.", "neutral"));
+    sections.push(ui.notice("Reused computation is historical, not a new independent sample. Original compute and current verification/materialization overhead stay separate; no savings are inferred.", "neutral"), ...readNotices(comparison, "compare"), h("p", { class: "ares-sub ares-identifiers", text: `Source sha256: ${text(comparison.sourceSha256)} | ledger bytes: ${number(comparison.ledgerPosition)}` }), ui.notice("Aggregation unavailable; performed: false. These descriptive rows do not pool retries or create a verdict. Existing closed investigation and fresh final remain the result authorities.", "neutral"));
     const aggregation = record(comparison.aggregation);
     sections.push(h("section", { class: "ares-card" }, h("h3", { text: "Input compatibility" }),
       ui.chip(aggregation.compatible === true ? "compatible inputs" : "compatibility unavailable or restricted", aggregation.compatible === true ? "neutral" : "warn"),
       reasonRows(aggregation.reasons)));
     for (const row of rows(comparison.rows).slice(0, 8)) {
       const attempts = rows(row.attempts).slice(0, 128), columns = [
-        ["id", "Attempt"], ["code", "Code commit / tree / snapshot"], ["protocol", "Protocol hash"], ["seed", "Seed"], ["status", "Status"], ["retry", "Retry ancestry / sample group"], ["metrics", "Metrics and units"], ["digests", "Artifact digests (not read)"], ["wall", "Wall ms (recorded)"], ["bytes", "Output bytes"], ["other", "Other costs"],
+        ["id", "Attempt"], ["code", "Code commit / tree / snapshot"], ["protocol", "Protocol hash"], ["seed", "Seed"], ["status", "Status"], ["retry", "Retry ancestry / sample group"], ["metrics", "Metrics and units"], ["digests", "Artifact digests (not read)"], ["wall", "Wall ms (recorded)"], ["bytes", "Output bytes"], ["execution", "Execution / independent samples"], ["reuseSources", "Reused source references"], ["reuseCosts", "Original / incremental overhead"], ["other", "Other costs"],
       ].map(([key, label]) => ({ key, label, ...(["seed", "wall", "bytes"].includes(key) ? { align: "end" } : {}) }));
       const cost = value => typeof value === "number" && Number.isFinite(value) ? value : "unknown";
       const tableRows = attempts.map(attempt => {
-        const code = record(attempt.code), costs = record(attempt.costs);
+        const code = record(attempt.code), costs = record(attempt.costs), reuse = record(attempt.reuse), reuseCosts = record(reuse.costs);
         return { id: text(attempt.id), code: [text(code.commit), text(code.treeId), text(code.snapshotSha256, "unknown")].join(" / "), protocol: text(attempt.protocolHash), seed: number(attempt.seed), status: text(attempt.status),
           retry: `${text(attempt.retryOf, "none")} | ancestry: ${rows(attempt.retryAncestry).join(" -> ") || "none"} | sample group: ${text(attempt.sampleGroup, "unknown")}`,
           metrics: rows(attempt.metrics).slice(0, 32).map(metric => `${text(metric.name)}: ${number(metric.value)} ${text(metric.unit, "unit unavailable")}`).join("; ") || "unknown",
           digests: rows(attempt.artifactDigests).slice(0, 64).join("; ") || "none recorded", wall: cost(costs.wallMilliseconds), bytes: cost(costs.storageBytes),
+          execution: attempt.reuse ? `executed: ${number(reuse.executedStages)}; reused: ${number(reuse.reusedStages)}; fresh evaluator: ${number(reuse.freshEvaluations)}; independent samples: ${number(reuse.independentSamples)}` : "legacy/fresh receipt; reuse metadata unavailable",
+          reuseSources: rows(reuse.sources).slice(0, 16).map(raw => { const source = record(raw), ref = record(source.ref); return `${text(source.candidateStage)} <- ${text(ref.attemptId)} / ${text(ref.stage)} / ${text(ref.sha256)}`; }).join("; ") || "none recorded",
+          reuseCosts: attempt.reuse ? `original wall seconds: ${cost(reuseCosts.originalWallSeconds)}; original GPU hours: ${cost(reuseCosts.originalGpuHours)}; current verification ms: ${cost(reuseCosts.verificationMilliseconds)}; current materialization ms: ${cost(reuseCosts.materializationMilliseconds)}; preflight failure ms (overlapping subset): ${cost(reuseCosts.observedPreflightFailureMilliseconds)}; total failure/CPU/storage/transfer: unknown; do not sum clock subsets` : "unknown",
           other: ["compute", "transfer", "verification", "retention", "materialization", "idle", "person"].map(name => `${name}: ${cost(costs[name])}`).join("; ") };
       });
       const candidate = record(row.candidate), perSeed = rows(candidate.perSeed).slice(0, 128);

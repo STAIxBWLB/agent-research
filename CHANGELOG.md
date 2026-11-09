@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+
+- Eligible stage-artifact reuse (#64): default fresh behavior is preserved; optional `attempt run --reuse eligible` and `--force-fresh` (MCP `reuse`/`forceFresh`) add current-policy, source-verified investigation reuse with atomic local source receipts, bounded study-local lookup/pins, reasoned misses and a fresh evaluator. Original and current costs and executed/reused/sample counts remain distinct; unmeasured costs remain unknown. GPU ABI reuse stays unsupported/fresh. The measured pilot is not included.
+  - N-1 CLI: required commands/usage are retained; the reuse controls are optional and existing retry/final identity rules remain. Existing off/default v1/v2 execution and no-contract hashes remain unchanged.
+  - N-1 MCP: existing tools/annotations remain; reuse mode and forceFresh are additive optional inputs on attempt run.
+  - N-1 study/ledger formats: readers retain existing v1/v2 attempts, study and ledger versions. Opted-in controlled attempts use v3, with explicit reused source semantics; older readers refuse before mutation. New ledger progress/receipt kinds are additive. Successful `retention.pruned` events add optional exact manifest-reference tuples `[attemptId, stage, sha256]` alongside the existing fingerprint/hash/count; 500 maximum-width references remain within the existing 64 KiB ledger event bound. Read-only disposal projections preserve older hash-only receipts as unknown, without rewriting attempts. This requires a compatible minor release; no version bump, tag or publication is performed here.
+
 - #61 follow-up: a stage that exits 0 without a declared output now fails with a seal refusal naming the missing output port and the next step, instead of a generic retained filesystem error. V2 wall-clock failures keep best-effort stage log evidence like v1; terminal status, reservation release and the unobserved-stop hold are unchanged. No format change.
 
 - Citation hygiene in `paper check` (#99): deterministic `adjacent-duplicate-citation`, `citation-stack`, `repeated-bundle`, `bare-identifier` and `duplicate-heading` findings with section heading paths. Findings now carry `severity`; the new codes are warnings unless an optional `study.toml` `[paper]` table lists them in `blocking` (thresholds `maxGroup`, `maxBundleRepeats`; unknown keys or codes refuse). Existing codes stay blocking and studies without `study.toml` keep their blocking set. CLI and MCP share one report. No study/ledger format change.

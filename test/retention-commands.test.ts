@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { COMMANDS } from "../src/commands-table.ts";
 import { executorSet, init, protocol, retentionInspect, retentionPrune } from "../src/commands.ts";
 import { ARES_TOOLS, createAresMcp } from "../src/mcp-tools.ts";
-import { readLedger } from "../src/study.ts";
+import { prepareCommit, readLedger, sha256 } from "../src/study.ts";
 import type { ProcessRequest, ProcessRunner } from "../src/exp/executor.ts";
 import type { RetainedRef } from "../src/exp/retention.ts";
 import { fakeHttp, tempDir } from "./helpers.ts";
@@ -60,7 +60,7 @@ test("confirmed prune rechecks current design policy before executor and commits
   const added = readLedger(dir).slice(before.length);
   expect(added.map(e => e.type)).toEqual(["gate.approve", "retention.pruned"]);
   expect(added[1]?.actor.kind).toBe("person");
-  expect(added[1]?.data).toEqual({fingerprint, refsSha256: expect.stringMatching(/^[a-f0-9]{64}$/), count: 1});
+  expect(added[1]?.data).toEqual({fingerprint, refsSha256: expect.stringMatching(/^[a-f0-9]{64}$/), count: 1, refs: refs.map(ref => [ref.attemptId, ref.stage, ref.sha256])});
   const gated = await study("gates"), gatedBefore = readLedger(gated), count = fake.requests.length;
   await expect(retentionPrune(gated, {refs, fingerprint}, {...base, runner: fake.runner})).rejects.toThrow("gate design is pending");
   expect(fake.requests.length).toBe(count);
@@ -100,4 +100,11 @@ test("retention inventory pages are shared by CLI and MCP and reject unsafe boun
   const before = fake.requests.length;
   for (const options of [{ offset: -1 }, { offset: 16000001 }, { limit: 0 }, { limit: 501 }]) await expect(retentionInspect(dir, ctx, options)).rejects.toThrow("offset");
   expect(fake.requests).toHaveLength(before);
+});
+
+
+test("prune can retain exact witnesses for all 500 maximum-width references within one event", async () => {
+  const dir = await study(), selected = Array.from({length: 500}, (_, index) => ({attemptId: (index + 1).toString(16).padStart(16, "0"), stage: "s".repeat(32), sha256: "a".repeat(64)}));
+  const prepared = prepareCommit(dir, [], [{actor: base.actor, type: "retention.pruned", data: {fingerprint, refsSha256: sha256(JSON.stringify(selected)), count: selected.length, refs: selected.map(ref => [ref.attemptId, ref.stage, ref.sha256])}}]);
+  expect(prepared.events).toHaveLength(1); expect(Buffer.byteLength(prepared.lines[0]!)).toBeLessThanOrEqual(65536);
 });

@@ -213,6 +213,23 @@ Retention defaults to a 1 GiB study cap including in-flight reservations. Config
 
 After an interrupted release, explicit `ares attempt reconcile <dir>` can free terminal or orphan reservation holds only after the executor confirms no owned live container. Unknown work is never rerun. Prune commits executor tombstones before disposal; a crash before the local audit commit leaves authoritative remote tombstones and no false local success or automatic approval. Inspect and preview again before retrying. This is not an atomic transaction spanning the executor and study filesystem.
 
+## Eligible stage-artifact reuse
+
+Fresh execution is the default. To use deterministic candidate artifacts in an investigation, declare each eligible `stages[].reuse` contract in protocol v2, review its actual toolchain/complete inputs and approve the current design. The contract fields and safety limits are described in [Stage-artifact reuse](docs/design/stage-reuse.md). Its `kind: pure-artifact`, byte-exact determinism, declared-only inputs, no external state/model outputs and documented toolchain digest are required declarations, not automatic proof of purity.
+
+```sh
+ares attempt run experiment --repo ./candidate --commit FULL_SHA --run investigate --reuse eligible --detach
+ares attempt reconcile experiment
+# New explicit attempt, with reuse if a verified source is available:
+ares attempt run experiment --repo ./candidate --commit FULL_SHA --run investigate --reuse eligible --retry SOURCE_ID --detach
+# Recompute instead of consuming hits:
+ares attempt run experiment --repo ./candidate --commit FULL_SHA --run investigate --reuse eligible --force-fresh --retry SOURCE_ID --detach
+```
+
+The run must match the current selection rule. MCP `ares_attempt_run` accepts equivalent `reuse: off|eligible` and `forceFresh` fields. Plan `attempt.run` steps forward the corresponding `reuse` and `force-fresh` arguments admitted by the shared command table. Re-delivery with the same controls returns the existing running or terminal attempt, including force-fresh requests. Changing reuse/force-fresh controls on an existing identity is refused with its recorded controls and an explicit retry hint. Off-mode artifacts are not indexed retroactively. Evaluators, ablation, final and posthoc always execute fresh. Missing/pruned/corrupt/unsupported sources are reasoned misses with ordinary budget checks. GPU ABI reuse is currently unsupported and falls back to fresh execution.
+
+Hits revalidate and pin original bytes and record source references atomically with local stage admission. Current policy, gates and budgets are checked again; old approval is not inherited. Console/provenance/export separate original computation, current verification/materialization, executed/reused stages and independent counts. Reused work is not a new independent sample, and evaluator metrics are never reused. Unmeasured costs stay unknown. Source logs belong to the original attempt; the log reader reports that source id for a reused named stage. No measured speedup or adoption decision is claimed.
+
 ## Investigation workflow
 
 Set the selection rule before running baseline and candidate attempts. It fixes the run, primary protocol metric, frozen baseline commit, minimum paired seeds and improvement margin. Save this as `selection.json`, replacing the synthetic baseline SHA with your full frozen commit:
@@ -731,7 +748,7 @@ ares executor check <dir> [--json]
 ares gate list <dir> [--json]
 ares gate approve <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact|harness:round-id> [--reason TEXT] [--json]
 ares gate reject <dir> <scope|screen|design|final|review|plan:node-id|accept:artifact|harness:round-id> --reason TEXT [--json]
-ares attempt run <dir> --repo PATH --commit SHA [--seed N] [--run NAME] [--label TEXT] [--retry ID] [--detach] [--json]
+ares attempt run <dir> --repo PATH --commit SHA [--seed N] [--run NAME] [--label TEXT] [--retry ID] [--reuse off|eligible] [--force-fresh] [--detach] [--json]
 ares attempt list <dir> [--run NAME] [--status running|succeeded|failed|cancelled|unknown] [--limit N] [--offset N] [--json]
 ares attempt show <dir> <id> [--json]
 ares attempt cancel <dir> <id> [--reason TEXT] [--json]

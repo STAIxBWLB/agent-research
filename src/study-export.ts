@@ -1,3 +1,4 @@
+import { attemptReuseView, retentionDisposalIndex, type RetentionDisposalIndex } from "./provenance.ts";
 import {urlOrKeyLike} from "./privacy.ts";
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, isAbsolute, sep } from "node:path";
@@ -34,8 +35,10 @@ const LEDGER_KEYS: Record<string, readonly string[]> = {
   "investigate.closed": ["run", "sha256", "ruleSha256", "winner"], "ablate.closed": ["sha256", "investigateSha256"], "final.closed": ["sha256", "status", "investigateSha256"],
   "idea.decided": ["decision"], "paper.built": ["manuscriptSha256", "evidenceSha256", "sourceManuscriptSha256"], "review.added": [], "review.resolved": ["buildSha256"],
   "attempt.started": ["id", "run", "seed", "commit", "treeId"],
+  "retention.pruned": ["fingerprint", "refsSha256", "count"],
+  "attempt.stage.reused": ["id", "stage", "candidateStage", "key", "sourceAttemptId", "sourceStage", "sourceSha256"],
 };
-for (const t of ["attempt.run", "attempt.snapshot", "attempt.stage.changed", "attempt.stage.evidence", "attempt.stage.recovered", "attempt.stage.started", "attempt.succeeded", "attempt.failed", "attempt.cancelled", "attempt.unknown"]) LEDGER_KEYS[t] = ["id", "run", "stage", "status"];
+for (const t of ["attempt.run", "attempt.snapshot", "attempt.stage.changed", "attempt.stage.evidence", "attempt.stage.recovered", "attempt.stage.started", "attempt.reuse.preflight", "attempt.reuse.fresh-intent", "attempt.reuse.materialized", "attempt.reuse.miss", "attempt.succeeded", "attempt.failed", "attempt.cancelled", "attempt.unknown"]) LEDGER_KEYS[t] = ["id", "run", "stage", "status"];
 
 export interface BundleManifest {
   bundle: 1; formats: typeof FORMAT_VERSIONS; studyIdSha256: string; mode: string; protocolHash: string | null; sealBinding: string | null;
@@ -67,8 +70,9 @@ function project(value: unknown): unknown {
 const isoAt = (value: unknown): string | null => typeof value === "string" && value.length <= 64 && /^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value)) ? value : null;
 function reduceEvent(event: LedgerEvent) {
   const actor = { kind: ACTOR_KINDS.has(event.actor?.kind as string) ? event.actor.kind : "other", ...(event.actor.id !== undefined ? { idSha256: sha256(event.actor.id) } : {}) };
-  const at = isoAt(event.at);
-  return { v: event.v, at, actor, type: TOKEN.test(event.type) ? event.type : "other", data: reduceData(plain(event.data) ? event.data : {}, (Object.hasOwn(LEDGER_KEYS, event.type) ? LEDGER_KEYS[event.type]! : [])) };
+  const at = isoAt(event.at), data = reduceData(plain(event.data) ? event.data : {}, (Object.hasOwn(LEDGER_KEYS, event.type) ? LEDGER_KEYS[event.type]! : []));
+  if (event.type === "retention.pruned" && Array.isArray(event.data.refs) && event.data.refs.length > 0 && event.data.refs.length <= 500 && retentionDisposalIndex([event]).size === event.data.refs.length) data.refs = event.data.refs.map(ref => [...ref as string[]]);
+  return { v: event.v, at, actor, type: TOKEN.test(event.type) ? event.type : "other", data };
 }
 // Closed codes emitted by attempts.ts, metrics.ts and artifacts.ts; never derive a class from user prose.
 const ATTEMPT_REASON_CODES = new Set([
@@ -91,7 +95,7 @@ function digest(image: unknown): string | null {
   const match = typeof image === "string" ? /@(sha256:[a-f0-9]{64})$/.exec(image) : null;
   return match?.[1] ?? null;
 }
-function attemptRow(a: Attempt) {
+function attemptRow(a: Attempt, disposals: RetentionDisposalIndex) {
   const stages: Record<string, unknown> = {};
   for (const name of ["candidate", "evaluator"] as const) {
     const stage = plain(a.stages) && Object.hasOwn(a.stages, name) ? a.stages[name] : undefined;
@@ -100,15 +104,17 @@ function attemptRow(a: Attempt) {
   }
   for (const parent of a.pipeline?.completed ?? []) {
     const stage = parent.record;
-    stages[parent.name] = { exitCode: stage.exitCode ?? null, durationMs: duration(stage.startedAt, stage.endedAt), network: "none", imageDigest: digest(stage.image), manifestSha256: parent.ref.sha256, inputIndependent: false };
+    const borrowed = parent.reuse;
+    if (borrowed !== undefined) stages[parent.name] = { execution: "reused", originalExitCode: stage.exitCode ?? null, originalDurationMs: duration(stage.startedAt, stage.endedAt), imageDigest: digest(stage.image), manifestSha256: parent.ref.sha256, inputIndependent: false };
+    else stages[parent.name] = { execution: "executed", exitCode: stage.exitCode ?? null, durationMs: duration(stage.startedAt, stage.endedAt), network: "none", imageDigest: digest(stage.image), manifestSha256: parent.ref.sha256, inputIndependent: false };
   }
-  const reason = reasonClass(a.reason, a.status);
+  const reason = reasonClass(a.reason, a.status), reuse = attemptReuseView(a, disposals);
   return {
     id: a.id, run: a.run, studyIdSha256: sha256(String(a.studyId)), protocolHash: shaped(a.protocolHash, SHA256), sealBinding: shaped(a.sealBinding, SHA256), commit: shaped(a.commit, GIT_ID), treeId: shaped(a.treeId, GIT_ID),
     snapshotSha256: shaped(a.snapshotSha256, SHA256), seed: Number.isSafeInteger(a.seed) ? a.seed : null, labelSha256: sha256(String(a.label ?? "")), retryOf: shaped(a.retryOf, ATTEMPT_ID), status: a.status, stage: a.stage, ...(reason ? { reasonClass: reason } : {}),
     ...(a.verifiedInputs !== undefined ? { inputs: Object.fromEntries(Object.entries(a.verifiedInputs).map(([name, hash]) => [name, shaped(hash, SHA256)])) } : {}),
     ...(a.gpuDevices !== undefined ? { gpuDeviceCount: a.gpuDevices.length } : {}),
-    durationMs: duration(a.startedAt, a.endedAt), stages,
+    durationMs: duration(a.startedAt, a.endedAt), stages, ...(reuse === undefined ? {} : {reuse}),
     metrics: (Array.isArray(a.metrics) ? a.metrics : []).map(m => ({ name: m.name, unit: m.unit, value: finite(m.value), provenance: m.provenance === "ares-observed" ? "ares-observed" : "other" })),
     outputs: (Array.isArray(a.outputs) ? a.outputs : []).map(o => ({ sha256: shaped(o.sha256, SHA256), bytes: finite(o.bytes) })),
     sealing: plain(a.sealing) ? { separateContainers: a.sealing.separateContainers === true, evaluatorReadOnly: a.sealing.evaluatorReadOnly === true, candidateHasNoEvaluator: a.sealing.candidateHasNoEvaluator === true } : null,
@@ -198,13 +204,13 @@ function realTarget(path: string): string {
 /** Caller holds the study lock across every bounded source read. */
 function readBundle(dirArg: string, maxFileBytes: number) {
   const { dir, study } = openStudy(dirArg);
-  const events = readLedger(dir);
+  const events = readLedger(dir), disposals = retentionDisposalIndex(events);
   const zero = () => Object.fromEntries(STATUSES.map(s => [s, 0])) as Record<AttemptStatus, number>;
   const byStatus = zero(), runCounts = new Map<string, Record<AttemptStatus, number>>(), attemptLines: string[] = [];
   let attemptBytes = 0;
   // One pass; only the projected row and counts outlive each raw record.
   for (const a of study.mode === "experiment" ? readAttemptRecords(dir) : []) {
-    const line = JSON.stringify(attemptRow(a)) + "\n";
+    const line = JSON.stringify(attemptRow(a, disposals)) + "\n";
     attemptBytes += Buffer.byteLength(line);
     if (attemptBytes > maxFileBytes) throw new Error(`study export: attempts.jsonl would exceed ${maxFileBytes} bytes; nothing was written`);
     attemptLines.push(line);

@@ -2,7 +2,7 @@ import {proposeLesson, decideLesson, checkLesson, listLessonCandidates} from "./
 import type {SkillCheckOptions} from "./memory/skill-check.ts";
 import {setHarnessStream, readHarnessStream, selectExperience, freezeExperience, checkExperience} from "./harness/experience.ts";
 import {harnessRoundBinding, readHarnessRounds, type HarnessRound, setHarnessRound, showHarness, importHarnessFixture, recordHarnessTransition} from "./harness/rounds.ts";
-import { readProvenance, compareLineage, type ProvenanceOptions, type ProvenancePage, type LineageComparison } from "./provenance.ts";
+import { readProvenance, compareLineage, attemptReuseView, type ProvenanceOptions, type ProvenancePage, type LineageComparison } from "./provenance.ts";
 import { validateAutonomyMode, validatePhase, PHASES, ACCEPT_ARTIFACTS, resolveAutonomy, type AcceptArtifact, type Autonomy } from "./autonomy.ts";
 import { copilotBinding, requireCopilotAccept } from "./copilot.ts";
 import { homedir } from "node:os";
@@ -163,7 +163,7 @@ export async function retentionPrune(dirArg: string, options: { refs: RetainedRe
     const { dir, study, executor } = retentionExecutor(initial.dir);
     requireCopilotAccept(dir, "hypotheses");
     const binding = designBinding(dir), approval = requireGate(dir, study, "design", binder(dir));
-    const event: PendingEvent = { actor: ctx.actor, type: "retention.pruned", data: { fingerprint, refsSha256: sha256(JSON.stringify(refs)), count: refs.length } };
+    const event: PendingEvent = { actor: ctx.actor, type: "retention.pruned", data: { fingerprint, refsSha256: sha256(JSON.stringify(refs)), count: refs.length, refs: refs.map(ref => [ref.attemptId, ref.stage, ref.sha256]) } };
     prepareCommit(dir, [], [...approval, event]);
     assertStudyReadLock(dir, lock);
     const result = await checked(executor);
@@ -188,11 +188,18 @@ export const harnessAdopt = (dir: string, round: string, raw: unknown, confirm: 
 export const harnessShow = (dir: string, round?: string) => showHarness(dir, round);
 export const harnessImport = (dir: string, round: string, raw: unknown, ctx: Ctx) => withLock(dir, () => importHarnessFixture(dir, round, raw, ctx.actor));
 export async function attemptRun(dir: string, options: AttemptOptions, ctx: Ctx) {
+  if (options.reuse !== undefined && options.reuse !== "off" && options.reuse !== "eligible") throw new Error("attempt reuse: off or eligible required; select --reuse off|eligible (MCP reuse) and retry");
+  if (options.forceFresh !== undefined && typeof options.forceFresh !== "boolean") throw new Error("attempt forceFresh: boolean required; set forceFresh to true/false or use --force-fresh, then retry");
   try { return await runAttempt(dir, options, ctx); }
   catch (error) { if (error instanceof GpuAdmissionDeferred) return error.result; throw error; }
 }
 export const attemptList = (dir: string, options: AttemptListOptions = {}) => listAttemptSummaries(dir, options);
-export const attemptShow = (dir: string, id: string) => showAttempt(dir, id);
+export const attemptShow = (dir: string, id: string) => {
+  const attempt = showAttempt(dir, id);
+  if (attempt.v !== 3) return attempt;
+  const reuseView = attemptReuseView(attempt, readLedger(dir));
+  return reuseView === undefined ? attempt : {...attempt, reuseView};
+};
 export const attemptCancel = (dir: string, id: string, reason: string | undefined, ctx: Ctx) => cancelAttempt(dir, id, reason, ctx);
 export const attemptReconcile = (dir: string, ctx: Ctx) => reconcileAttempts(dir, ctx);
 export const attemptLogs = (dir: string, id: string, options: LogOptions, ctx: Ctx) => readAttemptLogs(dir, id, options, ctx.runner);
@@ -415,15 +422,19 @@ function stepNumber(node: StepNode, key: string): number | undefined {
 }
 export async function planRun(dirArg: string, options: { parallel?: number }, ctx: Ctx) {
   const { dir } = openStudy(dirArg);
-  const attemptOptions = (node: StepNode, retryOf?: string) => {
+  const attemptOptions = (node: StepNode, retryOf?: string): AttemptOptions => {
     const parent = retryOf ?? (node.args.retry !== undefined ? stepText(node, "retry") : undefined);
     const retry = parent && listAttempts(dir).attempts.some(a => a.id === parent) ? parent : undefined;
+    const reuse = node.args.reuse;
+    if (reuse !== undefined && reuse !== "off" && reuse !== "eligible") throw new Error("plan attempt reuse: off or eligible required; correct args.reuse with ares plan set <dir>, then retry the node explicitly");
+    const forceFresh = node.args["force-fresh"];
+    if (forceFresh !== undefined && typeof forceFresh !== "boolean") throw new Error("plan attempt force-fresh: boolean required; correct args.force-fresh with ares plan set <dir>, then retry the node explicitly");
     return {
       repo: resolve(dir, stepText(node, "repo")), commit: stepText(node, "commit"),
       ...(stepNumber(node, "seed") !== undefined ? { seed: stepNumber(node, "seed")! } : {}),
       ...(node.args.run !== undefined ? { run: stepText(node, "run") } : {}),
       ...(node.args.label !== undefined ? { label: stepText(node, "label") } : {}),
-      ...(retry ? { retry } : {}), detach: true,
+      ...(retry ? { retry } : {}), ...(reuse === undefined ? {} : { reuse }), ...(forceFresh === undefined ? {} : { forceFresh }), detach: true,
     };
   };
   const observed = (attempt: ReturnType<typeof showAttempt>): Observation => ({
@@ -484,9 +495,11 @@ export async function planRun(dirArg: string, options: { parallel?: number }, ct
       }
       return { status: ok ? "done" : "failed", ...(ok ? { output: { sha256: sha256(JSON.stringify(result)) } } : { reason: "step reported failure; inspect its command result and inputs before retry" }) };
     },
-    reconcile: async (_node, state) => {
+    reconcile: async (node, state) => {
       if (!state.attemptId || !listAttempts(dir).attempts.some(a => a.id === state.attemptId)) return { status: "uncertain", reason: "expected attempt record missing; explicitly retry or skip this node" };
-      const before = showAttempt(dir, state.attemptId);
+      const before = showAttempt(dir, state.attemptId), requested = attemptOptions(node, state.retryOf);
+      const recordedMode = before.v === 3 ? before.reuse!.mode : before.freshRequest?.reuse ?? "off", recordedForce = before.v === 3 ? before.reuse!.forceFresh : before.freshRequest?.forceFresh ?? false;
+      if ((requested.reuse ?? "off") !== recordedMode || (requested.forceFresh ?? false) !== recordedForce) return { status: "uncertain", reason: `attempt recorded reuse=${recordedMode}, forceFresh=${recordedForce}; inspect ares attempt show, then retry this plan node explicitly` };
       if (before.status === "running") await reconcileAttempts(dir, ctx);
       return observed(showAttempt(dir, state.attemptId));
     },
