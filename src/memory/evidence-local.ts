@@ -18,7 +18,7 @@ const unsupported = (codes: string[]) => codes.some(code => code.startsWith("uns
 /** Typed local addresses only. A readable record or recorded successful outcome never establishes claim support. */
 export function inspectLocalEvidence(dir: string, raw: unknown, snapshot?: ReturnType<typeof localEvidenceSnapshot>): LocalEvidenceInspection {
   let ref: ExecutionReferenceV1;
-  try {ref = validateExecutionReference(raw);} catch {return base("unsupported");}
+  try {const parsed = validateExecutionReference(raw); if (parsed.tool !== "ares") return base("unsupported"); ref = parsed;} catch {return base("unsupported");}
   let study: ReturnType<typeof openStudy>["study"];
   try {study = snapshot?.study ?? openStudy(dir).study;}
   catch (error) {return base(error instanceof Error && /unsupported/.test(error.message) ? "unsupported" : "unavailable", ref);}

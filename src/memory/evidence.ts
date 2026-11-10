@@ -22,7 +22,7 @@ export function skillEvidenceReference(raw: unknown, studyId?: string): SkillEvi
     raw = {v: 1, tool: "ares", projectKey: match[1], kind: match[2], id: match[3]};
   }
   if (plain(raw) && raw.v === 1 && raw.tool === "amem" && Object.keys(raw).every(key => ["v", "tool", "id"].includes(key)) && typeof raw.id === "string" && raw.id.length === 32 && /^[a-f0-9]{32}$/.test(raw.id)) return {v: 1, tool: "amem", id: raw.id};
-  try {const ref = validateExecutionReference(raw); return studyId === undefined || ref.projectKey === studyId ? ref : undefined;}
+  try {const ref = validateExecutionReference(raw); return ref.tool === "ares" && (studyId === undefined || ref.projectKey === studyId) ? ref : undefined;}
   catch {return undefined;}
 }
 const refused = (state: EvidenceInspection["state"], ref?: SkillEvidenceReference): EvidenceInspection => ({...(ref ? {ref} : {}), state, digest: null, integrity: "unverified", outcome: {status: "unverified", success: false}, support: "reviewer-judgment"});
