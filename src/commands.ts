@@ -21,6 +21,7 @@ import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
 import { setFinalSeeds, finalGateBinding, requireFinalInputs, closeFinal, showPosthoc } from "./exp/final.ts";
 import { addIdea, decideIdea } from "./exp/ideas.ts";
 import { showInvestigation, closeInvestigation } from "./exp/investigate.ts";
+import { isInvestigationRun } from "./exp/reuse-runtime.ts";
 import { readSelection, setSelection } from "./exp/selection.ts";
 import { createHubClient } from "./plan/hub.ts";
 import { runPlan, type ControllerRuntime, type Observation, type StepNode } from "./plan/controller.ts";
@@ -196,7 +197,7 @@ export async function attemptRun(dir: string, options: AttemptOptions, ctx: Ctx)
   if (options.forceFresh !== undefined && typeof options.forceFresh !== "boolean") throw new Error("attempt forceFresh: boolean required; set forceFresh to true/false or use --force-fresh, then retry");
   const protocol = options.reuse === "eligible" ? readProtocol(dir) : undefined;
   const selection = protocol ? readSelection(dir, protocol) : undefined;
-  const warnings = options.reuse === "eligible" && selection?.run !== (options.run ?? "main")
+  const warnings = options.reuse === "eligible" && !isInvestigationRun(options.run ?? "main", selection)
     ? [{ code: "outside-investigation", cause: "not an investigation run", nextStep: "declare the selection run, or drop --reuse" }] : undefined;
   let result;
   try { result = await runAttempt(dir, options, ctx); }

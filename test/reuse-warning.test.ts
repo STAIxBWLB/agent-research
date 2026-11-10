@@ -1,11 +1,19 @@
 import { afterEach, expect, test } from "bun:test";
 import { attemptRun, attemptShow } from "../src/commands.ts";
+import { isInvestigationRun } from "../src/exp/reuse-runtime.ts";
 import { run } from "../src/cli.ts";
 import { createAresMcp } from "../src/mcp-tools.ts";
 import { fakeHttp } from "./helpers.ts";
 import { cleanupPipelineFixtures, setup } from "./pipeline-fixture.ts";
 
 afterEach(cleanupPipelineFixtures);
+
+test("investigation scope shares selection matching and reserved-phase exclusions", () => {
+  expect(isInvestigationRun("main", undefined)).toBe(false);
+  expect(isInvestigationRun("probe", { run: "investigate" })).toBe(false);
+  expect(isInvestigationRun("investigate", { run: "investigate" })).toBe(true);
+  for (const run of ["ablate", "final", "posthoc"]) expect(isInvestigationRun(run, { run })).toBe(false);
+});
 
 const warning = [{ code: "outside-investigation", cause: "not an investigation run", nextStep: "declare the selection run, or drop --reuse" }];
 
