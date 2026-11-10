@@ -1,3 +1,4 @@
+import {realpathSync} from "node:fs";
 import { expect, spyOn, test } from "bun:test";
 import { join, resolve } from "node:path";
 import * as lineage from "../src/provenance.ts";
