@@ -4,7 +4,7 @@ import {parseSupervisionIntentLabel, type SupervisionIntentLabel} from "./execut
 import {types} from "node:util";
 import { readShadowSnapshot, readSupervisionTrigger, type ShadowSnapshot, type SupervisionObservation, type SupervisionGap, type SupervisionRuleId, type EvaluatedRevision } from "./execution-supervision-records.ts";
 
-export const SUPERVISION_PRODUCER_COMMIT = "f6f94528ac31ec67d1a8a8bcb8fcf25168d9cfc7";
+export const SUPERVISION_PRODUCER_COMMIT = "a470ebbd5d809e421c6fc82fab8a69434c1b2e08";
 const BATCH_BYTES = 1024 * 1024, MAX_BATCH = 100, MAX_TRUTH = 1024;
 export interface SupervisionTruth {
   id: string; rule: SupervisionRuleId; task: number; revision: string; trigger: string;
@@ -21,7 +21,7 @@ export interface SupervisionScore {
   personDecisions: 0; workerTurns: 0; actionWrites: 0; notifications: 0;
 }
 function fail(cause: string): never {
-  throw new Error(`execution supervision: ${cause}; restore bounded records from the pinned agent-hub#1221 T1 contract and supply separate rule-covered truth before scoring; do not launch a treatment trial`);
+  throw new Error(`execution supervision: ${cause}; restore bounded records from the pinned agent-hub#1221 exported shadow contract and supply separate rule-covered truth before scoring; do not launch a treatment trial`);
 }
 function size(raw: unknown, bound: number): void {
   let serialized: string | undefined;
