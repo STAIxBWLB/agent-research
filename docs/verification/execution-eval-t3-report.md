@@ -291,6 +291,8 @@ product harness fault suite and were not re-measured by these trials; only false
 These dispositions record the evidence against the preregistered gates. They create no product authority: no winner,
 no gate approval, no adoption of a treatment and no ares-sealed result authority.
 
+See [T4 status and live-evidence gaps](execution-eval-t4-status.md) for the resulting defaults and remaining evidence needs.
+
 ## Negative and unknown results
 
 - Every reuse case is slower under eligible reuse, in both conditions, including the cases the mechanism is meant to
