@@ -1,13 +1,15 @@
 import {HARNESS_MODEL_BYTES} from "./limits.ts";
 import {hasHarnessCredential} from "./privacy.ts";
-/** Ares-owned synthetic fixture projections, not the wire schemas or assurance receipts of agent-hub producers. */
+/** Legacy synthetic projections stay separate from the hub public metadata decoder and probe receipts. */
 import {plain} from "../study.ts";
-import {validateExecutionReference, type ExecutionReferenceV1} from "../provenance.ts";
+import {types} from "node:util";
+import {parseHubGuidanceReadResult, HUB_GUIDANCE_READ_BYTES, type HubGuidanceReadProjection} from "./hub-guidance.ts";
+import {validateExecutionReference, type SupportedExecutionReferenceV1} from "../provenance.ts";
 
 export const HARNESS_FIXTURE_BYTES = 65_536;
 export interface VariantFixtureProjectionV1 {
   v: 1; projectKey: string; taskId: string; revision: number; baselineRoleId: string; baselineRoleHash: string; baselineBytes: number;
-  candidateHash: string; candidateBytes: number; author: string; problemHypothesis: string; expectedObservableDifference: string; rationale: string; evidence: ExecutionReferenceV1[];
+  candidateHash: string; candidateBytes: number; author: string; problemHypothesis: string; expectedObservableDifference: string; rationale: string; evidence: SupportedExecutionReferenceV1[];
 }
 export interface ProbeFixtureProjectionV1 {
   v: 1; id: string; experimentId: string; arm: string; taskId: string; taskRevision: number; taskInputHash: string; workerEffectiveInputHash: string; codeTreeHash: string; baselineHash: string; guidanceHash: string; baselineContextHash: string; libraryHash: string;
@@ -36,13 +38,25 @@ export function parseVariantFixture(raw: unknown): VariantFixtureProjectionV1 {
   const value = object(raw, VARIANT, "variant");
   if (!Array.isArray(value.evidence) || value.evidence.length > 16) fail("variant evidence");
   const evidence = value.evidence.map(raw => {
-    let ref: ExecutionReferenceV1; try {ref = validateExecutionReference(raw);} catch {return fail("variant evidence");}
+    let ref: SupportedExecutionReferenceV1; try {ref = validateExecutionReference(raw);} catch {return fail("variant evidence");}
     text(ref.projectKey, "variant evidence projectKey"); text(ref.id, "variant evidence id"); if (ref.revision !== undefined) text(ref.revision, "variant evidence revision", 128); return ref;
   });
   return {v: 1, projectKey: text(value.projectKey, "projectKey"), taskId: text(value.taskId, "taskId"), revision: integer(value.revision, "revision", 1, Number.MAX_SAFE_INTEGER),
     baselineRoleId: text(value.baselineRoleId, "baselineRoleId", 128), baselineRoleHash: hash(value.baselineRoleHash, "baselineRoleHash"), baselineBytes: integer(value.baselineBytes, "baselineBytes", 0, 8192),
     candidateHash: hash(value.candidateHash, "candidateHash"), candidateBytes: integer(value.candidateBytes, "candidateBytes", 0, 8192), author: text(value.author, "author", 128),
     problemHypothesis: text(value.problemHypothesis, "problemHypothesis", 2000), expectedObservableDifference: text(value.expectedObservableDifference, "expectedObservableDifference", 2000), rationale: text(value.rationale, "rationale", 2000), evidence};
+}
+/** Format-discriminated read only: metadata never becomes a fixture probe or an admission receipt. */
+export type HarnessVariantReadResult = {format: "ares-fixture"; variant: VariantFixtureProjectionV1} | {format: "hub-public"; view: HubGuidanceReadProjection};
+export function parseHarnessVariant(raw: unknown): HarnessVariantReadResult {
+  let value = raw;
+  if (typeof value === "string") {
+    if (Buffer.byteLength(value) > HUB_GUIDANCE_READ_BYTES) fail("variant read bound");
+    try { value = JSON.parse(value); } catch { fail("variant read JSON"); }
+  }
+  if (types.isProxy(value)) fail("variant read inert data");
+  if (value !== null && typeof value === "object" && Object.hasOwn(value, "state")) return {format: "hub-public", view: parseHubGuidanceReadResult(value)};
+  return {format: "ares-fixture", variant: parseVariantFixture(raw)};
 }
 export function parseProbeFixture(raw: unknown): ProbeFixtureProjectionV1 {
   const value = object(raw, PROBE, "probe");
@@ -64,7 +78,7 @@ export function compareProbeFixtures(left: ProbeFixtureProjectionV1, right: Prob
   if (a.guidanceHash === b.guidanceHash && a.workerEffectiveInputHash !== b.workerEffectiveInputHash) reasons.push("workerEffectiveInputHash-mismatch");
   return {compatible: reasons.length === 0, matched: false, sourceStrength: "synthetic-fixture", endToEndEvaluation: "unavailable", reasons, confounders: ["synthetic-fixture", "producer-unavailable", "sampling-unknown"]};
 }
-/** No real producer wire reader exists here; absent and denied addresses deliberately look identical. */
+/** Real probe receipts remain unavailable; public guidance metadata supplies no probe/handoff assurance. */
 export function realHubProbeUnavailable(_address?: unknown) {
   return {state: "unavailable", matched: false, sourceStrength: "producer-unavailable", endToEndEvaluation: "unavailable", reasons: ["producer-unavailable"]} as const;
 }

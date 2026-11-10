@@ -1,3 +1,5 @@
+import { types } from "node:util";
+import {parseHubExecutionReference, type HubExecutionReferenceV1} from "./harness/hub-reference.ts";
 import { existsSync, lstatSync, opendirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep, posix } from "node:path";
 import { parseLedger, plain, readBytesBounded, hashFileBounded, sha256, validateStudy, type LedgerEvent, type Study, assertStudyReadLock, type StudyReadLock } from "./study.ts";
@@ -22,6 +24,7 @@ const KINDS = ["study", "plan-revision", "dispatch", "idea", "attempt", "artifac
 export const PROVENANCE_KINDS = KINDS;
 export type ProvenanceKind = typeof KINDS[number];
 export interface ExecutionReferenceV1 { v: 1; tool: "ares"; projectKey: string; kind: ProvenanceKind; id: string; revision?: string; sha256?: string }
+export type SupportedExecutionReferenceV1 = ExecutionReferenceV1 | HubExecutionReferenceV1;
 export type ProvenanceState = "current" | "historical" | "corrupt" | "unavailable" | "declared-unresolved";
 export interface ProvenanceProof { file: string; sha256: string; ledgerIndex?: number; recordSha256?: string; sourceBindingSha256?: string; recordType?: string; nativeId?: string }
 export interface ProvenanceNode { ref: ExecutionReferenceV1; state: ProvenanceState; availability: "available" | "receipt-only" | "missing" | "not-read"; proof: ProvenanceProof; data?: Record<string, string | number | boolean | null> }
@@ -32,13 +35,20 @@ export interface ProvenancePage {
   v: 1; status: "ok" | "changed" | "unavailable" | "capped"; sourceSha256: string | null; ledgerPosition: number | null;
   nodes: ProvenanceNode[]; edges: ProvenanceEdge[]; issues: ProvenanceIssue[]; totals: { nodes: number; edges: number } | null; truncated: boolean; nextCursor?: string;
 }
-export interface ProvenanceOptions { root?: ExecutionReferenceV1; cursor?: string; nodeLimit?: number; edgeLimit?: number; traversalLimit?: number }
+export interface ProvenanceOptions { root?: SupportedExecutionReferenceV1; cursor?: string; nodeLimit?: number; edgeLimit?: number; traversalLimit?: number }
 const HASH = /^[a-f0-9]{64}$/, ATTEMPT = /^[a-f0-9]{16}$/, RUN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 class SourceFailure extends Error { constructor(readonly code: string, readonly capped = false) { super(code); } }
 function fail(code: string, capped = false): never { throw new SourceFailure(code, capped); }
 function text(value: unknown, bound: number): value is string { return typeof value === "string" && value.trim().length > 0 && !value.includes("\0") && Buffer.byteLength(value) <= bound; }
 /** An address is never a path, URL, subprocess or hub resolver instruction. Native ids are preserved verbatim. */
-export function validateExecutionReference(raw: unknown): ExecutionReferenceV1 {
+export function validateExecutionReference<T extends {tool: "ares"}>(raw: T): ExecutionReferenceV1;
+export function validateExecutionReference(raw: unknown): SupportedExecutionReferenceV1;
+export function validateExecutionReference(raw: unknown): SupportedExecutionReferenceV1 {
+  if (raw && typeof raw === "object" && !types.isProxy(raw) && [Object.prototype, null].includes(Object.getPrototypeOf(raw)) && !Object.getOwnPropertySymbols(raw).length) {
+    const fields = Object.getOwnPropertyDescriptors(raw);
+    if (Object.values(fields).some(field => !("value" in field))) throw new Error("provenance reference: accessor fields are unsupported; supply a plain execution address before retrying");
+    if (fields.tool?.value === "ahub") return parseHubExecutionReference(raw);
+  } else throw new Error("provenance reference: unsupported object shape; supply a plain execution address before retrying");
   if (!plain(raw) || Object.keys(raw).some(key => !["v", "tool", "projectKey", "kind", "id", "revision", "sha256"].includes(key)) || raw.v !== 1 || raw.tool !== "ares" || !KINDS.includes(raw.kind as ProvenanceKind) || !text(raw.projectKey, 256) || !text(raw.id, 256) || raw.revision !== undefined && !text(raw.revision, 128) || raw.sha256 !== undefined && (typeof raw.sha256 !== "string" || !HASH.test(raw.sha256))) throw new Error("provenance reference: unsupported shape or identifier bound; use an ares ExecutionReferenceV1 with native ids <=256 bytes, revision <=128 bytes and a lowercase 64-hex sha256");
   return { v: 1, tool: "ares", projectKey: raw.projectKey, kind: raw.kind as ProvenanceKind, id: raw.id, ...(raw.revision !== undefined ? { revision: raw.revision as string } : {}), ...(raw.sha256 !== undefined ? { sha256: raw.sha256 as string } : {}) };
 }
@@ -459,6 +469,11 @@ export function readProvenance(dirArg: string, options: ProvenanceOptions = {}):
   const root = options.root === undefined ? undefined : validateExecutionReference(options.root);
   const nodeLimit = options.nodeLimit ?? PROVENANCE_NODE_LIMIT, edgeLimit = options.edgeLimit ?? PROVENANCE_EDGE_LIMIT, traversal = options.traversalLimit ?? PROVENANCE_TRAVERSAL;
   if (!Number.isSafeInteger(nodeLimit) || nodeLimit < 1 || nodeLimit > PROVENANCE_NODE_LIMIT || !Number.isSafeInteger(edgeLimit) || edgeLimit < 1 || edgeLimit > PROVENANCE_EDGE_LIMIT || !Number.isSafeInteger(traversal) || traversal < 1 || traversal > PROVENANCE_TRAVERSAL) throw new Error("provenance page bounds: use 1..100 nodes, 1..200 edges and traversal 1..1000 before retrying");
+  if (root?.tool === "ahub") {
+    const page = empty("unavailable", "foreign-root-unsupported");
+    page.issues[0]!.message = "provenance foreign root is unsupported by this local ares reader; keep the address unchanged and inspect it through its source owner before requesting evidence";
+    return page;
+  }
   let source: Snapshot, dir: string;
   try { dir = realpathSync(resolve(dirArg)); source = capture(dir); }
   catch (error) { const code = error instanceof SourceFailure ? error.code : "unreadable-source"; return empty(error instanceof SourceFailure && error.capped ? "capped" : code === "write-in-progress" ? "changed" : "unavailable", code); }

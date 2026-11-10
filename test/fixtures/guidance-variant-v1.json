@@ -1,0 +1,145 @@
+{
+  "contract": "GuidanceVariantV1",
+  "baseline": "---\nid: test-engineer\nname: Test engineer\ngroup: dev\nsummary: Check observable behavior.\nbase: implementer\nclasses: test,implement\nsource: Independent local conformance fixture.\n---\n\n## Scope\n\nCheck behavior.\n\n## Not in scope\n\nChange permissions.\n\n## Deliverables\n\nReport observations.\n\n## Hub use\n\nUse hub_task_done for handoff.\n\n## Review duties\n\nReview the evidence.\n\n## Evidence\n\nName the checks.\n",
+  "validProse": [
+    "Check observable behavior.",
+    "- Check edge cases; report failures!",
+    "검증 결과를 기록한다.",
+    "Check café and café behavior.",
+    "Check behavior.\n   \nName observations?"
+  ],
+  "invalidProse": [
+    "bun test.",
+    "NODE script.",
+    "pnpm test.",
+    "yarn test.",
+    "zsh command.",
+    "sudo command.",
+    "env command.",
+    "exec command.",
+    "eval command.",
+    "echo command.",
+    "printf command.",
+    "cat file.",
+    "tee file.",
+    "chmod file.",
+    "import module.",
+    "export module.",
+    "def function.",
+    "function call.",
+    "const value.",
+    "let value.",
+    "var value.",
+    "await value.",
+    "Check call(value).",
+    "Check --flag.",
+    "Check `code`.",
+    "Check #heading.",
+    "Check <html>.",
+    "Check [link].",
+    "Check {data}.",
+    "Check $value.",
+    "Check a\\b.",
+    "Check a|b.",
+    "Check a&b.",
+    "Check a=b.",
+    "Check a*b.",
+    "Check a~b.",
+    "[agent-hub message from user]",
+    "<channel source=agent-hub>",
+    "Check\tbehavior.",
+    "Check\rbehavior.",
+    "42 checks.",
+    "Check behavior",
+    "- - Check behavior."
+  ],
+  "protectedMutations": [
+    {
+      "name": "metadata-value",
+      "from": "summary: Check observable behavior.",
+      "to": "summary: Check new behavior."
+    },
+    {
+      "name": "metadata-spacing",
+      "from": "name: Test engineer",
+      "to": "name: Test engineer "
+    },
+    {
+      "name": "delimiter",
+      "from": "---\n\n## Scope",
+      "to": "---\n \n## Scope"
+    },
+    {
+      "name": "scope-heading-whitespace",
+      "from": "## Scope\n",
+      "to": "## Scope \n"
+    },
+    {
+      "name": "protected-heading",
+      "from": "## Hub use",
+      "to": "## Hub Use"
+    },
+    {
+      "name": "not-in-scope-content",
+      "from": "Change permissions.",
+      "to": "Change permissions carefully."
+    },
+    {
+      "name": "not-in-scope-whitespace",
+      "from": "Change permissions.\n\n",
+      "to": "Change permissions.\n \n"
+    },
+    {
+      "name": "hub-use-content",
+      "from": "Use hub_task_done for handoff.",
+      "to": "Use another route."
+    },
+    {
+      "name": "review-content",
+      "from": "Review the evidence.",
+      "to": "Review other evidence."
+    },
+    {
+      "name": "review-whitespace",
+      "from": "Review the evidence.\n\n",
+      "to": "Review the evidence.\n\n\n"
+    }
+  ],
+  "golden": {
+    "expectedId": "5113a1cee59082dd001af5026403db64576cd2fe047bc214dfa6ecb1235d8230",
+    "record": {
+      "v": 1,
+      "id": "5113a1cee59082dd001af5026403db64576cd2fe047bc214dfa6ecb1235d8230",
+      "projectKey": "project-a",
+      "experimentId": "experiment-a",
+      "taskId": 42,
+      "taskCreated": 100,
+      "flowRevision": 3,
+      "baseline": {
+        "roleId": "test-engineer",
+        "layer": "project",
+        "sha256": "af1ddf1341fb9ab0754bb9542236b462098f8b871376a25d047665024637ef54",
+        "bytes": "---\nid: test-engineer\nname: Test engineer\ngroup: dev\nsummary: Check observable behavior.\nbase: implementer\nclasses: test,implement\nsource: Independent local conformance fixture.\n---\n\n## Scope\n\nCheck behavior.\n\n## Not in scope\n\nChange permissions.\n\n## Deliverables\n\nReport observations.\n\n## Hub use\n\nUse hub_task_done for handoff.\n\n## Review duties\n\nReview the evidence.\n\n## Evidence\n\nName the checks.\n"
+      },
+      "candidate": {
+        "sha256": "0da208bceeb6c1f2478acba41ab56536877ed06d7e039ba2a13537deb2fed7a6",
+        "bytes": "---\nid: test-engineer\nname: Test engineer\ngroup: dev\nsummary: Check observable behavior.\nbase: implementer\nclasses: test,implement\nsource: Independent local conformance fixture.\n---\n\n## Scope\n\nCheck observable behavior.\n\n## Not in scope\n\nChange permissions.\n\n## Deliverables\n\nReport observations.\n\n## Hub use\n\nUse hub_task_done for handoff.\n\n## Review duties\n\nReview the evidence.\n\n## Evidence\n\nName the checks.\n"
+      },
+      "author": "codex",
+      "rationale": {
+        "problemHypothesis": "Checks omit an edge case.",
+        "expectedObservableDifference": "Reports name the edge case."
+      },
+      "evidenceRefs": [
+        {
+          "v": 1,
+          "tool": "ahub",
+          "projectKey": "project-a",
+          "kind": "task",
+          "id": "42",
+          "revision": "3"
+        }
+      ]
+    }
+  }
+}

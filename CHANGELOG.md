@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Harness guidance mapper (#66): read-only decoding of the agent-hub `GuidanceReadResult` public metadata contract at `50100a8` alongside the existing ares fixture format. Keeps native variant/experiment/task/layer/section/digest identity, bounded lifecycle and evidence metadata, and explicit unavailable results. Rationale shape/bounds are checked but its text is omitted pending agent-hub task #822; synthetic PII-shaped canaries cover outputs and errors. Strict `ahub` execution-reference decoding never enables local-source fallback, skill evidence, hub resolution or live probe import (#1226 remains pending).
+  - N-1 CLI: command names, usage and existing fixture operations stay unchanged; no new command is exposed.
+  - N-1 MCP: tool names, schemas and annotations stay unchanged; no external resolver is added.
+  - N-1 study/ledger formats: no format/version or stored-record rewrite; existing ares reference/projection bytes, round bindings and denominators remain unchanged. New producer metadata is decoded read-only and carries no probe/handoff assurance.
+
 - Supervision treatment record integration (#63 T2b): `integration-check` now retains all 36 frozen cases and reports the agent-hub#1221 T1 record consumer pinned to `bc6f46b077dd3a255debaee8152fa17f1f13b79c`. All 12 frozen Supervision task-state payloads remain unsupported rule facts, with per-case reason/hash coverage and helpful/false/missed left unknown (`null`), not zero or fabricated success. Separate synthetic record vectors exercise the closed reader/scorer without importing or executing hub rules. Helpful/false scoring requires a present matching observation; absence is `no-evaluation-coverage`, and missed/correct-non-trigger metrics remain `null` pending source-owned evaluation coverage. Batch counters or caller-asserted evaluated lists cannot establish that coverage. No treatment trial, record receipt or effect path is launched; person decisions remain literal 0. Corpus re-expression needs an owner decision before T3.
   - N-1 CLI: no command/default switch change; the existing check-only integration output adds Supervision coverage and producer binding.
   - N-1 MCP: no tool, schema or annotation change.
