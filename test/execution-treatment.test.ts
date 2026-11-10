@@ -5,6 +5,7 @@ import * as lineage from "../scripts/execution-lineage.ts";
 import * as reuse from "../scripts/execution-reuse.ts";
 import * as supervision from "../scripts/execution-supervision.ts";
 import * as records from "../scripts/execution-supervision-records.ts";
+import {AMENDMENT_RECEIPT, verifySupervisionAmendment, loadSupervisionAmendmentCases} from "../scripts/execution-supervision-amendment.ts";
 import { FROZEN_RECEIPT, verifyPreregistration } from "../scripts/execution-eval.ts";
 import { readBytesBounded, readJsonFile, plain, sha256 } from "../src/study.ts";
 import { join } from "node:path";
@@ -49,6 +50,8 @@ test("integration-check binds clean code but never invokes an arm or changes fro
   const reader = spyOn(records, "readShadowSnapshot").mockImplementation(() => { throw new Error("must not score or read producer unit records here"); });
   const scorer = spyOn(supervision, "scoreSupervisionRecords").mockImplementation(() => { throw new Error("must not score supervision truth here"); });
   const classify = spyOn(supervision, "classifySupervisionFixture");
+  const classifyV2 = spyOn(supervision, "classifySupervisionV2Fixture");
+  const intentScore = spyOn(supervision, "scoreSupervisionIntentRecords").mockImplementation(() => {throw new Error("must not score a trial");});
   try {
     const result = await validateTreatmentIntegration(root);
     expect(result).toMatchObject({ status: "integrated-not-measured", trialExecutions: 0, treatmentObservations: 0, adoptionDecision: null, arms: {diagnose: {cases: 12}, reuse: {cases: 12}, supervision: {status: "integrated-record-reader", dependency: "agent-hub#1221", producerCommit: "bc6f46b077dd3a255debaee8152fa17f1f13b79c", cases: 12, fakeShadow: false, helpful: null, false: null, missed: null, personDecisions: 0, coverage: { covered: 0, unsupported: 12 }}} });
@@ -58,15 +61,25 @@ test("integration-check binds clean code but never invokes an arm or changes fro
     expect(classify).toHaveBeenCalledTimes(12);
     expect(classify.mock.calls.map(call => call[0])).toEqual(rows.map(row => row.payload));
     expect(result.arms.supervision.coverage.rows).toEqual(rows.map(row => ({ id: row.id, inputSha256: row.inputSha256, expectedSha256: row.expectedSha256, state: "unsupported", reason: "task-state-not-admitted-rule-facts" })));
+    const amended = verifySupervisionAmendment(root), amendedCases = loadSupervisionAmendmentCases(root).cases;
+    expect(classifyV2).toHaveBeenCalledTimes(12); expect(intentScore).not.toHaveBeenCalled();
+    expect(classifyV2.mock.calls.map(call => call[0])).toEqual(amendedCases.map(row => row.payload));
+    expect(result.arms.supervision.amendment).toMatchObject({corpusVersion: 2, cases: 12, status: "preregistered-amendment-not-measured",
+      receiptSha256: amended.receiptSha256, amends: {receiptSha256: "72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20"},
+      coverage: {kind: "format-only", covered: 12, unsupported: 0}, helpful: null, false: null, wrongAction: null, missed: null, correctNonTriggers: null,
+      personDecisions: 0, trialExecutions: 0, treatmentObservations: 0});
+    expect(result.arms.supervision.amendment.coverage.rows).toEqual(amendedCases.map(row => ({id: row.id, inputSha256: row.inputSha256,
+      expectedSha256: row.expectedSha256, state: "covered", reason: "supported-supervision-facts-shape"})));
+    expect(sha256(readBytesBounded(join(root, AMENDMENT_RECEIPT), 65_536))).toMatch(/^[a-f0-9]{64}$/);
     expect(immutableSources()).toEqual(before);
-  } finally { diagnostic.mockRestore(); reused.mockRestore(); reader.mockRestore(); scorer.mockRestore(); classify.mockRestore(); }
+  } finally { diagnostic.mockRestore(); reused.mockRestore(); reader.mockRestore(); scorer.mockRestore(); classify.mockRestore(); classifyV2.mockRestore(); intentScore.mockRestore(); }
 });
 
 test("check-only CLI refuses trial arguments rather than accepting a treatment launch", () => {
-  for (const args of [["integration-check", "--run"], ["treatment"], ["supervision"]]) {
+  for (const args of [["integration-check", "--run"], ["treatment"], ["supervision"], ["freeze-supervision-v2", "--run"], ["verify-supervision-v2", "--force"]]) {
     const home = tempDir();
     const child = Bun.spawnSync([process.execPath, join(root, "scripts/execution-eval.ts"), ...args], {cwd: home, env: {HOME: home, PATH: "/usr/bin:/bin"}, stdout: "pipe", stderr: "pipe", timeout: 5000, maxBuffer: 65_536});
     expect(child.exitCode).not.toBe(0); expect(child.stdout.length).toBe(0);
-    expect(child.stderr.toString()).toMatch(/no treatment-run|never launches treatment trials/);
+    expect(child.stderr.toString()).toMatch(/no treatment-run|never launches treatment trials|no evaluator or trial/);
   }
 });

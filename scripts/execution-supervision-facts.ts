@@ -97,6 +97,7 @@ export function validateSupervisionFacts(raw: unknown): SupervisionFacts {
     if (!["backlog", "proposed", "in_progress", "in_review", "approved", "changes_requested", "cancelled"].includes(state)) invalid();
     return {id: number(task.id, budget, 1), state: state as TaskState, history: array(task.history, 4096, budget).map(entry => history(entry, budget))};
   });
+  if (new Set(tasks.map(task => task.id)).size !== tasks.length) invalid();
   const result: SupervisionFacts = {tasks};
   if (row.deliverables !== undefined) result.deliverables = array(row.deliverables, 100, budget).map(value => {
     const item = object(value, ["task", "checked", "changed"], ["missing"], budget);

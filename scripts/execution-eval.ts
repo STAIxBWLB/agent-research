@@ -153,7 +153,7 @@ if (import.meta.main) {
       const { validateTreatmentIntegration } = await import("./execution-treatment.ts");
       console.log(JSON.stringify(await validateTreatmentIntegration(root)));
     } else if (command === "freeze-supervision-v2" || command === "verify-supervision-v2") {
-      if (extra.length) fail("Supervision amendment accepts at most one receipt path", "use bun scripts/execution-eval.ts freeze-supervision-v2|verify-supervision-v2 [receipt.json]; no evaluator or trial is run");
+      if (extra.length || output?.startsWith("-")) fail("Supervision amendment accepts at most one receipt path and no flags", "use bun scripts/execution-eval.ts freeze-supervision-v2|verify-supervision-v2 [receipt.json]; no evaluator or trial is run");
       const amendment = await import("./execution-supervision-amendment.ts");
       const file = resolve(output ?? join(root, amendment.AMENDMENT_RECEIPT));
       const receipt = command === "freeze-supervision-v2" ? amendment.freezeSupervisionAmendment(root, file) : amendment.verifySupervisionAmendment(root, file);

@@ -1,5 +1,7 @@
 import { plain } from "../src/study.ts";
-import {validateSupervisionFacts} from "./execution-supervision-facts.ts";
+import {validateSupervisionFacts, currentSupervisionRevision} from "./execution-supervision-facts.ts";
+import {parseSupervisionIntentLabel, type SupervisionIntentLabel} from "./execution-supervision-amendment.ts";
+import {types} from "node:util";
 import { readShadowSnapshot, readSupervisionTrigger, type ShadowSnapshot, type SupervisionObservation, type SupervisionGap, type SupervisionRuleId } from "./execution-supervision-records.ts";
 
 export const SUPERVISION_PRODUCER_COMMIT = "bc6f46b077dd3a255debaee8152fa17f1f13b79c";
@@ -31,11 +33,11 @@ function text(raw: unknown, label: string, maximum = 1024): string {
   return raw;
 }
 function object(raw: unknown, fields: readonly string[], label: string): Record<string, unknown> {
-  if (!plain(raw) || Reflect.ownKeys(raw).some(key => typeof key !== "string" || !fields.includes(key) || !Object.hasOwn(Object.getOwnPropertyDescriptor(raw, key)!, "value") || !Object.getOwnPropertyDescriptor(raw, key)!.enumerable)) fail(`${label} must contain only known JSON data fields`);
+  if (types.isProxy(raw) || !plain(raw) || Reflect.ownKeys(raw).some(key => typeof key !== "string" || !fields.includes(key) || !Object.hasOwn(Object.getOwnPropertyDescriptor(raw, key)!, "value") || !Object.getOwnPropertyDescriptor(raw, key)!.enumerable)) fail(`${label} must contain only known JSON data fields`);
   return raw;
 }
 function list(raw: unknown, label: string, max = MAX_BATCH): unknown[] {
-  if (!Array.isArray(raw) || raw.length > max || Reflect.ownKeys(raw).length !== raw.length + 1) fail(`${label} must be a dense JSON array of at most ${max} items`);
+  if (types.isProxy(raw) || !Array.isArray(raw) || raw.length > max || Reflect.ownKeys(raw).length !== raw.length + 1) fail(`${label} must be a dense JSON array of at most ${max} items`);
   const values: unknown[] = [];
   for (let index = 0; index < raw.length; index++) {
     const descriptor = Object.getOwnPropertyDescriptor(raw, String(index));
@@ -127,4 +129,60 @@ export function classifySupervisionV2Fixture(input: unknown): {state: "covered";
   text(value.request, "Supervision v2 request", 4000);
   validateSupervisionFacts(value.facts);
   return {state: "covered", reason: "supported-supervision-facts-shape"};
+}
+
+
+export const SUPERVISION_INTENT_RULES = {escalate: "repeated_failure", recheck: "deliverable_invalidated_check", request_integration: "declared_overlap_without_integration"} as const;
+type IntentProposalClass = "helpful" | "false" | "wrong-action" | "unscored";
+export interface SupervisionIntentRow {
+  id: string; task: number; revision: string | null; nextAction: SupervisionIntentLabel["nextAction"]; rule: SupervisionRuleId | null;
+  state: "scored" | "insufficient-evidence"; reason?: string; outcome: "helpful" | "false" | null;
+  helpful: number | null; false: number | null; wrongAction: number | null; falseProposalBudget: number | null; missed: null; correctNonTriggers: null;
+  proposals: {identity: string; rule: SupervisionRuleId; action: SupervisionObservation["action"]; classification: IntentProposalClass}[];
+}
+export interface SupervisionIntentScore {
+  authority: "synthetic-intent-join-conformance"; rows: SupervisionIntentRow[];
+  records: Pick<SupervisionScore, "observations" | "gap" | "duplicates" | "producerCounts" | "retentionSuppressed">; evaluationCoverage: "positive-observations-only"; coverage: {total: number; formatCompatible: number; scored: number; insufficient: number};
+  scores: null | {helpful: number; false: number; wrongAction: number; falseProposalBudget: number; missed: null; correctNonTriggers: null};
+  personDecisions: 0; workerTurns: 0; actionWrites: 0; notifications: 0;
+}
+/** Join approved scenario intent, never predict a rule trigger or manufacture evaluation coverage. */
+export function scoreSupervisionIntentRecords(rawSnapshots: readonly unknown[], rawFacts: unknown, rawLabels: readonly unknown[]): SupervisionIntentScore {
+  if (types.isProxy(rawSnapshots) || types.isProxy(rawLabels)) fail("intent join requires inert JSON lists");
+  const facts = validateSupervisionFacts(rawFacts), labels = list(rawLabels, "intent labels", MAX_TRUTH).map(parseSupervisionIntentLabel);
+  const normalized = scoreSupervisionRecords(rawSnapshots, []), records = {observations: normalized.observations, gap: normalized.gap,
+    duplicates: normalized.duplicates, producerCounts: normalized.producerCounts, retentionSuppressed: normalized.retentionSuppressed};
+  const byTask = new Map(facts.tasks.map(task => [task.id, task]));
+  const identities = new Set<string>(), targets = new Set<string>();
+  const rows: SupervisionIntentRow[] = labels.map(label => {
+    if (identities.has(label.id)) fail("intent case ids must be unique"); identities.add(label.id);
+    const task = byTask.get(label.task), current = task ? currentSupervisionRevision(task).revision : null;
+    const target = JSON.stringify([label.task, current]);
+    if (targets.has(target)) fail("one task/revision may have only one intent label per fact set"); targets.add(target);
+    const wanted = label.nextAction === "none" ? null : SUPERVISION_INTENT_RULES[label.nextAction];
+    const observed = current === null ? [] : records.observations.filter(row => row.task === label.task && row.revision === current);
+    const relevant = (row: Pick<SupervisionObservation, "task" | "revision" | "rule">) => row.task === label.task && row.revision === current && (wanted === null || row.rule === wanted);
+    const matching = wanted === null ? [] : observed.filter(row => row.rule === wanted && row.action === label.nextAction);
+    const reason = current === null ? "target-task-unavailable" : records.gap.some(relevant) ? "coverage-gap"
+      : records.observations.some(row => relevant(row) && row.limits.truncated) ? "history-truncated"
+      : records.retentionSuppressed ? "retention-suppressed"
+      : label.trigger ? !matching.length ? "no-evaluation-coverage" : undefined
+      : !observed.length ? "no-evaluation-coverage" : undefined;
+    const proposals = observed.map(row => ({identity: key(row), rule: row.rule, action: row.action,
+      classification: (reason ? "unscored" : !label.trigger ? "false" : row.action === label.nextAction ? "helpful" : "wrong-action") as IntentProposalClass}));
+    const base = {id: label.id, task: label.task, revision: current, nextAction: label.nextAction, rule: wanted, proposals, missed: null, correctNonTriggers: null};
+    if (reason) return {...base, state: "insufficient-evidence", reason, outcome: null, helpful: null, false: null, wrongAction: null, falseProposalBudget: null};
+    const wrongAction = proposals.filter(row => row.classification === "wrong-action").length;
+    const falseProposals = label.trigger ? 0 : proposals.length;
+    return {...base, state: "scored", outcome: label.trigger ? "helpful" : "false", helpful: label.trigger ? 1 : 0,
+      false: falseProposals, wrongAction, falseProposalBudget: falseProposals + wrongAction};
+  });
+  const scored = rows.filter(row => row.state === "scored"), scores = scored.length ? {
+    helpful: scored.reduce((sum, row) => sum + row.helpful!, 0), false: scored.reduce((sum, row) => sum + row.false!, 0),
+    wrongAction: scored.reduce((sum, row) => sum + row.wrongAction!, 0), falseProposalBudget: scored.reduce((sum, row) => sum + row.falseProposalBudget!, 0),
+    missed: null, correctNonTriggers: null,
+  } : null;
+  return {authority: "synthetic-intent-join-conformance", rows, records, evaluationCoverage: "positive-observations-only",
+    coverage: {total: rows.length, formatCompatible: rows.filter(row => row.revision !== null).length, scored: scored.length, insufficient: rows.length - scored.length}, scores,
+    personDecisions: 0, workerTurns: 0, actionWrites: 0, notifications: 0};
 }
