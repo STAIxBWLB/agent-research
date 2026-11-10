@@ -2,21 +2,21 @@ import { plain } from "../src/study.ts";
 import {validateSupervisionFacts, currentSupervisionRevision} from "./execution-supervision-facts.ts";
 import {parseSupervisionIntentLabel, type SupervisionIntentLabel} from "./execution-supervision-amendment.ts";
 import {types} from "node:util";
-import { readShadowSnapshot, readSupervisionTrigger, type ShadowSnapshot, type SupervisionObservation, type SupervisionGap, type SupervisionRuleId } from "./execution-supervision-records.ts";
+import { readShadowSnapshot, readSupervisionTrigger, type ShadowSnapshot, type SupervisionObservation, type SupervisionGap, type SupervisionRuleId, type EvaluatedRevision } from "./execution-supervision-records.ts";
 
-export const SUPERVISION_PRODUCER_COMMIT = "bc6f46b077dd3a255debaee8152fa17f1f13b79c";
+export const SUPERVISION_PRODUCER_COMMIT = "f6f94528ac31ec67d1a8a8bcb8fcf25168d9cfc7";
 const BATCH_BYTES = 1024 * 1024, MAX_BATCH = 100, MAX_TRUTH = 1024;
 export interface SupervisionTruth {
   id: string; rule: SupervisionRuleId; task: number; revision: string; trigger: string;
   expected: boolean | null; coverage: "covered" | "unsupported"; reason?: string;
 }
-type Outcome = "helpful" | "false";
+type Outcome = "helpful" | "false" | "missed" | "correct-non-trigger";
 export interface SupervisionScore {
   authority: "synthetic-record-conformance";
-  observations: SupervisionObservation[]; gap: SupervisionGap[]; duplicates: number;
-  producerCounts: ShadowSnapshot["counts"][]; retentionSuppressed: boolean; unscoredObservations: number;
+  observations: SupervisionObservation[]; gap: SupervisionGap[]; evaluated: EvaluatedRevision[]; duplicates: number;
+  producerCounts: ShadowSnapshot["counts"][]; retentionSuppressed: boolean; evaluatedSuppressed: boolean; unscoredObservations: number;
   coverage: {total: number; scored: number; insufficient: number; unsupported: number};
-  scores: null | {helpful: number; false: number; missed: null; correctNonTriggers: null};
+  scores: null | {helpful: number; false: number; missed: number | null; correctNonTriggers: number | null};
   rows: {id: string; state: "scored" | "insufficient-evidence"; reason?: string; outcome: Outcome | null}[];
   personDecisions: 0; workerTurns: 0; actionWrites: 0; notifications: 0;
 }
@@ -71,7 +71,7 @@ export function scoreSupervisionRecords(rawSnapshots: readonly unknown[], rawTru
     if (ids.has(row.id) || truthKeys.has(key(row))) fail("truth ids and rule/task/revision/trigger identities must be unique");
     ids.add(row.id); truthKeys.add(key(row));
   }
-  const observations = new Map<string, SupervisionObservation>(), gaps = new Map<string, SupervisionGap>(), perRevision = new Map<string, number>();
+  const observations = new Map<string, SupervisionObservation>(), gaps = new Map<string, SupervisionGap>(), evaluated = new Map<string, EvaluatedRevision>(), perRevision = new Map<string, number>();
   let duplicates = 0;
   for (const snapshot of snapshots) {
     for (const observation of snapshot.observations) {
@@ -84,6 +84,11 @@ export function scoreSupervisionRecords(rawSnapshots: readonly unknown[], rawTru
       if (observations.size >= 100 || count > 3) fail("combined retained observations exceed 100 or 3 per rule/task/revision");
       perRevision.set(owner, count); observations.set(identity, observation);
     }
+    for (const row of snapshot.evaluated) {
+      const identity = revision(row);
+      if (!evaluated.has(identity) && evaluated.size >= 100) fail("combined evaluated revisions exceed 100");
+      evaluated.set(identity, row);
+    }
     for (const gap of snapshot.gap) {
       const identity = gapKey(gap);
       if (!gaps.has(identity) && gaps.size >= 100) fail("combined retained gaps exceed 100");
@@ -93,21 +98,30 @@ export function scoreSupervisionRecords(rawSnapshots: readonly unknown[], rawTru
   const gapRevisions = new Set([...gaps.values()].map(revision));
   const truncatedRevisions = new Set([...observations.values()].filter(row => row.limits.truncated).map(revision));
   const retentionSuppressed = snapshots.some(snapshot => snapshot.counts.suppressed > 0);
-  const scores = {helpful: 0, false: 0, missed: null, correctNonTriggers: null};
-  let scored = 0, unsupported = 0;
+  const evaluatedSuppressed = snapshots.some(snapshot => snapshot.counts.evaluatedSuppressed > 0);
+  const mayInferAbsence = (row: EvaluatedRevision) => evaluated.has(revision(row)) && !gapRevisions.has(revision(row)) && !truncatedRevisions.has(revision(row)) && !retentionSuppressed && !evaluatedSuppressed;
+  const scores = {helpful: 0, false: 0, missed: 0 as number | null, correctNonTriggers: 0 as number | null};
+  let scored = 0, unsupported = 0, missedCovered = false, nonTriggerCovered = false;
   const rows: SupervisionScore["rows"] = truth.map(row => {
+    const present = observations.has(key(row));
     const reason = row.coverage === "unsupported" ? "unsupported-case" : row.expected === null ? "truth-unavailable"
-      : gapRevisions.has(revision(row)) ? "coverage-gap" : truncatedRevisions.has(revision(row)) ? "history-truncated" : retentionSuppressed ? "retention-suppressed" : !observations.has(key(row)) ? "no-evaluation-coverage" : undefined;
+      : gapRevisions.has(revision(row)) ? "coverage-gap" : truncatedRevisions.has(revision(row)) ? "history-truncated" : retentionSuppressed ? "retention-suppressed"
+      : !present && evaluatedSuppressed ? "evaluated-suppressed" : !present && !evaluated.has(revision(row)) ? "no-evaluation-coverage" : undefined;
     if (row.coverage === "unsupported") unsupported++;
     if (reason) return {id: row.id, state: "insufficient-evidence", reason, outcome: null};
-    // A retained observation proves its own identity was evaluated. Absence has no such source binding.
-    const outcome: Outcome = row.expected ? "helpful" : "false";
-    scored++; scores[outcome]++;
+    if (mayInferAbsence(row)) {if (row.expected) missedCovered = true; else nonTriggerCovered = true;}
+    const outcome: Outcome = present ? row.expected ? "helpful" : "false" : row.expected ? "missed" : "correct-non-trigger";
+    scored++;
+    if (outcome === "correct-non-trigger") scores.correctNonTriggers = (scores.correctNonTriggers ?? 0) + 1;
+    else if (outcome === "missed") scores.missed = (scores.missed ?? 0) + 1;
+    else scores[outcome]++;
     return {id: row.id, state: "scored", outcome};
   });
+  if (!missedCovered) scores.missed = null;
+  if (!nonTriggerCovered) scores.correctNonTriggers = null;
   const scoredKeys = new Set(truth.filter((_, index) => rows[index]!.state === "scored").map(key));
-  return {authority: "synthetic-record-conformance", observations: [...observations.values()], gap: [...gaps.values()], duplicates,
-    producerCounts: snapshots.map(snapshot => snapshot.counts), retentionSuppressed,
+  return {authority: "synthetic-record-conformance", observations: [...observations.values()], gap: [...gaps.values()], evaluated: [...evaluated.values()], duplicates,
+    producerCounts: snapshots.map(snapshot => snapshot.counts), retentionSuppressed, evaluatedSuppressed,
     unscoredObservations: [...observations.keys()].filter(identity => !scoredKeys.has(identity)).length,
     coverage: {total: truth.length, scored, insufficient: truth.length - scored, unsupported}, scores: scored ? scores : null, rows,
     personDecisions: 0, workerTurns: 0, actionWrites: 0, notifications: 0};
@@ -137,25 +151,25 @@ type IntentProposalClass = "intended-action" | "false" | "wrong-action";
 export interface SupervisionIntentRow {
   id: string; task: number; revision: string | null; nextAction: SupervisionIntentLabel["nextAction"]; rule: SupervisionRuleId | null;
   state: "scored" | "insufficient-evidence"; reason?: string; outcome: "helpful" | "missed" | "correct-non-trigger" | "insufficient";
-  helpful: number | null; falseCases: number; falseProposals: number; wrongAction: number; falseProposalBudget: number; missed: null; correctNonTriggers: null;
+  helpful: number | null; falseCases: number; falseProposals: number; wrongAction: number; falseProposalBudget: number; missed: number | null; correctNonTriggers: number | null;
   proposals: {identity: string; rule: SupervisionRuleId; action: SupervisionObservation["action"]; classification: IntentProposalClass}[];
 }
 export interface SupervisionIntentScore {
   authority: "synthetic-intent-join-conformance"; rows: SupervisionIntentRow[];
-  records: Pick<SupervisionScore, "observations" | "gap" | "duplicates" | "producerCounts" | "retentionSuppressed">;
-  evaluationCoverage: "positive-observations-only"; proposalCountScope: "present-observations-only";
+  records: Pick<SupervisionScore, "observations" | "gap" | "evaluated" | "duplicates" | "producerCounts" | "retentionSuppressed" | "evaluatedSuppressed">;
+  evaluationCoverage: "explicit-evaluated-triples"; proposalCountScope: "present-observations-only";
   coverage: {total: number; formatCompatible: number; scored: number; insufficient: number};
-  scores: null | {helpful: number | null; falseCases: number; falseProposals: number; wrongAction: number; falseProposalBudget: number; missed: null; correctNonTriggers: null};
+  scores: null | {helpful: number; falseCases: number; falseProposals: number; wrongAction: number; falseProposalBudget: number; missed: number | null; correctNonTriggers: number | null};
   personDecisions: 0; workerTurns: 0; actionWrites: 0; notifications: 0;
 }
 /** Join approved scenario intent, never predict a rule trigger or manufacture evaluation coverage. */
 export function scoreSupervisionIntentRecords(rawSnapshots: readonly unknown[], rawFacts: unknown, rawLabels: readonly unknown[]): SupervisionIntentScore {
   if (types.isProxy(rawSnapshots) || types.isProxy(rawLabels)) fail("intent join requires inert JSON lists");
   const facts = validateSupervisionFacts(rawFacts), labels = list(rawLabels, "intent labels", MAX_TRUTH).map(parseSupervisionIntentLabel);
-  const normalized = scoreSupervisionRecords(rawSnapshots, []), records = {observations: normalized.observations, gap: normalized.gap,
-    duplicates: normalized.duplicates, producerCounts: normalized.producerCounts, retentionSuppressed: normalized.retentionSuppressed};
+  const normalized = scoreSupervisionRecords(rawSnapshots, []), records = {observations: normalized.observations, gap: normalized.gap, evaluated: normalized.evaluated,
+    duplicates: normalized.duplicates, producerCounts: normalized.producerCounts, retentionSuppressed: normalized.retentionSuppressed, evaluatedSuppressed: normalized.evaluatedSuppressed};
   const byTask = new Map(facts.tasks.map(task => [task.id, task]));
-  const identities = new Set<string>(), targets = new Set<string>();
+  const identities = new Set<string>(), targets = new Set<string>(), coveredMisses = new Set<string>(), coveredNonTriggers = new Set<string>();
   const rows: SupervisionIntentRow[] = labels.map(label => {
     if (identities.has(label.id)) fail("intent case ids must be unique"); identities.add(label.id);
     const task = byTask.get(label.task), current = task ? currentSupervisionRevision(task).revision : null;
@@ -170,21 +184,27 @@ export function scoreSupervisionIntentRecords(rawSnapshots: readonly unknown[], 
       classification: (!label.trigger ? "false" : row.action === label.nextAction ? "intended-action" : "wrong-action") as IntentProposalClass}));
     const wrongAction = proposals.filter(row => row.classification === "wrong-action").length;
     const falseProposals = label.trigger ? 0 : proposals.length, falseCases = falseProposals ? 1 : 0;
-    const base = {id: label.id, task: label.task, revision: current, nextAction: label.nextAction, rule: wanted, proposals,
-      falseCases, falseProposals, wrongAction, falseProposalBudget: falseProposals + wrongAction, missed: null, correctNonTriggers: null};
-    if (matching.length) return {...base, state: "scored", outcome: "helpful", helpful: 1};
-    const reason = current === null ? "target-task-unavailable" : records.gap.some(relevant) ? "coverage-gap"
+    const blocked = records.gap.some(relevant) ? "coverage-gap"
       : records.observations.some(row => relevant(row) && row.limits.truncated) ? "history-truncated"
-      : records.retentionSuppressed ? "retention-suppressed" : "no-evaluation-coverage";
-    // No desired-action observation does not prove that its rule was evaluated.
-    return {...base, state: "insufficient-evidence", reason, outcome: "insufficient", helpful: null};
+      : records.retentionSuppressed ? "retention-suppressed" : records.evaluatedSuppressed ? "evaluated-suppressed" : undefined;
+    const hasCoverage = current !== null && !blocked && (wanted === null ? RULES.every(rule => records.evaluated.some(row => row.task === label.task && row.revision === current && row.rule === rule))
+      : records.evaluated.some(row => row.task === label.task && row.revision === current && row.rule === wanted));
+    if (hasCoverage) {if (label.trigger) coveredMisses.add(label.id); else coveredNonTriggers.add(label.id);}
+    const base = {id: label.id, task: label.task, revision: current, nextAction: label.nextAction, rule: wanted, proposals,
+      falseCases, falseProposals, wrongAction, falseProposalBudget: falseProposals + wrongAction};
+    if (matching.length) return {...base, state: "scored", outcome: "helpful", helpful: 1, missed: hasCoverage ? 0 : null, correctNonTriggers: null};
+    if (hasCoverage && label.trigger) return {...base, state: "scored", outcome: "missed", helpful: 0, missed: 1, correctNonTriggers: null};
+    if (hasCoverage && !observed.length) return {...base, state: "scored", outcome: "correct-non-trigger", helpful: 0, missed: null, correctNonTriggers: 1};
+    const reason = current === null ? "target-task-unavailable" : blocked ?? (hasCoverage ? "non-trigger-proposals-present" : "no-evaluation-coverage");
+    return {...base, state: "insufficient-evidence", reason, outcome: "insufficient", helpful: null, missed: null, correctNonTriggers: hasCoverage ? 0 : null};
   });
-  const helpful = rows.filter(row => row.outcome === "helpful").length, scores = rows.length ? {
-    helpful: helpful || null, falseCases: rows.reduce((sum, row) => sum + row.falseCases, 0), falseProposals: rows.reduce((sum, row) => sum + row.falseProposals, 0),
+  const helpful = rows.filter(row => row.outcome === "helpful").length, scored = rows.filter(row => row.state === "scored").length, scores = rows.length ? {
+    helpful, falseCases: rows.reduce((sum, row) => sum + row.falseCases, 0), falseProposals: rows.reduce((sum, row) => sum + row.falseProposals, 0),
     wrongAction: rows.reduce((sum, row) => sum + row.wrongAction, 0), falseProposalBudget: rows.reduce((sum, row) => sum + row.falseProposalBudget, 0),
-    missed: null, correctNonTriggers: null,
+    missed: coveredMisses.size ? rows.reduce((sum, row) => sum + (row.missed ?? 0), 0) : null,
+    correctNonTriggers: coveredNonTriggers.size ? rows.reduce((sum, row) => sum + (row.correctNonTriggers ?? 0), 0) : null,
   } : null;
-  return {authority: "synthetic-intent-join-conformance", rows, records, evaluationCoverage: "positive-observations-only", proposalCountScope: "present-observations-only",
-    coverage: {total: rows.length, formatCompatible: rows.filter(row => row.revision !== null).length, scored: helpful, insufficient: rows.length - helpful}, scores,
+  return {authority: "synthetic-intent-join-conformance", rows, records, evaluationCoverage: "explicit-evaluated-triples", proposalCountScope: "present-observations-only",
+    coverage: {total: rows.length, formatCompatible: rows.filter(row => row.revision !== null).length, scored, insufficient: rows.length - scored}, scores,
     personDecisions: 0, workerTurns: 0, actionWrites: 0, notifications: 0};
 }

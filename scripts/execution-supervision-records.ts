@@ -1,8 +1,10 @@
 import { plain, readTextBounded } from "../src/study.ts";
+import {types} from "node:util";
 
 /** Consumer-owned readers for the pinned shadow producer records, not its rule implementation. */
 export const SUPERVISION_RECORD_BYTES = 256 * 1024, SUPERVISION_STRING_BYTES = 1024;
 export const MAX_SHADOW_OBSERVATIONS = 100, MAX_SHADOW_GAPS = 100, MAX_SHADOW_REFS = 8, MAX_SHADOW_PER_REVISION = 3;
+export const MAX_SHADOW_EVALUATED = 100;
 export type SupervisionRuleId = "repeated_failure" | "deliverable_invalidated_check" | "declared_overlap_without_integration";
 export type SupervisionAction = "escalate" | "recheck" | "request_integration";
 export type SupervisionReasonCode = "repeated_failure" | "stale_check" | "unintegrated_overlap";
@@ -13,8 +15,9 @@ export interface SupervisionObservation {
   refs: string[]; limits: ObservationLimits; action: SupervisionAction; reason: SupervisionReasonCode;
 }
 export interface SupervisionGap { rule: SupervisionRuleId; version: 1; task: number; revision: string; reason: SupervisionGapReason }
-export interface ShadowCounts { evaluations: number; observations: number; deduped: number; suppressed: number; gap: number; workerTurns: 0; actionWrites: 0; notifications: 0 }
-export interface ShadowSnapshot { observations: SupervisionObservation[]; gap: SupervisionGap[]; counts: ShadowCounts }
+export interface EvaluatedRevision {rule: SupervisionRuleId; task: number; revision: string}
+export interface ShadowCounts { evaluations: number; observations: number; deduped: number; suppressed: number; gap: number; evaluatedSuppressed: number; workerTurns: 0; actionWrites: 0; notifications: 0 }
+export interface ShadowSnapshot { observations: SupervisionObservation[]; gap: SupervisionGap[]; counts: ShadowCounts; evaluated: EvaluatedRevision[] }
 const RULES: Record<SupervisionRuleId, { action: SupervisionAction; reason: SupervisionReasonCode; trigger: string; records: number }> = {
   repeated_failure: { action: "escalate", reason: "repeated_failure", trigger: "failures:", records: 64 },
   deliverable_invalidated_check: { action: "recheck", reason: "stale_check", trigger: "check:", records: 64 },
@@ -22,7 +25,7 @@ const RULES: Record<SupervisionRuleId, { action: SupervisionAction; reason: Supe
 };
 function invalid(cause: string): never { throw new Error(`execution supervision records: ${cause}; restore a complete bounded snapshot from the pinned shadow producer and retry the fixture integration check`); }
 function object(raw: unknown, keys: readonly string[], label: string): Record<string, unknown> {
-  if (!plain(raw)) invalid(`${label} must be a plain object`);
+  if (types.isProxy(raw) || !plain(raw)) invalid(`${label} must be a plain object`);
   const own = Reflect.ownKeys(raw);
   if (own.some(key => {
     const field = Object.getOwnPropertyDescriptor(raw, key);
@@ -31,7 +34,7 @@ function object(raw: unknown, keys: readonly string[], label: string): Record<st
   return raw;
 }
 function array(raw: unknown, max: number, label: string): unknown[] {
-  if (!Array.isArray(raw)) invalid(`${label} must be an array within the producer bound`);
+  if (types.isProxy(raw) || !Array.isArray(raw) || Object.getPrototypeOf(raw) !== Array.prototype) invalid(`${label} must be an array within the producer bound`);
   const length = Object.getOwnPropertyDescriptor(raw, "length");
   if (!length || !Object.hasOwn(length, "value") || typeof length.value !== "number" || !Number.isSafeInteger(length.value) || length.value < 0 || length.value > max) invalid(`${label} must be an array of at most ${max} entries`);
   const result: unknown[] = [], own = Reflect.ownKeys(raw);
@@ -92,15 +95,30 @@ export function readSupervisionGap(raw: unknown): SupervisionGap {
   return { ...base, reason: value.reason };
 }
 export function readShadowCounts(raw: unknown): ShadowCounts {
-  const value = object(raw, ["evaluations", "observations", "deduped", "suppressed", "gap", "workerTurns", "actionWrites", "notifications"], "shadow counts");
+  const value = object(raw, ["evaluations", "observations", "deduped", "suppressed", "gap", "evaluatedSuppressed", "workerTurns", "actionWrites", "notifications"], "shadow counts");
   if (value.workerTurns !== 0 || value.actionWrites !== 0 || value.notifications !== 0) invalid("shadow workerTurns/actionWrites/notifications must each be literal zero");
-  const result: ShadowCounts = { evaluations: nonnegative(value.evaluations, "counts.evaluations"), observations: nonnegative(value.observations, "counts.observations", MAX_SHADOW_OBSERVATIONS), deduped: nonnegative(value.deduped, "counts.deduped"), suppressed: nonnegative(value.suppressed, "counts.suppressed"), gap: nonnegative(value.gap, "counts.gap", MAX_SHADOW_GAPS), workerTurns: 0, actionWrites: 0, notifications: 0 };
-  if (result.evaluations === 0 && [result.observations, result.deduped, result.suppressed, result.gap].some(count => count !== 0)) invalid("zero evaluations requires empty retained and activity counts");
+  const result: ShadowCounts = { evaluations: nonnegative(value.evaluations, "counts.evaluations"), observations: nonnegative(value.observations, "counts.observations", MAX_SHADOW_OBSERVATIONS), deduped: nonnegative(value.deduped, "counts.deduped"), suppressed: nonnegative(value.suppressed, "counts.suppressed"), gap: nonnegative(value.gap, "counts.gap", MAX_SHADOW_GAPS), evaluatedSuppressed: nonnegative(value.evaluatedSuppressed, "counts.evaluatedSuppressed"), workerTurns: 0, actionWrites: 0, notifications: 0 };
+  if (result.evaluations === 0 && [result.observations, result.deduped, result.suppressed, result.gap, result.evaluatedSuppressed].some(count => count !== 0)) invalid("zero evaluations requires empty retained and activity counts");
   return result;
 }
+export function readEvaluatedRevision(raw: unknown): EvaluatedRevision {
+  const value = object(raw, ["rule", "task", "revision"], "evaluated revision");
+  if (typeof value.rule !== "string" || !Object.hasOwn(RULES, value.rule)) invalid("evaluated revision rule is unsupported");
+  const task = nonnegative(value.task, "evaluated revision task");
+  if (!task) invalid("evaluated revision task must be a positive safe integer");
+  return {rule: value.rule as SupervisionRuleId, task, revision: text(value.revision, "evaluated revision identity")};
+}
 export function readShadowSnapshot(raw: unknown): ShadowSnapshot {
-  const value = object(raw, ["observations", "gap", "counts"], "shadow snapshot");
+  const value = object(raw, ["observations", "gap", "counts", "evaluated"], "shadow snapshot");
   const observations = array(value.observations, MAX_SHADOW_OBSERVATIONS, "shadow observations").map(readSupervisionObservation), gap = array(value.gap, MAX_SHADOW_GAPS, "shadow gaps").map(readSupervisionGap), counts = readShadowCounts(value.counts);
+  const evaluated = array(value.evaluated, MAX_SHADOW_EVALUATED, "shadow evaluated revisions").map(readEvaluatedRevision);
+  const evaluatedKeys = new Set<string>();
+  for (const entry of evaluated) {
+    const key = JSON.stringify([entry.rule, entry.task, entry.revision]);
+    if (evaluatedKeys.has(key)) invalid("retained snapshot contains a duplicate evaluated revision key");
+    evaluatedKeys.add(key);
+  }
+  if (counts.evaluations === 0 && evaluated.length) invalid("zero evaluations requires empty evaluated revisions");
   const seen = new Set<string>(), revisions = new Map<string, number>();
   for (const observation of observations) {
     const key = JSON.stringify([observation.rule, observation.task, observation.revision, observation.trigger]), revision = JSON.stringify([observation.rule, observation.task, observation.revision]);
@@ -110,7 +128,7 @@ export function readShadowSnapshot(raw: unknown): ShadowSnapshot {
   const gaps = new Set<string>();
   for (const entry of gap) { const key = JSON.stringify([entry.rule, entry.task, entry.revision, entry.reason]); if (gaps.has(key)) invalid("retained snapshot contains a duplicate gap key"); gaps.add(key); }
   if (counts.observations !== observations.length || counts.gap !== gap.length) invalid("snapshot counts do not match retained observation/gap lengths");
-  const snapshot = { observations, gap, counts };
+  const snapshot = { observations, gap, counts, evaluated };
   if (Buffer.byteLength(JSON.stringify(snapshot)) > SUPERVISION_RECORD_BYTES) invalid("aggregate shadow snapshot exceeds 256 KiB");
   return snapshot;
 }
