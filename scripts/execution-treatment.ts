@@ -59,7 +59,7 @@ export async function validateTreatmentIntegration(rootArg: string) {
         amendment: {corpusVersion: 2, status: amended.receipt.status, receiptSha256: amended.receipt.receiptSha256, amends: amended.receipt.amends,
           bindings: amended.receipt.bindings, cases: amendmentCoverage.length,
           coverage: {kind: "format-only", covered: amendmentCoverage.length, unsupported: 0, rows: amendmentCoverage},
-          helpful: null, false: null, wrongAction: null, missed: null, correctNonTriggers: null, personDecisions: 0 as const, trialExecutions: 0, treatmentObservations: 0} },
+          helpful: null, false: null, falseCases: null, falseProposals: null, wrongAction: null, missed: null, correctNonTriggers: null, personDecisions: 0 as const, trialExecutions: 0, treatmentObservations: 0} },
     },
     trialExecutions: 0, treatmentObservations: 0, adoptionDecision: null,
     limitations: ["integration checks only; T3 paired trials require separate launch authorization", "native container, model/account, human timing and measured cost benefit are unverified", "opaque frozen cached strings cannot establish numeric producer manifests; no hidden warmup or fabricated hits", "v2 format coverage is not producer evaluation coverage; no evaluator or trial was run", "frozen supervision task-state payloads are unsupported T1 rule facts; no translation, missed-trigger score or correct-non-trigger claim; corpus re-expression needs an owner decision before T3"],

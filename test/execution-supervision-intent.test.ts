@@ -25,82 +25,109 @@ function snapshot(observations: SupervisionObservation[] = [], extras: Partial<S
   return {observations, gap: [], counts: {evaluations: 1, observations: observations.length, deduped: 0, suppressed: 0, gap: 0, workerTurns: 0, actionWrites: 0, notifications: 0, ...extras}};
 }
 
-test("all intended actions join their rule/task/current revision without any trigger string in the label", () => {
+test("intended action joins its rule/task/current revision without a producer-trigger string in the label", () => {
   for (const [action, rule] of [["escalate", "repeated_failure"], ["recheck", "deliverable_invalidated_check"], ["request_integration", "declared_overlap_without_integration"]] as const) {
     const result = scoreSupervisionIntentRecords([snapshot([observation(rule)])], facts(), [label(action)]);
     expect(result.authority).toBe("synthetic-intent-join-conformance");
-    expect(result.evaluationCoverage).toBe("positive-observations-only");
+    expect(result.evaluationCoverage).toBe("positive-observations-only"); expect(result.proposalCountScope).toBe("present-observations-only");
     expect(result.coverage).toEqual({total: 1, formatCompatible: 1, scored: 1, insufficient: 0});
-    expect(result.rows[0]).toMatchObject({task: TASK, revision: "1:none", nextAction: action, rule, state: "scored", outcome: "helpful", helpful: 1, false: 0, wrongAction: 0, falseProposalBudget: 0});
-    expect(result.scores).toEqual({helpful: 1, false: 0, wrongAction: 0, falseProposalBudget: 0, missed: null, correctNonTriggers: null});
+    expect(result.rows[0]).toMatchObject({task: TASK, revision: "1:none", nextAction: action, rule, state: "scored", outcome: "helpful", helpful: 1, falseCases: 0, falseProposals: 0, wrongAction: 0, falseProposalBudget: 0});
+    expect(result.rows[0]?.proposals[0]?.classification).toBe("intended-action");
+    expect(result.scores).toEqual({helpful: 1, falseCases: 0, falseProposals: 0, wrongAction: 0, falseProposalBudget: 0, missed: null, correctNonTriggers: null});
     expect(result.personDecisions).toBe(0); expect(result.workerTurns).toBe(0); expect(result.actionWrites).toBe(0); expect(result.notifications).toBe(0);
   }
   const changed = scoreSupervisionIntentRecords([snapshot([observation("repeated_failure", "failures:check:another-opaque-class")])], facts(), [label()]);
   expect(changed.rows[0]?.outcome).toBe("helpful");
 });
 
-test("case helpfulness is one while additional deduplicated proposals carry their own wrong-action budget", () => {
+test("helpfulness counts one case while replay-deduplicated extra proposals retain wrong-action burden", () => {
   const observations = [observation(), observation("repeated_failure", "failures:check:second-class"), observation("deliverable_invalidated_check"), observation("declared_overlap_without_integration")];
   const first = snapshot(observations), replay = snapshot(observations, {evaluations: 2, deduped: 4});
   const result = scoreSupervisionIntentRecords([first, replay], facts(), [label()]);
   expect(result.records.duplicates).toBe(4); expect(result.records.observations).toHaveLength(4);
   expect(result.records.producerCounts).toEqual([first.counts, replay.counts]);
-  expect(result.rows[0]?.proposals.map(row => row.classification)).toEqual(["helpful", "helpful", "wrong-action", "wrong-action"]);
-  expect(result.scores).toEqual({helpful: 1, false: 0, wrongAction: 2, falseProposalBudget: 2, missed: null, correctNonTriggers: null});
+  expect(result.rows[0]?.proposals.map(row => row.classification)).toEqual(["intended-action", "intended-action", "wrong-action", "wrong-action"]);
+  expect(result.scores).toEqual({helpful: 1, falseCases: 0, falseProposals: 0, wrongAction: 2, falseProposalBudget: 2, missed: null, correctNonTriggers: null});
 });
 
-test("none intent counts every present proposal as false regardless of rule", () => {
+test("none intent counts each present proposal as false but does not create a false case outcome", () => {
   const records = snapshot([observation(), observation("deliverable_invalidated_check"), observation("declared_overlap_without_integration")]);
   const result = scoreSupervisionIntentRecords([records], facts(), [label("none")]);
-  expect(result.rows[0]).toMatchObject({rule: null, state: "scored", outcome: "false", helpful: 0, false: 3, wrongAction: 0, falseProposalBudget: 3});
+  expect(result.rows[0]).toMatchObject({rule: null, state: "insufficient-evidence", outcome: "insufficient", helpful: null, falseCases: 1, falseProposals: 3, wrongAction: 0, falseProposalBudget: 3});
   expect(result.rows[0]?.proposals.every(row => row.classification === "false")).toBe(true);
-  expect(result.scores).toEqual({helpful: 0, false: 3, wrongAction: 0, falseProposalBudget: 3, missed: null, correctNonTriggers: null});
+  expect(result.scores).toEqual({helpful: null, falseCases: 1, falseProposals: 3, wrongAction: 0, falseProposalBudget: 3, missed: null, correctNonTriggers: null});
 });
 
-test("wrong-action-only and absent records never prove the desired rule's evaluation coverage", () => {
-  for (const records of [[], [snapshot()], [snapshot([], {evaluations: 0})], [snapshot([observation("deliverable_invalidated_check")])]]) {
-    const result = scoreSupervisionIntentRecords(records, facts(), [label()]);
-    expect(result.rows[0]).toMatchObject({state: "insufficient-evidence", reason: "no-evaluation-coverage", outcome: null, helpful: null, false: null, wrongAction: null, falseProposalBudget: null});
-    expect(result.scores).toBeNull();
-    expect(result.rows[0]?.proposals.every(row => row.classification === "unscored")).toBe(true);
+test("wrong-only proposals have a known burden even though desired-rule evaluation remains unknown", () => {
+  const result = scoreSupervisionIntentRecords([snapshot([observation("deliverable_invalidated_check")])], facts(), [label()]);
+  expect(result.rows[0]).toMatchObject({state: "insufficient-evidence", reason: "no-evaluation-coverage", outcome: "insufficient", helpful: null, falseCases: 0, falseProposals: 0, wrongAction: 1, falseProposalBudget: 1});
+  expect(result.rows[0]?.proposals[0]?.classification).toBe("wrong-action");
+  expect(result.scores).toEqual({helpful: null, falseCases: 0, falseProposals: 0, wrongAction: 1, falseProposalBudget: 1, missed: null, correctNonTriggers: null});
+});
+
+test("absence stays insufficient with zero observed proposal counts, never missed or a correct non-trigger", () => {
+  for (const records of [[], [snapshot()], [snapshot([], {evaluations: 0})]]) for (const intended of [label(), label("none")]) {
+    const result = scoreSupervisionIntentRecords(records, facts(), [intended]);
+    expect(result.rows[0]).toMatchObject({state: "insufficient-evidence", reason: "no-evaluation-coverage", outcome: "insufficient", helpful: null, falseCases: 0, falseProposals: 0, wrongAction: 0, falseProposalBudget: 0});
+    expect(result.rows[0]?.proposals).toEqual([]);
+    expect(result.scores).toEqual({helpful: null, falseCases: 0, falseProposals: 0, wrongAction: 0, falseProposalBudget: 0, missed: null, correctNonTriggers: null});
   }
-  const nonTriggerAbsent = scoreSupervisionIntentRecords([snapshot()], facts(), [label("none")]);
-  expect(nonTriggerAbsent.scores).toBeNull(); expect(nonTriggerAbsent.rows[0]?.reason).toBe("no-evaluation-coverage");
 });
 
-test("handover and plan revisions prevent old observations from joining the current source facts", () => {
+test("a synthetic always-wrong record set cannot hide proposal budget behind insufficient case coverage", () => {
+  const source: SupervisionFacts = {tasks: Array.from({length: 4}, (_, index) => ({...facts().tasks[0]!, id: TASK + index}))};
+  const labels = source.tasks.map((task, index) => ({...label(), id: `always-wrong-${index}`, task: task.id}));
+  const records = snapshot(source.tasks.map(task => ({...observation("deliverable_invalidated_check"), task: task.id})));
+  const result = scoreSupervisionIntentRecords([records], source, labels);
+  expect(result.coverage).toEqual({total: 4, formatCompatible: 4, scored: 0, insufficient: 4});
+  expect(result.rows.every(row => row.outcome === "insufficient" && row.proposals[0]?.classification === "wrong-action")).toBe(true);
+  expect(result.scores).toEqual({helpful: null, falseCases: 0, falseProposals: 0, wrongAction: 4, falseProposalBudget: 4, missed: null, correctNonTriggers: null});
+});
+
+test("handover and plan revisions prevent old observations from joining current source facts", () => {
   const handover = facts([{at: 2, event: "reassigned"}, {at: 3, event: "accepted"}]);
   const plan = facts([{at: 2, event: "planned", planRevision: {revision: 2, fingerprint: "synthetic-plan"}}]);
   for (const [source, revision] of [[handover, "3:none"], [plan, "1:2"]] as const) {
     const stale = scoreSupervisionIntentRecords([snapshot([observation()])], source, [label()]);
-    expect(stale.rows[0]).toMatchObject({revision, state: "insufficient-evidence", reason: "no-evaluation-coverage"});
-    expect(stale.rows[0]?.proposals).toEqual([]); expect(stale.scores).toBeNull();
+    expect(stale.rows[0]).toMatchObject({revision, state: "insufficient-evidence", reason: "no-evaluation-coverage", outcome: "insufficient", wrongAction: 0, falseProposalBudget: 0});
+    expect(stale.rows[0]?.proposals).toEqual([]); expect(stale.scores?.helpful).toBeNull();
     const current = scoreSupervisionIntentRecords([snapshot([observation("repeated_failure", undefined, revision)])], source, [label()]);
     expect(current.rows[0]?.outcome).toBe("helpful");
   }
   const missing = scoreSupervisionIntentRecords([snapshot([observation()])], {tasks: []}, [label()]);
-  expect(missing.rows[0]).toMatchObject({revision: null, state: "insufficient-evidence", reason: "target-task-unavailable"});
+  expect(missing.rows[0]).toMatchObject({revision: null, state: "insufficient-evidence", reason: "target-task-unavailable", outcome: "insufficient"});
 });
 
-test("matching gaps, truncated prefixes and suppressed retention remain insufficient with positive records", () => {
-  const gap = snapshot([observation()]);
+test("correct-action presence remains helpful across gaps, truncation and retention suppression", () => {
+  const gap = snapshot([observation(), observation("deliverable_invalidated_check")]);
   gap.gap = [{rule: "repeated_failure", version: 1, task: TASK, revision: "1:none", reason: "history-truncated"}]; gap.counts.gap = 1;
-  const truncated = snapshot([{...observation(), limits: {records: 64, truncated: true}}]);
-  const suppressed = snapshot([observation()], {suppressed: 1});
-  for (const [records, reason] of [[gap, "coverage-gap"], [truncated, "history-truncated"], [suppressed, "retention-suppressed"]] as const) {
-    for (const intended of [label(), label("none")]) {
-      const result = scoreSupervisionIntentRecords([records], facts(), [intended]);
-      expect(result.rows[0]).toMatchObject({state: "insufficient-evidence", reason, outcome: null});
-      expect(result.scores).toBeNull(); expect(result.rows[0]?.proposals[0]?.classification).toBe("unscored");
-    }
+  const truncated = snapshot([{...observation(), limits: {records: 64, truncated: true}}, observation("deliverable_invalidated_check")]);
+  const suppressed = snapshot([observation(), observation("deliverable_invalidated_check")], {suppressed: 1});
+  for (const records of [gap, truncated, suppressed]) {
+    const result = scoreSupervisionIntentRecords([records], facts(), [label()]);
+    expect(result.rows[0]).toMatchObject({state: "scored", outcome: "helpful", helpful: 1, wrongAction: 1, falseProposalBudget: 1});
+    expect(result.scores?.helpful).toBe(1); expect(result.scores?.wrongAction).toBe(1);
+  }
+});
+
+test("gaps, truncated prefixes and suppressed retention never erase present bad proposals", () => {
+  const gap = snapshot([observation("deliverable_invalidated_check")]);
+  gap.gap = [{rule: "repeated_failure", version: 1, task: TASK, revision: "1:none", reason: "history-truncated"}]; gap.counts.gap = 1;
+  const truncated = snapshot([{...observation("deliverable_invalidated_check"), limits: {records: 64, truncated: true}}]);
+  const suppressed = snapshot([observation("deliverable_invalidated_check")], {suppressed: 1});
+  for (const records of [gap, truncated, suppressed]) {
+    const wrong = scoreSupervisionIntentRecords([records], facts(), [label()]);
+    expect(wrong.rows[0]).toMatchObject({state: "insufficient-evidence", outcome: "insufficient", helpful: null, wrongAction: 1, falseProposalBudget: 1});
+    expect(wrong.rows[0]?.proposals[0]?.classification).toBe("wrong-action");
+    const unwanted = scoreSupervisionIntentRecords([records], facts(), [label("none")]);
+    expect(unwanted.rows[0]).toMatchObject({outcome: "insufficient", helpful: null, falseCases: 1, falseProposals: 1, falseProposalBudget: 1});
+    expect(unwanted.rows[0]?.proposals[0]?.classification).toBe("false");
   }
 });
 
 test("intent labels refuse ambiguous bindings, unsupported fields and inconsistent false/action forms", () => {
   const valid = label(), records = [snapshot([observation()])];
-  for (const invalid of [{...valid, unknown: true}, {...valid, trigger: "failures:check:fixture-a"}, {...valid, trigger: false}, {...valid, nextAction: "none"}, {...valid, task: 0}, {...valid, v: 2}]) {
-    expect(() => scoreSupervisionIntentRecords(records, facts(), [invalid])).toThrow();
-  }
+  for (const invalid of [{...valid, unknown: true}, {...valid, trigger: "failures:check:fixture-a"}, {...valid, trigger: false}, {...valid, nextAction: "none"}, {...valid, task: 0}, {...valid, v: 2}]) expect(() => scoreSupervisionIntentRecords(records, facts(), [invalid])).toThrow();
   expect(() => scoreSupervisionIntentRecords(records, facts(), [valid, {...valid, id: "another-intent"}])).toThrow("one task/revision");
   expect(() => scoreSupervisionIntentRecords(records, facts(), [valid, {...valid, task: TASK + 1}])).toThrow("case ids");
 });
@@ -120,15 +147,15 @@ test("all twelve frozen v2 inputs have format coverage without reading their exp
   expect(() => classifySupervisionV2Fixture({request: "Synthetic", facts: {tasks: []}, expected: {trigger: true}})).toThrow();
 });
 
-test("closed task states do not hide present false proposals or manufacture coverage from absence", () => {
+test("closed states do not hide present false proposals or manufacture coverage from absence", () => {
   for (const state of ["approved", "cancelled"] as const) {
     const source: SupervisionFacts = {tasks: [{...facts().tasks[0]!, state}]};
     const present = scoreSupervisionIntentRecords([snapshot([observation()])], source, [label("none")]);
-    expect(present.rows[0]).toMatchObject({revision: "1:none", state: "scored", outcome: "false", false: 1, falseProposalBudget: 1});
+    expect(present.rows[0]).toMatchObject({revision: "1:none", state: "insufficient-evidence", outcome: "insufficient", falseCases: 1, falseProposals: 1, falseProposalBudget: 1});
     expect(present.rows[0]?.proposals[0]?.classification).toBe("false");
     const absent = scoreSupervisionIntentRecords([snapshot()], source, [label("none")]);
-    expect(absent.rows[0]).toMatchObject({state: "insufficient-evidence", reason: "no-evaluation-coverage", outcome: null});
-    expect(absent.scores).toBeNull();
+    expect(absent.rows[0]).toMatchObject({state: "insufficient-evidence", reason: "no-evaluation-coverage", outcome: "insufficient", falseProposals: 0});
+    expect(absent.scores?.helpful).toBeNull();
   }
 });
 

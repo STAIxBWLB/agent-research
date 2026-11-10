@@ -133,17 +133,19 @@ export function classifySupervisionV2Fixture(input: unknown): {state: "covered";
 
 
 export const SUPERVISION_INTENT_RULES = {escalate: "repeated_failure", recheck: "deliverable_invalidated_check", request_integration: "declared_overlap_without_integration"} as const;
-type IntentProposalClass = "helpful" | "false" | "wrong-action" | "unscored";
+type IntentProposalClass = "intended-action" | "false" | "wrong-action";
 export interface SupervisionIntentRow {
   id: string; task: number; revision: string | null; nextAction: SupervisionIntentLabel["nextAction"]; rule: SupervisionRuleId | null;
-  state: "scored" | "insufficient-evidence"; reason?: string; outcome: "helpful" | "false" | null;
-  helpful: number | null; false: number | null; wrongAction: number | null; falseProposalBudget: number | null; missed: null; correctNonTriggers: null;
+  state: "scored" | "insufficient-evidence"; reason?: string; outcome: "helpful" | "missed" | "correct-non-trigger" | "insufficient";
+  helpful: number | null; falseCases: number; falseProposals: number; wrongAction: number; falseProposalBudget: number; missed: null; correctNonTriggers: null;
   proposals: {identity: string; rule: SupervisionRuleId; action: SupervisionObservation["action"]; classification: IntentProposalClass}[];
 }
 export interface SupervisionIntentScore {
   authority: "synthetic-intent-join-conformance"; rows: SupervisionIntentRow[];
-  records: Pick<SupervisionScore, "observations" | "gap" | "duplicates" | "producerCounts" | "retentionSuppressed">; evaluationCoverage: "positive-observations-only"; coverage: {total: number; formatCompatible: number; scored: number; insufficient: number};
-  scores: null | {helpful: number; false: number; wrongAction: number; falseProposalBudget: number; missed: null; correctNonTriggers: null};
+  records: Pick<SupervisionScore, "observations" | "gap" | "duplicates" | "producerCounts" | "retentionSuppressed">;
+  evaluationCoverage: "positive-observations-only"; proposalCountScope: "present-observations-only";
+  coverage: {total: number; formatCompatible: number; scored: number; insufficient: number};
+  scores: null | {helpful: number | null; falseCases: number; falseProposals: number; wrongAction: number; falseProposalBudget: number; missed: null; correctNonTriggers: null};
   personDecisions: 0; workerTurns: 0; actionWrites: 0; notifications: 0;
 }
 /** Join approved scenario intent, never predict a rule trigger or manufacture evaluation coverage. */
@@ -163,26 +165,26 @@ export function scoreSupervisionIntentRecords(rawSnapshots: readonly unknown[], 
     const observed = current === null ? [] : records.observations.filter(row => row.task === label.task && row.revision === current);
     const relevant = (row: Pick<SupervisionObservation, "task" | "revision" | "rule">) => row.task === label.task && row.revision === current && (wanted === null || row.rule === wanted);
     const matching = wanted === null ? [] : observed.filter(row => row.rule === wanted && row.action === label.nextAction);
+    // Proposal burden is known from presence alone, independently of case/evaluation coverage.
+    const proposals = observed.map(row => ({identity: key(row), rule: row.rule, action: row.action,
+      classification: (!label.trigger ? "false" : row.action === label.nextAction ? "intended-action" : "wrong-action") as IntentProposalClass}));
+    const wrongAction = proposals.filter(row => row.classification === "wrong-action").length;
+    const falseProposals = label.trigger ? 0 : proposals.length, falseCases = falseProposals ? 1 : 0;
+    const base = {id: label.id, task: label.task, revision: current, nextAction: label.nextAction, rule: wanted, proposals,
+      falseCases, falseProposals, wrongAction, falseProposalBudget: falseProposals + wrongAction, missed: null, correctNonTriggers: null};
+    if (matching.length) return {...base, state: "scored", outcome: "helpful", helpful: 1};
     const reason = current === null ? "target-task-unavailable" : records.gap.some(relevant) ? "coverage-gap"
       : records.observations.some(row => relevant(row) && row.limits.truncated) ? "history-truncated"
-      : records.retentionSuppressed ? "retention-suppressed"
-      : label.trigger ? !matching.length ? "no-evaluation-coverage" : undefined
-      : !observed.length ? "no-evaluation-coverage" : undefined;
-    const proposals = observed.map(row => ({identity: key(row), rule: row.rule, action: row.action,
-      classification: (reason ? "unscored" : !label.trigger ? "false" : row.action === label.nextAction ? "helpful" : "wrong-action") as IntentProposalClass}));
-    const base = {id: label.id, task: label.task, revision: current, nextAction: label.nextAction, rule: wanted, proposals, missed: null, correctNonTriggers: null};
-    if (reason) return {...base, state: "insufficient-evidence", reason, outcome: null, helpful: null, false: null, wrongAction: null, falseProposalBudget: null};
-    const wrongAction = proposals.filter(row => row.classification === "wrong-action").length;
-    const falseProposals = label.trigger ? 0 : proposals.length;
-    return {...base, state: "scored", outcome: label.trigger ? "helpful" : "false", helpful: label.trigger ? 1 : 0,
-      false: falseProposals, wrongAction, falseProposalBudget: falseProposals + wrongAction};
+      : records.retentionSuppressed ? "retention-suppressed" : "no-evaluation-coverage";
+    // No desired-action observation does not prove that its rule was evaluated.
+    return {...base, state: "insufficient-evidence", reason, outcome: "insufficient", helpful: null};
   });
-  const scored = rows.filter(row => row.state === "scored"), scores = scored.length ? {
-    helpful: scored.reduce((sum, row) => sum + row.helpful!, 0), false: scored.reduce((sum, row) => sum + row.false!, 0),
-    wrongAction: scored.reduce((sum, row) => sum + row.wrongAction!, 0), falseProposalBudget: scored.reduce((sum, row) => sum + row.falseProposalBudget!, 0),
+  const helpful = rows.filter(row => row.outcome === "helpful").length, scores = rows.length ? {
+    helpful: helpful || null, falseCases: rows.reduce((sum, row) => sum + row.falseCases, 0), falseProposals: rows.reduce((sum, row) => sum + row.falseProposals, 0),
+    wrongAction: rows.reduce((sum, row) => sum + row.wrongAction, 0), falseProposalBudget: rows.reduce((sum, row) => sum + row.falseProposalBudget, 0),
     missed: null, correctNonTriggers: null,
   } : null;
-  return {authority: "synthetic-intent-join-conformance", rows, records, evaluationCoverage: "positive-observations-only",
-    coverage: {total: rows.length, formatCompatible: rows.filter(row => row.revision !== null).length, scored: scored.length, insufficient: rows.length - scored.length}, scores,
+  return {authority: "synthetic-intent-join-conformance", rows, records, evaluationCoverage: "positive-observations-only", proposalCountScope: "present-observations-only",
+    coverage: {total: rows.length, formatCompatible: rows.filter(row => row.revision !== null).length, scored: helpful, insufficient: rows.length - helpful}, scores,
     personDecisions: 0, workerTurns: 0, actionWrites: 0, notifications: 0};
 }
