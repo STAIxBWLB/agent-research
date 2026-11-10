@@ -2,7 +2,7 @@ import { plain } from "../src/study.ts";
 import { readShadowSnapshot, readSupervisionTrigger, type ShadowSnapshot, type SupervisionObservation, type SupervisionGap, type SupervisionRuleId } from "./execution-supervision-records.ts";
 
 export const SUPERVISION_PRODUCER_COMMIT = "bc6f46b077dd3a255debaee8152fa17f1f13b79c";
-const BATCH_BYTES = 1024 * 1024, MAX_BATCH = 100;
+const BATCH_BYTES = 1024 * 1024, MAX_BATCH = 100, MAX_TRUTH = 1024;
 export interface SupervisionTruth {
   id: string; rule: SupervisionRuleId; task: number; revision: string; trigger: string;
   expected: boolean | null; coverage: "covered" | "unsupported"; reason?: string;
@@ -33,8 +33,8 @@ function object(raw: unknown, fields: readonly string[], label: string): Record<
   if (!plain(raw) || Reflect.ownKeys(raw).some(key => typeof key !== "string" || !fields.includes(key) || !Object.hasOwn(Object.getOwnPropertyDescriptor(raw, key)!, "value") || !Object.getOwnPropertyDescriptor(raw, key)!.enumerable)) fail(`${label} must contain only known JSON data fields`);
   return raw;
 }
-function list(raw: unknown, label: string): unknown[] {
-  if (!Array.isArray(raw) || raw.length > MAX_BATCH || Reflect.ownKeys(raw).length !== raw.length + 1) fail(`${label} must be a dense JSON array of at most 100 items`);
+function list(raw: unknown, label: string, max = MAX_BATCH): unknown[] {
+  if (!Array.isArray(raw) || raw.length > max || Reflect.ownKeys(raw).length !== raw.length + 1) fail(`${label} must be a dense JSON array of at most ${max} items`);
   const values: unknown[] = [];
   for (let index = 0; index < raw.length; index++) {
     const descriptor = Object.getOwnPropertyDescriptor(raw, String(index));
@@ -61,7 +61,7 @@ const gapKey = (row: SupervisionGap) => JSON.stringify([row.rule, row.task, row.
 
 /** Consume retained record snapshots only. This never evaluates hub facts, generates a proposal or executes an arm. */
 export function scoreSupervisionRecords(rawSnapshots: readonly unknown[], rawTruth: readonly unknown[]): SupervisionScore {
-  const snapshots = list(rawSnapshots, "snapshots").map(readShadowSnapshot), truth = list(rawTruth, "truth").map(truthRow);
+  const snapshots = list(rawSnapshots, "snapshots").map(readShadowSnapshot), truth = list(rawTruth, "truth", MAX_TRUTH).map(truthRow);
   size({snapshots, truth}, BATCH_BYTES);
   const ids = new Set<string>(), truthKeys = new Set<string>();
   for (const row of truth) {
