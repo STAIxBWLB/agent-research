@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import {mkdirSync, mkdtempSync, rmSync} from "node:fs";
+import {mkdirSync, mkdtempSync, realpathSync, rmSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import * as diagnosticSetup from "./execution-diagnose-setup.ts";
 import { types } from "node:util";
@@ -131,7 +131,7 @@ async function executeDiagnostic(arm: Arm, input: Record<string, unknown>, paren
     let dir = parent;
     const skipped = baseline.provenance.attemptId === null;
     if (!skipped) {
-      nativeRoot = mkdtempSync(join(resolve(parent), "native-scaffold-"));
+      nativeRoot = mkdtempSync(join(realpathSync(parent), "native-scaffold-"));
       dir = join(nativeRoot, "study"); const work = join(nativeRoot, "executor");
       mkdirSync(dir, {mode: 0o700}); mkdirSync(work, {mode: 0o700});
       await diagnosticSetup.bootstrapVisibleDiagnosticStudy(input, dir, work);

@@ -16,7 +16,7 @@ const cases = corpus.cases.filter(row => row.trial === "diagnose");
 function payload(file: string): Record<string, unknown> { const wrapper = JSON.parse(readTextBounded(join(root, file), DIAGNOSTIC_BYTES)); return wrapper.input; }
 /** The runtime and unit test share the one reviewed visible-facts bootstrap. */
 async function bootstrap(value: Record<string, unknown>) {
-  const dir = tempDir(), work = tempDir();
+  const dir = realpathSync(tempDir()), work = realpathSync(tempDir());
   await bootstrapVisibleDiagnosticStudy(value, dir, work);
   return dir;
 }

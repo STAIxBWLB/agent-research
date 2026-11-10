@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, opendirSync } from "node:fs";
+import { lstatSync, mkdirSync, opendirSync, realpathSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { init, protocol as setProtocol } from "../src/commands.ts";
 import { designBinding, protocolHash } from "../src/exp/protocol.ts";
@@ -13,7 +13,7 @@ function identity(raw: unknown, pattern: RegExp, label: string): string {
   return raw;
 }
 function freshDirectory(dir: string): void {
-  let stat; try {stat = lstatSync(dir);} catch {return fail("private directory is missing");}
+  let stat; try {stat = lstatSync(dir); if (realpathSync(dir) !== resolve(dir)) fail("private directory has a linked parent");} catch {return fail("private directory is missing or has a linked parent");}
   if (!stat.isDirectory() || stat.isSymbolicLink() || process.getuid && stat.uid !== process.getuid()) fail("private directory is not an owned physical directory");
   const entries = opendirSync(dir);
   try {if (entries.readSync()) fail("private directory is not fresh");} finally {entries.closeSync();}
