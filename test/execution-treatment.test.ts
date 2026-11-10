@@ -83,3 +83,14 @@ test("check-only CLI refuses trial arguments rather than accepting a treatment l
     expect(child.stderr.toString()).toMatch(/no treatment-run|never launches treatment trials|no evaluator or trial/);
   }
 });
+
+test("an invalid present r2 amendment never falls back to the superseded reuse seal", async () => {
+  const r2 = await import("../scripts/execution-reuse-rematerialize-r2.ts");
+  const original = await import("../scripts/execution-reuse-rematerialize.ts");
+  const current = spyOn(r2, "verifyReuseRematerializationR2").mockReturnValue({state: "changed", receipt: null});
+  const fallback = spyOn(original, "verifyReuseRematerializationSeal").mockImplementation(() => {throw new Error("must not use superseded setup");});
+  try {
+    await expect(validateTreatmentIntegration(root)).rejects.toThrow("never fall back to the superseded seal");
+    expect(current).toHaveBeenCalledTimes(1); expect(fallback).not.toHaveBeenCalled();
+  } finally {current.mockRestore(); fallback.mockRestore();}
+});
