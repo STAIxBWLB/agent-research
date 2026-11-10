@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, posix } from "node:path";
-import { commit, openStudy, plain, readJsonFile, requireExperiment, type Actor } from "../study.ts";
+import { commit, openStudy, plain, readJsonFile, requireExperiment, sha256, type Actor } from "../study.ts";
 import { readProtocol, canonicalExecutorPath, validateProtocol, type Protocol } from "./protocol.ts";
 
 export interface ExecutorGpu { devices: (number | string)[]; minFreeMemoryMb: number; maxLoadRatio: number }
@@ -14,6 +14,8 @@ export interface ProcessRequest {
 export interface ProcessResult { exitCode: number; stdout: string; stderr: string; timedOut?: boolean; truncated?: boolean }
 export type ProcessRunner = (request: ProcessRequest) => Promise<ProcessResult>;
 export const EXECUTOR_BYTES = 8192, PROCESS_OUTPUT_BYTES = 65_536;
+// Domain tag keeps a container-name digest from ever being confused with another ares hash.
+const CONTAINER_NAME_DOMAIN = "ares-container-name-v1";
 
 /** Opt-in context for native CLI attribution and config discovery; no API credentials. */
 export const PROCESS_CONTEXT_ENV_KEYS = ["AGENTHUB_PEER_ID", "CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CODEX_THREAD_ID", "PI_SESSION_ID",
@@ -358,9 +360,18 @@ export function executionPathsOverlap(left: string, right: string): boolean {
 export type Stage = "candidate" | "evaluator";
 export interface ContainerPaths { snapshot: string; output: string; evaluator: string; result: string }
 export interface ContainerOptions { protocol: Protocol; stage: Stage; studyId: string; attemptId: string; user: string; paths: ContainerPaths; seed?: number; gpuDevices?: string[]; pipeline?: { name: string; inputRoot: string; seed: boolean } }
-export function containerName(attemptId: string, stage: Stage): string {
+export function containerName(studyId: string, attemptId: string, stage: Stage): string {
   if (!/^[a-f0-9]{16}$/.test(attemptId) || !["candidate", "evaluator"].includes(stage)) throw new Error("container identity: invalid attempt or stage; use a 16-hex attempt id and candidate or evaluator stage");
-  return `ares-${attemptId}-${stage}`;
+  if (!/^[A-Za-z0-9_-]{1,80}$/.test(studyId)) throw new Error("container identity: invalid study id; use the id from study.json");
+  // An attempt id is study-local, so the name must carry the study too or two studies collide on one executor host.
+  return `ares-${sha256(`${CONTAINER_NAME_DOMAIN}\0${studyId}\0${attemptId}`).slice(0, 16)}-${stage}`;
+}
+/** The pipeline stage suffix is part of the launched name; one place keeps the argv and the attempt record identical. */
+export function stageContainerName(studyId: string, attemptId: string, stage: Stage, pipelineStage?: string): string {
+  const name = containerName(studyId, attemptId, stage);
+  if (pipelineStage === undefined) return name;
+  if (stage !== "candidate" || !/^[a-z][a-z0-9_-]{0,31}$/.test(pipelineStage)) throw new Error("pipeline container: invalid stage name");
+  return `${name}-${pipelineStage}`;
 }
 /** Pure preflight for host input isolation; no hashing, transport or attempt side effects. */
 export function validateContainerInputSources(protocol: Protocol, pathsArg: ContainerPaths): void {
@@ -375,8 +386,7 @@ export function validateContainerInputSources(protocol: Protocol, pathsArg: Cont
 }
 /** Mounts are fixed by stage, never supplied as free-form Docker options. */
 export function buildContainerArgs(options: ContainerOptions): string[] {
-  const p = validateProtocol(options.protocol), name = containerName(options.attemptId, options.stage) + (options.pipeline ? `-${options.pipeline.name}` : "");
-  if (options.pipeline && (options.stage !== "candidate" || !/^[a-z][a-z0-9_-]{0,31}$/.test(options.pipeline.name))) throw new Error("pipeline container: invalid stage name");
+  const p = validateProtocol(options.protocol), name = stageContainerName(options.studyId, options.attemptId, options.stage, options.pipeline?.name);
   const seed = options.seed === undefined ? p.seeds[0]! : options.seed;
   if (!Number.isSafeInteger(seed) || !p.seeds.includes(seed)) throw new Error("container seed: undeclared or non-integer; choose a seed from protocol.seeds for ares attempt run --seed N");
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(options.studyId)) throw new Error("study id: invalid label; use the id from study.json");
@@ -421,8 +431,9 @@ export function buildContainerArgs(options: ContainerOptions): string[] {
 }
 
 /** Launch on the executor host; stdio is detached so SSH returns immediately. T3 reconciles deadlines as a backstop. */
-export async function startWatchdog(executor: Executor, attemptId: string, stage: Stage, wallSeconds: number, runner: ProcessRunner = spawnRunner, containerId?: string): Promise<void> {
-  const name = containerName(attemptId, stage);
+export async function startWatchdog(executor: Executor, name: string, wallSeconds: number, runner: ProcessRunner = spawnRunner, containerId?: string): Promise<void> {
+  // The caller passes the name the container was launched with, which is the recorded one for older attempts.
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(name)) throw new Error("watchdog container name: invalid; pass the launched container name");
   if (containerId !== undefined && !/^[a-f0-9]{64}$/.test(containerId)) throw new Error("watchdog container id: invalid; use the full id returned by the verified container start");
   if (!Number.isSafeInteger(wallSeconds) || wallSeconds < 1 || wallSeconds > 604_800) throw new Error("watchdog deadline: invalid wallSeconds; use the validated protocol limit (1..604800 seconds)");
   const script = `nohup sh -c ${shellQuote(`sleep ${wallSeconds}; docker kill ${containerId ?? name}`)} </dev/null >/dev/null 2>&1 &`;

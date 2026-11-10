@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Study-scoped executor container names (#149, product fix): a container name now derives from the study id together with the attempt id, so two studies that repeat one attempt identity on the same executor no longer collide and end `unknown` with `container isolation verification failed`. Each stage record stores the name it launched with; a record written before this change carries none and keeps resolving `ares-<attemptId>-<stage>[-<pipelineStage>]` for inspect, reconcile and absence confirmation. Isolation verification still refuses a foreign or leftover container that carries the new name, and the watchdog, cleanup and adoption paths use the recorded name rather than recomputing one. No record version changes and existing attempts stay readable.
+
 - Reuse rematerialization r2 preparation (#63 T3): export existing source/fault helpers without changing their implementations, add an arm-neutral fresh/eligible fixture runner and a separate create-once superseding setup receipt. Per-case stage hashes and fault states must equal the original amendment; all frozen inputs, labels, v1/v2 seals and the original Reuse receipt stay unchanged. Phase parent CPU, subprocess unknowns and wall clocks stay distinct. No T3 measurement is included.
   - N-1 CLI: installed commands/usages stay unchanged; repository-only r2 freeze/verify modes are additive.
   - N-1 MCP: tools, schemas and annotations stay unchanged.

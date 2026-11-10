@@ -12,12 +12,12 @@ import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, requireExperiment, requireGate, sha256, withLock, StudyLockBusyError, type Actor, type PendingEvent } from "../study.ts";
 import { canonical, designBinding, sameProtocolInputs, frozenProtocol, validateStoredProtocol, protocolHash, readProtocol, readDesign, type Protocol } from "./protocol.ts";
-import { buildContainerArgs, probeGpuAdmission, GpuAdmissionDeferred, validateGpuDevices, validateContainerInputSources, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, containerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
+import { buildContainerArgs, probeGpuAdmission, GpuAdmissionDeferred, validateGpuDevices, validateContainerInputSources, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, stageContainerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
 import { resolveSnapshot, transferSnapshot, transferTask } from "./snapshot.ts";
 import { collectEvaluation as defaultEvaluationCollector, collectStageEvidence as defaultStageCollector, EvidenceError, MetricsError, OUTPUT_METADATA_BYTES, outputBudget, type StageEvidence } from "./metrics.ts";
 
 export type AttemptStatus = "running" | "succeeded" | "failed" | "cancelled" | "unknown";
-export interface AttemptStage { image: string; argv: string[]; mounts: { target: string; readOnly: boolean }[]; network: "none"; limits: Protocol["limits"]; user: string; containerId?: string; startedAt: string; endedAt?: string; exitCode?: number; evidence?: StageEvidence; evidenceError?: { reason: string; message: string }; launchPending?: true }
+export interface AttemptStage { image: string; argv: string[]; mounts: { target: string; readOnly: boolean }[]; network: "none"; limits: Protocol["limits"]; user: string; containerName?: string; containerId?: string; startedAt: string; endedAt?: string; exitCode?: number; evidence?: StageEvidence; evidenceError?: { reason: string; message: string }; launchPending?: true }
 export interface Evaluation { metrics: { name: string; unit: string; value: number; provenance: "ares-observed" }[]; outputs: { path: string; sha256: string; bytes: number }[] }
 export interface Attempt {
   v: 1 | 2 | 3; pipeline?: PipelineState; reuse?: AttemptReuseState; freshRequest?: { reuse: "off" | "eligible"; forceFresh: boolean }; id: string; studyId: string; run: string; protocolHash: string; sealBinding: string; commit: string; treeId: string; snapshotSha256?: string; seed: number; label: string; retryOf?: string;
@@ -275,7 +275,7 @@ function executionProtocol(dir: string, attempt: Attempt): Protocol {
   return { ...attempt.protocol, inputs: current.inputs };
 }
 function stageRecord(attempt: Attempt, stage: Stage, user: string, ctx: AttemptContext): AttemptStage {
-  return { image: attempt.protocol[stage].image, argv: attempt.protocol[stage].command, mounts: [...(stage === "candidate" ? [{ target: "/workspace", readOnly: true }, { target: "/out", readOnly: false }] : [{ target: "/eval", readOnly: true }, { target: "/candidate", readOnly: true }, { target: "/result", readOnly: false }]), ...(pipelineInputRoot(attempt) ? [{ target: "/in", readOnly: true }] : []), ...Object.values(attempt.protocol.inputs ?? {}).flatMap(input => input.mount[stage] ? [{ target: input.mount[stage]!, readOnly: true }] : [])], network: "none", limits: attempt.protocol.limits, user, startedAt: at(ctx) };
+  return { image: attempt.protocol[stage].image, argv: attempt.protocol[stage].command, mounts: [...(stage === "candidate" ? [{ target: "/workspace", readOnly: true }, { target: "/out", readOnly: false }] : [{ target: "/eval", readOnly: true }, { target: "/candidate", readOnly: true }, { target: "/result", readOnly: false }]), ...(pipelineInputRoot(attempt) ? [{ target: "/in", readOnly: true }] : []), ...Object.values(attempt.protocol.inputs ?? {}).flatMap(input => input.mount[stage] ? [{ target: input.mount[stage]!, readOnly: true }] : [])], network: "none", limits: attempt.protocol.limits, user, containerName: stageContainerName(attempt.studyId, attempt.id, stage, attempt.pipeline && stage === "candidate" ? attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name : undefined), startedAt: at(ctx) };
 }
 
 /** Validate observed container settings before describing its sealing as ares-observed. */
@@ -348,9 +348,13 @@ async function recordVerifiedStage(dir: string, attempt: Attempt, state: Observe
     return event;
   }, approvals);
 }
-function attemptContainerName(attempt: Attempt): string {
-  const base = containerName(attempt.id, attempt.stage);
+function legacyContainerName(attempt: Attempt): string {
+  // Records written before study-scoped names carry no launched name; keep resolving the one they used.
+  const base = `ares-${attempt.id}-${attempt.stage}`;
   return attempt.pipeline && attempt.stage === "candidate" ? `${base}-${attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name}` : base;
+}
+function attemptContainerName(attempt: Attempt): string {
+  return attempt.stages[attempt.stage]?.containerName ?? legacyContainerName(attempt);
 }
 async function inspect(dir: string, attempt: Attempt, ctx: AttemptContext, ownershipOnly = false) {
   const protocol = ownershipOnly ? attempt.protocol : executionProtocol(dir, attempt);
@@ -504,7 +508,7 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
       if (decision.outcome === "reused") return attempt;
     }
     // Keep configuration refusals outside the uncertain container-start catch.
-    args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: openStudy(dir).study.id, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths, ...(attempt.gpuDevices ? { gpuDevices: attempt.gpuDevices } : {}), ...(attempt.pipeline && attempt.stage === "candidate" ? { pipeline: { name: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name, inputRoot: pipelineInputRoot(attempt)!, seed: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.seed } } : {}) });
+    args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: attempt.studyId, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths, ...(attempt.gpuDevices ? { gpuDevices: attempt.gpuDevices } : {}), ...(attempt.pipeline && attempt.stage === "candidate" ? { pipeline: { name: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name, inputRoot: pipelineInputRoot(attempt)!, seed: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.seed } } : {}) });
     if (attempt.reuse) attempt = await update(dir, attempt.id, recoveryCtx, current => {
       if (current.status !== "running" || current.stage !== attempt.stage || current.pipeline?.index !== attempt.pipeline?.index || current.launching?.token !== attempt.launching?.token) throw new InputVerificationError("reuse: container launch ownership changed; run ares attempt reconcile <dir> after the active control operation finishes before retrying");
       requireCopilotAccept(dir, "hypotheses");
@@ -530,7 +534,7 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
     if (!/^[a-f0-9]{64}$/.test(cid)) throw hostError(attempt, "container start");
     startedId = cid;
     attempt.stages[attempt.stage]!.containerId = cid;
-    await startWatchdog(attempt.executor, attempt.id, attempt.stage, remainingWallSeconds(dir, attempt, ctx), ctx.runner ?? spawnRunner, cid);
+    await startWatchdog(attempt.executor, attemptContainerName(attempt), remainingWallSeconds(dir, attempt, ctx), ctx.runner ?? spawnRunner, cid);
     const state = await inspect(dir, attempt, ctx); if (!state) throw hostError(attempt, "container start verification");
     return recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.started");
   } catch {
@@ -539,7 +543,7 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
         // A lost response is not proof that Docker rejected the start. Adopt only a verified owned container.
         const state = await inspect(dir, attempt, ctx);
         if (state) {
-          if (state.running) await startWatchdog(attempt.executor, attempt.id, attempt.stage, remainingWallSeconds(dir, attempt, ctx), ctx.runner ?? spawnRunner, state.id);
+          if (state.running) await startWatchdog(attempt.executor, attemptContainerName(attempt), remainingWallSeconds(dir, attempt, ctx), ctx.runner ?? spawnRunner, state.id);
           return recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.recovered");
         }
       } catch {
