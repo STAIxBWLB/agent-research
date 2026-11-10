@@ -1,0 +1,41 @@
+{
+  "v": 1,
+  "id": "supervision-v2-true-trigger-overlap-without-integration",
+  "trial": "supervision",
+  "scenario": "true-trigger",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "facts": {
+      "tasks": [
+        {
+          "id": 403,
+          "state": "in_progress",
+          "history": [
+            {
+              "at": 1760036000000,
+              "by": "peer-a",
+              "event": "accepted"
+            }
+          ]
+        },
+        {
+          "id": 404,
+          "state": "in_progress",
+          "history": [
+            {
+              "at": 1760036300000,
+              "by": "peer-b",
+              "event": "accepted"
+            }
+          ]
+        }
+      ],
+      "overlaps": [
+        {
+          "task": 403,
+          "other": 404
+        }
+      ]
+    }
+  }
+}

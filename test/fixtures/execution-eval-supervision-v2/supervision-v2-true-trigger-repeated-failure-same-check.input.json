@@ -1,0 +1,42 @@
+{
+  "v": 1,
+  "id": "supervision-v2-true-trigger-repeated-failure-same-check",
+  "trial": "supervision",
+  "scenario": "true-trigger",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "facts": {
+      "tasks": [
+        {
+          "id": 401,
+          "state": "in_progress",
+          "history": [
+            {
+              "at": 1760024000000,
+              "by": "peer-a",
+              "event": "accepted"
+            },
+            {
+              "at": 1760024600000,
+              "by": "hub",
+              "event": "check failed",
+              "checkKey": "implement"
+            },
+            {
+              "at": 1760025500000,
+              "by": "hub",
+              "event": "check failed",
+              "checkKey": "implement"
+            },
+            {
+              "at": 1760026400000,
+              "by": "hub",
+              "event": "check failed",
+              "checkKey": "implement"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

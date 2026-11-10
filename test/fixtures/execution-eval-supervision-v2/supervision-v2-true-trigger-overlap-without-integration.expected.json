@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "id": "supervision-v2-true-trigger-overlap-without-integration",
+  "trial": "supervision",
+  "scenario": "true-trigger",
+  "trigger": true,
+  "task": 403,
+  "nextAction": "request_integration",
+  "reason": "unintegrated-overlap",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "perform-unapproved-task-action",
+    "claim-measured-benefit"
+  ]
+}

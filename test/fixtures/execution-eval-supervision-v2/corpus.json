@@ -1,0 +1,89 @@
+{
+  "v": 1,
+  "cases": [
+    {
+      "id": "supervision-v2-ordinary-progress-quiet-check-sequence",
+      "trial": "supervision",
+      "scenario": "ordinary-progress",
+      "input": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-quiet-check-sequence.input.json",
+      "expected": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-quiet-check-sequence.expected.json"
+    },
+    {
+      "id": "supervision-v2-ordinary-progress-recorded-gate-wait",
+      "trial": "supervision",
+      "scenario": "ordinary-progress",
+      "input": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-recorded-gate-wait.input.json",
+      "expected": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-recorded-gate-wait.expected.json"
+    },
+    {
+      "id": "supervision-v2-ordinary-progress-completed-intact-deliverables",
+      "trial": "supervision",
+      "scenario": "ordinary-progress",
+      "input": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-completed-intact-deliverables.input.json",
+      "expected": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-completed-intact-deliverables.expected.json"
+    },
+    {
+      "id": "supervision-v2-ordinary-progress-truncated-quiet-revision",
+      "trial": "supervision",
+      "scenario": "ordinary-progress",
+      "input": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-truncated-quiet-revision.input.json",
+      "expected": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-truncated-quiet-revision.expected.json"
+    },
+    {
+      "id": "supervision-v2-true-trigger-repeated-failure-same-check",
+      "trial": "supervision",
+      "scenario": "true-trigger",
+      "input": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-repeated-failure-same-check.input.json",
+      "expected": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-repeated-failure-same-check.expected.json"
+    },
+    {
+      "id": "supervision-v2-true-trigger-changed-deliverable-after-pass",
+      "trial": "supervision",
+      "scenario": "true-trigger",
+      "input": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-changed-deliverable-after-pass.input.json",
+      "expected": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-changed-deliverable-after-pass.expected.json"
+    },
+    {
+      "id": "supervision-v2-true-trigger-overlap-without-integration",
+      "trial": "supervision",
+      "scenario": "true-trigger",
+      "input": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-overlap-without-integration.input.json",
+      "expected": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-overlap-without-integration.expected.json"
+    },
+    {
+      "id": "supervision-v2-true-trigger-repeated-failure-current-plan",
+      "trial": "supervision",
+      "scenario": "true-trigger",
+      "input": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-repeated-failure-current-plan.input.json",
+      "expected": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-repeated-failure-current-plan.expected.json"
+    },
+    {
+      "id": "supervision-v2-misleading-symptom-absent-measurement",
+      "trial": "supervision",
+      "scenario": "misleading-symptom",
+      "input": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-absent-measurement.input.json",
+      "expected": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-absent-measurement.expected.json"
+    },
+    {
+      "id": "supervision-v2-misleading-symptom-long-gap-recorded-progress",
+      "trial": "supervision",
+      "scenario": "misleading-symptom",
+      "input": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-long-gap-recorded-progress.input.json",
+      "expected": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-long-gap-recorded-progress.expected.json"
+    },
+    {
+      "id": "supervision-v2-misleading-symptom-failures-split-by-hand-over",
+      "trial": "supervision",
+      "scenario": "misleading-symptom",
+      "input": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-failures-split-by-hand-over.input.json",
+      "expected": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-failures-split-by-hand-over.expected.json"
+    },
+    {
+      "id": "supervision-v2-misleading-symptom-unmeasured-changed-ids",
+      "trial": "supervision",
+      "scenario": "misleading-symptom",
+      "input": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-unmeasured-changed-ids.input.json",
+      "expected": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-unmeasured-changed-ids.expected.json"
+    }
+  ]
+}

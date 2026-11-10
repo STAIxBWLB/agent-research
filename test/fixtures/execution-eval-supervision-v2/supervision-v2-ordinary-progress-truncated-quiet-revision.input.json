@@ -1,0 +1,414 @@
+{
+  "v": 1,
+  "id": "supervision-v2-ordinary-progress-truncated-quiet-revision",
+  "trial": "supervision",
+  "scenario": "ordinary-progress",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "facts": {
+      "tasks": [
+        {
+          "id": 304,
+          "state": "in_progress",
+          "history": [
+            {
+              "at": 1760018000000,
+              "by": "peer-a",
+              "event": "accepted"
+            },
+            {
+              "at": 1760018060000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760018120000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760018180000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760018240000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760018300000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760018360000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760018420000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760018480000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760018540000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760018600000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760018660000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760018720000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760018780000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760018840000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760018900000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760018960000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760019020000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760019080000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760019140000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760019200000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760019260000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760019320000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760019380000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760019440000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760019500000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760019560000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760019620000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760019680000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760019740000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760019800000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760019860000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760019920000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760019980000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760020040000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760020100000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760020160000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760020220000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760020280000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760020340000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760020400000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760020460000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760020520000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760020580000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760020640000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760020700000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760020760000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760020820000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760020880000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760020940000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760021000000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760021060000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760021120000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760021180000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760021240000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760021300000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760021360000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760021420000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760021480000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760021540000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760021600000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760021660000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760021720000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760021780000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            },
+            {
+              "at": 1760021840000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "lint"
+            },
+            {
+              "at": 1760021900000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "docs"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
