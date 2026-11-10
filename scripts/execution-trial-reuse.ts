@@ -104,14 +104,21 @@ export async function runReuseTrialArm(input: unknown, seed: number, reuse: "off
       const after = showAttempt(dir, sourceAttempt.id);
       if (!sourceRecord!.equals(attemptBytes(fixture, after)) || canonical(after.metrics) !== sourceMetrics) fail("current arm changed original source record or metrics");
     }
+    // Off-mode v2 records have no reuse view. Count only this attempt's actual native execution receipts;
+    // reused parents carry historical source container metadata and must never count as new work.
+    const freshRecords = completed.filter(parent => !parent.reuse).map(parent => parent.record);
+    if (freshRecords.some(record => !/^[a-f0-9]{64}$/.test(record.containerId ?? "") || record.exitCode !== 0) || !/^[a-f0-9]{64}$/.test(currentEvaluatorId) || current.stages.evaluator!.exitCode !== 0) fail("current native execution receipts are incomplete");
+    const currentExecutedStages = freshRecords.length + 1;
+    if (new Set([...freshRecords.map(record => record.containerId), currentEvaluatorId]).size !== currentExecutedStages) fail("current native execution receipts do not name distinct containers");
+    const currentIndependentSamples = current.status === "succeeded" && !hits.length && current.retryOf === undefined ? 1 : 0;
     const view = attemptReuseView(current, readLedger(dir));
-    if (!view || view.executedStages !== freshStages.length + 1 || view.reusedCandidateStages !== hits.length) fail("current stage accounting is inconsistent");
+    if (view && (view.executedStages !== currentExecutedStages || view.reusedCandidateStages !== hits.length || view.freshEvaluations !== 1 || view.independentSamples !== currentIndependentSamples)) fail("current stage accounting is inconsistent");
     const currentExecuted = fake.executed.slice(sourceExecuted.length), page = readProvenance(dir), comparison = compareLineage(dir, {attempts: [current.id]});
     const evidence = {reuse, seed, fault, changedKeys, sourceAttemptId: sourceAttempt?.id ?? null, currentAttemptId: current.id, sourceRefs, hits, misses, freshStages,
       sourceObserved, currentObserved: values.observed, expected, sourcePayloadDigests, currentPayloadDigests: values.payloadDigests,
       sourceRecordSha256: sourceRecord ? sha256(sourceRecord) : null, sourceMetricsSha256: sourceMetrics ? sha256(sourceMetrics) : null,
       currentMetricsSha256: sha256(canonical(current.metrics)), sourceEvaluatorId, currentEvaluatorId,
-      counts: {sourceExecutedStages: sourceExecuted.length, currentExecutedStages: view.executedStages, reusedStages: hits.length, currentIndependentSamples: view.independentSamples}};
+      counts: {sourceExecutedStages: sourceExecuted.length, currentExecutedStages, reusedStages: hits.length, currentIndependentSamples}};
     return {...evidence, injection, sourceRecordUnchanged: sourceAttempt ? true as const : null, sourceExecuted, currentExecuted,
       sourcePopulation: hasSource ? "fixture-rematerialized" as const : "none" as const,
       candidateEvidenceSha256: sha256(canonical(evidence)), provenanceStatus: page.status, comparisonStatus: comparison.status,

@@ -68,6 +68,18 @@ test("r2 refuses source changes outside the exact seven export prefixes", () => 
   }
 });
 
+test("recorded setup costs retain their values and canonical seal across JSON property ordering", () => {
+  const f = fixture(), first = sealReuseRematerializationR2(f.root);
+  if (first.state !== "verified") throw new Error("synthetic r2 fixture must seal");
+  edit(f.receipt, raw => {raw.setup.setupCosts = Object.fromEntries(Object.entries(raw.setup.setupCosts).reverse());});
+  const reread = readReuseRematerializationR2(f.root);
+  expect(reread.setup.setupCosts).toEqual(first.receipt.setup.setupCosts);
+  expect(reread.receiptSha256).toBe(first.receipt.receiptSha256);
+  const {receiptSha256, ...body} = reread;
+  expect(sha256(canonical(body))).toBe(receiptSha256);
+  expect(verifyReuseRematerializationR2(f.root)).toEqual({state: "verified", receipt: reread});
+});
+
 test("original receipt raw and canonical pins cannot be replaced by a recomputed tampered setup", () => {
   const f = fixture(), prior = join(f.root, REMATERIALIZATION_RECEIPT);
   edit(prior, raw => {raw.identity.cases[0].fault = "corrupt"; raw.setupSha256 = sha256(canonical(raw.identity));});

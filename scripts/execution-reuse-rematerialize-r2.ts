@@ -44,7 +44,9 @@ function digest(raw: unknown): string {
 }
 function json(text: string): unknown {try {return JSON.parse(text);} catch {return fail("invalid receipt JSON");}}
 function costs(raw: unknown): CostRecord {
-  const row = object(raw, COST_FIELDS), result: Record<string, number | "unknown"> = Object.create(null);
+  // The shared canonical encoder sorts ordinary JSON objects. A null-prototype output
+  // would take its JSON.stringify fallback and change the seal merely on reread.
+  const row = object(raw, COST_FIELDS), result: Record<string, number | "unknown"> = {};
   for (const key of COST_FIELDS) {
     const value = row[key];
     if (value !== "unknown" && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) fail("setup costs must be nonnegative recorded units or unknown");

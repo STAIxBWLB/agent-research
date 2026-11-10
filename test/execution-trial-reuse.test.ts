@@ -42,7 +42,7 @@ async function arms(value: ReturnType<typeof input>) {
   return {off, eligible};
 }
 
-test("both no-source arms use the shared backend and independently execute the full fresh pipeline", async () => {
+test("off-mode native v2 and eligible v3 no-source arms both count their full fresh execution receipts", async () => {
   const {off, eligible} = await arms(input(false));
   for (const result of [off, eligible]) {
     expect(result.sourcePopulation).toBe("none"); expect(result.sourceAttemptId).toBeNull(); expect(result.sourceRefs).toEqual([]);
