@@ -1,0 +1,116 @@
+import {expect, test} from "bun:test";
+import {symlinkSync} from "node:fs";
+import {join} from "node:path";
+import {baselineSlots} from "../scripts/execution-baseline.ts";
+import {COST_FIELDS} from "../scripts/execution-eval.ts";
+import {TREATMENT_AUTHORITY_DEVIATION, TREATMENT_RECEIPT_BYTES, treatmentSlots, treatmentDenominators, treatmentMatches, treatmentChildCpuSeconds, parseTreatmentCgroupCpu, validateTreatmentObservation, readTreatmentObservation, validateTreatmentTrialManifest, serializeTreatmentBundle, type TreatmentObservation} from "../scripts/execution-trials.ts";
+import {readBytesBounded, readTextBounded, sha256, writeAtomic} from "../src/study.ts";
+import {tempDir} from "./helpers.ts";
+
+// Shape-only synthetic receipts; none of these tests calls the admitted runner or a child.
+function observation(): TreatmentObservation {
+  return {...treatmentSlots(0, [3, 11, 19], "reuse")[0]!, v: 1, authority: "harness-observed", trial: "reuse", caseId: "synthetic-case", caseIndex: 0, slot: 0,
+    codeSha256: "a".repeat(64), methodSha256: "b".repeat(64), inputSha256: "c".repeat(64), expectedSha256: "d".repeat(64),
+    status: "unknown", cause: "budget-stopped-not-started", matched: "unknown", result: null, integration: null, processWallMs: "unknown", humanTimeToFind: "unknown",
+    costs: Object.fromEntries(COST_FIELDS.map(key => [key, "unknown"])) as TreatmentObservation["costs"], containerCpuSeconds: "unknown", artifact: null, logs: null};
+}
+function manifest() {
+  const codeFiles = [{path: "scripts/synthetic.ts", sha256: "a".repeat(64), bytes: 1}];
+  const rows = Array.from({length: 12}, (_, index) => treatmentSlots(index, [3, 11, 19], "reuse")).flat().map(slot => ({arm: slot.arm, status: "unknown" as const}));
+  return {...TREATMENT_AUTHORITY_DEVIATION, v: 1, kind: "synthetic-paired-treatment-observations", authority: "harness-observed", trial: "reuse", state: "incomplete", failure: null,
+    startedAt: "2026-11-10T00:00:00.000Z", endedAt: "2026-11-10T00:01:00.000Z",
+    bindings: {registration: "a".repeat(64), supervision: "b".repeat(64), reuseR2: "c".repeat(64), reuseSetup: "d".repeat(64)},
+    methodSha256: "b".repeat(64), inputSha256: "c".repeat(64), expectedSha256: "d".repeat(64),
+    code: {commit: "a".repeat(40), tree: "b".repeat(40), codeSha256: sha256(JSON.stringify(codeFiles)), files: codeFiles},
+    environment: {os: "linux", osRelease: "synthetic", arch: "x64", bun: "1.3.10", cpuModelsSha256: "a".repeat(64), logicalCpus: 2, cpuLimit: 2, memoryLimitBytes: 256 * 1024 * 1024, pidsLimit: 32, containerIdentitySha256: "b".repeat(64), imageDigest: "sha256:" + "c".repeat(64), imageDigestSource: "admission-controller-pinned-image-id", sequentialChildren: 1},
+    schedule: {cases: 12, repetitions: 3, conditions: ["cold", "warm"], arms: ["fresh", "eligible-reuse"], observations: 144, sha256: "e".repeat(64)},
+    denominators: treatmentDenominators(rows), costs: observation().costs, admission: {parentCpuSeconds: 1, wallMs: 2, codeMaterializationBytes: 1, tmpfs: {kind: "controller-tmpfs-cap", bytes: 16 * 1024 * 1024}},
+    accounting: {cpuScope: "synthetic scope", components: "subsets, never summed again", transferBytes: 65536, retainedBytes: 65537, unpublishedSlots: 144, containerCpuSeconds: "unknown", containerCpuScope: "admitted-container-cgroup"},
+    files: [] as {path: string; sha256: string; bytes: number}[], limitations: ["synthetic validator fixture only, no measurements"]};
+}
+
+test("paired slots preserve original corpus parity, seed order and cold/warm labels for all144 slots", () => {
+  for (const trial of ["diagnose", "reuse"] as const) {
+    const all = [];
+    for (let index = 5; index < 17; index++) {
+      const slots = treatmentSlots(index, [4, 12, 20], trial), baseline = baselineSlots(index, [4, 12, 20]);
+      expect(slots).toHaveLength(12);
+      for (const [pair, original] of baseline.entries()) {
+        const actual = slots.slice(pair * 2, pair * 2 + 2);
+        expect(actual.map(slot => slot.executedSlot)).toEqual([0, 1]);
+        expect(actual.map(slot => [slot.seed, slot.condition, slot.repetition])).toEqual(Array(2).fill([original.seed, original.condition, original.repetition]));
+        expect(actual[original.executedSlot]!.arm).toBe(trial === "reuse" ? "fresh" : "current-workflow");
+      }
+      all.push(...slots);
+    }
+    expect(all).toHaveLength(144);
+    expect(new Set(all.map(slot => slot.arm)).size).toBe(2);
+  }
+  expect(() => treatmentSlots(0, [1, 2], "reuse")).toThrow("three declared seeds");
+});
+
+test("failed, cancelled, unknown and excluded slots stay in each full denominator", () => {
+  const statuses = ["succeeded", "failed", "cancelled", "unknown", "excluded"] as const;
+  const rows = ["fresh", "eligible-reuse"].flatMap(arm => statuses.map(status => ({arm: arm as "fresh" | "eligible-reuse", status})));
+  const result = treatmentDenominators(rows);
+  expect(result.full).toBe(10); expect(result.unknown).toBe(2); expect(result.failed).toBe(2);
+  expect(result.arms.fresh).toEqual({full: 5, succeeded: 1, failed: 1, cancelled: 1, unknown: 1, excluded: 1});
+  expect(treatmentChildCpuSeconds(undefined)).toBe("unknown");
+  for (const total of [-1, NaN, Infinity]) expect(treatmentChildCpuSeconds({cpuTime: {total}})).toBe("unknown");
+  expect(treatmentChildCpuSeconds({cpuTime: {total: 0}})).toBe(0);
+  expect(treatmentChildCpuSeconds({cpuTime: {total: 1500000}})).toBe(1.5);
+  expect(parseTreatmentCgroupCpu("usage_usec 1500000\nuser_usec 1000000\nsystem_usec 500000\n")).toBe(1.5);
+  for (const text of ["", "usage_usec -1", "usage_usec 1.5", "usage_usec 1\nusage_usec 2", "x".repeat(4097)]) expect(() => parseTreatmentCgroupCpu(text)).toThrow("execution treatment trials:");
+});
+
+test("truth matching is evaluator-only and compares complete seeded outputs or diagnostic projection", () => {
+  const expected = {freshExecution: {outputs: [{seed: 3, prepare: 6, transform: 12, evaluate: 24}]}};
+  expect(treatmentMatches("reuse", expected, 3, expected.freshExecution.outputs[0])).toBe(true);
+  expect(treatmentMatches("reuse", expected, 3, {...expected.freshExecution.outputs[0], evaluate: 25})).toBe(false);
+  expect(() => treatmentMatches("reuse", expected, 4, {})).toThrow("unique sealed");
+  const diagnostic = {provenance: {attemptId: "synthetic", head: "a".repeat(40)}, nextAction: "inspect"};
+  expect(treatmentMatches("diagnose", {...diagnostic, evaluatorOnly: "not projected"}, 3, diagnostic)).toBe(true);
+  expect(treatmentMatches("diagnose", diagnostic, 3, {...diagnostic, nextAction: "retry"})).toBe(false);
+});
+
+test("bounded slot receipts preserve unknown units, integration phase scopes and source bytes", () => {
+  const row = observation(); row.integration = {instrumentation: {total: {wallMs: 2, parentCpuSeconds: 1, subprocessCpuSeconds: "unknown"}}, sourceRecordUnchanged: true};
+  expect(validateTreatmentObservation(row)).toEqual(row);
+  expect(row.costs.cpuSeconds).toBe("unknown");
+  const dir = tempDir(), file = join(dir, "slot.json"); writeAtomic(file, JSON.stringify(row), TREATMENT_RECEIPT_BYTES);
+  const before = readBytesBounded(file, TREATMENT_RECEIPT_BYTES);
+  expect(readTreatmentObservation(file)).toEqual(row); expect(readBytesBounded(file, TREATMENT_RECEIPT_BYTES)).toEqual(before);
+  const linked = join(dir, "linked.json"); symlinkSync(file, linked);
+  expect(() => readTreatmentObservation(linked)).toThrow("linked");
+  for (const value of [{...row, seed: 0.5}, {...row, slotOrder: ["fresh", "fresh"]}, {...row, integration: {path: "/private/synthetic"}}, {...row, privateBody: "private"}, {...row, result: "x".repeat(TREATMENT_RECEIPT_BYTES)}]) expect(() => validateTreatmentObservation(value)).toThrow("execution treatment trials:");
+});
+
+test("incomplete manifests retain the full144 denominator and bound code, admission and schedule", () => {
+  const raw = manifest(); expect(validateTreatmentTrialManifest(raw)).toEqual(raw);
+  expect(raw.denominators.full).toBe(144); expect(raw.denominators.arms.fresh!.full).toBe(72);
+  for (const change of [
+    (value: ReturnType<typeof manifest>) => {value.state = "complete";},
+    (value: ReturnType<typeof manifest>) => {value.denominators.unknown--;},
+    (value: ReturnType<typeof manifest>) => {value.environment.pidsLimit = 33;},
+    (value: ReturnType<typeof manifest>) => {value.schedule.observations = 143;},
+    (value: ReturnType<typeof manifest>) => {value.code.codeSha256 = "0".repeat(64);},
+    (value: ReturnType<typeof manifest>) => {value.accounting.unpublishedSlots = 143;},
+  ]) {const value = manifest(); change(value); expect(() => validateTreatmentTrialManifest(value)).toThrow("execution treatment trials:");}
+});
+
+test("inert receipt validators never execute accessors, proxy traps or serializers", () => {
+  let calls = 0;
+  const getter = observation(); Object.defineProperty(getter, "result", {enumerable: true, get() {calls++; return {};}});
+  const proxy = new Proxy(observation(), {getPrototypeOf() {calls++; return Object.prototype;}});
+  const serializer = {...observation(), toJSON() {calls++; return {};}};
+  for (const raw of [getter, proxy, serializer]) expect(() => validateTreatmentObservation(raw)).toThrow("execution treatment trials:");
+  expect(calls).toBe(0);
+});
+
+test("bundle bounds include JSON escaping, prefix and newline without starting a trial", () => {
+  expect(JSON.parse(serializeTreatmentBundle({"manifest.json": "{}"}))).toEqual({v: 1, files: {"manifest.json": "{}"}});
+  expect(() => serializeTreatmentBundle({"manifest.json": "{}", "../private.json": "{}"})).toThrow("filename");
+  const huge: Record<string, string> = {"manifest.json": "{}"};
+  for (let index = 0; index < 130; index++) huge[`slot-${String(index).padStart(3, "0")}.json`] = '"'.repeat(65000);
+  expect(() => serializeTreatmentBundle(huge)).toThrow("escaped bundle");
+});
