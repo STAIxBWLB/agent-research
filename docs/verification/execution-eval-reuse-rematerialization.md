@@ -38,18 +38,26 @@ that declaration.
   expected-file hash of its own; label immutability comes from the parent v1 seal, which `verifyPreregistration` re-checks
   over its own `expectedFiles`.
 
-## Which sources are rebuilt, and which are refused
+## Which sources are rebuilt, and which keep a fault
 
-A source is rebuilt only when it is a succeeded source whose frozen artifact payload still matches its declared digest.
-The other cases keep the fault that their scenario injects, because repairing it would delete the scenario:
+Every case that declares a source is rebuilt from its own frozen `source.workload`, and a rebuilt source then keeps the
+fault its scenario declares. Refusing those cases here would delete the scenario instead of presenting it to the reuse
+path, so the setup rebuilds them healthy and the fault is injected afterwards:
 
-| Cases | Reason | Why the setup refuses |
-| --- | --- | --- |
-| local-stage-edit (2), global-code-change (2) | `rematerialized` | succeeded sources with a matching artifact digest |
-| corrupt-artifact (2) | `source-corrupt` | the frozen payload no longer matches its declared digest |
-| pruned-artifact (2) | `source-not-retained` | `artifact.present` is false; the frozen bytes carry no retention flag, so no pruned/missing distinction is invented |
-| interrupted-source (2) | `source-not-succeeded` | source status is `cancelled` or `unknown` |
-| no-hit (2) | `no-frozen-source` | the case declares no source at all |
+| Cases | Setup state | Injected fault | Why |
+| --- | --- | --- | --- |
+| local-stage-edit (2), global-code-change (2) | rebuilt | none | succeeded source whose frozen payload matches its declared digest |
+| corrupt-artifact (2) | rebuilt with injected fault | `corrupt` | one retained payload changes after the seal, so the sealed manifest hash no longer matches its bytes, mirroring payload ≠ digest |
+| pruned-artifact (2) | rebuilt with injected fault | `pruned` | the rebuilt stages are disposed through the retention prune path, which leaves its tombstone, mirroring `present: false` |
+| interrupted-source (2) | rebuilt with injected fault | `interrupted` | the source attempt is recorded with the case's own `cancelled` or `unknown` status after its candidate stages were sealed |
+| no-hit (2) | no source | none | the case declares no source at all |
+
+The setup's own classification is 4 rebuilt, 6 rebuilt with an injected fault and 2 with no source; none is refused.
+`state` stays `rematerialized` for every rebuilt case, and the per-case `label` records whether a fault was injected; the
+two no-source cases carry `no-frozen-source`.
+Injection is deterministic and code-bound: the injecting function lives in a bound setup module, so a change to it changes
+the sealed identity. The fault is applied to the rebuilt retained artifact only; the frozen input, the frozen label and
+the parent v1 receipt stay byte-identical.
 
 ## Hit capability
 
@@ -61,10 +69,25 @@ so a stage edited further down the pipeline leaves earlier keys intact. The rece
 - local-stage-edit variant one edits the transform offset, so `prepare` keeps its key and `transform` and `evaluate` lose
   theirs. Variant two edits the evaluator operation, so `prepare` and `transform` keep theirs.
 - global-code-change declares a different current code digest, so no stage keeps its key.
+- A case with an injected fault declares no hit-capable stage, because the declared fault is meant to defeat every stage.
 
 `test/execution-reuse-rematerialize.test.ts` does not trust that derivation. It rebuilds the source in a private study
 through the real producer adapter, then runs the case's current attempt with `--reuse eligible` against the rebuilt
-source and requires the reuse path itself to admit exactly those stages and to miss the rest.
+source and requires the reuse path itself to admit exactly those stages and to miss the rest. The same fixture runs each
+of the six fault cases: the source is rebuilt healthy, the case's own fault is injected, and the current attempt must
+record no hit. The stage carrying the fault reports the reuse path's own reason (`corrupt`, `pruned`, or
+`ineligible-source` for a non-succeeded source); a downstream stage reports `missing`, because the upstream miss changes
+its key so no sealed entry of the source is even a candidate. Those refusals come from the reuse path, not from the setup
+that produced the case.
+
+## One reuse-admission rule tightened
+
+Presenting the interrupted cases exposed a gap in the reuse path itself: its admission refused only a source attempt that
+was still `running`, so a `cancelled` or `unknown` attempt whose candidate stages were sealed could still be reused. The
+source attempt must now be `succeeded`; anything else is the `ineligible-source` miss the path already uses for an
+ineligible source. That matches the preregistered method, which states that a valid digest alone never makes an
+interrupted or semantically stale source eligible, and the frozen corpus's interrupted-source cases. The change is in
+`src/exp/reuse-admission.ts`: it admits no new stage and only narrows reuse.
 
 ## Cost
 

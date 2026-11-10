@@ -8,12 +8,12 @@
       "receiptSha256": "72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20"
     },
     "bindings": {
-      "codeSha256": "ecdc6e956f1de20c635c0f3037521dba10ef3e3828e53d2cbc1d116777888c1a",
+      "codeSha256": "4ba0c5eba102fd79fc1281fd8ef3b633cd5c58ae61fb699173075b6f068aaf17",
       "corpusSha256": "45f2e032ffa3403f82ba2a7c9c03dda3959cbf7986419393632a5f10daf29617",
       "inputSha256": "7a6cab1ddf510ed9c7ea3631fd4b9e5801014f659fc0d987151a4780386da237",
-      "workloadSha256": "3cfb5d4a6145d94d3b2dbe0e37495cf3febcc1c4bc4a3831c0835e758c0910cb",
-      "stageSha256": "8cac64ff18d70d2a347da9fd2e86df7cbed17f9e00a23822837b19926b82b99e",
-      "protocolSha256": "a48c68ecf84d5be2d346d28dea1f78661821332694807f47a36fd41bfc378972",
+      "workloadSha256": "b3df174544fb990600e7fef9a7e0a7b67cea1a2f7592c75faff217bf00679c30",
+      "stageSha256": "3e8ccecdd3047ac2c9dc37a936e9b3c1ce6813797288a44483cd4995514f03d6",
+      "protocolSha256": "a3a3bda038b7a3151f58551d477ef68a53c7622e61f6c429415b581103b69293",
       "thresholdsSha256": "7f4ac614c71f8ab97e5b10454b091b15feaf9caf20e7011f4b166c59ea867b72",
       "denominatorsSha256": "fb66698580a5a9c945eba8ea6bb1eb3c729b8e765ba1133bb19e62534e006955"
     },
@@ -23,6 +23,9 @@
         "scenario": "local-stage-edit",
         "state": "rematerialized",
         "reason": "rematerialized",
+        "fault": "none",
+        "label": "fixture-rematerialized",
+        "sourceStatus": "succeeded",
         "sourceCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
         "workloadSha256": "73607dfb5256fa58b27f6d49b7dd86997fdba8a16cdbb2ca97665d1c603326ab",
         "stageSha256": "d66d75612f60fbb6cc82299dc430eb3da0f61b0844b261da3d8a028f5d3ce214",
@@ -100,6 +103,9 @@
         "scenario": "local-stage-edit",
         "state": "rematerialized",
         "reason": "rematerialized",
+        "fault": "none",
+        "label": "fixture-rematerialized",
+        "sourceStatus": "succeeded",
         "sourceCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
         "workloadSha256": "4d31ccbbe96cd4f3d7b61ea519e4614384fb1b03680121acdd82d714b12c09ae",
         "stageSha256": "0ce59f9931a64ef6e367483629d1ca71c9d8d3fd086d393e2d4c94a7b9ee0be8",
@@ -178,6 +184,9 @@
         "scenario": "global-code-change",
         "state": "rematerialized",
         "reason": "rematerialized",
+        "fault": "none",
+        "label": "fixture-rematerialized",
+        "sourceStatus": "succeeded",
         "sourceCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
         "workloadSha256": "73607dfb5256fa58b27f6d49b7dd86997fdba8a16cdbb2ca97665d1c603326ab",
         "stageSha256": "d66d75612f60fbb6cc82299dc430eb3da0f61b0844b261da3d8a028f5d3ce214",
@@ -253,6 +262,9 @@
         "scenario": "global-code-change",
         "state": "rematerialized",
         "reason": "rematerialized",
+        "fault": "none",
+        "label": "fixture-rematerialized",
+        "sourceStatus": "succeeded",
         "sourceCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
         "workloadSha256": "4d31ccbbe96cd4f3d7b61ea519e4614384fb1b03680121acdd82d714b12c09ae",
         "stageSha256": "0ce59f9931a64ef6e367483629d1ca71c9d8d3fd086d393e2d4c94a7b9ee0be8",
@@ -328,6 +340,9 @@
         "scenario": "no-hit",
         "state": "refused",
         "reason": "no-frozen-source",
+        "fault": "none",
+        "label": "no-frozen-source",
+        "sourceStatus": null,
         "sourceCodeDigest": null,
         "workloadSha256": null,
         "stageSha256": null,
@@ -339,6 +354,9 @@
         "scenario": "no-hit",
         "state": "refused",
         "reason": "no-frozen-source",
+        "fault": "none",
+        "label": "no-frozen-source",
+        "sourceStatus": null,
         "sourceCodeDigest": null,
         "workloadSha256": null,
         "stageSha256": null,
@@ -348,68 +366,470 @@
       {
         "caseId": "reuse-corrupt-artifact-first-variant",
         "scenario": "corrupt-artifact",
-        "state": "refused",
-        "reason": "source-corrupt",
-        "sourceCodeDigest": null,
-        "workloadSha256": null,
-        "stageSha256": null,
+        "state": "rematerialized",
+        "reason": "rematerialized",
+        "fault": "corrupt",
+        "label": "fixture-rematerialized+injected-fault",
+        "sourceStatus": "succeeded",
+        "sourceCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
+        "workloadSha256": "73607dfb5256fa58b27f6d49b7dd86997fdba8a16cdbb2ca97665d1c603326ab",
+        "stageSha256": "d66d75612f60fbb6cc82299dc430eb3da0f61b0844b261da3d8a028f5d3ce214",
         "hitCapableStages": [],
-        "stages": []
+        "stages": [
+          {
+            "stage": "prepare",
+            "seed": 3,
+            "value": 18,
+            "sha256": "7ee29791fc17e986b97128845622b077fb45e349fdb80523fac9dba879b4ad60",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 3,
+            "value": 37,
+            "sha256": "b58a3da5fde2680191877ec88a1aa7d06927cc3b30cdf0d0db8c39b488891576",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 3,
+            "value": 1372,
+            "sha256": "11179a1aa7aec480c2e68076772014f1a6ffdddf770a26acce9b4e5e787fd801",
+            "bytes": 5
+          },
+          {
+            "stage": "prepare",
+            "seed": 11,
+            "value": 26,
+            "sha256": "20d2add851bf39edcc6b5e830930f962db7e19dffa2cab8610eed551eda6c302",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 11,
+            "value": 53,
+            "sha256": "877a8799041017f1719854e4e295c6dca56cd1cf1b1914d1bfed9281f7fc2686",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 11,
+            "value": 2820,
+            "sha256": "542b66911dddedbc96854d30cbccbb9d52323ca8525f2867af57828d4c4b242f",
+            "bytes": 5
+          },
+          {
+            "stage": "prepare",
+            "seed": 19,
+            "value": 34,
+            "sha256": "ea243e5457028e97f9bc93b37a72f8e80ea61ae081911bb037765590ee6aa435",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 19,
+            "value": 69,
+            "sha256": "b35e87b5838011a3637be660e4238af9a55e4edc74404c990f7a558e7f416658",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 19,
+            "value": 4780,
+            "sha256": "8d0d7d110042d429466cb6db2d6569714cd470115db692648be0fbeb7ddc6b19",
+            "bytes": 5
+          }
+        ]
       },
       {
         "caseId": "reuse-corrupt-artifact-second-variant",
         "scenario": "corrupt-artifact",
-        "state": "refused",
-        "reason": "source-corrupt",
-        "sourceCodeDigest": null,
-        "workloadSha256": null,
-        "stageSha256": null,
+        "state": "rematerialized",
+        "reason": "rematerialized",
+        "fault": "corrupt",
+        "label": "fixture-rematerialized+injected-fault",
+        "sourceStatus": "succeeded",
+        "sourceCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
+        "workloadSha256": "4d31ccbbe96cd4f3d7b61ea519e4614384fb1b03680121acdd82d714b12c09ae",
+        "stageSha256": "0ce59f9931a64ef6e367483629d1ca71c9d8d3fd086d393e2d4c94a7b9ee0be8",
         "hitCapableStages": [],
-        "stages": []
+        "stages": [
+          {
+            "stage": "prepare",
+            "seed": 4,
+            "value": 19,
+            "sha256": "a9742eb8ee320e006666aef25ae9aeed948247f3125c9cafa7cf97b7e7467dd5",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 4,
+            "value": 59,
+            "sha256": "be4ba010e48e7d5c7c60457e7f40538407a26f4ead94b392beff67a3a5546b8a",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 4,
+            "value": 3485,
+            "sha256": "a5816419e9750e9af190df4313c102d2a5c2bf17ba60be72d42e769aa4b572d2",
+            "bytes": 5
+          },
+          {
+            "stage": "prepare",
+            "seed": 12,
+            "value": 27,
+            "sha256": "932ab0a0e4191d32c0af7b3f565b7b180dbe9869378abc5816f9add54b806e7f",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 12,
+            "value": 83,
+            "sha256": "f1769867b0abc7068f5cb7dd41574a420b3cfa4553856f459857ff8e5a525b13",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 12,
+            "value": 6901,
+            "sha256": "01a1228856cc170b44920faa172f253d2eb173adb6072d213f484bde7a52a48a",
+            "bytes": 5
+          },
+          {
+            "stage": "prepare",
+            "seed": 20,
+            "value": 35,
+            "sha256": "90d7ec0f0acef104d8b6252794295f661a0149634868d02a1ae0c358099638f5",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 20,
+            "value": 107,
+            "sha256": "bcea5d7d8b256f1bda5f90a3ede41899e94b89fccb4e4d2786073b5bfaa0002a",
+            "bytes": 4
+          },
+          {
+            "stage": "evaluate",
+            "seed": 20,
+            "value": 11469,
+            "sha256": "63dd0388dc70e047dfeab114aab5fc273fce524c1d39ec5ea9c11736c49dea4a",
+            "bytes": 6
+          }
+        ]
       },
       {
         "caseId": "reuse-pruned-artifact-first-variant",
         "scenario": "pruned-artifact",
-        "state": "refused",
-        "reason": "source-not-retained",
-        "sourceCodeDigest": null,
-        "workloadSha256": null,
-        "stageSha256": null,
+        "state": "rematerialized",
+        "reason": "rematerialized",
+        "fault": "pruned",
+        "label": "fixture-rematerialized+injected-fault",
+        "sourceStatus": "succeeded",
+        "sourceCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
+        "workloadSha256": "73607dfb5256fa58b27f6d49b7dd86997fdba8a16cdbb2ca97665d1c603326ab",
+        "stageSha256": "d66d75612f60fbb6cc82299dc430eb3da0f61b0844b261da3d8a028f5d3ce214",
         "hitCapableStages": [],
-        "stages": []
+        "stages": [
+          {
+            "stage": "prepare",
+            "seed": 3,
+            "value": 18,
+            "sha256": "7ee29791fc17e986b97128845622b077fb45e349fdb80523fac9dba879b4ad60",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 3,
+            "value": 37,
+            "sha256": "b58a3da5fde2680191877ec88a1aa7d06927cc3b30cdf0d0db8c39b488891576",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 3,
+            "value": 1372,
+            "sha256": "11179a1aa7aec480c2e68076772014f1a6ffdddf770a26acce9b4e5e787fd801",
+            "bytes": 5
+          },
+          {
+            "stage": "prepare",
+            "seed": 11,
+            "value": 26,
+            "sha256": "20d2add851bf39edcc6b5e830930f962db7e19dffa2cab8610eed551eda6c302",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 11,
+            "value": 53,
+            "sha256": "877a8799041017f1719854e4e295c6dca56cd1cf1b1914d1bfed9281f7fc2686",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 11,
+            "value": 2820,
+            "sha256": "542b66911dddedbc96854d30cbccbb9d52323ca8525f2867af57828d4c4b242f",
+            "bytes": 5
+          },
+          {
+            "stage": "prepare",
+            "seed": 19,
+            "value": 34,
+            "sha256": "ea243e5457028e97f9bc93b37a72f8e80ea61ae081911bb037765590ee6aa435",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 19,
+            "value": 69,
+            "sha256": "b35e87b5838011a3637be660e4238af9a55e4edc74404c990f7a558e7f416658",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 19,
+            "value": 4780,
+            "sha256": "8d0d7d110042d429466cb6db2d6569714cd470115db692648be0fbeb7ddc6b19",
+            "bytes": 5
+          }
+        ]
       },
       {
         "caseId": "reuse-pruned-artifact-second-variant",
         "scenario": "pruned-artifact",
-        "state": "refused",
-        "reason": "source-not-retained",
-        "sourceCodeDigest": null,
-        "workloadSha256": null,
-        "stageSha256": null,
+        "state": "rematerialized",
+        "reason": "rematerialized",
+        "fault": "pruned",
+        "label": "fixture-rematerialized+injected-fault",
+        "sourceStatus": "succeeded",
+        "sourceCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
+        "workloadSha256": "4d31ccbbe96cd4f3d7b61ea519e4614384fb1b03680121acdd82d714b12c09ae",
+        "stageSha256": "0ce59f9931a64ef6e367483629d1ca71c9d8d3fd086d393e2d4c94a7b9ee0be8",
         "hitCapableStages": [],
-        "stages": []
+        "stages": [
+          {
+            "stage": "prepare",
+            "seed": 4,
+            "value": 19,
+            "sha256": "a9742eb8ee320e006666aef25ae9aeed948247f3125c9cafa7cf97b7e7467dd5",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 4,
+            "value": 59,
+            "sha256": "be4ba010e48e7d5c7c60457e7f40538407a26f4ead94b392beff67a3a5546b8a",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 4,
+            "value": 3485,
+            "sha256": "a5816419e9750e9af190df4313c102d2a5c2bf17ba60be72d42e769aa4b572d2",
+            "bytes": 5
+          },
+          {
+            "stage": "prepare",
+            "seed": 12,
+            "value": 27,
+            "sha256": "932ab0a0e4191d32c0af7b3f565b7b180dbe9869378abc5816f9add54b806e7f",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 12,
+            "value": 83,
+            "sha256": "f1769867b0abc7068f5cb7dd41574a420b3cfa4553856f459857ff8e5a525b13",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 12,
+            "value": 6901,
+            "sha256": "01a1228856cc170b44920faa172f253d2eb173adb6072d213f484bde7a52a48a",
+            "bytes": 5
+          },
+          {
+            "stage": "prepare",
+            "seed": 20,
+            "value": 35,
+            "sha256": "90d7ec0f0acef104d8b6252794295f661a0149634868d02a1ae0c358099638f5",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 20,
+            "value": 107,
+            "sha256": "bcea5d7d8b256f1bda5f90a3ede41899e94b89fccb4e4d2786073b5bfaa0002a",
+            "bytes": 4
+          },
+          {
+            "stage": "evaluate",
+            "seed": 20,
+            "value": 11469,
+            "sha256": "63dd0388dc70e047dfeab114aab5fc273fce524c1d39ec5ea9c11736c49dea4a",
+            "bytes": 6
+          }
+        ]
       },
       {
         "caseId": "reuse-interrupted-source-first-variant",
         "scenario": "interrupted-source",
-        "state": "refused",
-        "reason": "source-not-succeeded",
-        "sourceCodeDigest": null,
-        "workloadSha256": null,
-        "stageSha256": null,
+        "state": "rematerialized",
+        "reason": "rematerialized",
+        "fault": "interrupted",
+        "label": "fixture-rematerialized+injected-fault",
+        "sourceStatus": "cancelled",
+        "sourceCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
+        "workloadSha256": "73607dfb5256fa58b27f6d49b7dd86997fdba8a16cdbb2ca97665d1c603326ab",
+        "stageSha256": "d66d75612f60fbb6cc82299dc430eb3da0f61b0844b261da3d8a028f5d3ce214",
         "hitCapableStages": [],
-        "stages": []
+        "stages": [
+          {
+            "stage": "prepare",
+            "seed": 3,
+            "value": 18,
+            "sha256": "7ee29791fc17e986b97128845622b077fb45e349fdb80523fac9dba879b4ad60",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 3,
+            "value": 37,
+            "sha256": "b58a3da5fde2680191877ec88a1aa7d06927cc3b30cdf0d0db8c39b488891576",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 3,
+            "value": 1372,
+            "sha256": "11179a1aa7aec480c2e68076772014f1a6ffdddf770a26acce9b4e5e787fd801",
+            "bytes": 5
+          },
+          {
+            "stage": "prepare",
+            "seed": 11,
+            "value": 26,
+            "sha256": "20d2add851bf39edcc6b5e830930f962db7e19dffa2cab8610eed551eda6c302",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 11,
+            "value": 53,
+            "sha256": "877a8799041017f1719854e4e295c6dca56cd1cf1b1914d1bfed9281f7fc2686",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 11,
+            "value": 2820,
+            "sha256": "542b66911dddedbc96854d30cbccbb9d52323ca8525f2867af57828d4c4b242f",
+            "bytes": 5
+          },
+          {
+            "stage": "prepare",
+            "seed": 19,
+            "value": 34,
+            "sha256": "ea243e5457028e97f9bc93b37a72f8e80ea61ae081911bb037765590ee6aa435",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 19,
+            "value": 69,
+            "sha256": "b35e87b5838011a3637be660e4238af9a55e4edc74404c990f7a558e7f416658",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 19,
+            "value": 4780,
+            "sha256": "8d0d7d110042d429466cb6db2d6569714cd470115db692648be0fbeb7ddc6b19",
+            "bytes": 5
+          }
+        ]
       },
       {
         "caseId": "reuse-interrupted-source-second-variant",
         "scenario": "interrupted-source",
-        "state": "refused",
-        "reason": "source-not-succeeded",
-        "sourceCodeDigest": null,
-        "workloadSha256": null,
-        "stageSha256": null,
+        "state": "rematerialized",
+        "reason": "rematerialized",
+        "fault": "interrupted",
+        "label": "fixture-rematerialized+injected-fault",
+        "sourceStatus": "unknown",
+        "sourceCodeDigest": "46c53423b4e6f80c25bdb8af86c145e4b1781418414d8776ea299d45d1000fd7",
+        "workloadSha256": "4d31ccbbe96cd4f3d7b61ea519e4614384fb1b03680121acdd82d714b12c09ae",
+        "stageSha256": "0ce59f9931a64ef6e367483629d1ca71c9d8d3fd086d393e2d4c94a7b9ee0be8",
         "hitCapableStages": [],
-        "stages": []
+        "stages": [
+          {
+            "stage": "prepare",
+            "seed": 4,
+            "value": 19,
+            "sha256": "a9742eb8ee320e006666aef25ae9aeed948247f3125c9cafa7cf97b7e7467dd5",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 4,
+            "value": 59,
+            "sha256": "be4ba010e48e7d5c7c60457e7f40538407a26f4ead94b392beff67a3a5546b8a",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 4,
+            "value": 3485,
+            "sha256": "a5816419e9750e9af190df4313c102d2a5c2bf17ba60be72d42e769aa4b572d2",
+            "bytes": 5
+          },
+          {
+            "stage": "prepare",
+            "seed": 12,
+            "value": 27,
+            "sha256": "932ab0a0e4191d32c0af7b3f565b7b180dbe9869378abc5816f9add54b806e7f",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 12,
+            "value": 83,
+            "sha256": "f1769867b0abc7068f5cb7dd41574a420b3cfa4553856f459857ff8e5a525b13",
+            "bytes": 3
+          },
+          {
+            "stage": "evaluate",
+            "seed": 12,
+            "value": 6901,
+            "sha256": "01a1228856cc170b44920faa172f253d2eb173adb6072d213f484bde7a52a48a",
+            "bytes": 5
+          },
+          {
+            "stage": "prepare",
+            "seed": 20,
+            "value": 35,
+            "sha256": "90d7ec0f0acef104d8b6252794295f661a0149634868d02a1ae0c358099638f5",
+            "bytes": 3
+          },
+          {
+            "stage": "transform",
+            "seed": 20,
+            "value": 107,
+            "sha256": "bcea5d7d8b256f1bda5f90a3ede41899e94b89fccb4e4d2786073b5bfaa0002a",
+            "bytes": 4
+          },
+          {
+            "stage": "evaluate",
+            "seed": 20,
+            "value": 11469,
+            "sha256": "63dd0388dc70e047dfeab114aab5fc273fce524c1d39ec5ea9c11736c49dea4a",
+            "bytes": 6
+          }
+        ]
       }
     ],
     "files": [
@@ -425,8 +845,8 @@
       },
       {
         "path": "docs/verification/execution-eval-reuse-rematerialization.md",
-        "sha256": "a48c68ecf84d5be2d346d28dea1f78661821332694807f47a36fd41bfc378972",
-        "bytes": 6641
+        "sha256": "a3a3bda038b7a3151f58551d477ef68a53c7622e61f6c429415b581103b69293",
+        "bytes": 8890
       },
       {
         "path": "test/fixtures/execution-eval/corpus.json",
@@ -495,17 +915,22 @@
       },
       {
         "path": "scripts/execution-reuse-rematerialize.ts",
-        "sha256": "3ec1c70500149696025004f6b6ba9cbd94cd168f0995da58fc5feb1838197795",
-        "bytes": 17677
+        "sha256": "73660056772f742a7cf18a5c586f06ace07c106b514d9045046e341db5b4810a",
+        "bytes": 18126
       },
       {
         "path": "scripts/execution-workload.ts",
         "sha256": "052bfc7746f7ea7f1b9080fe159507c6a75b604453ce33e54462d27cedf75a96",
         "bytes": 4343
+      },
+      {
+        "path": "scripts/execution-reuse.ts",
+        "sha256": "c95576dd61ae83c11903da408928643b93df8c07c25e3efb7c15b5451a9cbf69",
+        "bytes": 45590
       }
     ]
   },
-  "setupSha256": "73e815201fc3bd2724c6509d42e2802443763674ae7a68b053d2961dcd6722d9",
+  "setupSha256": "dce537e27d78d1771cb8d16edea295b0d06a28bdd7b5c148eab9443137a06cef",
   "setupCosts": {
     "cpuSeconds": "unknown",
     "gpuDeviceSeconds": "unknown",
@@ -519,8 +944,8 @@
     "verificationWallMs": "unknown",
     "retentionBytes": "unknown",
     "retentionByteSeconds": "unknown",
-    "materializationCpuSeconds": 0.008465,
-    "materializationWallMs": 10.437708999999998,
+    "materializationCpuSeconds": 0.009704,
+    "materializationWallMs": 11.513834000000003,
     "materializationTransferBytes": "unknown",
     "failureCpuSeconds": "unknown",
     "failureGpuDeviceSeconds": "unknown",

@@ -2,7 +2,7 @@ import { lstatSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { types } from "node:util";
 import { canonical, COST_FIELDS, filePath, FROZEN_RECEIPT, PREREGISTRATION, publishEvaluationReceipt, verifyPreregistration, type CostRecord } from "./execution-eval.ts";
-import { sourceState } from "./execution-reuse.ts";
+import { sourceFault, sourceState, type ReuseFault } from "./execution-reuse.ts";
 import { freshValues, numericWorkload } from "./execution-workload.ts";
 import { readBytesBounded, readTextBounded, sha256 } from "../src/study.ts";
 
@@ -11,16 +11,17 @@ export const REMATERIALIZATION_PROTOCOL = "docs/verification/execution-eval-reus
 const CORPUS = "test/fixtures/execution-eval/corpus.json";
 const PARENT_RECEIPT_SHA256 = "72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20";
 const PARENT_RAW_SHA256 = "ad2c48aade8fd430727f7c16f90bb33a9283f5fc71593b2fcf8c98f5c58a2d60";
-/** The two modules whose arithmetic and case selection define every rematerialized identity. */
-export const SETUP_CODE_FILES = ["scripts/execution-reuse-rematerialize.ts", "scripts/execution-workload.ts"] as const;
+/** The modules whose arithmetic, case selection and fault injection define every rematerialized identity. */
+export const SETUP_CODE_FILES = ["scripts/execution-reuse-rematerialize.ts", "scripts/execution-workload.ts", "scripts/execution-reuse.ts"] as const;
 const DOCUMENT_BYTES = 65_536, FIXTURE_BYTES = 16_384, TOTAL_BYTES = 3 * 1024 * 1024;
 const STAGES = ["prepare", "transform", "evaluate"] as const;
 const SCENARIOS = ["local-stage-edit", "global-code-change", "no-hit", "corrupt-artifact", "pruned-artifact", "interrupted-source"] as const;
-export type RematerializationReason = "rematerialized" | "no-frozen-source" | "source-not-succeeded" | "source-not-retained" | "source-corrupt" | "source-unsupported";
+export type RematerializationReason = "rematerialized" | "no-frozen-source";
 export interface RematerializedStage { stage: typeof STAGES[number]; seed: number; value: number; sha256: string; bytes: number }
 export interface RematerializedCase {
   caseId: string; scenario: string; state: "rematerialized" | "refused"; reason: RematerializationReason;
-  sourceCodeDigest: string | null; workloadSha256: string | null; stageSha256: string | null;
+  fault: ReuseFault; label: "fixture-rematerialized" | "fixture-rematerialized+injected-fault" | "no-frozen-source";
+  sourceStatus: string | null; sourceCodeDigest: string | null; workloadSha256: string | null; stageSha256: string | null;
   hitCapableStages: typeof STAGES[number][]; stages: RematerializedStage[];
 }
 interface FileHash { path: string; sha256: string; bytes: number }
@@ -80,14 +81,14 @@ export function rematerializeReuseCase(raw: unknown): RematerializedCase {
   const currentCode = digest(context.globalCodeDigest, "current global code digest");
   text(context.method, 128, "current method");
   const state = sourceState(input.source);
-  const refused = (reason: RematerializationReason): RematerializedCase => ({caseId, scenario, state: "refused", reason, sourceCodeDigest: null, workloadSha256: null, stageSha256: null, hitCapableStages: [], stages: []});
+  const refused = (reason: RematerializationReason): RematerializedCase => ({caseId, scenario, state: "refused", reason, fault: "none", label: "no-frozen-source",
+    sourceStatus: null, sourceCodeDigest: null, workloadSha256: null, stageSha256: null, hitCapableStages: [], stages: []});
   if (state.sourceEstablishment === "no-frozen-source") return refused("no-frozen-source");
   const source = object(input.source, ["artifact", "attemptId", "executorClass", "globalCodeDigest", "method", "status", "workload"], "frozen source");
-  if (state.sourceStatus !== "succeeded") return refused("source-not-succeeded");
-  if (state.sourceIntegrity === "corrupt") return refused("source-corrupt");
-  // `pruned` and `missing` carry no usable artifact either way; the frozen bytes do not distinguish them.
-  if (state.sourceIntegrity === "missing" || state.sourceIntegrity === "pruned") return refused("source-not-retained");
-  if (state.sourceIntegrity !== "valid-opaque") return refused("source-unsupported");
+  // A source that its own scenario breaks is rebuilt healthy and then broken the same way, so the reuse path meets the
+  // fault instead of the setup quietly removing the case from the trial.
+  const fault: ReuseFault = sourceFault(state);
+  if (fault === "none" && state.sourceIntegrity !== "valid-opaque") fail("a succeeded source must carry a valid opaque artifact, a corruption or a retention fault");
   const sourceCode = digest(source.globalCodeDigest, "source global code digest");
   const sourceRaw = source.workload, seeds = object(sourceRaw, ["values", "seeds", "stages"], "frozen source workload").seeds;
   if (!Array.isArray(seeds) || !seeds.length) fail("frozen source workload must declare at least one seed");
@@ -106,8 +107,12 @@ export function rematerializeReuseCase(raw: unknown): RematerializedCase {
   // A stage can serve a hit only when the code tree and that stage's own declaration and upstream bytes are unchanged.
   const sameCode = sourceCode === currentCode;
   const sameDefinition = [true, declared.multiplier === current.multiplier && declared.offset === current.offset, declared.evaluateOperation === current.evaluateOperation];
-  const hitCapableStages = STAGES.filter((_stage, index) => sameCode && sameDefinition[index] === true && left.every((row, seed) => row[index] === right[seed]![index]));
-  return {caseId, scenario, state: "rematerialized", reason: "rematerialized", sourceCodeDigest: sourceCode,
+  const derived = STAGES.filter((_stage, index) => sameCode && sameDefinition[index] === true && left.every((row, seed) => row[index] === right[seed]![index]));
+  // A declared fault is meant to defeat every stage, so it declares none; the admission check holds the reuse path to that.
+  const hitCapableStages = fault === "none" ? derived : [];
+  return {caseId, scenario, state: "rematerialized", reason: "rematerialized", fault,
+    label: fault === "none" ? "fixture-rematerialized" : "fixture-rematerialized+injected-fault",
+    sourceStatus: state.sourceStatus, sourceCodeDigest: sourceCode,
     workloadSha256: sha256(canonical(sourceRaw)), stageSha256: sha256(canonical(stages)), hitCapableStages: [...hitCapableStages], stages};
 }
 /** Destination parents are physical directories inside the supplied fixture root. */

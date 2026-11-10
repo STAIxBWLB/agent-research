@@ -8,7 +8,7 @@ import { setSelection } from "../src/exp/selection.ts";
 import { setExecutor, spawnRunner, type ProcessRunner, type ProcessResult } from "../src/exp/executor.ts";
 import { parseMetrics } from "../src/exp/metrics.ts";
 import { retainedOperation, type RetainedRef } from "../src/exp/retention.ts";
-import { plain, readBytesBounded, readTextBounded, readLedger, sha256, withLock, writeAtomic } from "../src/study.ts";
+import { commit, plain, readBytesBounded, readTextBounded, readLedger, sha256, withLock, writeAtomic } from "../src/study.ts";
 import { readProvenance, compareLineage, attemptReuseView } from "../src/provenance.ts";
 import { canonical, COST_FIELDS, type CostRecord } from "./execution-eval.ts";
 import { numericWorkload, freshValues, prepareValue, transformValue, evaluateValue, type FreshValues, type NumericWorkload } from "./execution-workload.ts";
@@ -22,9 +22,18 @@ export interface ReuseIntegrationCheck {
   chain: { taskSha256: string; attemptId: string; attemptRecordSha256: string; artifactDigests: string[]; retainedManifestDigests: string[]; provenanceStatus: string; provenanceSha256: string; comparisonStatus: string; comparisonSha256: string; evidenceCandidate: "unreviewed-functional-fixture" };
   evaluatorFresh: true; sourceRefs: RetainedRef[]; candidateEvidenceSha256: string; costs: CostRecord; limitations: string[];
 }
-const actor = { kind: "person" as const }, BYTES = 16_384;
+const actor = { kind: "person" as const }, BYTES = 16_384, ATTEMPT_LIMIT = 1024 * 1024;
 const offlineHttp = { env: {}, json: async () => fail("network access is outside the functional fixture"), text: async () => fail("network access is outside the functional fixture") };
 function fail(cause: string, next = "inspect the bounded frozen input and producer adapter, restore valid bindings and rerun the functional integration checks"): never { throw new Error(`execution reuse integration: ${cause}; ${next}`); }
+/** The declared fault of a frozen source, applied to its rebuilt retained artifact rather than left to the setup. */
+export const FAULTS = ["none", "corrupt", "pruned", "interrupted"] as const;
+export type ReuseFault = typeof FAULTS[number];
+/** A frozen source is broken in exactly one declared way: not succeeded, corrupt bytes, or an absent payload. */
+export function sourceFault(state: Pick<ReuseIntegrationCheck, "sourceStatus" | "sourceIntegrity">): ReuseFault {
+  if (state.sourceStatus !== "succeeded") return "interrupted";
+  if (state.sourceIntegrity === "corrupt") return "corrupt";
+  return state.sourceIntegrity === "missing" || state.sourceIntegrity === "pruned" ? "pruned" : "none";
+}
 /** Exported so the rematerialization setup refuses exactly the sources this adapter refuses to reuse. */
 export function sourceState(raw: unknown): Pick<ReuseIntegrationCheck, "sourceEstablishment" | "sourcePopulation" | "sourceStatus" | "sourceIntegrity"> {
   if (raw === null || raw === undefined) return { sourceEstablishment: "no-frozen-source", sourcePopulation: "none", sourceStatus: null, sourceIntegrity: "absent" };
@@ -185,6 +194,38 @@ async function producerValues(fixture: ProducerFixture, attempt: Attempt): Promi
 }
 function attemptBytes(fixture: ProducerFixture, attempt: Attempt): Buffer { return readBytesBounded(join(fixture.dir, "runs", "investigate", "attempts", `${attempt.id}.json`), 1024 * 1024); }
 function unknownCosts(): CostRecord { return Object.fromEntries(COST_FIELDS.map(field => [field, "unknown"])) as CostRecord; }
+const STAGE_NAMES = ["prepare", "transform", "evaluate"] as const;
+/**
+ * Applies the case's own declared fault to the rebuilt retained source after the producer sealed it, so the #64 reuse
+ * path meets a corrupt, pruned or non-succeeded source rather than a case the setup quietly removed from the trial.
+ */
+async function injectDeclaredFault(fixture: ProducerFixture, source: Attempt, refs: RetainedRef[], fault: ReuseFault, status: string | null, observed: FreshValues): Promise<string> {
+  if (fault === "none") return "the frozen source declares no fault";
+  if (fault === "corrupt") {
+    const ref = refs[0]!, stage = STAGE_NAMES.find(name => name === ref.stage);
+    if (!stage) fail("the rebuilt source stage is unsupported");
+    // Mirrors payload ≠ digest: the retained payload changes after the seal, so the sealed manifest hash no longer matches.
+    const data = join(fixture.workdir, source.studyId, ".retained", "objects", ref.attemptId, ref.stage, "data");
+    chmodSync(data, 0o700);
+    writeAtomic(join(data, "value.json"), JSON.stringify(observed[stage] + 1) + "\n", BYTES, 0o400);
+    chmodSync(data, 0o500);
+    return `changed the sealed ${stage} payload so its manifest hash no longer matches`;
+  }
+  if (fault === "pruned") {
+    const request = { op: "prune" as const, studyId: source.studyId, refs };
+    const planned = await retainedOperation(source.executor, request, fixture.fake.ctx.runner!);
+    if (!planned.fingerprint) fail("the retention prune path returned no fingerprint");
+    const pruned = await retainedOperation(source.executor, {...request, fingerprint: planned.fingerprint}, fixture.fake.ctx.runner!);
+    if (pruned.pruned !== refs.length) fail("the retention prune path did not dispose every rebuilt stage");
+    return `pruned ${refs.length} rebuilt retained stages through the retention prune path`;
+  }
+  if (status !== "cancelled" && status !== "unknown") fail("an interrupted source must record the frozen cancelled or unknown status");
+  const path = join(fixture.dir, "runs", source.run, "attempts", `${source.id}.json`), record: Attempt = JSON.parse(readTextBounded(path, ATTEMPT_LIMIT));
+  record.status = status;
+  // The sealed candidate stages and every other byte stay as the producer wrote them; only the recorded status changes.
+  commit(fixture.dir, [[path, JSON.stringify(record, null, 2) + "\n", ATTEMPT_LIMIT]], [{actor, type: status === "cancelled" ? "attempt.cancelled" : "attempt.unknown", data: {id: record.id, run: record.run, stage: record.stage, status}}]);
+  return `recorded the source attempt ${status} with its sealed candidate stages unchanged`;
+}
 
 /** One functional first-seed check. No source warmup, treatment trial, measured cost or adoption authority. */
 export async function checkReuseTreatmentFixture(input: unknown, seed: number): Promise<ReuseIntegrationCheck> {
@@ -265,6 +306,7 @@ export async function checkProducerReuseUnitFixture(): Promise<ProducerReuseUnit
 export interface RematerializedAdmissionCheck {
   v: 1; kind: "rematerialized-reuse-admission-check"; authority: "functional-fixture-only";
   caseId: string; sourcePopulation: "fixture-rematerialized"; frozenCorpus: true;
+  fault: ReuseFault; injection: string;
   sourceCodeDigest: string; currentCodeDigest: string; changedKeys: string[];
   status: "succeeded"; sourceAttemptId: string; currentAttemptId: string;
   sourceRefs: RetainedRef[]; hits: { stage: string; key: string; source: RetainedRef }[];
@@ -280,6 +322,8 @@ export interface RematerializedAdmissionCheck {
  * Rebuilds one frozen case's source stage outputs as real retained artifacts and asks the #64 reuse path to admit them.
  * The source runs from `source.workload` and the source's own code digest; the current attempt then runs the case's own
  * declared code digest and stage edits, so each admitted stage is evidence that the frozen bytes, not a label, decide it.
+ * A case that declares a fault has it injected into the rebuilt retained source after its seal, so a refusal here is the
+ * reuse path's own, not a case the setup dropped.
  */
 export async function checkRematerializedReuseAdmission(input: unknown, seed: number): Promise<RematerializedAdmissionCheck> {
   if (!plain(input) || Buffer.byteLength(JSON.stringify(input)) > BYTES || !plain(input.currentContext) || !plain(input.source)) fail("a bounded input with a frozen source is required for rematerialized admission", "supply one frozen reuse case that declares a source workload");
@@ -287,14 +331,17 @@ export async function checkRematerializedReuseAdmission(input: unknown, seed: nu
   if (!plain(source.workload) || typeof source.globalCodeDigest !== "string" || !/^[a-f0-9]{64}$/.test(source.globalCodeDigest)) fail("the frozen source must declare a workload and a code digest", "restore the frozen source bytes before rematerialized admission");
   const sourceCode = source.globalCodeDigest, currentCode = currentContext.globalCodeDigest, method = currentContext.method;
   if (typeof currentCode !== "string" || !/^[a-f0-9]{64}$/.test(currentCode) || typeof method !== "string" || !method.trim() || method.length > 128) fail("the current context must declare a code digest and method");
+  const declared = sourceState(source), fault = sourceFault(declared);
   const caseId = typeof input.id === "string" ? input.id : "unnamed", sourceInput: Record<string, unknown> = {...input, workload: source.workload, currentContext: {...currentContext, globalCodeDigest: sourceCode}};
   return withProducerFixture<RematerializedAdmissionCheck>(sourceInput, seed, 2, async fixture => {
     const { dir, repo, commit, fake } = fixture;
     // The rebuilt source must run with reuse eligible: only then does the producer record the stage keys admission compares.
     const sourceAttempt = await completeProducer(fixture, await runAttempt(dir, {repo, commit, seed, run: "investigate", reuse: "eligible", detach: true}, fake.ctx));
     if (fake.executed.join(",") !== "prepare,transform,evaluate,verify" || sourceAttempt.pipeline!.completed.some(parent => parent.reuse)) fail("the rematerialized source was not produced fresh");
-    const sourceBytes = attemptBytes(fixture, sourceAttempt), sourceValues = await producerValues(fixture, sourceAttempt);
+    const sourceValues = await producerValues(fixture, sourceAttempt);
     const sourceRefs = sourceAttempt.pipeline!.completed.map(parent => ({...parent.ref})), changedKeys: string[] = [];
+    const injection = await injectDeclaredFault(fixture, sourceAttempt, sourceRefs, fault, declared.sourceStatus, sourceValues.observed);
+    const sourceBytes = attemptBytes(fixture, sourceAttempt);
     let currentCommit = commit;
     if (currentCode !== sourceCode) { changedKeys.push("code-tree"); currentCommit = await fixture.commitFile("global-code-digest.txt", currentCode + "\n"); }
     if (canonical(input.workload) !== canonical(source.workload)) {
@@ -309,12 +356,14 @@ export async function checkRematerializedReuseAdmission(input: unknown, seed: nu
     const misses = Object.entries(current.reuse?.stages ?? {}).filter(([, value]) => value.outcome !== "reused").map(([stage, value]) => ({stage, reason: value.reason}));
     const freshStages = completed.filter(parent => !parent.reuse).map(parent => parent.name);
     if (hits.length + freshStages.length !== 3) fail("the current attempt did not report one decision per candidate stage");
+    // A declared fault must be refused by the reuse path itself, so it admits no stage and records no verified hit.
+    if (fault !== "none" && (hits.length || freshStages.length !== 3 || misses.some(row => row.reason === "verified-hit"))) fail(`the reuse path admitted a stage of a ${fault} rebuilt source`);
     const currentValues = await producerValues(fixture, current), expected = freshValues(input, seed), view = attemptReuseView(current, readLedger(dir));
     if (!view || view.reusedCandidateStages !== hits.length || view.executedStages !== 1 + freshStages.length) fail("rematerialized admission counts misrepresent the current attempt");
     if (canonical(currentValues.observed) !== canonical(expected)) fail("the current attempt did not reproduce the current case's declared workload");
     for (const [index, parent] of completed.entries()) if (parent.reuse && sha256(readBytesBounded(join(current.paths.output, parent.name, "value.json"), BYTES)) !== sourceValues.payloadDigests[index]) fail("an admitted stage materialized bytes that differ from the rebuilt source");
     if (!sourceBytes.equals(attemptBytes(fixture, showAttempt(dir, sourceAttempt.id)))) fail("rematerialized admission overwrote the original source record");
-    const evidence = {caseId, sourceCodeDigest: sourceCode, currentCodeDigest: currentCode, changedKeys, sourceAttemptId: sourceAttempt.id, currentAttemptId: current.id,
+    const evidence = {caseId, fault, injection, sourceCodeDigest: sourceCode, currentCodeDigest: currentCode, changedKeys, sourceAttemptId: sourceAttempt.id, currentAttemptId: current.id,
       sourceRefs, hits, misses, freshStages, sourceObserved: sourceValues.observed, currentObserved: currentValues.observed, expected,
       sourcePayloadDigests: sourceValues.payloadDigests, currentPayloadDigests: currentValues.payloadDigests, sourceRecordSha256: sha256(sourceBytes),
       counts: {reusedStages: view.reusedCandidateStages, currentExecutedStages: view.executedStages}};

@@ -51,7 +51,7 @@ export async function validateTreatmentIntegration(rootArg: string) {
   const sealed = rematerialized.verifyReuseRematerializationSeal(rootArg);
   if (sealed.state !== "verified") fail(`reuse rematerialization seal is ${sealed.state}; run bun scripts/execution-eval.ts freeze-reuse-rematerialization from a clean checkout and commit the receipt`);
   const reuseCases = sealed.receipt.identity.cases, rebuilt = reuseCases.filter(row => row.state === "rematerialized");
-  const reuseRows = reuseCases.map(row => ({id: row.caseId, scenario: row.scenario, state: row.state, reason: row.reason, hitCapableStages: row.hitCapableStages}));
+  const reuseRows = reuseCases.map(row => ({id: row.caseId, scenario: row.scenario, state: row.state, reason: row.reason, fault: row.fault, label: row.label, hitCapableStages: row.hitCapableStages}));
   return {
     v: 1 as const, kind: "synthetic-treatment-integration-check" as const, status: "integrated-not-measured" as const,
     authority: "harness-observed" as const, registrationReceiptSha256: registration.receiptSha256, bindings: registration.bindings, code,
@@ -62,10 +62,11 @@ export async function validateTreatmentIntegration(rootArg: string) {
         sourceEstablishment: "fixture-rematerialized-numeric-manifests", sourcePopulation: "deterministic-rematerialization-setup",
         rematerialization: {path: rematerialized.REMATERIALIZATION_RECEIPT, state: sealed.state, setupSha256: sealed.receipt.setupSha256,
           amends: sealed.receipt.identity.amends, bindings: sealed.receipt.identity.bindings, setupCosts: sealed.receipt.setupCosts,
-          cases: reuseCases.length, rematerialized: rebuilt.length, refused: reuseCases.length - rebuilt.length,
+          cases: reuseCases.length, rebuilt: rebuilt.filter(row => row.fault === "none").length,
+          injectedFault: rebuilt.filter(row => row.fault !== "none").length, noSource: reuseCases.length - rebuilt.length,
           hitCapable: rebuilt.filter(row => row.hitCapableStages.length > 0).length,
           hitCapableStages: rebuilt.reduce((total, row) => total + row.hitCapableStages.length, 0), rows: reuseRows,
-          admissionEvidence: "test/execution-reuse-rematerialize.test.ts runs the current attempt with reuse eligible against each rebuilt source in a fake-runner fixture",
+          admissionEvidence: "test/execution-reuse-rematerialize.test.ts runs the current attempt with reuse eligible against each rebuilt source, and against the same sources rebuilt healthy and then broken by their own declared fault, in a fake-runner fixture",
           helpful: null, false: null, missed: null, personDecisions: 0 as const, trialExecutions: 0} },
       supervision: { status: "integrated-record-reader", cases: supervisionCases, dependency: "agent-hub#1221", producerCommit: supervision.SUPERVISION_PRODUCER_COMMIT,
         reader: "readShadowSnapshot", scorer: "scoreSupervisionRecords", classifier: "classifySupervisionFixture", fakeShadow: false,
@@ -76,6 +77,6 @@ export async function validateTreatmentIntegration(rootArg: string) {
           helpful: null, false: null, falseCases: null, falseProposals: null, wrongAction: null, falseProposalBudget: null, missed: null, correctNonTriggers: null, personDecisions: 0 as const, trialExecutions: 0, treatmentObservations: 0} },
     },
     trialExecutions: 0, treatmentObservations: 0, adoptionDecision: null,
-    limitations: ["integration checks only; T3 paired trials require separate launch authorization", "native container, model/account, human timing and measured cost benefit are unverified", "the opaque frozen cached payloads are still not producer manifests; the sealed setup rebuilds them from each case's declared workload and admission is proven in a fake-runner fixture, so no hidden warmup or fabricated hit is claimed", "v2 format coverage is not producer evaluation coverage; no evaluator or trial was run", "frozen supervision task-state payloads are unsupported T1 rule facts; no translation, missed-trigger score or correct-non-trigger claim; corpus re-expression needs an owner decision before T3"],
+    limitations: ["integration checks only; T3 paired trials require separate launch authorization", "native container, model/account, human timing and measured cost benefit are unverified", "the opaque frozen cached payloads are still not producer manifests; the sealed setup rebuilds each source from its declared workload, applies six of those sources' own declared faults to the rebuilt artifact after its seal, and proves admission or the reuse path's own refusal in a fake-runner fixture, so no hidden warmup or fabricated hit is claimed", "v2 format coverage is not producer evaluation coverage; no evaluator or trial was run", "frozen supervision task-state payloads are unsupported T1 rule facts; no translation, missed-trigger score or correct-non-trigger claim; corpus re-expression needs an owner decision before T3"],
   };
 }

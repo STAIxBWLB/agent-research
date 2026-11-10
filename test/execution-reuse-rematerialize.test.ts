@@ -22,11 +22,17 @@ const ADMITTED: Record<string, StageName[]> = {
   "reuse-global-code-change-first-variant": [],
   "reuse-global-code-change-second-variant": [],
 };
-const REFUSED: [string, string][] = [
+type Fault = "corrupt" | "pruned" | "interrupted";
+/** The six cases whose frozen source is rebuilt healthy and then broken by its own declared fault. */
+const INJECTED: Record<string, Fault> = {
+  "reuse-corrupt-artifact-first-variant": "corrupt", "reuse-corrupt-artifact-second-variant": "corrupt",
+  "reuse-pruned-artifact-first-variant": "pruned", "reuse-pruned-artifact-second-variant": "pruned",
+  "reuse-interrupted-source-first-variant": "interrupted", "reuse-interrupted-source-second-variant": "interrupted",
+};
+/** The reuse path's own refusal reason for the stage carrying the fault; the setup never records a reason for these cases. */
+const FAULT_REFUSAL: Record<Fault, string> = {corrupt: "corrupt", pruned: "pruned", interrupted: "ineligible-source"};
+const NO_SOURCE: [string, string][] = [
   ["reuse-no-hit-first-variant", "no-frozen-source"], ["reuse-no-hit-second-variant", "no-frozen-source"],
-  ["reuse-corrupt-artifact-first-variant", "source-corrupt"], ["reuse-corrupt-artifact-second-variant", "source-corrupt"],
-  ["reuse-pruned-artifact-first-variant", "source-not-retained"], ["reuse-pruned-artifact-second-variant", "source-not-retained"],
-  ["reuse-interrupted-source-first-variant", "source-not-succeeded"], ["reuse-interrupted-source-second-variant", "source-not-succeeded"],
 ];
 const casePath = (id: string) => `test/fixtures/execution-eval/${id}.input.json`;
 function fixture() {
@@ -67,19 +73,25 @@ test("the same frozen workload always rebuilds the same bytes, and the seal bind
   expect(groups.size).toBe(2);
   for (const digests of groups.values()) expect(new Set(digests).size).toBe(1);
   const rebuilt = first.identity.cases.filter(row => row.state === "rematerialized");
-  expect(rebuilt.map(row => row.caseId)).toEqual(Object.keys(ADMITTED));
+  expect(rebuilt.map(row => row.caseId).sort()).toEqual([...Object.keys(ADMITTED), ...Object.keys(INJECTED)].sort());
+  expect(rebuilt.filter(row => row.fault === "none").map(row => row.caseId).sort()).toEqual(Object.keys(ADMITTED).sort());
+  expect(rebuilt.filter(row => row.fault !== "none").map(row => [row.caseId, row.fault]).sort()).toEqual(Object.entries(INJECTED).sort());
   for (const row of rebuilt) {
     const declared = wrapper(f.root, row.caseId).input.source.workload;
     expect(row.stages).toHaveLength(3 * declared.seeds.length);
+    expect(row.sourceStatus).toBe(wrapper(f.root, row.caseId).input.source.status);
+    expect(row.label).toBe(row.fault === "none" ? "fixture-rematerialized" : "fixture-rematerialized+injected-fault");
     for (const stage of row.stages) {
       expect(stage.value).toBe(freshValues({workload: declared}, stage.seed)[stage.stage]);
       expect(stage.sha256).toBe(sha256(JSON.stringify(stage.value) + "\n"));
       expect(stage.bytes).toBe(Buffer.byteLength(JSON.stringify(stage.value) + "\n"));
     }
-    expect(row.hitCapableStages).toEqual(ADMITTED[row.caseId]!);
+    // A declared fault defeats every stage, so it declares none; the admission check holds the reuse path to that.
+    expect(row.hitCapableStages).toEqual(ADMITTED[row.caseId] ?? []);
   }
-  expect(first.identity.cases.filter(row => row.state === "refused").map(row => [row.caseId, row.reason])).toEqual(REFUSED.map(([id, reason]) => [id, reason]));
-  expect(first.identity.cases.filter(row => row.state === "refused").every(row => !row.stages.length && !row.hitCapableStages.length)).toBe(true);
+  expect(first.identity.cases.filter(row => row.state === "refused").map(row => [row.caseId, row.reason])).toEqual(NO_SOURCE);
+  expect(first.identity.cases.filter(row => row.state === "refused").every(row => row.fault === "none" && row.label === "no-frozen-source" && !row.stages.length && !row.hitCapableStages.length)).toBe(true);
+  expect(rebuilt.length).toBe(10); expect(first.identity.cases.length - rebuilt.length).toBe(2);
   expect(Object.entries(first.setupCosts).filter(([, value]) => value !== "unknown").map(([key]) => key).sort()).toEqual(["materializationCpuSeconds", "materializationWallMs"]);
 });
 
@@ -129,6 +141,25 @@ test("rebuilds the frozen sources and the reuse path admits exactly the stages e
     expect(result.sourceRecordUnchanged).toBe(true); expect(result.evaluatorFresh).toBe(true);
     expect(Object.values(result.costs).every(value => value === "unknown")).toBe(true);
     expect(result.candidateEvidenceSha256).toMatch(/^[a-f0-9]{64}$/);
+  }
+}, 180_000);
+
+test("the reuse path refuses every injected fault with its own reason and admits no stage", async () => {
+  const f = fixture();
+  for (const [id, fault] of Object.entries(INJECTED)) {
+    const input = wrapper(f.root, id).input, seed = input.workload.seeds[0] as number;
+    const result = await checkRematerializedReuseAdmission({...input, id}, seed);
+    expect(result.fault).toBe(fault);
+    expect(result.injection.length).toBeGreaterThan(0);
+    expect(result.hits).toEqual([]); expect(result.freshStages).toEqual(ALL_STAGES);
+    // The faulted stage reports the reuse path's own refusal; a downstream stage reports `missing` because the upstream
+    // miss changes its key, so no sealed entry of the source is even a candidate there.
+    expect(result.misses.map(row => row.reason)).toEqual([FAULT_REFUSAL[fault], "missing", "missing"]);
+    expect(result.counts).toEqual({reusedStages: 0, currentExecutedStages: 4});
+    expect(result.executed).toEqual([...ALL_STAGES, "verify", ...ALL_STAGES, "verify"]);
+    expect(result.currentObserved).toEqual(result.expected);
+    expect(result.sourceRecordUnchanged).toBe(true);
+    expect(Object.values(result.costs).every(value => value === "unknown")).toBe(true);
   }
 }, 180_000);
 
