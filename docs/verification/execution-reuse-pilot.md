@@ -80,6 +80,11 @@ an identical request as the same attempt; they are repeated measurements of one 
 | C global code change | three distinct trees | `protocol.json` | every stage misses |
 | D no-hit control | `85cea594` and the three C trees | both | eligible mode with nothing to reuse |
 
+Only B1 measures the edit. It is the first eligible run after the protocol change and the only attempt in the pilot
+where one stage reuses while the next two run fresh. B1 then seals fresh sources for the edited `bucket` and
+`summarize`, so B2 and B3 reuse all three stages: they are unchanged reruns of the edited protocol, which makes them a
+second case-A measurement rather than a second stage-edit measurement, and they are reported that way below.
+
 Arm order was counterbalanced: A rep 1 fresh then eligible, rep 2 eligible then fresh, rep 3 fresh then eligible; C tree
 1 fresh then eligible, tree 2 eligible then fresh, tree 3 fresh then eligible; B rep 1 eligible, rep 2 eligible then
 fresh, rep 3 fresh then eligible. The cold eligible run that populates the store (D1) ran before A rep 1 so the three A
@@ -101,11 +106,11 @@ below is the fair comparison.
 | unchanged rerun | A2 | eligible | `265f6538c3ffb454` | 85cea594 | 46665 | 0 | normalize=reused bucket=reused summarize=reused | 5386 | 7033 | checksum=231,coverage=47 | 3089 |
 | unchanged rerun | A3 | eligible | `9c0f68011975910c` | 85cea594 | 47060 | 0 | normalize=reused bucket=reused summarize=reused | 5687 | 7624 | checksum=231,coverage=47 | 3089 |
 | local stage edit | B1 | fresh | `e45919c9062ae544` | 85cea594 | 57424 | 394 | normalize=fresh bucket=fresh summarize=fresh | - | - | checksum=137,coverage=47 | 2853 |
-| local stage edit | B2 | fresh | `6a375d1a514442fd` | 85cea594 | 58321 | 400 | normalize=fresh bucket=fresh summarize=fresh | - | - | checksum=137,coverage=47 | 2855 |
-| local stage edit | B3 | fresh | `5ae54292ed099c7b` | 85cea594 | 56749 | 385 | normalize=fresh bucket=fresh summarize=fresh | - | - | checksum=137,coverage=47 | 2854 |
+| rerun after the edit | B2 | fresh | `6a375d1a514442fd` | 85cea594 | 58321 | 400 | normalize=fresh bucket=fresh summarize=fresh | - | - | checksum=137,coverage=47 | 2855 |
+| rerun after the edit | B3 | fresh | `5ae54292ed099c7b` | 85cea594 | 56749 | 385 | normalize=fresh bucket=fresh summarize=fresh | - | - | checksum=137,coverage=47 | 2854 |
 | local stage edit | B1 | eligible | `2d660d3aa4ff01d2` | 85cea594 | 59533 | 253 | normalize=reused bucket=fresh summarize=fresh | 5730 | 7731 | checksum=137,coverage=47 | 3088 |
-| local stage edit | B2 | eligible | `71933ad0139da073` | 85cea594 | 46847 | 0 | normalize=reused bucket=reused summarize=reused | 5149 | 7647 | checksum=137,coverage=47 | 3088 |
-| local stage edit | B3 | eligible | `6d5c633d3b834c96` | 85cea594 | 46045 | 0 | normalize=reused bucket=reused summarize=reused | 5346 | 7340 | checksum=137,coverage=47 | 3088 |
+| rerun after the edit | B2 | eligible | `71933ad0139da073` | 85cea594 | 46847 | 0 | normalize=reused bucket=reused summarize=reused | 5149 | 7647 | checksum=137,coverage=47 | 3088 |
+| rerun after the edit | B3 | eligible | `6d5c633d3b834c96` | 85cea594 | 46045 | 0 | normalize=reused bucket=reused summarize=reused | 5346 | 7340 | checksum=137,coverage=47 | 3088 |
 | global code change | C1 | fresh | `17b4c14ab26cf30d` | d0201073 | 57847 | 528 | normalize=fresh bucket=fresh summarize=fresh | - | - | checksum=236,coverage=47 | 2854 |
 | global code change | C1 | eligible | `d3e28f3bbe73c247` | d0201073 | 62797 | 372 | normalize=fresh bucket=fresh summarize=fresh | 5501 | 7910 | checksum=236,coverage=47 | 3089 |
 | global code change | C2 | fresh | `392d1d41fba84be8` | 103eafa1 | 57979 | 398 | normalize=fresh bucket=fresh summarize=fresh | - | - | checksum=237,coverage=47 | 2855 |
@@ -114,9 +119,10 @@ below is the fair comparison.
 | global code change | C3 | eligible | `a80033bf2d47e4e8` | e8c03d4b | 70411 | 392 | normalize=fresh bucket=fresh summarize=fresh | 5697 | 8884 | checksum=241,coverage=47 | 3089 |
 | no-hit control (store empty) | D1 | eligible | `c873be129a3aa4f3` | 85cea594 | 61928 | 388 | normalize=fresh bucket=fresh summarize=fresh | 5233 | 7899 | checksum=231,coverage=47 | 3089 |
 
-Denominators: case A 3 fresh and 3 eligible attempts, case B 3 and 3, case C 3 fresh and 3 eligible across three
-distinct trees, case D 4 eligible no-hit attempts (D1 plus the three C eligible runs) against 4 fresh attempts on the
-same trees. Three further attempts are excluded and listed under "Discarded attempts".
+Denominators: case A 3 fresh and 3 eligible attempts, case B 3 fresh and 3 eligible attempts of which one eligible run
+(B1) measures the edit and two (B2, B3) are reruns, case C 3 fresh and 3 eligible across three distinct trees, case D 4
+eligible no-hit attempts (D1 plus the three C eligible runs) against 4 fresh attempts on the same trees. Three further
+attempts are excluded and listed under "Discarded attempts".
 
 ## Thresholds
 
@@ -131,16 +137,22 @@ false reuse: 0 of 16 eligible-hit stage admissions (9 in case A, 1 in B1, 3 each
 
 ### Median total compute reduction on eligible-hit cases: not met as written
 
-| case | fresh wall median | eligible wall median | reduction | executed stage ms median (fresh to eligible) |
+| case | fresh wall median | eligible wall | reduction | executed stage ms (fresh to eligible) |
 | --- | --- | --- | --- | --- |
-| A unchanged rerun | 57930 | 46665 | 19.45 percent | 406 to 0 |
-| B local stage edit (B2, B3 steady state) | 57424 | 46847 | 18.42 percent | 394 to 0 |
+| A unchanged rerun | 57930 | 46665 (median of three) | 19.45 percent | 406 to 0 |
+| B1 stage edit, first eligible run after the edit | 57424 | 59533 (single run) | 3.67 percent slower | 394 to 253, only `normalize` reused |
+| B2 and B3 unchanged reruns of the edited protocol | 57424 | 46446 (median of two) | 19.12 percent | 394 to 0 |
 
 Measured against the attempt wall ares reports, the reduction is 19.45 percent on the unchanged-rerun case, below the
-20 percent threshold, and 18.42 percent on the stage-edit case. Measured as candidate stage execution time it is 100
-percent, because no stage ran on a full hit. CPU is not available: the reuse receipts record `cpuSeconds: "unknown"`
-and the attempt record carries no CPU telemetry, so "total compute" cannot be read as CPU from this pilot. The two
-readings disagree, so the threshold is not met on the stricter denominator and the CPU reading stays unknown.
+20 percent threshold. Case B is not a second measurement of that saving. Only B1 measures the stage edit: it reused one
+of three stages and came out 3.67 percent slower than the fresh median at the same stage size, so a partial hit at this
+scale shows no wall saving at all. B2 and B3 reuse all three stages because B1 created the edited sources, which makes
+them unchanged reruns of the edited protocol, and they land at 19.12 percent against the same fresh median.
+
+Measured as candidate stage execution time the reduction is 100 percent on a full hit and 35.8 percent on B1 (394 to
+253 ms). CPU is not available: the reuse receipts record `cpuSeconds: "unknown"` and the attempt record carries no CPU
+telemetry, so "total compute" cannot be read as CPU from this pilot. The readings disagree, so the threshold is not met
+on the stricter denominator and the CPU reading stays unknown.
 
 ### p95 overhead on no-hit cases: not met
 
@@ -170,15 +182,24 @@ That is an inference from the difference between attempt wall and stage wall, no
 ares does not record. What ares does record is the direction and the size of the difference, and it repeats on every
 rep.
 
+The exception is the partial hit. B1 reused one of three stages and skipped one launch instead of three, so it paid the
+same 5730 ms of verification to avoid 141 ms of stage execution and one launch: 59533 ms against a fresh median of
+57424 ms, 3.67 percent slower. The break-even point follows from these numbers: a hit has to skip launches, or replace
+execution, worth more than the verification pass it pays for.
+
 ## Decision: restrict
 
 Adopt is excluded: two of the three gates are unmet, and E1 forbids adopting on insufficient evidence. Defer would
-ignore a mechanism that repeated cleanly across six hit attempts and four misses, so the pilot records a
-restriction instead:
+ignore a mechanism that repeated cleanly across six hit attempts (one of them partial) and four misses, so the pilot
+records a restriction instead:
 
 - Eligible reuse stays off by default. A study whose stages execute in well under a second pays 5.2 to 5.7 s of
   verification on every attempt and saves only 0.4 to 0.5 s of stage execution, and its no-hit overhead (6.90 to 15.30
   percent) is above the 5 percent ceiling.
+- A partial hit at this stage size is a net loss, not a smaller gain: the one run that measured a stage edit (B1) reused
+  one of three stages and was 3.67 percent slower than fresh, because the verification pass is charged once per attempt
+  while only one stage's execution is avoided. Reuse is therefore not for cases where a single edited stage is expected
+  to miss while its upstream still hits.
 - Reuse may be enabled for a run whose sources are already retained and whose declared stages execute on the order of
   the verification cost or more, where a hit saves execution rather than only container launches.
 - No default, no selector and no documentation change follows from this pilot. A follow-up pilot with stage-sized work,
