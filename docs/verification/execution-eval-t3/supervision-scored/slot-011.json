@@ -1,0 +1,98 @@
+{
+  "slot": {
+    "caseIndex": 0,
+    "repetition": 5,
+    "condition": "warm",
+    "permutation": [
+      "C",
+      "B",
+      "A"
+    ],
+    "shadowIndex": 1
+  },
+  "caseId": "supervision-v2-ordinary-progress-quiet-check-sequence",
+  "inputSha256": "df552ff7d13dc0ab5346252f02d9967672df2a819f9ca755433de715733451c6",
+  "status": "succeeded",
+  "failure": null,
+  "costs": {
+    "wallMs": 191.33545000000004,
+    "cpuSeconds": 0.215942,
+    "memoryRssBytes": 45875200
+  },
+  "score": {
+    "authority": "synthetic-intent-join-conformance",
+    "rows": [
+      {
+        "id": "supervision-v2-ordinary-progress-quiet-check-sequence",
+        "task": 301,
+        "revision": "1:none",
+        "nextAction": "none",
+        "rule": null,
+        "proposals": [],
+        "falseCases": 0,
+        "falseProposals": 0,
+        "wrongAction": 0,
+        "falseProposalBudget": 0,
+        "state": "insufficient-evidence",
+        "reason": "no-evaluation-coverage",
+        "outcome": "insufficient",
+        "helpful": null,
+        "missed": null,
+        "correctNonTriggers": null
+      }
+    ],
+    "records": {
+      "observations": [],
+      "gap": [],
+      "evaluated": [
+        {
+          "rule": "deliverable_invalidated_check",
+          "task": 301,
+          "revision": "1:none"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 301,
+          "revision": "1:none"
+        }
+      ],
+      "duplicates": 0,
+      "producerCounts": [
+        {
+          "evaluations": 1,
+          "observations": 0,
+          "deduped": 0,
+          "suppressed": 0,
+          "gap": 0,
+          "evaluatedSuppressed": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      ],
+      "retentionSuppressed": false,
+      "evaluatedSuppressed": false
+    },
+    "evaluationCoverage": "explicit-evaluated-triples",
+    "proposalCountScope": "present-observations-only",
+    "coverage": {
+      "total": 1,
+      "formatCompatible": 1,
+      "scored": 0,
+      "insufficient": 1
+    },
+    "scores": {
+      "helpful": 0,
+      "falseCases": 0,
+      "falseProposals": 0,
+      "wrongAction": 0,
+      "falseProposalBudget": 0,
+      "missed": null,
+      "correctNonTriggers": null
+    },
+    "personDecisions": 0,
+    "workerTurns": 0,
+    "actionWrites": 0,
+    "notifications": 0
+  }
+}

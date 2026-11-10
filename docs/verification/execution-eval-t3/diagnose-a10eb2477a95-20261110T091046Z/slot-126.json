@@ -1,0 +1,122 @@
+{
+  "seed": 11,
+  "repetition": 1,
+  "condition": "warm",
+  "slotOrder": [
+    "H1-A1-C1-lineage-view",
+    "current-workflow"
+  ],
+  "executedSlot": 0,
+  "arm": "H1-A1-C1-lineage-view",
+  "diagnoseSetupCode": {
+    "helperSha256": "03bd141f6fbbfc5e8663efead747d16a877b5acb2d6bab83fda487f467748082",
+    "fixtureFactorySha256": "40d1d138408af8b51a770f6dd44c1493a2468dda5e3a4be15b4db9a11c0b38dc"
+  },
+  "v": 1,
+  "authority": "harness-observed",
+  "trial": "diagnose",
+  "caseId": "diagnose-corrupt-source-truncated-json",
+  "caseIndex": 10,
+  "slot": 126,
+  "codeSha256": "7ad41ec68eca8e4ea87bc1f6358a0c41cf7d1c26a618f2ab496741db0008798e",
+  "methodSha256": "84e4aabb8178299ceb84c45711c150228a328d9c6acfc2a83735514f1e8fcd62",
+  "inputSha256": "6a6e7c8befdff54405294b577ff9d66299e615de9f2ce7c09d7f6a100ed21c20",
+  "expectedSha256": "eeaae1c757eb8bf8eeecf7eee1292b3139cf917a0bae60767aa0c3d91407e6f7",
+  "status": "succeeded",
+  "cause": null,
+  "matched": true,
+  "result": {
+    "provenance": {
+      "attemptId": null,
+      "head": null,
+      "selectedHead": "55652338855c3d6fa2ed49fa97d685e7ac968200",
+      "status": "unknown",
+      "completeness": "unreadable-source"
+    },
+    "nextAction": "restore-valid-source-record"
+  },
+  "integration": {
+    "v": 1,
+    "kind": "fixture-integration-only",
+    "arm": "diagnose-lineage",
+    "authority": "harness-observed",
+    "state": "skipped",
+    "reason": "no-visible-producer",
+    "evidenceSha256": null,
+    "producer": null,
+    "lineage": null,
+    "comparison": null,
+    "humanTimeToFind": "unknown",
+    "costs": "unknown",
+    "resultAuthority": {
+      "selection": false,
+      "final": false,
+      "adoption": false
+    },
+    "physicalIsolation": "not-established",
+    "scaffolding": {
+      "v": 1,
+      "kind": "synthetic-native-scaffolding",
+      "authority": "harness-observed",
+      "source": "visible-facts-only",
+      "independentPhysicalAttestation": false,
+      "state": "skipped",
+      "reason": "no-visible-producer",
+      "helperSha256": "03bd141f6fbbfc5e8663efead747d16a877b5acb2d6bab83fda487f467748082",
+      "fixtureFactorySha256": "40d1d138408af8b51a770f6dd44c1493a2468dda5e3a4be15b4db9a11c0b38dc",
+      "setup": {
+        "wallMs": 1.6693660000000037,
+        "parentCpuSeconds": 0.00206,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "current": {
+        "wallMs": 0.36242099999999766,
+        "parentCpuSeconds": 0.000362,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "clockScope": "child-parent-process-only",
+      "components": "setup and current are subsets of scheduled process totals, never added again"
+    }
+  },
+  "processWallMs": 37.39766000000054,
+  "humanTimeToFind": "unknown",
+  "costs": {
+    "cpuSeconds": 0.045479,
+    "gpuDeviceSeconds": "unknown",
+    "providerTokens": "unknown",
+    "providerRequests": "unknown",
+    "wallElapsedMs": 37.586945000000014,
+    "storagePeakBytes": "unknown",
+    "storageByteSeconds": "unknown",
+    "transferBytes": "unknown",
+    "verificationCpuSeconds": 0.000178,
+    "verificationWallMs": 0.16299200000048586,
+    "retentionBytes": "unknown",
+    "retentionByteSeconds": "unknown",
+    "materializationCpuSeconds": 0.000005,
+    "materializationWallMs": 0.006343000000015309,
+    "materializationTransferBytes": 0,
+    "failureCpuSeconds": 0,
+    "failureGpuDeviceSeconds": "unknown",
+    "failureWallMs": 0,
+    "failureTransferBytes": "unknown",
+    "idleWallMs": "unknown",
+    "personMinutes": "unknown",
+    "monetaryEstimateUsd": "unknown"
+  },
+  "containerCpuSeconds": 0.04592300000000016,
+  "artifact": {
+    "sha256": "805b4861096c29a836468cd1752f38679969d901d3d0e14211f5059c72e4dc15",
+    "bytes": 1311
+  },
+  "logs": {
+    "stdout": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  }
+}

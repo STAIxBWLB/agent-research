@@ -1,0 +1,97 @@
+{
+  "slot": {
+    "caseIndex": 5,
+    "repetition": 5,
+    "condition": "cold",
+    "permutation": [
+      "C",
+      "B",
+      "A"
+    ],
+    "shadowIndex": 1
+  },
+  "caseId": "supervision-v2-true-trigger-changed-deliverable-after-pass",
+  "inputSha256": "bf83f4d2c25e14fec70a82d75277c7a48ddd2cd14eae207bca1465412b67fe86",
+  "status": "succeeded",
+  "failure": null,
+  "costs": {
+    "wallMs": 188.23250999999982,
+    "cpuSeconds": 0.212779,
+    "memoryRssBytes": 45875200
+  },
+  "score": {
+    "authority": "synthetic-intent-join-conformance",
+    "rows": [
+      {
+        "id": "supervision-v2-true-trigger-changed-deliverable-after-pass",
+        "task": 402,
+        "revision": "1:none",
+        "nextAction": "recheck",
+        "rule": "deliverable_invalidated_check",
+        "proposals": [],
+        "falseCases": 0,
+        "falseProposals": 0,
+        "wrongAction": 0,
+        "falseProposalBudget": 0,
+        "state": "scored",
+        "outcome": "missed",
+        "helpful": 0,
+        "missed": 1,
+        "correctNonTriggers": null
+      }
+    ],
+    "records": {
+      "observations": [],
+      "gap": [],
+      "evaluated": [
+        {
+          "rule": "deliverable_invalidated_check",
+          "task": 402,
+          "revision": "1:none"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 402,
+          "revision": "1:none"
+        }
+      ],
+      "duplicates": 0,
+      "producerCounts": [
+        {
+          "evaluations": 1,
+          "observations": 0,
+          "deduped": 0,
+          "suppressed": 0,
+          "gap": 0,
+          "evaluatedSuppressed": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      ],
+      "retentionSuppressed": false,
+      "evaluatedSuppressed": false
+    },
+    "evaluationCoverage": "explicit-evaluated-triples",
+    "proposalCountScope": "present-observations-only",
+    "coverage": {
+      "total": 1,
+      "formatCompatible": 1,
+      "scored": 1,
+      "insufficient": 0
+    },
+    "scores": {
+      "helpful": 0,
+      "falseCases": 0,
+      "falseProposals": 0,
+      "wrongAction": 0,
+      "falseProposalBudget": 0,
+      "missed": 1,
+      "correctNonTriggers": null
+    },
+    "personDecisions": 0,
+    "workerTurns": 0,
+    "actionWrites": 0,
+    "notifications": 0
+  }
+}

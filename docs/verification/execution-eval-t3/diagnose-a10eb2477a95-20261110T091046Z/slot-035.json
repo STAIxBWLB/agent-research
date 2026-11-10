@@ -1,0 +1,138 @@
+{
+  "seed": 19,
+  "repetition": 2,
+  "condition": "warm",
+  "slotOrder": [
+    "current-workflow",
+    "H1-A1-C1-lineage-view"
+  ],
+  "executedSlot": 1,
+  "arm": "H1-A1-C1-lineage-view",
+  "diagnoseSetupCode": {
+    "helperSha256": "03bd141f6fbbfc5e8663efead747d16a877b5acb2d6bab83fda487f467748082",
+    "fixtureFactorySha256": "40d1d138408af8b51a770f6dd44c1493a2468dda5e3a4be15b4db9a11c0b38dc"
+  },
+  "v": 1,
+  "authority": "harness-observed",
+  "trial": "diagnose",
+  "caseId": "diagnose-missing-artifact-lost-file",
+  "caseIndex": 2,
+  "slot": 35,
+  "codeSha256": "7ad41ec68eca8e4ea87bc1f6358a0c41cf7d1c26a618f2ab496741db0008798e",
+  "methodSha256": "84e4aabb8178299ceb84c45711c150228a328d9c6acfc2a83735514f1e8fcd62",
+  "inputSha256": "819b7d59f0dcd20e244fd12984931621174d0eb15e06c06104b73c635ab492c9",
+  "expectedSha256": "a3e54f86e687226ab5ca2fc6da6e2b3eac37093b2beae5634862259819c1552d",
+  "status": "succeeded",
+  "cause": null,
+  "matched": true,
+  "result": {
+    "provenance": {
+      "attemptId": "7e961dc8bd206223",
+      "head": "22d0a78487852998fbe605b4907e7452f55edd96",
+      "selectedHead": "22d0a78487852998fbe605b4907e7452f55edd96",
+      "status": "succeeded",
+      "completeness": "artifact-missing"
+    },
+    "nextAction": "restore-or-reexecute-artifact"
+  },
+  "integration": {
+    "v": 1,
+    "kind": "fixture-integration-only",
+    "arm": "diagnose-lineage",
+    "authority": "harness-observed",
+    "state": "matched",
+    "reason": "matched-producer-metadata",
+    "evidenceSha256": "b3ae037abf0149ece5af7ac8355b77b58b054ce2ff0cbfa6c67ea86ec36ebef4",
+    "producer": {
+      "tool": "ares",
+      "kind": "attempt",
+      "id": "7e961dc8bd206223",
+      "projectKeySha256": "6f32739b8c199db50c8a0d216dc39572711c4a333214d117082a31ee2f8d89c6"
+    },
+    "lineage": {
+      "status": "ok",
+      "sourceSha256": "00d1777d98d23866ab98086a0bf88445a8f9085f28725e382504a990291d80b8",
+      "ledgerPosition": 1043,
+      "nodes": 3,
+      "edges": 2
+    },
+    "comparison": {
+      "status": "ok",
+      "sourceSha256": "00d1777d98d23866ab98086a0bf88445a8f9085f28725e382504a990291d80b8",
+      "ledgerPosition": 1043,
+      "rows": 1
+    },
+    "humanTimeToFind": "unknown",
+    "costs": "unknown",
+    "resultAuthority": {
+      "selection": false,
+      "final": false,
+      "adoption": false
+    },
+    "physicalIsolation": "not-established",
+    "scaffolding": {
+      "v": 1,
+      "kind": "synthetic-native-scaffolding",
+      "authority": "harness-observed",
+      "source": "visible-facts-only",
+      "independentPhysicalAttestation": false,
+      "state": "materialized",
+      "reason": null,
+      "helperSha256": "03bd141f6fbbfc5e8663efead747d16a877b5acb2d6bab83fda487f467748082",
+      "fixtureFactorySha256": "40d1d138408af8b51a770f6dd44c1493a2468dda5e3a4be15b4db9a11c0b38dc",
+      "setup": {
+        "wallMs": 9.024483000000004,
+        "parentCpuSeconds": 0.010495,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "current": {
+        "wallMs": 14.983649,
+        "parentCpuSeconds": 0.019089,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "clockScope": "child-parent-process-only",
+      "components": "setup and current are subsets of scheduled process totals, never added again"
+    }
+  },
+  "processWallMs": 57.527259000000186,
+  "humanTimeToFind": "unknown",
+  "costs": {
+    "cpuSeconds": 0.071769,
+    "gpuDeviceSeconds": "unknown",
+    "providerTokens": "unknown",
+    "providerRequests": "unknown",
+    "wallElapsedMs": 57.75639200000023,
+    "storagePeakBytes": "unknown",
+    "storageByteSeconds": "unknown",
+    "transferBytes": "unknown",
+    "verificationCpuSeconds": 0.000233,
+    "verificationWallMs": 0.19588100000009945,
+    "retentionBytes": "unknown",
+    "retentionByteSeconds": "unknown",
+    "materializationCpuSeconds": 0.000006,
+    "materializationWallMs": 0.0062329999998382846,
+    "materializationTransferBytes": 0,
+    "failureCpuSeconds": 0,
+    "failureGpuDeviceSeconds": "unknown",
+    "failureWallMs": 0,
+    "failureTransferBytes": "unknown",
+    "idleWallMs": "unknown",
+    "personMinutes": "unknown",
+    "monetaryEstimateUsd": "unknown"
+  },
+  "containerCpuSeconds": 0.0723720000000001,
+  "artifact": {
+    "sha256": "b1e6c1303d048fb820b83379c9e6a8fde2e6b02347cf5faddadecda6b4875a7b",
+    "bytes": 1809
+  },
+  "logs": {
+    "stdout": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  }
+}

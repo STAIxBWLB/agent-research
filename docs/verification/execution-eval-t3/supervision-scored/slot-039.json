@@ -1,0 +1,113 @@
+{
+  "slot": {
+    "caseIndex": 3,
+    "repetition": 1,
+    "condition": "warm",
+    "permutation": [
+      "A",
+      "C",
+      "B"
+    ],
+    "shadowIndex": 2
+  },
+  "caseId": "supervision-v2-ordinary-progress-truncated-quiet-revision",
+  "inputSha256": "cab754c167b8a13e4d83b5b5904ce4f791db7969f52b12444da1c5be53b347ae",
+  "status": "succeeded",
+  "failure": null,
+  "costs": {
+    "wallMs": 190.25435800000014,
+    "cpuSeconds": 0.214956,
+    "memoryRssBytes": 45875200
+  },
+  "score": {
+    "authority": "synthetic-intent-join-conformance",
+    "rows": [
+      {
+        "id": "supervision-v2-ordinary-progress-truncated-quiet-revision",
+        "task": 304,
+        "revision": "1:none",
+        "nextAction": "none",
+        "rule": null,
+        "proposals": [],
+        "falseCases": 0,
+        "falseProposals": 0,
+        "wrongAction": 0,
+        "falseProposalBudget": 0,
+        "state": "insufficient-evidence",
+        "reason": "coverage-gap",
+        "outcome": "insufficient",
+        "helpful": null,
+        "missed": null,
+        "correctNonTriggers": null
+      }
+    ],
+    "records": {
+      "observations": [],
+      "gap": [
+        {
+          "rule": "deliverable_invalidated_check",
+          "version": 1,
+          "task": 304,
+          "revision": "1:none",
+          "reason": "history-truncated"
+        },
+        {
+          "rule": "repeated_failure",
+          "version": 1,
+          "task": 304,
+          "revision": "1:none",
+          "reason": "history-truncated"
+        }
+      ],
+      "evaluated": [
+        {
+          "rule": "deliverable_invalidated_check",
+          "task": 304,
+          "revision": "1:none"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 304,
+          "revision": "1:none"
+        }
+      ],
+      "duplicates": 0,
+      "producerCounts": [
+        {
+          "evaluations": 1,
+          "observations": 0,
+          "deduped": 0,
+          "suppressed": 0,
+          "gap": 2,
+          "evaluatedSuppressed": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      ],
+      "retentionSuppressed": false,
+      "evaluatedSuppressed": false
+    },
+    "evaluationCoverage": "explicit-evaluated-triples",
+    "proposalCountScope": "present-observations-only",
+    "coverage": {
+      "total": 1,
+      "formatCompatible": 1,
+      "scored": 0,
+      "insufficient": 1
+    },
+    "scores": {
+      "helpful": 0,
+      "falseCases": 0,
+      "falseProposals": 0,
+      "wrongAction": 0,
+      "falseProposalBudget": 0,
+      "missed": null,
+      "correctNonTriggers": null
+    },
+    "personDecisions": 0,
+    "workerTurns": 0,
+    "actionWrites": 0,
+    "notifications": 0
+  }
+}

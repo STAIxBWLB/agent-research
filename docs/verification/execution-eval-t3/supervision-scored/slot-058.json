@@ -1,0 +1,122 @@
+{
+  "slot": {
+    "caseIndex": 4,
+    "repetition": 5,
+    "condition": "cold",
+    "permutation": [
+      "C",
+      "B",
+      "A"
+    ],
+    "shadowIndex": 1
+  },
+  "caseId": "supervision-v2-true-trigger-repeated-failure-same-check",
+  "inputSha256": "644fa6f1b3d01513da7dc047400909a5600abdc4b4a5a249ec771b9e0dbca087",
+  "status": "succeeded",
+  "failure": null,
+  "costs": {
+    "wallMs": 191.57016799999838,
+    "cpuSeconds": 0.216263,
+    "memoryRssBytes": 45875200
+  },
+  "score": {
+    "authority": "synthetic-intent-join-conformance",
+    "rows": [
+      {
+        "id": "supervision-v2-true-trigger-repeated-failure-same-check",
+        "task": 401,
+        "revision": "1:none",
+        "nextAction": "escalate",
+        "rule": "repeated_failure",
+        "proposals": [
+          {
+            "identity": "[\"repeated_failure\",401,\"1:none\",\"failures:check:implement\"]",
+            "rule": "repeated_failure",
+            "action": "escalate",
+            "classification": "intended-action"
+          }
+        ],
+        "falseCases": 0,
+        "falseProposals": 0,
+        "wrongAction": 0,
+        "falseProposalBudget": 0,
+        "state": "scored",
+        "outcome": "helpful",
+        "helpful": 1,
+        "missed": 0,
+        "correctNonTriggers": null
+      }
+    ],
+    "records": {
+      "observations": [
+        {
+          "rule": "repeated_failure",
+          "version": 1,
+          "task": 401,
+          "revision": "1:none",
+          "trigger": "failures:check:implement",
+          "refs": [
+            "history:1",
+            "history:2"
+          ],
+          "limits": {
+            "records": 3,
+            "truncated": false
+          },
+          "action": "escalate",
+          "reason": "repeated_failure"
+        }
+      ],
+      "gap": [],
+      "evaluated": [
+        {
+          "rule": "deliverable_invalidated_check",
+          "task": 401,
+          "revision": "1:none"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 401,
+          "revision": "1:none"
+        }
+      ],
+      "duplicates": 0,
+      "producerCounts": [
+        {
+          "evaluations": 1,
+          "observations": 1,
+          "deduped": 0,
+          "suppressed": 0,
+          "gap": 0,
+          "evaluatedSuppressed": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      ],
+      "retentionSuppressed": false,
+      "evaluatedSuppressed": false
+    },
+    "evaluationCoverage": "explicit-evaluated-triples",
+    "proposalCountScope": "present-observations-only",
+    "coverage": {
+      "total": 1,
+      "formatCompatible": 1,
+      "scored": 1,
+      "insufficient": 0
+    },
+    "scores": {
+      "helpful": 1,
+      "falseCases": 0,
+      "falseProposals": 0,
+      "wrongAction": 0,
+      "falseProposalBudget": 0,
+      "missed": 0,
+      "correctNonTriggers": null
+    },
+    "personDecisions": 0,
+    "workerTurns": 0,
+    "actionWrites": 0,
+    "notifications": 0
+  }
+}

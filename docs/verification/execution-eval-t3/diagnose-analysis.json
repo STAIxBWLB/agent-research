@@ -1,0 +1,948 @@
+{
+  "v": 1,
+  "kind": "descriptive-diagnose-T3-analysis",
+  "captureManifestSha256": "20b0818f84407c55faad226b24a653f81bbb5f975041142c5004ed48539b12af",
+  "captureCode": "a10eb2477a950a7d5728c268ff5a6dd480f31f2b",
+  "methodSha256": "84e4aabb8178299ceb84c45711c150228a328d9c6acfc2a83735514f1e8fcd62",
+  "inputSha256": "c0c7c97d0bd6d5bc588141836cb9af1b9854f40c2a974c15cdda85716274677d",
+  "expectedSha256": "30ceddce8081026f52aff1678fb0c26cdb7f627cae077ee75a87f3ed62cebf95",
+  "analysisSha256": "ed73268e2f3e4391326a16634dfd8197c303b4e737b78e69ab88ffbeb7839a6e",
+  "schedule": {
+    "cases": 12,
+    "repetitions": 3,
+    "conditions": [
+      "cold",
+      "warm"
+    ],
+    "arms": [
+      "current-workflow",
+      "H1-A1-C1-lineage-view"
+    ],
+    "observations": 144,
+    "sha256": "d7fd54bf6b0c0b550ec3bd2c329329e669970f9b5c1b62803ff3d5827d272b38"
+  },
+  "denominators": {
+    "full": 144,
+    "succeeded": 144,
+    "failed": 0,
+    "cancelled": 0,
+    "unknown": 0,
+    "excluded": 0,
+    "arms": {
+      "current-workflow": {
+        "full": 72,
+        "succeeded": 72,
+        "failed": 0,
+        "cancelled": 0,
+        "unknown": 0,
+        "excluded": 0
+      },
+      "H1-A1-C1-lineage-view": {
+        "full": 72,
+        "succeeded": 72,
+        "failed": 0,
+        "cancelled": 0,
+        "unknown": 0,
+        "excluded": 0
+      }
+    }
+  },
+  "definitions": {
+    "incident": "one distinct frozen labeled case id; twelve incidents",
+    "observation": "one scheduled case/arm/seed/cold-or-warm unit; six per incident per arm",
+    "incidentAccuracy": "joint provenance and next-action agreement counted once per incident only when every observation of that incident agrees",
+    "componentAccuracy": "sealed expected provenance object and next-action token compared separately per observation",
+    "mustNot": "no separate automated check exists; the sealed projection covers provenance and nextAction only",
+    "humanTimeToFind": "literal unknown in every slot; no timing measurement was taken",
+    "CPU": "scheduled parent process CPU plus direct child resourceUsage CPU; cgroup CPU and nested phase CPU are separate and never added",
+    "p95": "nearest rank ceil(.95*n)"
+  },
+  "components": {
+    "current-workflow": {
+      "observations": 72,
+      "provenanceMatches": 72,
+      "nextActionMatches": 72,
+      "jointMatches": 72,
+      "mismatches": [],
+      "incidents": 12,
+      "incidentsJointMatched": 12,
+      "repeatedObservationsPerIncident": 6
+    },
+    "H1-A1-C1-lineage-view": {
+      "observations": 72,
+      "provenanceMatches": 72,
+      "nextActionMatches": 72,
+      "jointMatches": 72,
+      "mismatches": [],
+      "incidents": 12,
+      "incidentsJointMatched": 12,
+      "repeatedObservationsPerIncident": 6
+    }
+  },
+  "byCondition": {
+    "cold": {
+      "current-workflow": {
+        "observations": 36,
+        "provenanceMatches": 36,
+        "nextActionMatches": 36,
+        "jointMatches": 36,
+        "mismatches": [],
+        "incidents": 12,
+        "incidentsJointMatched": 12,
+        "repeatedObservationsPerIncident": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 36,
+        "provenanceMatches": 36,
+        "nextActionMatches": 36,
+        "jointMatches": 36,
+        "mismatches": [],
+        "incidents": 12,
+        "incidentsJointMatched": 12,
+        "repeatedObservationsPerIncident": 3
+      }
+    },
+    "warm": {
+      "current-workflow": {
+        "observations": 36,
+        "provenanceMatches": 36,
+        "nextActionMatches": 36,
+        "jointMatches": 36,
+        "mismatches": [],
+        "incidents": 12,
+        "incidentsJointMatched": 12,
+        "repeatedObservationsPerIncident": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 36,
+        "provenanceMatches": 36,
+        "nextActionMatches": 36,
+        "jointMatches": 36,
+        "mismatches": [],
+        "incidents": 12,
+        "incidentsJointMatched": 12,
+        "repeatedObservationsPerIncident": 3
+      }
+    }
+  },
+  "scaffolding": {
+    "materialized": 96,
+    "skipped": 48,
+    "skipReason": [
+      "no-visible-producer"
+    ],
+    "skippedIncidents": [
+      "diagnose-corrupt-source-truncated-json",
+      "diagnose-corrupt-source-unsupported-version",
+      "diagnose-privacy-gap-partial-summary",
+      "diagnose-privacy-gap-withheld-source"
+    ],
+    "helperSha256": [
+      "03bd141f6fbbfc5e8663efead747d16a877b5acb2d6bab83fda487f467748082"
+    ],
+    "fixtureFactorySha256": [
+      "40d1d138408af8b51a770f6dd44c1493a2468dda5e3a4be15b4db9a11c0b38dc"
+    ],
+    "independentPhysicalAttestation": [
+      false
+    ]
+  },
+  "phases": {
+    "cold": {
+      "current-workflow": {
+        "observations": 36,
+        "setup": {
+          "medianWallMs": 8.871977000000005,
+          "medianParentCpuSeconds": 0.010513,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "current": {
+          "medianWallMs": 0.10548250000000081,
+          "medianParentCpuSeconds": 0.000106,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "childProcessWall": {
+          "medianMs": 43.00703450000026,
+          "nearestRankP95Ms": 45.39656500000001
+        },
+        "slotCpuSeconds": {
+          "median": 0.052566
+        },
+        "containerCpuSeconds": {
+          "median": 0.0529320000000002,
+          "scope": "admitted-container-cgroup budget counter, never added to process CPU"
+        },
+        "clockScope": "setup and current are nested subsets of the scheduled child process total, never added to it"
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 36,
+        "setup": {
+          "medianWallMs": 8.853273999999999,
+          "medianParentCpuSeconds": 0.0105545,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "current": {
+          "medianWallMs": 15.0095645,
+          "medianParentCpuSeconds": 0.019332500000000002,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "childProcessWall": {
+          "medianMs": 58.194581000000085,
+          "nearestRankP95Ms": 64.581412
+        },
+        "slotCpuSeconds": {
+          "median": 0.07282150000000001
+        },
+        "containerCpuSeconds": {
+          "median": 0.07332450000000024,
+          "scope": "admitted-container-cgroup budget counter, never added to process CPU"
+        },
+        "clockScope": "setup and current are nested subsets of the scheduled child process total, never added to it"
+      }
+    },
+    "warm": {
+      "current-workflow": {
+        "observations": 36,
+        "setup": {
+          "medianWallMs": 8.989417,
+          "medianParentCpuSeconds": 0.0106275,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "current": {
+          "medianWallMs": 0.1081924999999977,
+          "medianParentCpuSeconds": 0.0001095,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "childProcessWall": {
+          "medianMs": 42.986360500000046,
+          "nearestRankP95Ms": 45.7276539999998
+        },
+        "slotCpuSeconds": {
+          "median": 0.052854
+        },
+        "containerCpuSeconds": {
+          "median": 0.05323750000000016,
+          "scope": "admitted-container-cgroup budget counter, never added to process CPU"
+        },
+        "clockScope": "setup and current are nested subsets of the scheduled child process total, never added to it"
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 36,
+        "setup": {
+          "medianWallMs": 8.9172655,
+          "medianParentCpuSeconds": 0.010627999999999999,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "current": {
+          "medianWallMs": 15.157507999999996,
+          "medianParentCpuSeconds": 0.0194345,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "childProcessWall": {
+          "medianMs": 58.457394999999906,
+          "nearestRankP95Ms": 63.971680000000106
+        },
+        "slotCpuSeconds": {
+          "median": 0.07240550000000001
+        },
+        "containerCpuSeconds": {
+          "median": 0.07301650000000004,
+          "scope": "admitted-container-cgroup budget counter, never added to process CPU"
+        },
+        "clockScope": "setup and current are nested subsets of the scheduled child process total, never added to it"
+      }
+    }
+  },
+  "costs": {
+    "cpuSeconds": 8.371294000000004,
+    "gpuDeviceSeconds": "unknown",
+    "providerTokens": "unknown",
+    "providerRequests": "unknown",
+    "wallElapsedMs": 6789.258247999996,
+    "storagePeakBytes": "unknown",
+    "storageByteSeconds": "unknown",
+    "transferBytes": "unknown",
+    "verificationCpuSeconds": 0.03285800000000001,
+    "verificationWallMs": 28.024108000002798,
+    "retentionBytes": "unknown",
+    "retentionByteSeconds": "unknown",
+    "materializationCpuSeconds": 0.003904999999999997,
+    "materializationWallMs": 3.814869000001039,
+    "materializationTransferBytes": 43416,
+    "failureCpuSeconds": 0,
+    "failureGpuDeviceSeconds": "unknown",
+    "failureWallMs": 0,
+    "failureTransferBytes": "unknown",
+    "idleWallMs": "unknown",
+    "personMinutes": "unknown",
+    "monetaryEstimateUsd": "unknown"
+  },
+  "accounting": {
+    "cpuScope": "scheduled parent process CPU plus direct child resourceUsage CPU; admission and post-run verification are outside slot totals; child descendants are not individually metered",
+    "components": "integration sourceSetup/current/total parent CPU are nested subsets of child CPU, never added to costs.cpuSeconds; separate cgroup CPU is budget-only, never added",
+    "transferBytes": 2589040,
+    "retainedBytes": 2357918,
+    "unpublishedSlots": 0,
+    "containerCpuSeconds": 8.795758000000001,
+    "containerCpuScope": "admitted-container-cgroup"
+  },
+  "admission": {
+    "parentCpuSeconds": 0.202785,
+    "wallMs": 153.80738,
+    "codeMaterializationBytes": 1694018,
+    "tmpfs": {
+      "kind": "controller-tmpfs-cap",
+      "bytes": 16777216
+    }
+  },
+  "environment": {
+    "os": "linux",
+    "osRelease": "6.8.0-147-generic",
+    "arch": "x64",
+    "bun": "1.4.2",
+    "cpuModelsSha256": "642d41f4a3fb835516c3cf5c1ff6fc6534609967f20ab9577943043dd9a76040",
+    "logicalCpus": 224,
+    "cpuLimit": 2,
+    "memoryLimitBytes": 268435456,
+    "pidsLimit": 32,
+    "containerIdentitySha256": "e7208c1de4667df886d47a130a820bb8f5fbac3b50fbb152b1e1be9c3181d214",
+    "imageDigest": "sha256:72a7d979b414619df086635b69acab42da61718bacf6bd98874d8c90b30a7e1a",
+    "imageDigestSource": "admission-controller-pinned-image-id",
+    "sequentialChildren": 1
+  },
+  "limitations": [
+    "harness-observed synthetic paired observations only; no winner, adoption, ares-sealed result authority or native Docker isolation proof",
+    "current Reuse evaluator is fresh; reused stages are not independent samples",
+    "cold resets private fixture input/output state; warm retains payload bytes; both start a new process, no host-cache or JIT coldness claim",
+    "human time-to-find, provider/GPU/person/idle and uninstrumented subprocess dimensions remain unknown",
+    "private code, workspace, child TMPDIR and output share the controller-enforced /tmp tmpfs cap; transient actual storage peak is unknown",
+    "retained/transfer accounting includes code, payloads, output transfer and receipts plus a conservative 64 KiB manifest reservation",
+    "T2a baseline receipts are immutable context, never substituted for a paired T3 control"
+  ],
+  "perIncident": [
+    {
+      "caseId": "diagnose-corrupt-source-truncated-json",
+      "scenario": "corrupt-source",
+      "condition": "cold",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "restore-valid-source-record",
+      "observedNextAction": {
+        "current-workflow": [
+          "restore-valid-source-record"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "restore-valid-source-record"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-corrupt-source-unsupported-version",
+      "scenario": "corrupt-source",
+      "condition": "cold",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "use-compatible-source-reader",
+      "observedNextAction": {
+        "current-workflow": [
+          "use-compatible-source-reader"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "use-compatible-source-reader"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-missing-artifact-lost-file",
+      "scenario": "missing-artifact",
+      "condition": "cold",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "restore-or-reexecute-artifact",
+      "observedNextAction": {
+        "current-workflow": [
+          "restore-or-reexecute-artifact"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "restore-or-reexecute-artifact"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-missing-artifact-pruned-file",
+      "scenario": "missing-artifact",
+      "condition": "cold",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "reexecute-from-frozen-inputs",
+      "observedNextAction": {
+        "current-workflow": [
+          "reexecute-from-frozen-inputs"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "reexecute-from-frozen-inputs"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-privacy-gap-partial-summary",
+      "scenario": "privacy-gap",
+      "condition": "cold",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "request-safe-provenance-summary",
+      "observedNextAction": {
+        "current-workflow": [
+          "request-safe-provenance-summary"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "request-safe-provenance-summary"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-privacy-gap-withheld-source",
+      "scenario": "privacy-gap",
+      "condition": "cold",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "request-safe-provenance-summary",
+      "observedNextAction": {
+        "current-workflow": [
+          "request-safe-provenance-summary"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "request-safe-provenance-summary"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-retry-active-child",
+      "scenario": "retry",
+      "condition": "cold",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "await-retry-result",
+      "observedNextAction": {
+        "current-workflow": [
+          "await-retry-result"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "await-retry-result"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-retry-terminal-child",
+      "scenario": "retry",
+      "condition": "cold",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "use-terminal-retry-result",
+      "observedNextAction": {
+        "current-workflow": [
+          "use-terminal-retry-result"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "use-terminal-retry-result"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-stale-head-changed-selection",
+      "scenario": "stale-head",
+      "condition": "cold",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "run-fresh-selected-head",
+      "observedNextAction": {
+        "current-workflow": [
+          "run-fresh-selected-head"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "run-fresh-selected-head"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-stale-head-old-card",
+      "scenario": "stale-head",
+      "condition": "cold",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "run-fresh-selected-head",
+      "observedNextAction": {
+        "current-workflow": [
+          "run-fresh-selected-head"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "run-fresh-selected-head"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-uncertain-delivery-ended-connection",
+      "scenario": "uncertain-delivery",
+      "condition": "cold",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "reconcile-dispatch-before-retry",
+      "observedNextAction": {
+        "current-workflow": [
+          "reconcile-dispatch-before-retry"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "reconcile-dispatch-before-retry"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-uncertain-delivery-lost-ack",
+      "scenario": "uncertain-delivery",
+      "condition": "cold",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "reconcile-dispatch-before-retry",
+      "observedNextAction": {
+        "current-workflow": [
+          "reconcile-dispatch-before-retry"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "reconcile-dispatch-before-retry"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-corrupt-source-truncated-json",
+      "scenario": "corrupt-source",
+      "condition": "warm",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "restore-valid-source-record",
+      "observedNextAction": {
+        "current-workflow": [
+          "restore-valid-source-record"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "restore-valid-source-record"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-corrupt-source-unsupported-version",
+      "scenario": "corrupt-source",
+      "condition": "warm",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "use-compatible-source-reader",
+      "observedNextAction": {
+        "current-workflow": [
+          "use-compatible-source-reader"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "use-compatible-source-reader"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-missing-artifact-lost-file",
+      "scenario": "missing-artifact",
+      "condition": "warm",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "restore-or-reexecute-artifact",
+      "observedNextAction": {
+        "current-workflow": [
+          "restore-or-reexecute-artifact"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "restore-or-reexecute-artifact"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-missing-artifact-pruned-file",
+      "scenario": "missing-artifact",
+      "condition": "warm",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "reexecute-from-frozen-inputs",
+      "observedNextAction": {
+        "current-workflow": [
+          "reexecute-from-frozen-inputs"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "reexecute-from-frozen-inputs"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-privacy-gap-partial-summary",
+      "scenario": "privacy-gap",
+      "condition": "warm",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "request-safe-provenance-summary",
+      "observedNextAction": {
+        "current-workflow": [
+          "request-safe-provenance-summary"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "request-safe-provenance-summary"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-privacy-gap-withheld-source",
+      "scenario": "privacy-gap",
+      "condition": "warm",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "request-safe-provenance-summary",
+      "observedNextAction": {
+        "current-workflow": [
+          "request-safe-provenance-summary"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "request-safe-provenance-summary"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-retry-active-child",
+      "scenario": "retry",
+      "condition": "warm",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "await-retry-result",
+      "observedNextAction": {
+        "current-workflow": [
+          "await-retry-result"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "await-retry-result"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-retry-terminal-child",
+      "scenario": "retry",
+      "condition": "warm",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "use-terminal-retry-result",
+      "observedNextAction": {
+        "current-workflow": [
+          "use-terminal-retry-result"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "use-terminal-retry-result"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-stale-head-changed-selection",
+      "scenario": "stale-head",
+      "condition": "warm",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "run-fresh-selected-head",
+      "observedNextAction": {
+        "current-workflow": [
+          "run-fresh-selected-head"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "run-fresh-selected-head"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-stale-head-old-card",
+      "scenario": "stale-head",
+      "condition": "warm",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "run-fresh-selected-head",
+      "observedNextAction": {
+        "current-workflow": [
+          "run-fresh-selected-head"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "run-fresh-selected-head"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-uncertain-delivery-ended-connection",
+      "scenario": "uncertain-delivery",
+      "condition": "warm",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "reconcile-dispatch-before-retry",
+      "observedNextAction": {
+        "current-workflow": [
+          "reconcile-dispatch-before-retry"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "reconcile-dispatch-before-retry"
+        ]
+      }
+    },
+    {
+      "caseId": "diagnose-uncertain-delivery-lost-ack",
+      "scenario": "uncertain-delivery",
+      "condition": "warm",
+      "current-workflow": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "H1-A1-C1-lineage-view": {
+        "observations": 3,
+        "provenanceMatches": 3,
+        "nextActionMatches": 3,
+        "jointMatches": 3
+      },
+      "expectedNextAction": "reconcile-dispatch-before-retry",
+      "observedNextAction": {
+        "current-workflow": [
+          "reconcile-dispatch-before-retry"
+        ],
+        "H1-A1-C1-lineage-view": [
+          "reconcile-dispatch-before-retry"
+        ]
+      }
+    }
+  ]
+}

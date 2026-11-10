@@ -52,6 +52,7 @@ function environment(imageDigest: string) {
   if (![cpuLimit, memoryLimitBytes, pidsLimit].every(value => Number.isFinite(value) && value > 0) || cpuLimit > 2 || memoryLimitBytes > 256 * 1024 * 1024 || pidsLimit > 32) fail("admitted limits exceed the preregistered 2 CPU/256 MiB/32 PID budget");
   return { os: platform(), osRelease: release(), arch: arch(), bun: Bun.version, cpuModelsSha256: sha256(canonical(cpus().map(cpu => cpu.model))), logicalCpus: cpus().length, cpuLimit, memoryLimitBytes, pidsLimit, containerIdentitySha256: sha256(hostname()), imageDigest, imageDigestSource: "admission-controller-pinned-image-id" as const, sequentialChildren: 1 as const };
 }
+export {environment as baselineEnvironment};
 function unknownCosts(): CostRecord { return Object.fromEntries(COST_FIELDS.map(key => [key, "unknown"])) as CostRecord; }
 function denominator() { return { full: 0, succeeded: 0, failed: 0, cancelled: 0, unknown: 0, excluded: 0 }; }
 export function baselineSlots(index: number, seeds: readonly number[]) {

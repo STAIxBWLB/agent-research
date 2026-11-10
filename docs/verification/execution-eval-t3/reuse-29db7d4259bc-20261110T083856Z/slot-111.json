@@ -1,0 +1,189 @@
+{
+  "seed": 4,
+  "repetition": 0,
+  "condition": "warm",
+  "slotOrder": [
+    "eligible-reuse",
+    "fresh"
+  ],
+  "executedSlot": 1,
+  "arm": "fresh",
+  "v": 1,
+  "authority": "harness-observed",
+  "trial": "reuse",
+  "caseId": "reuse-pruned-artifact-second-variant",
+  "caseIndex": 21,
+  "slot": 111,
+  "codeSha256": "94ed67e881b9fdcad4fd4473b809a94d193f54976f56f844164ede6144cb872a",
+  "methodSha256": "84e4aabb8178299ceb84c45711c150228a328d9c6acfc2a83735514f1e8fcd62",
+  "inputSha256": "59a1be599a6ad4a993856e8b1ca5bdf2384b656144d30352eac10f250e7a0e66",
+  "expectedSha256": "89bb1084ea2d2a5659de922c3d70747e70d9a77a6d28f93785cd0d84b4184818",
+  "status": "succeeded",
+  "cause": null,
+  "matched": true,
+  "result": {
+    "seed": 4,
+    "prepare": 19,
+    "transform": 59,
+    "evaluate": 3485
+  },
+  "integration": {
+    "v": 1,
+    "kind": "reuse-arm-fixture-instrumentation",
+    "authority": "functional-fixture-only",
+    "instrumentationOnly": true,
+    "status": "succeeded",
+    "reuse": "off",
+    "seed": 4,
+    "sourcePopulation": "fixture-rematerialized",
+    "fault": "pruned",
+    "injection": "pruned 3 rebuilt retained stages through the retention prune path",
+    "changedKeys": [],
+    "sourceAttemptId": "50af49708c9625a6",
+    "currentAttemptId": "b4bdf8c2418e452f",
+    "sourceRefs": [
+      {
+        "attemptId": "50af49708c9625a6",
+        "stage": "prepare",
+        "sha256": "6f5a6fb65c332a86aff1a3cf659ad0e2bed3ac7369f26d1d895ad00bf19cce8f"
+      },
+      {
+        "attemptId": "50af49708c9625a6",
+        "stage": "transform",
+        "sha256": "7b5ee415e839127ef70454a887668d2b404267a5a2d7f92578a3f19511dca70c"
+      },
+      {
+        "attemptId": "50af49708c9625a6",
+        "stage": "evaluate",
+        "sha256": "70ef71188bbdc28a63ffb69803125e03492b2de94146ad3a87fb12c76bf7cf59"
+      }
+    ],
+    "sourceObserved": {
+      "seed": 4,
+      "prepare": 19,
+      "transform": 59,
+      "evaluate": 3485
+    },
+    "currentObserved": {
+      "seed": 4,
+      "prepare": 19,
+      "transform": 59,
+      "evaluate": 3485
+    },
+    "sourcePayloadDigests": [
+      "a9742eb8ee320e006666aef25ae9aeed948247f3125c9cafa7cf97b7e7467dd5",
+      "be4ba010e48e7d5c7c60457e7f40538407a26f4ead94b392beff67a3a5546b8a",
+      "a5816419e9750e9af190df4313c102d2a5c2bf17ba60be72d42e769aa4b572d2"
+    ],
+    "currentPayloadDigests": [
+      "a9742eb8ee320e006666aef25ae9aeed948247f3125c9cafa7cf97b7e7467dd5",
+      "be4ba010e48e7d5c7c60457e7f40538407a26f4ead94b392beff67a3a5546b8a",
+      "a5816419e9750e9af190df4313c102d2a5c2bf17ba60be72d42e769aa4b572d2"
+    ],
+    "sourceRecordSha256": "6c92fb4c596337274b0bf573605657bd56bf2b177efac8bc43a29c8d59ae185e",
+    "sourceRecordUnchanged": true,
+    "sourceMetricsSha256": "65dfb030c096b96a41278821771cc068da2e7bca47649bae1e422b30a34f350b",
+    "currentMetricsSha256": "65dfb030c096b96a41278821771cc068da2e7bca47649bae1e422b30a34f350b",
+    "sourceEvaluatorId": "afdd09eda2ab1e69772f9dba1798a0d7eb83022dc0c69f88d8ed6fc0e5f2025f",
+    "currentEvaluatorId": "fdc24989c9060a139a7e2324648ae06bcddb53b5e1ff7ad8315c65ff636027ea",
+    "evaluatorFresh": true,
+    "sourceExecuted": [
+      "prepare",
+      "transform",
+      "evaluate",
+      "verify"
+    ],
+    "currentExecuted": [
+      "prepare",
+      "transform",
+      "evaluate",
+      "verify"
+    ],
+    "hits": [],
+    "misses": [],
+    "freshStages": [
+      "prepare",
+      "transform",
+      "evaluate"
+    ],
+    "counts": {
+      "sourceExecutedStages": 4,
+      "currentExecutedStages": 4,
+      "reusedStages": 0,
+      "currentIndependentSamples": 0
+    },
+    "provenanceStatus": "ok",
+    "comparisonStatus": "ok",
+    "candidateEvidenceSha256": "0177566fb1f7bbee2892ef6e97fd908790fbd064987342012834e48b1777e8ca",
+    "instrumentation": {
+      "sourceSetup": {
+        "wallMs": 953.516337,
+        "parentCpuSeconds": 0.368832,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "current": {
+        "wallMs": 731.280364,
+        "parentCpuSeconds": 0.319137,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "total": {
+        "wallMs": 1686.302336,
+        "parentCpuSeconds": 0.689541,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "wallClock": "performance.now-monotonic",
+      "cpuClock": "process.cpuUsage-parent-process",
+      "totalIncludesCleanup": true,
+      "sourceSetupScope": "shared-fixture-setup-and-optional-source-plus-fault",
+      "currentScope": "current-edits-execution-and-output-verification"
+    },
+    "limitations": [
+      "test instrumentation only; no registered treatment trial, benchmark result, native container proof or adoption decision",
+      "Docker/container transport is fake; Git/tar/Python and producer APIs are real private fixture operations",
+      "parent process CPU excludes subprocess CPU and can include concurrent work; subprocess CPU remains unknown",
+      "source setup and current execution use identical backend and fault helpers in both arms; total includes fixture cleanup"
+    ],
+    "physicalIsolation": "not-established"
+  },
+  "processWallMs": 1723.7543579999765,
+  "humanTimeToFind": "unknown",
+  "costs": {
+    "cpuSeconds": 1.9566560000000002,
+    "gpuDeviceSeconds": "unknown",
+    "providerTokens": "unknown",
+    "providerRequests": "unknown",
+    "wallElapsedMs": 1724.0037060000177,
+    "storagePeakBytes": "unknown",
+    "storageByteSeconds": "unknown",
+    "transferBytes": "unknown",
+    "verificationCpuSeconds": 0.000248,
+    "verificationWallMs": 0.2031719999795314,
+    "retentionBytes": "unknown",
+    "retentionByteSeconds": "unknown",
+    "materializationCpuSeconds": 0.000012,
+    "materializationWallMs": 0.012500999990152195,
+    "materializationTransferBytes": 0,
+    "failureCpuSeconds": 0,
+    "failureGpuDeviceSeconds": "unknown",
+    "failureWallMs": 0,
+    "failureTransferBytes": "unknown",
+    "idleWallMs": "unknown",
+    "personMinutes": "unknown",
+    "monetaryEstimateUsd": "unknown"
+  },
+  "containerCpuSeconds": 1.9577560000000176,
+  "artifact": {
+    "sha256": "b5d0ea5b212205547a7dca7743c1525a8562aaa23b8fd45f843b9e0fd1fa9f8e",
+    "bytes": 3474
+  },
+  "logs": {
+    "stdout": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  }
+}

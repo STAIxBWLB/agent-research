@@ -1,0 +1,204 @@
+{
+  "seed": 3,
+  "repetition": 0,
+  "condition": "cold",
+  "slotOrder": [
+    "fresh",
+    "eligible-reuse"
+  ],
+  "executedSlot": 1,
+  "arm": "eligible-reuse",
+  "v": 1,
+  "authority": "harness-observed",
+  "trial": "reuse",
+  "caseId": "reuse-global-code-change-first-variant",
+  "caseIndex": 14,
+  "slot": 25,
+  "codeSha256": "94ed67e881b9fdcad4fd4473b809a94d193f54976f56f844164ede6144cb872a",
+  "methodSha256": "84e4aabb8178299ceb84c45711c150228a328d9c6acfc2a83735514f1e8fcd62",
+  "inputSha256": "0b954c87a5b588e47d8ab21621fe17c07f54e7ba2850adabea7a95153aa6741b",
+  "expectedSha256": "5ee35ecc6928a5568b4683468b8d5af4f70e970ad6013d46afdf3e90171bcf16",
+  "status": "succeeded",
+  "cause": null,
+  "matched": true,
+  "result": {
+    "seed": 3,
+    "prepare": 18,
+    "transform": 37,
+    "evaluate": 1372
+  },
+  "integration": {
+    "v": 1,
+    "kind": "reuse-arm-fixture-instrumentation",
+    "authority": "functional-fixture-only",
+    "instrumentationOnly": true,
+    "status": "succeeded",
+    "reuse": "eligible",
+    "seed": 3,
+    "sourcePopulation": "fixture-rematerialized",
+    "fault": "none",
+    "injection": "the frozen source declares no fault",
+    "changedKeys": [
+      "code-tree"
+    ],
+    "sourceAttemptId": "4db88d402c1eadc4",
+    "currentAttemptId": "991d2ad487cac709",
+    "sourceRefs": [
+      {
+        "attemptId": "4db88d402c1eadc4",
+        "stage": "prepare",
+        "sha256": "6a55d1f4995bd83c7f0979c34e0ba5b951e14ad5ebe30bd09ce08fd14b1b0af1"
+      },
+      {
+        "attemptId": "4db88d402c1eadc4",
+        "stage": "transform",
+        "sha256": "cab06cb8bb976c854ada1914b51f77378780a95bc9fccf3b78c4ee1b10b0c900"
+      },
+      {
+        "attemptId": "4db88d402c1eadc4",
+        "stage": "evaluate",
+        "sha256": "39fc5cca45eef651bc83379ce836d64cd3bdc5f5239c6754e2f9851e1c756270"
+      }
+    ],
+    "sourceObserved": {
+      "seed": 3,
+      "prepare": 18,
+      "transform": 37,
+      "evaluate": 1372
+    },
+    "currentObserved": {
+      "seed": 3,
+      "prepare": 18,
+      "transform": 37,
+      "evaluate": 1372
+    },
+    "sourcePayloadDigests": [
+      "7ee29791fc17e986b97128845622b077fb45e349fdb80523fac9dba879b4ad60",
+      "b58a3da5fde2680191877ec88a1aa7d06927cc3b30cdf0d0db8c39b488891576",
+      "11179a1aa7aec480c2e68076772014f1a6ffdddf770a26acce9b4e5e787fd801"
+    ],
+    "currentPayloadDigests": [
+      "7ee29791fc17e986b97128845622b077fb45e349fdb80523fac9dba879b4ad60",
+      "b58a3da5fde2680191877ec88a1aa7d06927cc3b30cdf0d0db8c39b488891576",
+      "11179a1aa7aec480c2e68076772014f1a6ffdddf770a26acce9b4e5e787fd801"
+    ],
+    "sourceRecordSha256": "4c1ca96ba98d9d08956141bb407140ce439bc6fcb35473342bf9afddd4086c48",
+    "sourceRecordUnchanged": true,
+    "sourceMetricsSha256": "88837724bb487af15c85435f9f60a82eb0fb8461ecce92bd27a9a010a308f353",
+    "currentMetricsSha256": "88837724bb487af15c85435f9f60a82eb0fb8461ecce92bd27a9a010a308f353",
+    "sourceEvaluatorId": "70383acc415b674babc37732b80f4bcf628a73f8d9d213cbce4fa4f218be3a73",
+    "currentEvaluatorId": "694602443145e48559933821596701c27d57bb5ae81e605f9990a2cbe3fbd1de",
+    "evaluatorFresh": true,
+    "sourceExecuted": [
+      "prepare",
+      "transform",
+      "evaluate",
+      "verify"
+    ],
+    "currentExecuted": [
+      "prepare",
+      "transform",
+      "evaluate",
+      "verify"
+    ],
+    "hits": [],
+    "misses": [
+      {
+        "stage": "prepare",
+        "reason": "missing"
+      },
+      {
+        "stage": "transform",
+        "reason": "missing"
+      },
+      {
+        "stage": "evaluate",
+        "reason": "missing"
+      }
+    ],
+    "freshStages": [
+      "prepare",
+      "transform",
+      "evaluate"
+    ],
+    "counts": {
+      "sourceExecutedStages": 4,
+      "currentExecutedStages": 4,
+      "reusedStages": 0,
+      "currentIndependentSamples": 0
+    },
+    "provenanceStatus": "ok",
+    "comparisonStatus": "ok",
+    "candidateEvidenceSha256": "ef65640083f702a0175c4774a2add37da3d99f9f8f9e31839fe7d4996d4e708c",
+    "instrumentation": {
+      "sourceSetup": {
+        "wallMs": 897.544539,
+        "parentCpuSeconds": 0.366178,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "current": {
+        "wallMs": 956.113894,
+        "parentCpuSeconds": 0.427278,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "total": {
+        "wallMs": 1855.2205960000001,
+        "parentCpuSeconds": 0.795515,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "wallClock": "performance.now-monotonic",
+      "cpuClock": "process.cpuUsage-parent-process",
+      "totalIncludesCleanup": true,
+      "sourceSetupScope": "shared-fixture-setup-and-optional-source-plus-fault",
+      "currentScope": "current-edits-execution-and-output-verification"
+    },
+    "limitations": [
+      "test instrumentation only; no registered treatment trial, benchmark result, native container proof or adoption decision",
+      "Docker/container transport is fake; Git/tar/Python and producer APIs are real private fixture operations",
+      "parent process CPU excludes subprocess CPU and can include concurrent work; subprocess CPU remains unknown",
+      "source setup and current execution use identical backend and fault helpers in both arms; total includes fixture cleanup"
+    ],
+    "physicalIsolation": "not-established"
+  },
+  "processWallMs": 1892.8397120000009,
+  "humanTimeToFind": "unknown",
+  "costs": {
+    "cpuSeconds": 2.153384,
+    "gpuDeviceSeconds": "unknown",
+    "providerTokens": "unknown",
+    "providerRequests": "unknown",
+    "wallElapsedMs": 1893.246091000001,
+    "storagePeakBytes": "unknown",
+    "storageByteSeconds": "unknown",
+    "transferBytes": "unknown",
+    "verificationCpuSeconds": 0.000331,
+    "verificationWallMs": 0.28018300000258023,
+    "retentionBytes": "unknown",
+    "retentionByteSeconds": "unknown",
+    "materializationCpuSeconds": 0.00006,
+    "materializationWallMs": 0.06056199999875389,
+    "materializationTransferBytes": 1549,
+    "failureCpuSeconds": 0,
+    "failureGpuDeviceSeconds": "unknown",
+    "failureWallMs": 0,
+    "failureTransferBytes": "unknown",
+    "idleWallMs": "unknown",
+    "personMinutes": "unknown",
+    "monetaryEstimateUsd": "unknown"
+  },
+  "containerCpuSeconds": 2.155368000000003,
+  "artifact": {
+    "sha256": "571b79bf62445af14b5b11bf2e3399a0c304bd8ac1179c0ab32063490b30eaeb",
+    "bytes": 3584
+  },
+  "logs": {
+    "stdout": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  }
+}
