@@ -1,0 +1,80 @@
+{
+  "v": 2,
+  "method": "Measured reuse pilot (#64 T4): a deterministic three-stage integer pipeline plus a fresh evaluator decides whether eligible artifact reuse meets the #63 E1 thresholds on a CPU-only SSH executor. Stages are pure artifacts under a reviewed contract; the evaluator is never reused.",
+  "candidate": {
+    "stages": [
+      {
+        "name": "normalize",
+        "image": "node@sha256:ff054b356ab93ed540518ca23cfcd9840e5256dd04db5a8d8afc43f4ecc7c9f8",
+        "command": ["node", "test/fixtures/execution-reuse-pilot/stage-normalize.mjs"],
+        "seed": false,
+        "code": "snapshot",
+        "needs": [],
+        "inputs": { "workload": { "task": "workload.json" } },
+        "outputs": { "values": "values.json" },
+        "reuse": {
+          "v": 1,
+          "kind": "pure-artifact",
+          "inputs": "declared-only",
+          "externalState": "none",
+          "writableState": "fresh-output-only",
+          "modelOutputs": "forbidden",
+          "determinism": "byte-exact",
+          "toolchain": { "description": "node@sha256:ff054b356ab93ed540518ca23cfcd9840e5256dd04db5a8d8afc43f4ecc7c9f8, integer arithmetic, stable JSON, /in read-only, /out only, network none", "documentationSha256": "a1ae6cec4a8ca3c31826b1795167c5c07a90a7f26c06453d64db468273d05a98" }
+        }
+      },
+      {
+        "name": "bucket",
+        "image": "node@sha256:ff054b356ab93ed540518ca23cfcd9840e5256dd04db5a8d8afc43f4ecc7c9f8",
+        "command": ["node", "test/fixtures/execution-reuse-pilot/stage-bucket.mjs"],
+        "seed": false,
+        "code": "snapshot",
+        "needs": ["normalize"],
+        "inputs": { "values": { "stage": "normalize", "output": "values" } },
+        "outputs": { "buckets": "buckets.json" },
+        "reuse": {
+          "v": 1,
+          "kind": "pure-artifact",
+          "inputs": "declared-only",
+          "externalState": "none",
+          "writableState": "fresh-output-only",
+          "modelOutputs": "forbidden",
+          "determinism": "byte-exact",
+          "toolchain": { "description": "node@sha256:ff054b356ab93ed540518ca23cfcd9840e5256dd04db5a8d8afc43f4ecc7c9f8, integer arithmetic, stable JSON, /in read-only, /out only, network none", "documentationSha256": "a1ae6cec4a8ca3c31826b1795167c5c07a90a7f26c06453d64db468273d05a98" }
+        }
+      },
+      {
+        "name": "summarize",
+        "image": "node@sha256:ff054b356ab93ed540518ca23cfcd9840e5256dd04db5a8d8afc43f4ecc7c9f8",
+        "command": ["node", "test/fixtures/execution-reuse-pilot/stage-summarize.mjs"],
+        "seed": false,
+        "code": "snapshot",
+        "needs": ["bucket"],
+        "inputs": { "buckets": { "stage": "bucket", "output": "buckets" } },
+        "outputs": { "summary": "summary.json" },
+        "reuse": {
+          "v": 1,
+          "kind": "pure-artifact",
+          "inputs": "declared-only",
+          "externalState": "none",
+          "writableState": "fresh-output-only",
+          "modelOutputs": "forbidden",
+          "determinism": "byte-exact",
+          "toolchain": { "description": "node@sha256:ff054b356ab93ed540518ca23cfcd9840e5256dd04db5a8d8afc43f4ecc7c9f8, integer arithmetic, stable JSON, /in read-only, /out only, network none", "documentationSha256": "a1ae6cec4a8ca3c31826b1795167c5c07a90a7f26c06453d64db468273d05a98" }
+        }
+      }
+    ]
+  },
+  "evaluator": {
+    "image": "node@sha256:ff054b356ab93ed540518ca23cfcd9840e5256dd04db5a8d8afc43f4ecc7c9f8",
+    "command": ["node", "evaluator.mjs"]
+  },
+  "metrics": [
+    { "name": "checksum", "unit": "count", "direction": "max" },
+    { "name": "coverage", "unit": "count", "direction": "max" }
+  ],
+  "seeds": [7],
+  "limits": { "cpus": 1, "memoryMb": 512, "pidsLimit": 64, "wallSeconds": 180, "gpus": 0 },
+  "network": "none",
+  "budget": { "maxAttempts": 40, "maxWallHours": 2, "maxGpuHours": 0 }
+}
