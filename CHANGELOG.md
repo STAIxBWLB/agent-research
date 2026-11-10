@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Supervision treatment record integration (#63 T2b): `integration-check` now retains all 36 frozen cases and reports the agent-hub#1221 T1 record consumer pinned to `bc6f46b077dd3a255debaee8152fa17f1f13b79c`. All 12 frozen Supervision task-state payloads remain unsupported rule facts, with per-case reason/hash coverage and helpful/false/missed left unknown (`null`), not zero or fabricated success. Separate synthetic record vectors exercise the closed reader/scorer without importing or executing hub rules. Helpful/false scoring requires a present matching observation; absence is `no-evaluation-coverage`, and missed/correct-non-trigger metrics remain `null` pending source-owned evaluation coverage. Batch counters or caller-asserted evaluated lists cannot establish that coverage. No treatment trial, record receipt or effect path is launched; person decisions remain literal 0. Corpus re-expression needs an owner decision before T3.
+  - N-1 CLI: no command/default switch change; the existing check-only integration output adds Supervision coverage and producer binding.
+  - N-1 MCP: no tool, schema or annotation change.
+  - N-1 study/ledger/receipt formats: unchanged; prior receipts stay readable and are not rewritten. The T1 seal and frozen corpus/expected files and T2a baseline bytes remain unchanged; new source is bound per run. No version bump, tag or publication is performed.
+
 - Extraction cards are read as physical files: every reader, including `lit card list`, `lit card export`, `lit card import`, `paper check`'s cited-card pass and point evidence, refuses a card path that is a link or special file with the cause and the next step instead of following it out of `literature/cards`, and a dangling link no longer reads as a missing card. A regular card reads as before and an absent card is still missing.
   - N-1 CLI: no command or usage change; a linked card path refuses where an N-1 reader followed it.
   - N-1 MCP: no tool, annotation or schema change; `ares_lit_card_list` and `ares_paper_check` inherit the same refusal.
