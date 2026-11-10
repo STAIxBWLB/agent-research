@@ -36,7 +36,7 @@ function inert(raw: unknown, depth = 0, budget = {bytes: 0, nodes: 0}): unknown 
     });
   }
   if (![Object.prototype, null].includes(Object.getPrototypeOf(raw))) fail("candidate-input-json");
-  const keys = Reflect.ownKeys(raw), result: Record<string, unknown> = Object.create(null);
+  const keys = Reflect.ownKeys(raw), result: Record<string, unknown> = {};
   if (keys.length > 128) fail("candidate-input-object");
   add(2 + Math.max(0, keys.length - 1));
   for (const key of keys) {
@@ -44,7 +44,8 @@ function inert(raw: unknown, depth = 0, budget = {bytes: 0, nodes: 0}): unknown 
     const field = Object.getOwnPropertyDescriptor(raw, key);
     if (!field || !("value" in field) || !field.enumerable) fail("candidate-input-json");
     add(Buffer.byteLength(JSON.stringify(key)) + 1);
-    result[key] = inert(field.value, depth + 1, budget);
+    // A data descriptor preserves ordinary JSON objects without invoking __proto__ setters.
+    Object.defineProperty(result, key, {value: inert(field.value, depth + 1, budget), enumerable: true, writable: true, configurable: true});
   }
   return result;
 }

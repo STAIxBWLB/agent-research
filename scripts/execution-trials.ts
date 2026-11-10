@@ -102,6 +102,7 @@ export function treatmentSlots(index: number, seeds: readonly number[], trial: T
     const order = slot.executedSlot === 0 ? [...ARMS[trial]] : [...ARMS[trial]].reverse();
     return order.map((arm, executedSlot) => ({seed: slot.seed, repetition: slot.repetition, condition: slot.condition, slotOrder: [...order], executedSlot, arm}));
   });
+}
 export function treatmentDenominators(rows: readonly {arm: TreatmentArm; status: TreatmentStatus}[]) {
   const total = tally(), arms: Partial<Record<TreatmentArm, ReturnType<typeof tally>>> = {};
   for (const row of rows) {
@@ -123,6 +124,7 @@ function seals(root: string): Binding {
   return {registration: registration.receiptSha256, supervision: supervision.receiptSha256, reuseR2: reuse.receipt.receiptSha256, reuseSetup: reuse.receipt.setup.setupSha256};
 }
 interface Case {id: string; index: number; payload: Record<string, unknown>; truth: Record<string, unknown>; inputSha256: string; expectedSha256: string}
+export interface RegisteredTreatmentSlot extends TreatmentSlot {slot: number; caseId: string; caseIndex: number; inputSha256: string; expectedSha256: string}
 function loadCases(root: string, trial: TreatmentTrial, registration: ReturnType<typeof verifyPreregistration>): Case[] {
   const inputHashes = new Map(registration.inputFiles.map(file => [file.path, file.sha256])), expectedHashes = new Map(registration.expectedFiles.map(file => [file.path, file.sha256]));
   const read = (name: string, hashes: Map<string, string>, max: number) => {const text = readTextBounded(join(root, name), max, {noFollow: true}); if (sha256(text) !== hashes.get(name)) fail("sealed fixture identity changed"); const raw: unknown = JSON.parse(text); if (!plain(raw)) fail("fixture object required"); return raw;};
@@ -136,6 +138,26 @@ function loadCases(root: string, trial: TreatmentTrial, registration: ReturnType
   }
   if (cases.length !== 12) fail("each registered trial requires exactly twelve cases");
   return cases;
+}
+function planCases(cases: Case[], trial: TreatmentTrial, firstVariant: unknown) {
+  const planned = cases.flatMap(row => {
+    const seeds = trial === "reuse" && plain(row.payload.workload) ? row.payload.workload.seeds : firstVariant;
+    if (!Array.isArray(seeds)) fail("declared seed triplet is missing");
+    return treatmentSlots(row.index, seeds as number[], trial).map(slot => ({row, slot}));
+  });
+  if (planned.length !== SLOTS) fail("paired schedule must contain 144 observations");
+  return planned;
+}
+function registeredSlots(planned: ReturnType<typeof planCases>): RegisteredTreatmentSlot[] {
+  return planned.map(({row, slot}, index) => ({...slot, slot: index, caseId: row.id, caseIndex: row.index, inputSha256: row.inputSha256, expectedSha256: row.expectedSha256}));
+}
+/** Reconstruct only frozen evaluator metadata; never launches an adapter or trial. */
+export function readRegisteredTreatmentSchedule(root: string, trial: TreatmentTrial) {
+  trialName(trial);
+  const bindings = seals(root), registration = verifyPreregistration(root, join(root, FROZEN_RECEIPT));
+  const protocol = JSON.parse(readTextBounded(join(root, PREREGISTRATION), TREATMENT_RECEIPT_BYTES));
+  const cases = loadCases(root, trial, registration), slots = registeredSlots(planCases(cases, trial, protocol.design.seedSets.firstVariant));
+  return {bindings, methodSha256: registration.bindings.methodSha256, inputSha256: registration.bindings.inputSha256, expectedSha256: registration.bindings.expectedSha256, slots, sha256: sha256(canonical(slots))};
 }
 function diagnostic(raw: unknown) {if (!plain(raw)) return null; return {provenance: raw.provenance, nextAction: raw.nextAction, ...(raw.retryOf === undefined ? {} : {retryOf: raw.retryOf}), ...(raw.independentSamples === undefined ? {} : {independentSamples: raw.independentSamples})};}
 export function treatmentMatches(trial: TreatmentTrial, truth: unknown, seed: number, result: unknown): boolean {
@@ -183,12 +205,7 @@ export function runTreatmentTrials(rootArg: string, outputArg: string, imageDige
   const temporaryOutput = relative(temporaryRoot, output);
   if (!temporaryOutput || isAbsolute(temporaryOutput) || temporaryOutput === ".." || temporaryOutput.startsWith(".." + sep)) fail("output must be inside the controller-capped /tmp filesystem");
   if (lstatSync(dirname(output)).isSymbolicLink() || realpathSync(dirname(output)) !== dirname(output)) fail("output parent must be a physical directory");
-  const planned = cases.flatMap(row => {
-    const seeds = trial === "reuse" && plain(row.payload.workload) ? row.payload.workload.seeds : protocol.design.seedSets.firstVariant;
-    if (!Array.isArray(seeds)) fail("declared seed triplet is missing");
-    return treatmentSlots(row.index, seeds as number[], trial).map(slot => ({row, slot}));
-  });
-  if (planned.length !== SLOTS) fail("paired schedule must contain 144 observations");
+  const planned = planCases(cases, trial, protocol.design.seedSets.firstVariant);
   const rows: TreatmentObservation[] = planned.map(({row, slot}, index) => ({...slot, v: 1, authority: "harness-observed", trial, caseId: row.id, caseIndex: row.index, slot: index, codeSha256: code.codeSha256, methodSha256: registration.bindings.methodSha256, inputSha256: row.inputSha256, expectedSha256: row.expectedSha256, status: "unknown", cause: "not-started", matched: "unknown", result: null, integration: null, processWallMs: "unknown", humanTimeToFind: "unknown", costs: unknownCosts(), containerCpuSeconds: "unknown", artifact: null, logs: null}));
   const work = mkdtempSync(join(tmpdir(), "ares-treatment-")), privateCode = join(work, "code"), home = join(work, "home"), files: FileIdentity[] = [];
   let materialized = 0, retained = 0, transferred = 0, createdOutput = false, trialCpu = 0, totalChildCpu = 0, stopped = false, failure: TreatmentTrialManifest["failure"] = null;
@@ -198,7 +215,7 @@ export function runTreatmentTrials(rootArg: string, outputArg: string, imageDige
   let admission = {parentCpuSeconds: 0, wallMs: 0, codeMaterializationBytes: 0, tmpfs};
   let startedAt = new Date().toISOString(), trialWall = performance.now(), trialParentCpu = process.cpuUsage();
   const manifest = (): TreatmentTrialManifest => ({...TREATMENT_AUTHORITY_DEVIATION, v: 1, kind: "synthetic-paired-treatment-observations", authority: "harness-observed", trial, state: failure || rows.some(row => row.status === "unknown") ? "incomplete" : "complete", failure, startedAt, endedAt: new Date().toISOString(), bindings: beforeSeals, methodSha256: registration.bindings.methodSha256, inputSha256: registration.bindings.inputSha256, expectedSha256: registration.bindings.expectedSha256, code, environment,
-    schedule: {cases: 12, repetitions: 3, conditions: ["cold", "warm"], arms: [...ARMS[trial]], observations: 144, sha256: sha256(canonical(planned.map(({row, slot}) => ({caseId: row.id, caseIndex: row.index, ...slot}))))}, denominators: treatmentDenominators(rows), costs: totals(rows), admission,
+    schedule: {cases: 12, repetitions: 3, conditions: ["cold", "warm"], arms: [...ARMS[trial]], observations: 144, sha256: sha256(canonical(registeredSlots(planned)))}, denominators: treatmentDenominators(rows), costs: totals(rows), admission,
     accounting: {cpuScope: "scheduled parent process CPU plus direct child resourceUsage CPU; admission and post-run verification are outside slot totals; child descendants are not individually metered", components: "integration sourceSetup/current/total parent CPU are nested subsets of child CPU, never added to costs.cpuSeconds; separate cgroup CPU is budget-only, never added", transferBytes: transferred + TREATMENT_RECEIPT_BYTES, retainedBytes: retained + TREATMENT_RECEIPT_BYTES, unpublishedSlots: SLOTS - files.length, containerCpuSeconds, containerCpuScope: "admitted-container-cgroup"}, files: [...files],
     limitations: ["harness-observed synthetic paired observations only; no winner, adoption, ares-sealed result authority or native Docker isolation proof", "current Reuse evaluator is fresh; reused stages are not independent samples", "cold resets private fixture input/output state; warm retains payload bytes; both start a new process, no host-cache or JIT coldness claim", "human time-to-find, provider/GPU/person/idle and uninstrumented subprocess dimensions remain unknown", "private code, workspace, child TMPDIR and output share the controller-enforced /tmp tmpfs cap; transient actual storage peak is unknown", "retained/transfer accounting includes code, payloads, output transfer and receipts plus a conservative 64 KiB manifest reservation", "T2a baseline receipts are immutable context, never substituted for a paired T3 control"]});
   try {
@@ -334,16 +351,20 @@ export function validateTreatmentTrialManifest(input: unknown): TreatmentTrialMa
 export function readTreatmentTrialManifest(output: string, root = fileURLToPath(new URL("..", import.meta.url))): TreatmentTrialManifest {
   let raw: unknown; try {raw = JSON.parse(readTextBounded(join(output, "manifest.json"), TREATMENT_RECEIPT_BYTES, {noFollow: true}));} catch {return fail("manifest is malformed, linked, unreadable or over-bound");}
   const manifest = validateTreatmentTrialManifest(raw); verifyRunCodeCommit(root, manifest.code);
+  const registered = readRegisteredTreatmentSchedule(root, manifest.trial);
+  if (manifest.schedule.sha256 !== registered.sha256 || canonical(manifest.bindings) !== canonical(registered.bindings)
+    || manifest.methodSha256 !== registered.methodSha256 || manifest.inputSha256 !== registered.inputSha256 || manifest.expectedSha256 !== registered.expectedSha256) fail("manifest differs from the frozen registered schedule or source bindings");
   const rows: TreatmentObservation[] = [];
   for (const entry of manifest.files) {
     const file = join(output, entry.path), text = readTextBounded(file, TREATMENT_RECEIPT_BYTES, {noFollow: true});
     if (sha256(text) !== entry.sha256 || Buffer.byteLength(text) !== entry.bytes) fail("published slot identity changed");
     const row = readTreatmentObservation(file);
     if (row.trial !== manifest.trial || row.slot !== Number(entry.path.slice(5, 8)) || row.codeSha256 !== manifest.code.codeSha256 || row.methodSha256 !== manifest.methodSha256) fail("slot receipt differs from its trial/code binding");
+    const expected = registered.slots[row.slot];
+    if (!expected || Object.entries(expected).some(([key, value]) => canonical(row[key as keyof TreatmentObservation]) !== canonical(value))) fail("slot identity differs from the frozen case, seed, repetition, condition, arm or input/expected pair");
     rows.push(row);
   }
-  const counted = treatmentDenominators(rows);
-  for (const arm of ARMS[manifest.trial]) {const held = counted.arms[arm] ??= tally(), missing = 72 - held.full; if (missing < 0) fail("too many arm observations"); held.full += missing; held.unknown += missing; counted.full += missing; counted.unknown += missing;}
+  const counted = treatmentDenominators([...rows, ...registered.slots.slice(rows.length).map(slot => ({arm: slot.arm, status: "unknown" as const}))]);
   if (canonical(counted) !== canonical(manifest.denominators)) fail("manifest denominator differs from published and explicitly missing slots");
   return manifest;
 }

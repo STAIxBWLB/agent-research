@@ -23,7 +23,7 @@ function unit() {
   });
   const codeFiles = [{path: "scripts/synthetic-unit.ts", sha256: "a".repeat(64), bytes: 12}];
   const code = {commit: "c".repeat(40), tree: "d".repeat(40), codeSha256: sha256(JSON.stringify(codeFiles)), files: codeFiles};
-  const environment = {os: "linux", osRelease: "unit", arch: "x64", bun: "unit", logicalCpus: 2, cpuLimit: 2, memoryLimitBytes: 256 * 1024 * 1024, pidsLimit: 32, cpuModelsSha256: "e".repeat(64), containerIdentitySha256: "f".repeat(64), imageDigest: `sha256:${"a".repeat(64)}`, sequentialChildren: 1};
+  const environment = {os: "linux", osRelease: "unit", arch: "x64", bun: "1.4.2", logicalCpus: 2, cpuLimit: 2, memoryLimitBytes: 256 * 1024 * 1024, pidsLimit: 32, cpuModelsSha256: "e".repeat(64), containerIdentitySha256: "f".repeat(64), imageDigest: `sha256:${"a".repeat(64)}`, sequentialChildren: 1};
   const bindings: SupervisionTrialBindings = {codeCommit: code.commit, codeTree: code.tree, codeSha256: code.codeSha256, v1ReceiptSha256: "1".repeat(64), v2ReceiptSha256: "2".repeat(64), reuseR2ReceiptSha256: "3".repeat(64), inputSha256: "4".repeat(64), methodSha256: "5".repeat(64), producerCommit: SUPERVISION_PRODUCER_COMMIT, producerModuleSha256: "6".repeat(64), generatorSha256: "7".repeat(64), imageDigest: environment.imageDigest, environmentSha256: sha256(canonical(environment))};
   const envelopes = supervisionSlots().map(slot => {
     const c = cases[slot.caseIndex]!, task = c.expected.task;
@@ -156,4 +156,17 @@ test("the cgroup CPU budget counter stays separate from parent and child process
     fixture.generation.containerCpuSeconds = invalid;
     expect(() => fixture.score()).toThrow("generation clock is invalid");
   }
+});
+
+
+test("successful snapshots cannot bypass per-case wall/CPU/RSS budgets with null costs", () => {
+  const fixture = unit(); fixture.envelopes[0]!.costs = null;
+  expect(() => fixture.score()).toThrow("observed within-budget wall/CPU/RSS costs");
+});
+
+
+test("a coherently rehashed foreign Bun version cannot replace frozen runtime admission", () => {
+  const fixture = unit(); fixture.environment.bun = "1.4.3";
+  fixture.bindings.environmentSha256 = sha256(canonical(fixture.environment));
+  expect(() => fixture.score()).toThrow("frozen 1.4.2 admission");
 });

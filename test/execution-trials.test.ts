@@ -1,9 +1,11 @@
 import {expect, test} from "bun:test";
 import {symlinkSync} from "node:fs";
 import {join} from "node:path";
+import {fileURLToPath} from "node:url";
 import {baselineSlots} from "../scripts/execution-baseline.ts";
+import {bindRunCode} from "../scripts/execution-code-binding.ts";
 import {COST_FIELDS} from "../scripts/execution-eval.ts";
-import {TREATMENT_AUTHORITY_DEVIATION, TREATMENT_RECEIPT_BYTES, treatmentSlots, treatmentDenominators, treatmentMatches, treatmentChildCpuSeconds, parseTreatmentCgroupCpu, validateTreatmentObservation, readTreatmentObservation, validateTreatmentTrialManifest, serializeTreatmentBundle, type TreatmentObservation} from "../scripts/execution-trials.ts";
+import {TREATMENT_AUTHORITY_DEVIATION, TREATMENT_RECEIPT_BYTES, treatmentSlots, treatmentDenominators, treatmentMatches, treatmentChildCpuSeconds, parseTreatmentCgroupCpu, validateTreatmentObservation, readTreatmentObservation, validateTreatmentTrialManifest, readTreatmentTrialManifest, readRegisteredTreatmentSchedule, serializeTreatmentBundle, type TreatmentObservation} from "../scripts/execution-trials.ts";
 import {readBytesBounded, readTextBounded, sha256, writeAtomic} from "../src/study.ts";
 import {tempDir} from "./helpers.ts";
 
@@ -113,4 +115,37 @@ test("bundle bounds include JSON escaping, prefix and newline without starting a
   const huge: Record<string, string> = {"manifest.json": "{}"};
   for (let index = 0; index < 130; index++) huge[`slot-${String(index).padStart(3, "0")}.json`] = '"'.repeat(65000);
   expect(() => serializeTreatmentBundle(huge)).toThrow("escaped bundle");
+});
+
+test("rehashed slot identity forgeries fail against the frozen144-slot schedule without running an arm", () => {
+  const root = fileURLToPath(new URL("..", import.meta.url)), registered = readRegisteredTreatmentSchedule(root, "reuse"), code = bindRunCode(root);
+  const dir = tempDir(), raw = manifest();
+  Object.assign(raw, {bindings: registered.bindings, methodSha256: registered.methodSha256, inputSha256: registered.inputSha256, expectedSha256: registered.expectedSha256, code});
+  raw.schedule.sha256 = registered.sha256; raw.accounting.unpublishedSlots = 143;
+  const first = registered.slots[0]!, original: TreatmentObservation = {...observation(), ...first, codeSha256: code.codeSha256, methodSha256: registered.methodSha256};
+  const publish = (row: TreatmentObservation) => {
+    const text = JSON.stringify(row) + "\n";
+    writeAtomic(join(dir, "slot-000.json"), text, TREATMENT_RECEIPT_BYTES);
+    raw.files = [{path: "slot-000.json", sha256: sha256(text), bytes: Buffer.byteLength(text)}];
+    writeAtomic(join(dir, "manifest.json"), JSON.stringify(raw) + "\n", TREATMENT_RECEIPT_BYTES);
+  };
+  publish(original);
+  expect(readTreatmentTrialManifest(dir, root).denominators.full).toBe(144);
+  for (const change of [
+    (row: TreatmentObservation) => {row.seed++;},
+    (row: TreatmentObservation) => {row.caseId = registered.slots[12]!.caseId;},
+    (row: TreatmentObservation) => {row.caseIndex++;},
+    (row: TreatmentObservation) => {row.repetition = 1;},
+    (row: TreatmentObservation) => {row.condition = "warm";},
+    (row: TreatmentObservation) => {row.slotOrder.reverse(); row.arm = row.slotOrder[row.executedSlot]!;},
+    (row: TreatmentObservation) => {row.inputSha256 = "0".repeat(64);},
+    (row: TreatmentObservation) => {row.expectedSha256 = "0".repeat(64);},
+  ]) {
+    const row = structuredClone(original); change(row); publish(row);
+    // Both row and file metadata have been rehashed; only the independent frozen schedule detects it.
+    expect(() => readTreatmentTrialManifest(dir, root)).toThrow("slot identity differs from the frozen");
+  }
+  publish(original); raw.schedule.sha256 = "0".repeat(64);
+  writeAtomic(join(dir, "manifest.json"), JSON.stringify(raw), TREATMENT_RECEIPT_BYTES);
+  expect(() => readTreatmentTrialManifest(dir, root)).toThrow("frozen registered schedule");
 });

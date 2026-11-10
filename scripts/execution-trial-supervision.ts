@@ -72,6 +72,7 @@ function codeBinding(raw: unknown): RunCodeBinding {
 function environment(raw: unknown): SupervisionTrialEnvironment {
   const row = object(raw, ["os", "osRelease", "arch", "bun", "logicalCpus", "cpuLimit", "memoryLimitBytes", "pidsLimit", "cpuModelsSha256", "containerIdentitySha256", "imageDigest", "sequentialChildren"], "environment");
   for (const key of ["os", "osRelease", "arch", "bun"] as const) if (typeof row[key] !== "string" || !(row[key] as string).length || Buffer.byteLength(row[key] as string) > 256 || /[\p{Cc}\p{Cs}]/u.test(row[key] as string)) fail("environment identity is invalid");
+  if (row.bun !== "1.4.2") fail("source Bun runtime differs from the frozen 1.4.2 admission");
   if (row.os !== "linux" || !Number.isSafeInteger(row.logicalCpus) || (row.logicalCpus as number) < 1 || typeof row.cpuLimit !== "number" || !Number.isFinite(row.cpuLimit) || row.cpuLimit <= 0 || row.cpuLimit > 2 || !Number.isSafeInteger(row.memoryLimitBytes) || (row.memoryLimitBytes as number) <= 0 || (row.memoryLimitBytes as number) > 256 * 1024 * 1024 || !Number.isSafeInteger(row.pidsLimit) || (row.pidsLimit as number) <= 0 || (row.pidsLimit as number) > 32 || row.sequentialChildren !== 1 || typeof row.imageDigest !== "string" || !/^sha256:[a-f0-9]{64}$/.test(row.imageDigest)) fail("source environment exceeds the admitted CPU/memory/PID limits");
   return {...row, cpuModelsSha256: digest(row.cpuModelsSha256, "CPU model hash"), containerIdentitySha256: digest(row.containerIdentitySha256, "container hash")} as unknown as SupervisionTrialEnvironment;
 }
@@ -132,7 +133,7 @@ export function scoreSupervisionGeneratedRecords(rawManifest: unknown, files: re
       if (value.snapshot !== null || !allowed.includes(String(value.failure)) || exceeded && value.failure !== "case-budget" || value.failure === "budget-stopped" && costs !== null) fail("failed/unknown slot must retain its actual failure/cost scope without fabricated records");
       return {slot, caseId: studyCase.id, inputSha256: studyCase.inputSha256, status, failure: value.failure as SlotResult["failure"], costs, score: null};
     }
-    if (value.failure !== null || value.snapshot === null || exceeded) fail("successful slot needs its actual snapshot and may not conceal observed over-budget costs");
+    if (value.failure !== null || value.snapshot === null || costs === null || exceeded) fail("successful slot needs its actual snapshot and observed within-budget wall/CPU/RSS costs");
     const score = scoreSupervisionIntentRecords([value.snapshot], studyCase.payload.facts, [studyCase.expected]);
     return {slot, caseId: studyCase.id, inputSha256: studyCase.inputSha256, status, failure: null, costs, score};
   });

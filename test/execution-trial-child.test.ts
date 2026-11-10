@@ -1,4 +1,9 @@
 import {expect, spyOn, test} from "bun:test";
+import {spawnSync} from "node:child_process";
+import {join} from "node:path";
+import {fileURLToPath} from "node:url";
+import {readTextBounded, writeAtomic} from "../src/study.ts";
+import {tempDir} from "./helpers.ts";
 import * as reuse from "../scripts/execution-trial-reuse.ts";
 import * as lineage from "../scripts/execution-lineage.ts";
 import {executeTreatmentFixture} from "../scripts/execution-trial-child.ts";
@@ -8,6 +13,20 @@ import type {DiagnosticLineageTreatment} from "../scripts/execution-lineage.ts";
 const hash = "a".repeat(64), commit = "b".repeat(40);
 const diagnosticPayload = {request: "Identify the synthetic producer", study: {selectedHead: commit}, attempts: [{id: "synthetic-attempt", commit, status: "succeeded", seed: 3}], artifact: {producerAttemptId: "synthetic-attempt", present: true}};
 const reusePayload = {request: "Compute the synthetic pipeline", workload: {values: [1, 2], seeds: [3]}, currentContext: {method: "synthetic", globalCodeDigest: hash}, source: null};
+
+test("real child CLI accepts ordinary nested synthetic Diagnose input without a measurement run", () => {
+  const dir = tempDir(), input = join(dir, "candidate.json"), output = join(dir, "result.json");
+  writeAtomic(input, JSON.stringify(diagnosticPayload), 16_384, 0o600);
+  const script = fileURLToPath(new URL("../scripts/execution-trial-child.ts", import.meta.url));
+  const child = spawnSync(process.execPath, [script, "diagnose", "current-workflow", input, output, "3"], {
+    cwd: dir, env: {...process.env, HOME: dir, AGENTHUB_HOME: join(dir, "hub")}, encoding: "utf8", timeout: 15_000, maxBuffer: 65_536,
+  });
+  expect(child.error).toBeUndefined(); expect(child.status).toBe(0); expect(child.stderr).toBe("");
+  const result = JSON.parse(readTextBounded(output, 65_536, {noFollow: true}));
+  expect(result.result).toMatchObject({provenance: {attemptId: "synthetic-attempt", head: commit, status: "succeeded", completeness: "complete"}, nextAction: "inspect-terminal-result"});
+  expect(result.integration).toMatchObject({kind: "diagnostic-fixture-baseline", nativeProducerRead: false, humanTimeToFind: "unknown", costs: "unknown"});
+  expect(Object.keys(result).sort()).toEqual(["integration", "result"]);
+});
 function armResult(mode: "off" | "eligible"): ReuseTrialArmResult {
   const ref = {attemptId: "a".repeat(16), stage: "prepare", sha256: hash};
   const phase = (wallMs: number, parentCpuSeconds: number) => ({wallMs, parentCpuSeconds, subprocessCpuSeconds: "unknown" as const});
