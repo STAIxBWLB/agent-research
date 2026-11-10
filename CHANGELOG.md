@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Supervision corpus v2 amendment (#63 T2c-B): separate create-once freeze/verify receipt binds the approved v2 protocol/join method, inherited budgets/thresholds/denominators, all input/expected bytes and the immutable v1 parent. Integration-check keeps v1 unsupported and adds twelve format-covered v2 cases with null outcomes and zero runs. The intent join uses action/rule/task/current revision, never producer trigger strings; the 2026-11-10 ruling separates exclusive case outcomes from observed wrong/false proposal burden. Always-wrong proposals consume the false-proposal budget even when missing desired-rule coverage leaves the case insufficient. Absence scoring remains pending source-owned evaluated coverage; no evaluator, treatment, hub or model call is added.
+  - N-1 CLI: installed ares commands/usages remain unchanged; repository-only freeze-supervision-v2/verify-supervision-v2 modes are additive and v1 freeze/verify keeps its seal and bytes.
+  - N-1 MCP: tools, schemas and annotations are unchanged; no external resolver or effect path is added.
+  - N-1 study/ledger/receipt formats: native study/ledger formats and v1 preregistration/baseline records are unchanged. The separate amendment receipt is a new developer fixture namespace; no older record is migrated or overwritten. Existing exact-trigger synthetic scorer behavior is retained alongside the new intent join.
+
 ## [0.3.0] - 2026-11-10
 
 N-1 compatibility for 0.3.0 is against **0.2.1**, the latest published patch of the 0.2 minor line. The installed-package `bun scripts/n1-check.ts` check passed on the prepared 0.3.0 candidate; the existing networked `n1` CI job repeats it and remains required by `ci-ok`.
