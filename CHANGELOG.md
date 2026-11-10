@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.3.0] - 2026-11-10
+
 - Harness guidance mapper (#66): read-only decoding of the agent-hub `GuidanceReadResult` public metadata contract at `50100a8` alongside the existing ares fixture format. Keeps native variant/experiment/task/layer/section/digest identity, bounded lifecycle and evidence metadata, and explicit unavailable results. Rationale shape/bounds are checked but its text is omitted pending agent-hub task #822; synthetic PII-shaped canaries cover outputs and errors. Strict `ahub` execution-reference decoding never enables local-source fallback, skill evidence, hub resolution or live probe import (#1226 remains pending).
   - N-1 CLI: command names, usage and existing fixture operations stay unchanged; no new command is exposed.
   - N-1 MCP: tool names, schemas and annotations stay unchanged; no external resolver is added.
