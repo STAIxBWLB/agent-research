@@ -128,11 +128,11 @@ function transport(env: NodeJS.ProcessEnv) {
   return { ctx, executed, containers, finish() { const current = [...containers.values()].filter(value => value.running); if (current.length !== 1) fail("functional integration expected one active fake container"); clock.value += 1000; current[0]!.running = false; current[0]!.finishedAt = new Date(clock.value).toISOString(); } };
 }
 
-interface ProducerFixture {
+export interface ProducerFixture {
   dir: string; repo: string; workdir: string; commit: string; seed: number; fake: ReturnType<typeof transport>; commitFile: (name: string, text: string) => Promise<string>;
 }
 /** The one synthetic v2 protocol shape every fixture in this module runs; only the workload and attempt budget vary. */
-function syntheticProtocol(workload: NumericWorkload, method: string, maxAttempts: 1 | 2): Record<string, unknown> {
+export function syntheticProtocol(workload: NumericWorkload, method: string, maxAttempts: 1 | 2): Record<string, unknown> {
   const reusable = { v: 1, kind: "pure-artifact", inputs: "declared-only", externalState: "none", writableState: "fresh-output-only", modelOutputs: "forbidden", determinism: "byte-exact", toolchain: { description: "Synthetic bounded integer transform, fake container transport", documentationSha256: sha256("fixture-integer-workload-v1") } };
   const stage = { image: `synthetic@sha256:${"a".repeat(64)}`, seed: true, code: "snapshot", reuse: reusable };
   return { v: 2, method, candidate: { stages: [
@@ -141,7 +141,7 @@ function syntheticProtocol(workload: NumericWorkload, method: string, maxAttempt
     { ...stage, name: "evaluate", command: ["/fixture-workload", "evaluate", workload.evaluateOperation], needs: ["transform"], inputs: { transformed: { stage: "transform", output: "value" } }, outputs: { value: "value.json" } },
   ] }, evaluator: { image: `synthetic@sha256:${"b".repeat(64)}`, command: ["/fixture-workload", "verify"] }, metrics: [{ name: "score", unit: "integer", direction: "max" }], seeds: workload.seeds, limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts, maxWallHours: 1, maxGpuHours: 0 } };
 }
-async function withProducerFixture<T>(input: Record<string, unknown>, seed: number, maxAttempts: 1 | 2, use: (fixture: ProducerFixture) => Promise<T>): Promise<T> {
+export async function withProducerFixture<T>(input: Record<string, unknown>, seed: number, maxAttempts: 1 | 2, use: (fixture: ProducerFixture) => Promise<T>): Promise<T> {
   if (!plain(input.currentContext)) fail("current context is missing");
   const workload: NumericWorkload = numericWorkload(input, seed), context = input.currentContext;
   if (typeof context.globalCodeDigest !== "string" || !/^[a-f0-9]{64}$/.test(context.globalCodeDigest) || typeof context.method !== "string" || !context.method.trim() || context.method.length > 128) fail("frozen current context is invalid");
@@ -168,7 +168,7 @@ async function withProducerFixture<T>(input: Record<string, unknown>, seed: numb
     return await use({ dir, repo, workdir, commit, seed, fake: transport(env), commitFile });
   } finally { cleanup(root); }
 }
-async function completeProducer(fixture: ProducerFixture, initial: Attempt, beforeStop?: (attempt: Attempt) => Promise<void>): Promise<Attempt> {
+export async function completeProducer(fixture: ProducerFixture, initial: Attempt, beforeStop?: (attempt: Attempt) => Promise<void>): Promise<Attempt> {
   let attempt = initial;
   for (let step = 0; step < 8 && attempt.status === "running"; step++) {
     const running = [...fixture.fake.containers.values()].filter(value => value.running);
@@ -179,7 +179,7 @@ async function completeProducer(fixture: ProducerFixture, initial: Attempt, befo
   if (attempt.status !== "succeeded" || !attempt.pipeline) fail("real producer adapter did not complete the functional pipeline");
   return attempt;
 }
-async function producerValues(fixture: ProducerFixture, attempt: Attempt): Promise<{ observed: FreshValues; payloadDigests: string[] }> {
+export async function producerValues(fixture: ProducerFixture, attempt: Attempt): Promise<{ observed: FreshValues; payloadDigests: string[] }> {
   if (!attempt.pipeline || attempt.status !== "succeeded") fail("producer values need a completed pipeline");
   const observed: FreshValues = { seed: attempt.seed, prepare: 0, transform: 0, evaluate: 0 }, payloadDigests: string[] = [];
   for (const name of ["prepare", "transform", "evaluate"] as const) {
@@ -192,14 +192,14 @@ async function producerValues(fixture: ProducerFixture, attempt: Attempt): Promi
   if (attempt.metrics[0]?.value !== observed.evaluate) fail("fresh evaluator receipt differs from candidate value");
   return { observed, payloadDigests };
 }
-function attemptBytes(fixture: ProducerFixture, attempt: Attempt): Buffer { return readBytesBounded(join(fixture.dir, "runs", "investigate", "attempts", `${attempt.id}.json`), 1024 * 1024); }
+export function attemptBytes(fixture: ProducerFixture, attempt: Attempt): Buffer { return readBytesBounded(join(fixture.dir, "runs", "investigate", "attempts", `${attempt.id}.json`), 1024 * 1024); }
 function unknownCosts(): CostRecord { return Object.fromEntries(COST_FIELDS.map(field => [field, "unknown"])) as CostRecord; }
 const STAGE_NAMES = ["prepare", "transform", "evaluate"] as const;
 /**
  * Applies the case's own declared fault to the rebuilt retained source after the producer sealed it, so the #64 reuse
  * path meets a corrupt, pruned or non-succeeded source rather than a case the setup quietly removed from the trial.
  */
-async function injectDeclaredFault(fixture: ProducerFixture, source: Attempt, refs: RetainedRef[], fault: ReuseFault, status: string | null, observed: FreshValues): Promise<string> {
+export async function injectDeclaredFault(fixture: ProducerFixture, source: Attempt, refs: RetainedRef[], fault: ReuseFault, status: string | null, observed: FreshValues): Promise<string> {
   if (fault === "none") return "the frozen source declares no fault";
   if (fault === "corrupt") {
     const ref = refs[0]!, stage = STAGE_NAMES.find(name => name === ref.stage);

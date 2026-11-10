@@ -1,4 +1,4 @@
-import { realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import {loadSupervisionAmendmentCases} from "./execution-supervision-amendment.ts";
 import { bindRunCode } from "./execution-code-binding.ts";
@@ -48,8 +48,12 @@ export async function validateTreatmentIntegration(rootArg: string) {
   const amendmentCoverage = amended.cases.map(row => ({id: row.id, inputSha256: row.inputSha256, expectedSha256: row.expectedSha256,
     ...supervision.classifySupervisionV2Fixture(row.payload)}));
   // The Reuse amendment is verified here, never resealed: an unverified setup cannot claim the cases are hit-capable.
-  const sealed = rematerialized.verifyReuseRematerializationSeal(rootArg);
-  if (sealed.state !== "verified") fail(`reuse rematerialization seal is ${sealed.state}; run bun scripts/execution-eval.ts freeze-reuse-rematerialization from a clean checkout and commit the receipt`);
+  const r2 = await import("./execution-reuse-rematerialize-r2.ts");
+  const r2Present = lstatSync(join(rootArg, r2.REUSE_R2_RECEIPT), {throwIfNoEntry: false}) !== undefined;
+  const superseding = r2Present ? r2.verifyReuseRematerializationR2(rootArg) : null;
+  if (superseding && superseding.state !== "verified") fail(`reuse r2 seal is ${superseding.state}; restore the reviewed r2 receipt and sources or register a new amendment; never fall back to the superseded seal`);
+  const sealed = superseding?.state === "verified" ? {state: "verified" as const, receipt: superseding.receipt.setup} : rematerialized.verifyReuseRematerializationSeal(rootArg);
+  if (sealed.state !== "verified") fail(`reuse rematerialization seal is ${sealed.state}; use the reviewed r2 freeze/verify modes after export-only changes, or restore the original source and receipt`);
   const reuseCases = sealed.receipt.identity.cases, rebuilt = reuseCases.filter(row => row.state === "rematerialized");
   const reuseRows = reuseCases.map(row => ({id: row.caseId, scenario: row.scenario, state: row.state, reason: row.reason, fault: row.fault, label: row.label, hitCapableStages: row.hitCapableStages}));
   return {
@@ -60,7 +64,8 @@ export async function validateTreatmentIntegration(rootArg: string) {
       reuse: { status: "integrated-rematerialized-source", adapter: "checkReuseTreatmentFixture", admissionAdapter: "checkRematerializedReuseAdmission",
         producer: "ares-retained-stage-reuse", cases: cases.filter(row => row.trial === "reuse").length,
         sourceEstablishment: "fixture-rematerialized-numeric-manifests", sourcePopulation: "deterministic-rematerialization-setup",
-        rematerialization: {path: rematerialized.REMATERIALIZATION_RECEIPT, state: sealed.state, setupSha256: sealed.receipt.setupSha256,
+        rematerialization: {path: r2Present ? r2.REUSE_R2_RECEIPT : rematerialized.REMATERIALIZATION_RECEIPT, state: sealed.state, setupSha256: sealed.receipt.setupSha256,
+          ...(superseding?.state === "verified" ? {receiptSha256: superseding.receipt.receiptSha256, supersedes: superseding.receipt.supersedes} : {}),
           amends: sealed.receipt.identity.amends, bindings: sealed.receipt.identity.bindings, setupCosts: sealed.receipt.setupCosts,
           cases: reuseCases.length, rebuilt: rebuilt.filter(row => row.fault === "none").length,
           injectedFault: rebuilt.filter(row => row.fault !== "none").length, noSource: reuseCases.length - rebuilt.length,
