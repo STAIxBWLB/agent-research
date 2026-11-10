@@ -18,7 +18,7 @@ describe("inert public hub guidance projection", () => {
     expect(result.state).toBe("available");
     if (result.state !== "available") throw new Error("available fixture required");
     const {rationale: _rationale, ...metadata} = input.records[0]!;
-    expect(result.records).toEqual([metadata]);
+    expect(result.records as unknown).toEqual([metadata]);
     expect(result.rationaleOmitted).toBe(true);
     expect(JSON.stringify(result)).not.toContain("problemHypothesis");
     expect(JSON.stringify(result)).not.toContain("첫 줄");
