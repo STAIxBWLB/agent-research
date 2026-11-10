@@ -7,13 +7,13 @@ export interface SupervisionTruth {
   id: string; rule: SupervisionRuleId; task: number; revision: string; trigger: string;
   expected: boolean | null; coverage: "covered" | "unsupported"; reason?: string;
 }
-type Outcome = "helpful" | "false" | "missed" | "correct-non-trigger";
+type Outcome = "helpful" | "false";
 export interface SupervisionScore {
   authority: "synthetic-record-conformance";
   observations: SupervisionObservation[]; gap: SupervisionGap[]; duplicates: number;
   producerCounts: ShadowSnapshot["counts"][]; retentionSuppressed: boolean; unscoredObservations: number;
   coverage: {total: number; scored: number; insufficient: number; unsupported: number};
-  scores: null | {helpful: number; false: number; missed: number; correctNonTriggers: number};
+  scores: null | {helpful: number; false: number; missed: null; correctNonTriggers: null};
   rows: {id: string; state: "scored" | "insufficient-evidence"; reason?: string; outcome: Outcome | null}[];
   personDecisions: 0; workerTurns: 0; actionWrites: 0; notifications: 0;
 }
@@ -90,17 +90,16 @@ export function scoreSupervisionRecords(rawSnapshots: readonly unknown[], rawTru
   const gapRevisions = new Set([...gaps.values()].map(revision));
   const truncatedRevisions = new Set([...observations.values()].filter(row => row.limits.truncated).map(revision));
   const retentionSuppressed = snapshots.some(snapshot => snapshot.counts.suppressed > 0);
-  const evaluated = snapshots.some(snapshot => snapshot.counts.evaluations > 0);
-  const scores = {helpful: 0, false: 0, missed: 0, correctNonTriggers: 0};
+  const scores = {helpful: 0, false: 0, missed: null, correctNonTriggers: null};
   let scored = 0, unsupported = 0;
   const rows: SupervisionScore["rows"] = truth.map(row => {
     const reason = row.coverage === "unsupported" ? "unsupported-case" : row.expected === null ? "truth-unavailable"
-      : !evaluated ? "no-evaluation" : gapRevisions.has(revision(row)) ? "coverage-gap" : truncatedRevisions.has(revision(row)) ? "history-truncated" : retentionSuppressed ? "retention-suppressed" : undefined;
+      : gapRevisions.has(revision(row)) ? "coverage-gap" : truncatedRevisions.has(revision(row)) ? "history-truncated" : retentionSuppressed ? "retention-suppressed" : !observations.has(key(row)) ? "no-evaluation-coverage" : undefined;
     if (row.coverage === "unsupported") unsupported++;
     if (reason) return {id: row.id, state: "insufficient-evidence", reason, outcome: null};
-    const observed = observations.has(key(row));
-    const outcome: Outcome = row.expected ? observed ? "helpful" : "missed" : observed ? "false" : "correct-non-trigger";
-    scored++; if (outcome === "correct-non-trigger") scores.correctNonTriggers++; else scores[outcome]++;
+    // A retained observation proves its own identity was evaluated. Absence has no such source binding.
+    const outcome: Outcome = row.expected ? "helpful" : "false";
+    scored++; scores[outcome]++;
     return {id: row.id, state: "scored", outcome};
   });
   const scoredKeys = new Set(truth.filter((_, index) => rows[index]!.state === "scored").map(key));
