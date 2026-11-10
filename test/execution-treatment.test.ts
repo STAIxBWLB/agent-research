@@ -54,7 +54,7 @@ test("integration-check binds clean code but never invokes an arm or changes fro
   const intentScore = spyOn(supervision, "scoreSupervisionIntentRecords").mockImplementation(() => {throw new Error("must not score a trial");});
   try {
     const result = await validateTreatmentIntegration(root);
-    expect(result).toMatchObject({ status: "integrated-not-measured", trialExecutions: 0, treatmentObservations: 0, adoptionDecision: null, arms: {diagnose: {cases: 12}, reuse: {cases: 12}, supervision: {status: "integrated-record-reader", dependency: "agent-hub#1221", producerCommit: "bc6f46b077dd3a255debaee8152fa17f1f13b79c", cases: 12, fakeShadow: false, helpful: null, false: null, missed: null, personDecisions: 0, coverage: { covered: 0, unsupported: 12 }}} });
+    expect(result).toMatchObject({ status: "integrated-not-measured", trialExecutions: 0, treatmentObservations: 0, adoptionDecision: null, arms: {diagnose: {cases: 12}, reuse: {cases: 12}, supervision: {status: "integrated-record-reader", dependency: "agent-hub#1221", producerCommit: supervision.SUPERVISION_PRODUCER_COMMIT, cases: 12, fakeShadow: false, helpful: null, false: null, missed: null, personDecisions: 0, coverage: { covered: 0, unsupported: 12 }}} });
     expect(result.code.commit).toMatch(/^[a-f0-9]{40}$/); expect(result.code.codeSha256).toHaveLength(64);
     expect(diagnostic).not.toHaveBeenCalled(); expect(reused).not.toHaveBeenCalled(); expect(reader).not.toHaveBeenCalled(); expect(scorer).not.toHaveBeenCalled();
     const rows = treatmentCases(root).cases.filter(row => row.trial === "supervision");

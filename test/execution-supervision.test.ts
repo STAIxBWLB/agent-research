@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
-import { scoreSupervisionRecords, type SupervisionTruth } from "../scripts/execution-supervision.ts";
+import { scoreSupervisionRecords, SUPERVISION_PRODUCER_COMMIT, type SupervisionTruth } from "../scripts/execution-supervision.ts";
 import type { ShadowSnapshot } from "../scripts/execution-supervision-records.ts";
 import { readTextBounded } from "../src/study.ts";
 
@@ -8,7 +8,7 @@ import { readTextBounded } from "../src/study.ts";
 interface Vector { id: string; sourceVector: string; snapshot: ShadowSnapshot; truth: SupervisionTruth[] }
 interface Vectors {
   v: number;
-  provenance: { repository: string; commit: string; paths: string[]; kind: string; frozenCorpus: boolean };
+  provenance: { repository: string; commit: string; paths: string[]; kind: string; frozenCorpus: boolean; generation: {facts: string; snapshots: string; truth: string; trials: number; producerModuleSha256: string; generatorSha256: string} };
   vectors: Vector[];
 }
 const fixture = JSON.parse(readTextBounded(resolve(import.meta.dir, "fixtures/execution-supervision/producer-vectors.json"), 196_608)) as Vectors;
@@ -22,24 +22,27 @@ const score = (id: string) => { const row = vector(id); return scoreSupervisionR
 test("producer vectors name the exact pinned public contract outside the frozen corpus", () => {
   expect(fixture.v).toBe(1);
   expect(fixture.provenance.repository).toBe("STAIxBWLB/agent-hub");
-  expect(fixture.provenance.commit).toBe("bc6f46b077dd3a255debaee8152fa17f1f13b79c");
+  expect(fixture.provenance.commit).toBe(SUPERVISION_PRODUCER_COMMIT);
   expect(fixture.provenance.paths).toEqual(["docs/design/supervision.md", "src/hub/supervision-rules.ts", "test/supervision-rules.test.ts"]);
   expect(fixture.provenance.frozenCorpus).toBe(false);
-  expect(fixture.vectors).toHaveLength(10);
+  expect(fixture.vectors).toHaveLength(14);
+  expect(fixture.provenance.generation).toMatchObject({facts: "hand-authored", snapshots: "producer-generated", truth: "hand-authored-preserved", trials: 0});
+  expect(fixture.provenance.generation.producerModuleSha256).toMatch(/^[a-f0-9]{64}$/);
+  expect(fixture.provenance.generation.generatorSha256).toMatch(/^[a-f0-9]{64}$/);
 });
 
 test("each producer observation rule scores only the supplied covered truth identity", () => {
   for (const id of ["repeated-first", "deliverable-invalidated", "declared-overlap"]) {
     const result = score(id);
     expect(result.observations).toEqual(vector(id).snapshot.observations);
-    expect(result.scores).toEqual({ helpful: 1, false: 0, missed: null, correctNonTriggers: null });
+    expect(result.scores).toEqual({ helpful: 1, false: 0, missed: 0, correctNonTriggers: null });
     expect(result.coverage).toEqual({ total: 1, scored: 1, insufficient: 0, unsupported: 0 });
     expect(result.rows[0]).toMatchObject({ state: "scored", outcome: "helpful" });
     expect(result.personDecisions).toBe(0);
     expect(result.workerTurns).toBe(0); expect(result.actionWrites).toBe(0); expect(result.notifications).toBe(0);
   }
-  expect(score("ordinary-progress").scores).toBeNull();
-  expect(score("ordinary-progress").rows[0]).toMatchObject({state: "insufficient-evidence", reason: "no-evaluation-coverage", outcome: null});
+  expect(score("ordinary-progress").scores).toEqual({helpful: 0, false: 0, missed: null, correctNonTriggers: 1});
+  expect(score("ordinary-progress").rows[0]).toMatchObject({state: "scored", outcome: "correct-non-trigger"});
 });
 
 test("replay and third equal failure keep original retained evidence and do not inflate counts", () => {
@@ -55,12 +58,13 @@ test("replay and third equal failure keep original retained evidence and do not 
   const result = scoreSupervisionRecords(rows.map(row => row.snapshot), rows[0]!.truth);
   expect(result.observations).toHaveLength(1); expect(result.duplicates).toBe(2);
   expect(result.producerCounts).toEqual(rows.map(row => row.snapshot.counts));
-  expect(result.scores).toEqual({ helpful: 1, false: 0, missed: null, correctNonTriggers: null });
+  expect(result.scores).toEqual({ helpful: 1, false: 0, missed: 0, correctNonTriggers: null });
 });
 
 test("all three producer coverage gaps remain unsupported rather than clean numeric outcomes", () => {
   const result = score("coverage-gaps");
-  expect(result.gap.map(row => row.reason).sort()).toEqual(["history-truncated", "no-deliverable-measurement", "no-history"]);
+  expect(result.gap).toHaveLength(5);
+  expect([...new Set(result.gap.map(row => row.reason))].sort()).toEqual(["history-truncated", "no-deliverable-measurement", "no-history"]);
   expect(result.scores).toBeNull();
   expect(result.coverage).toMatchObject({ total: 3, scored: 0, unsupported: 3 });
   expect(result.rows.every(row => row.state === "insufficient-evidence" && row.outcome === null)).toBe(true);
@@ -79,7 +83,7 @@ test("per-rule revision and retention refusal counters preserve unknown score co
 
 test("present observations can score false while absence and unmatched observations remain unknown", () => {
   const row = vector("repeated-first"), identity = row.truth[0]!;
-  expect(scoreSupervisionRecords([row.snapshot], [{ ...identity, expected: false }]).scores).toEqual({ helpful: 0, false: 1, missed: null, correctNonTriggers: null });
+  expect(scoreSupervisionRecords([row.snapshot], [{ ...identity, expected: false }]).scores).toEqual({ helpful: 0, false: 1, missed: null, correctNonTriggers: 0 });
   const clean = vector("ordinary-progress").snapshot;
   const missing = scoreSupervisionRecords([clean], [identity]);
   expect(missing.scores).toBeNull(); expect(missing.rows[0]).toMatchObject({state: "insufficient-evidence", reason: "no-evaluation-coverage", outcome: null});
@@ -100,10 +104,10 @@ test("explicit unknown truth remains unavailable even when a matching producer o
 test("each matching producer gap blocks numeric scoring even for a declared covered truth row", () => {
   const source = vector("coverage-gaps");
   for (const gap of source.snapshot.gap) {
-    const truth = source.truth.find(row => row.rule === gap.rule && row.task === gap.task && row.revision === gap.revision)!;
+    const truth = {id: `covered-gap-${gap.rule}-${gap.task}`, rule: gap.rule, task: gap.task, revision: gap.revision};
     const snapshot: ShadowSnapshot = {
-      observations: [], gap: [gap],
-      counts: { evaluations: 1, observations: 0, deduped: 0, suppressed: 0, gap: 1, workerTurns: 0, actionWrites: 0, notifications: 0 },
+      observations: [], gap: [gap], evaluated: [{rule: gap.rule, task: gap.task, revision: gap.revision}],
+      counts: { evaluations: 1, observations: 0, deduped: 0, suppressed: 0, evaluatedSuppressed: 0, gap: 1, workerTurns: 0, actionWrites: 0, notifications: 0 },
     };
     const result = scoreSupervisionRecords([snapshot], [{ ...truth, coverage: "covered", expected: true, trigger: gap.rule === "repeated_failure" ? "failures:check:implement" : gap.rule === "deliverable_invalidated_check" ? "check:d-0123456789ab" : "overlap:28:29" }]);
     expect(result.gap).toEqual([gap]); expect(result.retentionSuppressed).toBe(false);
@@ -158,12 +162,54 @@ test("task 7 evaluations cannot score absence for task 999 revision 99:none", ()
     expect(result.rows[0]).toMatchObject({state: "scored", outcome: "helpful"});
     expect(result.rows[1]).toMatchObject({id: "unobserved-task", state: "insufficient-evidence", reason: "no-evaluation-coverage", outcome: null});
     expect(result.coverage).toEqual({total: 2, scored: 1, insufficient: 1, unsupported: 0});
-    expect(result.scores).toEqual({helpful: 1, false: 0, missed: null, correctNonTriggers: null});
+    expect(result.scores).toEqual({helpful: 1, false: 0, missed: 0, correctNonTriggers: null});
     // Neither another task nor another revision nor an impossible rule coverage claim is proven by batch counters.
     const sameTaskOtherRevision = scoreSupervisionRecords([source.snapshot], [{...other, task: original.task}]);
     expect(sameTaskOtherRevision.rows[0]!.reason).toBe("no-evaluation-coverage");
     expect(sameTaskOtherRevision.scores).toBeNull();
   }
-  const asserted = {...source.snapshot, evaluated: [{rule: original.rule, task: 999, revision: "99:none"}]};
-  expect(() => scoreSupervisionRecords([asserted], [])).toThrow("unknown");
+  expect(source.snapshot.evaluated.some(row => row.task === 999)).toBe(false);
+});
+
+test("explicit rule/task/revision evaluation proves missed or correct non-trigger for an absent exact key", () => {
+  const row = vector("repeated-first"), identity = row.truth[0]!;
+  const evaluated = [{rule: identity.rule, task: identity.task, revision: identity.revision}];
+  const complete: ShadowSnapshot = {observations: [], gap: [], evaluated, counts: {evaluations: 1, observations: 0, deduped: 0, suppressed: 0, evaluatedSuppressed: 0, gap: 0, workerTurns: 0, actionWrites: 0, notifications: 0}};
+  expect(scoreSupervisionRecords([complete], [identity]).scores).toEqual({helpful: 0, false: 0, missed: 1, correctNonTriggers: null});
+  expect(scoreSupervisionRecords([complete], [{...identity, expected: false}]).scores).toEqual({helpful: 0, false: 0, missed: null, correctNonTriggers: 1});
+  const replay = scoreSupervisionRecords([complete, complete], [identity]);
+  expect(replay.evaluated).toEqual(evaluated); expect(replay.scores?.missed).toBe(1);
+  const noCoverage: ShadowSnapshot = {...complete, evaluated: []};
+  expect(scoreSupervisionRecords([noCoverage], [identity]).rows[0]?.reason).toBe("no-evaluation-coverage");
+  for (const incomplete of [
+    {...complete, counts: {...complete.counts, evaluatedSuppressed: 1}},
+    {...complete, counts: {...complete.counts, suppressed: 1}},
+    {...complete, evaluated: [{...evaluated[0]!, rule: "deliverable_invalidated_check" as const}]},
+    {...complete, evaluated: [{...evaluated[0]!, revision: "2:none"}]},
+  ]) expect(scoreSupervisionRecords([incomplete], [identity]).scores).toBeNull();
+});
+
+test("producer evaluated-retention overflow leaves absent rows unknown even if their triple survived", () => {
+  const source = vector("evaluated-retention-cap"), result = score("evaluated-retention-cap");
+  expect(source.snapshot.counts.evaluatedSuppressed).toBeGreaterThan(0);
+  expect(result.evaluatedSuppressed).toBe(true); expect(result.retentionSuppressed).toBe(false);
+  expect(result.rows[0]).toMatchObject({state: "insufficient-evidence", reason: "evaluated-suppressed", outcome: null});
+  expect(result.scores).toBeNull();
+});
+
+test("generated closed-side overlap records establish no R3 coverage; missing open-side gaps override coverage", () => {
+  for (const id of ["closed-overlap", "missing-and-closed-overlap"]) {
+    const row = vector(id), identity = row.truth[0]!;
+    expect(row.snapshot.evaluated.filter(entry => entry.rule === "declared_overlap_without_integration")).toEqual([]);
+    expect(row.snapshot.gap).toEqual([]); expect(row.snapshot.observations).toEqual([]);
+    const result = scoreSupervisionRecords([row.snapshot], [{...identity, coverage: "covered"}]);
+    expect(result.rows[0]).toMatchObject({state: "insufficient-evidence", reason: "no-evaluation-coverage", outcome: null});
+    expect(result.scores).toBeNull();
+  }
+  const missing = vector("missing-overlap");
+  expect(missing.snapshot.evaluated).toContainEqual({rule: "declared_overlap_without_integration", task: 28, revision: "1:none"});
+  expect(missing.snapshot.gap).toContainEqual({rule: "declared_overlap_without_integration", version: 1, task: 28, revision: "1:none", reason: "no-history"});
+  const result = scoreSupervisionRecords([missing.snapshot], [{...missing.truth[0]!, trigger: "overlap:28:29", coverage: "covered"}]);
+  expect(result.rows[0]).toMatchObject({state: "insufficient-evidence", reason: "coverage-gap", outcome: null});
+  expect(result.scores).toBeNull();
 });
