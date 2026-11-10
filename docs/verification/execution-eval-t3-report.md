@@ -95,17 +95,25 @@ retry-relationship and artifact-reference checks. Both arms are scored by the sa
 sealed projection: the full provenance object (attempt id, head, selected head, status, completeness) and the
 next-action token. `mustNot` labels have no separate automated check in this harness, so they are not counted as scored.
 
+Agreement between the two arms is not independent diagnostic accuracy, and this adapter cannot establish any.
+`diagnoseTreatment` returns the current-workflow baseline diagnostic itself on `matched` and on `skipped`, and an
+`unknown` completeness otherwise, while the visible-facts scaffolding writes the native records the matcher then reads.
+The treatment can therefore only reproduce the control answer or fall back to unknown, so parity is by construction
+once the plumbing works. What these 144 slots do establish is integration, cost and plumbing: the native read resolves
+the recorded producer for all eight incidents that expose one, the four privacy-gap and corrupt-source incidents skip
+without querying for a hidden identity, and every slot in both arms reproduces the sealed projection.
+
 | measure | `current-workflow` | `H1-A1-C1-lineage-view` |
 | --- | --- | --- |
 | observations / incidents | 72 / 12 | 72 / 12 |
-| provenance matches | 72 | 72 |
-| next-action matches | 72 | 72 |
-| joint matches (observation) | 72 | 72 |
-| incidents with every observation correct | 12 of 12 | 12 of 12 |
+| provenance matches the sealed projection | 72 | 72 |
+| next-action matches the sealed projection | 72 | 72 |
+| joint matches (observation, both components) | 72 | 72 |
+| incidents with every observation in agreement | 12 of 12 | 12 of 12 |
 | cold / warm joint matches | 36 / 36 | 36 / 36 |
 | human time-to-find | `unknown` | `unknown` |
 
-All twelve incidents are covered by both arms with the expected next action:
+All twelve incidents are reproduced by both arms:
 
 | scenario | expected next action | both arms |
 | --- | --- | --- |
@@ -137,8 +145,9 @@ subsets of the scheduled child total and are never added to it, and subprocess p
 The trial's scheduled slot CPU total is 8.371 s over 6789 ms of trial wall; the admitted-container cgroup counter reads
 8.796 s and is a separate budget clock, never added to process CPU. The treatment is therefore about 35 percent slower
 per child process and about 38 percent higher in slot CPU, entirely in the `current` phase, which is the native read it
-adds. Reading: accuracy parity is reproduced on every incident, and no accuracy loss was observed; the lineage path
-costs more automated compute, and the human dimension the gate actually asks about was not measured.
+adds. Reading: because the parity is by construction, the measurable result of this trial is cost, plumbing and
+integration rather than accuracy; the lineage path pays more automated compute for the same answer, and the human
+dimension the gate actually asks about was not measured.
 
 ## Reuse (r2): eligible reuse against fresh execution
 
@@ -251,7 +260,7 @@ inherited rather than re-chosen.
 
 | trial | gate | threshold | measured | verdict |
 | --- | --- | --- | --- | --- |
-| Diagnose | accuracy loss | at most 0 percentage points | 0.0 pp on 72 observations and 12 of 12 incidents, both arms | met |
+| Diagnose | accuracy loss | at most 0 percentage points | 0.0 pp observed on 72 observations and 12 of 12 incidents in both arms, but parity is by construction in this adapter | not independently measured (parity by construction) |
 | Diagnose | median human time-to-find reduction | at least 20 percent | `unknown`; no timing was taken | insufficient, never pass |
 | Reuse | median eligible compute reduction | at least 20 percent | -9.62 percent cold, -11.11 percent warm | unmet |
 | Reuse | no-hit p95 overhead | at most 5 percent | 31.36 percent cold, 30.74 percent warm | unmet |
@@ -265,10 +274,11 @@ product harness fault suite and were not re-measured by these trials; only false
 
 ## Dispositions
 
-- **Diagnose: insufficient evidence.** Accuracy parity is reproduced with no accuracy loss, so the correctness half of
-  the lineage gate is met, but the gate's decision quantity (median human time-to-find reduction of at least 20 percent)
-  was not measured and the preregistration makes unmeasurable human timing insufficient rather than passing. The
-  descriptive cost direction is negative: the treatment is slower in automated compute.
+- **Diagnose: insufficient evidence.** Accuracy parity holds by construction in this adapter, so the correctness half of
+  the lineage gate was not independently measured and is not claimed as met; the gate's decision quantity (median human
+  time-to-find reduction of at least 20 percent) was not measured either, and the preregistration makes unmeasurable
+  human timing insufficient rather than passing. The descriptive cost direction is negative: the treatment is slower in
+  automated compute.
 - **Reuse: restrict, do not adopt.** Zero false reuse and byte-equal outputs hold, but both performance gates fail
   decisively on paired evidence: eligible reuse is slower on all twelve cases and the no-hit overhead is about six times
   its ceiling. Adopt is excluded by measurement, not by missing data, so defer would misdescribe a negative result.
@@ -332,6 +342,19 @@ no host path or account appears in this report.
   rule cannot be scored from the current snapshot.
 - Retention, transfer and storage accounting excludes an actual peak measurement; the `/tmp` cap bounds but does not
   measure it.
+- A seal or code change detected mid-run surfaces as the `collection-interrupted` cause rather than as its own cause,
+  so that label alone does not say what changed.
+- The Supervision generator and producer hashes are read from the external manifest; they were checked by hand to match
+  the committed `supervision-generator.ts` (`5192b3d285044aefe598f8d3aa8b83f2af373325ca5b515ab4b7ab4f3419e9f2`) but
+  the receipt does not derive them itself.
+- The Supervision budgets are hardcoded constants that match the preregistration today; they are not read from it, so a
+  future preregistration edit would not move them.
+- A producer failure would fold into the `insufficient` outcome instead of being reported as its own case state. None
+  occurred in these 144 slots.
+- The reader does not re-check recorded per-slot costs against the case budgets, and the budget-stop loop branches have
+  no unit test, so an over-budget slot would be visible only through the recorded cost fields.
+- Network mode `none` is enforced by admission but not recorded inside the receipts, so it is an admission claim here
+  rather than a per-slot observation.
 
 ## Reproduce
 
@@ -343,9 +366,9 @@ bun scripts/execution-eval.ts verify
 bun scripts/execution-eval.ts verify-supervision-v2
 bun scripts/execution-eval.ts verify-reuse-rematerialization-r2
 
-/Users/yj.lee/.maru/env/.venv/bin/python docs/verification/execution-eval-t3/analyze-reuse.py . \
+python3 docs/verification/execution-eval-t3/analyze-reuse.py . \
   docs/verification/execution-eval-t3/reuse-29db7d4259bc-20261110T083856Z
-/Users/yj.lee/.maru/env/.venv/bin/python docs/verification/execution-eval-t3/analyze-diagnose.py . \
+python3 docs/verification/execution-eval-t3/analyze-diagnose.py . \
   docs/verification/execution-eval-t3/diagnose-a10eb2477a95-20261110T091046Z
 ```
 
