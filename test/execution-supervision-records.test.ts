@@ -98,7 +98,7 @@ test("closed arrays reject sparse, named, symbol and accessor indices without in
 });
 
 test("the exported envelope requires explicit bounded evaluated coverage and its suppression counter", () => {
-  const row = {rule: "repeated_failure", task: 1, revision: "1:none"};
+  const row = {rule: "repeated_failure" as const, task: 1, revision: "1:none"};
   expect(readEvaluatedRevision(row)).toEqual(row);
   const evaluated = Array.from({length: MAX_SHADOW_EVALUATED}, (_, index) => ({...row, task: index + 1}));
   expect(readShadowSnapshot({...snapshot(), evaluated}).evaluated).toEqual(evaluated);
@@ -121,7 +121,7 @@ test("the exported envelope requires explicit bounded evaluated coverage and its
 
 test("evaluated metadata rejects getters, sparse arrays and proxies without invoking producer hooks", () => {
   let reads = 0;
-  const row = {rule: "repeated_failure", task: 1, revision: "1:none"};
+  const row = {rule: "repeated_failure" as const, task: 1, revision: "1:none"};
   Object.defineProperty(row, "revision", {enumerable: true, get() {reads++; return "1:none";}});
   expect(() => readEvaluatedRevision(row)).toThrow("non-data fields");
   const proxy = new Proxy(snapshot(), {getPrototypeOf() {reads++; return Object.prototype;}});
