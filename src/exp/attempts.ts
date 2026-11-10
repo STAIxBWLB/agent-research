@@ -508,7 +508,8 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
       if (decision.outcome === "reused") return attempt;
     }
     // Keep configuration refusals outside the uncertain container-start catch.
-    args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: attempt.studyId, attemptId: attempt.id, seed: attempt.seed, user, paths: attempt.paths, ...(attempt.gpuDevices ? { gpuDevices: attempt.gpuDevices } : {}), ...(attempt.pipeline && attempt.stage === "candidate" ? { pipeline: { name: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name, inputRoot: pipelineInputRoot(attempt)!, seed: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.seed } } : {}) });
+    // The record's own name is authoritative: a stage recorded before study-scoped names must start where inspect looks.
+    args = buildContainerArgs({ protocol, stage: attempt.stage, studyId: attempt.studyId, attemptId: attempt.id, name: attemptContainerName(attempt), seed: attempt.seed, user, paths: attempt.paths, ...(attempt.gpuDevices ? { gpuDevices: attempt.gpuDevices } : {}), ...(attempt.pipeline && attempt.stage === "candidate" ? { pipeline: { name: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.name, inputRoot: pipelineInputRoot(attempt)!, seed: attempt.pipeline.definition.candidate.stages[attempt.pipeline.index]!.seed } } : {}) });
     if (attempt.reuse) attempt = await update(dir, attempt.id, recoveryCtx, current => {
       if (current.status !== "running" || current.stage !== attempt.stage || current.pipeline?.index !== attempt.pipeline?.index || current.launching?.token !== attempt.launching?.token) throw new InputVerificationError("reuse: container launch ownership changed; run ares attempt reconcile <dir> after the active control operation finishes before retrying");
       requireCopilotAccept(dir, "hypotheses");

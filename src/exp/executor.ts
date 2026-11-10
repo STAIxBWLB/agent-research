@@ -359,7 +359,7 @@ export function executionPathsOverlap(left: string, right: string): boolean {
 }
 export type Stage = "candidate" | "evaluator";
 export interface ContainerPaths { snapshot: string; output: string; evaluator: string; result: string }
-export interface ContainerOptions { protocol: Protocol; stage: Stage; studyId: string; attemptId: string; user: string; paths: ContainerPaths; seed?: number; gpuDevices?: string[]; pipeline?: { name: string; inputRoot: string; seed: boolean } }
+export interface ContainerOptions { protocol: Protocol; stage: Stage; studyId: string; attemptId: string; user: string; paths: ContainerPaths; seed?: number; gpuDevices?: string[]; name?: string; pipeline?: { name: string; inputRoot: string; seed: boolean } }
 export function containerName(studyId: string, attemptId: string, stage: Stage): string {
   if (!/^[a-f0-9]{16}$/.test(attemptId) || !["candidate", "evaluator"].includes(stage)) throw new Error("container identity: invalid attempt or stage; use a 16-hex attempt id and candidate or evaluator stage");
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(studyId)) throw new Error("container identity: invalid study id; use the id from study.json");
@@ -372,6 +372,11 @@ export function stageContainerName(studyId: string, attemptId: string, stage: St
   if (pipelineStage === undefined) return name;
   if (stage !== "candidate" || !/^[a-z][a-z0-9_-]{0,31}$/.test(pipelineStage)) throw new Error("pipeline container: invalid stage name");
   return `${name}-${pipelineStage}`;
+}
+/** A stage that was already recorded keeps its own launched name, pipeline suffix included. */
+function recordedContainerName(name: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(name)) throw new Error("container identity: invalid recorded name; use the name stored on the attempt stage");
+  return name;
 }
 /** Pure preflight for host input isolation; no hashing, transport or attempt side effects. */
 export function validateContainerInputSources(protocol: Protocol, pathsArg: ContainerPaths): void {
@@ -386,7 +391,7 @@ export function validateContainerInputSources(protocol: Protocol, pathsArg: Cont
 }
 /** Mounts are fixed by stage, never supplied as free-form Docker options. */
 export function buildContainerArgs(options: ContainerOptions): string[] {
-  const p = validateProtocol(options.protocol), name = stageContainerName(options.studyId, options.attemptId, options.stage, options.pipeline?.name);
+  const p = validateProtocol(options.protocol), name = options.name === undefined ? stageContainerName(options.studyId, options.attemptId, options.stage, options.pipeline?.name) : recordedContainerName(options.name);
   const seed = options.seed === undefined ? p.seeds[0]! : options.seed;
   if (!Number.isSafeInteger(seed) || !p.seeds.includes(seed)) throw new Error("container seed: undeclared or non-integer; choose a seed from protocol.seeds for ares attempt run --seed N");
   if (!/^[A-Za-z0-9_-]{1,80}$/.test(options.studyId)) throw new Error("study id: invalid label; use the id from study.json");

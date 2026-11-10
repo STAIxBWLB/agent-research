@@ -259,6 +259,29 @@ test("#149: a pre-change attempt record reconciles through its legacy container 
   expect(fake.containers.has(advanced.stages.evaluator!.containerName!)).toBe(true);
 });
 
+test("#149: a pre-change pending stage launches under the name its record resolves", async () => {
+  const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
+  const record = showAttempt(dir, first.id), scoped = record.stages.candidate!.containerName!, legacy = `ares-${record.id}-candidate`;
+  delete record.stages.candidate!.containerName; delete record.stages.candidate!.containerId;
+  record.stages.candidate!.launchPending = true; delete record.launching;
+  writeFileSync(join(dir, "runs", record.run, "attempts", `${record.id}.json`), JSON.stringify(record));
+  fake.containers.clear();
+  const mark = fake.requests.length;
+  expect(scoped).not.toBe(legacy);
+  expect(await reconcileAttempts(dir, fake.ctx)).toHaveLength(1);
+  const runs = fake.requests.slice(mark).filter(r => r.args[0] === "run");
+  expect(runs).toHaveLength(1); expect(runs[0]!.args[runs[0]!.args.indexOf("--name") + 1]).toBe(legacy);
+  expect(fake.containers.size).toBe(1); expect(fake.containers.has(legacy)).toBe(true);
+  const resumed = fake.requests.slice(mark);
+  expect(resumed.some(r => r.args[0] === "inspect" && r.args.at(-1) === legacy)).toBe(true);
+  expect(resumed.some(r => r.args[0] === "ps" && r.args.join(" ").includes(`name=^/${legacy}$`))).toBe(true);
+  const adopted = showAttempt(dir, first.id);
+  expect(adopted.status).toBe("running"); expect(adopted.stages.candidate!.containerId).toBe(fake.containers.get(legacy)!.id);
+  expect(resumed.some(r => r.command === "sh" && r.args.join(" ").includes(`docker kill ${adopted.stages.candidate!.containerId}`))).toBe(true);
+  await reconcileAttempts(dir, fake.ctx);
+  expect(fake.requests.slice(mark).filter(r => r.args[0] === "run")).toHaveLength(1);
+});
+
 test("daemon failure is not confirmed absence and does not free the active attempt", async () => {
   const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx); fake.daemonDown();
   await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("executor local: reconcile failed");

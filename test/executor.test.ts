@@ -67,6 +67,10 @@ test("#149: container names bind the study, stay bounded and keep the docker nam
   expect(() => stageContainerName("synthetic-study", attempt, "evaluator", "normalize")).toThrow("invalid stage name");
   const launched = (studyId: string) => { const args = buildContainerArgs({ ...options("candidate"), studyId }); return args[args.indexOf("--name") + 1]; };
   expect(launched("synthetic-study")).toBe(name); expect(launched("other-study")).toBe(containerName("other-study", attempt, "candidate"));
+  const recorded = (extra: ContainerOptions) => { const args = buildContainerArgs(extra); return args[args.indexOf("--name") + 1]; };
+  expect(recorded({ ...options("candidate"), name: "ares-0123456789abcdef-candidate" })).toBe("ares-0123456789abcdef-candidate");
+  expect(recorded({ ...options("candidate"), name: `${name}-normalize`, pipeline: { name: "normalize", inputRoot: "/executor/in", seed: true } })).toBe(`${name}-normalize`);
+  for (const invalid of ["--bad", "ares name", "", "ares-0123456789abcdef-candidate\n"]) expect(() => buildContainerArgs({ ...options("candidate"), name: invalid })).toThrow("invalid recorded name");
 });
 
 test("selected declared seed reaches both containers once and defaults to the first protocol seed", () => {
