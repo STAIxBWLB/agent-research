@@ -1,0 +1,211 @@
+{
+  "seed": 20,
+  "repetition": 2,
+  "condition": "cold",
+  "slotOrder": [
+    "eligible-reuse",
+    "fresh"
+  ],
+  "executedSlot": 0,
+  "arm": "eligible-reuse",
+  "v": 1,
+  "authority": "harness-observed",
+  "trial": "reuse",
+  "caseId": "reuse-local-stage-edit-second-variant",
+  "caseIndex": 13,
+  "slot": 20,
+  "codeSha256": "94ed67e881b9fdcad4fd4473b809a94d193f54976f56f844164ede6144cb872a",
+  "methodSha256": "84e4aabb8178299ceb84c45711c150228a328d9c6acfc2a83735514f1e8fcd62",
+  "inputSha256": "1f3e3bf29b382e23287d5ad752b3d862a1c93aba2beb77a6aae7d37531cc7618",
+  "expectedSha256": "e2234ee438c58f2578a0afca837220dc16ce1861f64f781918acb3a82fda5d3f",
+  "status": "succeeded",
+  "cause": null,
+  "matched": true,
+  "result": {
+    "seed": 20,
+    "prepare": 35,
+    "transform": 107,
+    "evaluate": 11489
+  },
+  "integration": {
+    "v": 1,
+    "kind": "reuse-arm-fixture-instrumentation",
+    "authority": "functional-fixture-only",
+    "instrumentationOnly": true,
+    "status": "succeeded",
+    "reuse": "eligible",
+    "seed": 20,
+    "sourcePopulation": "fixture-rematerialized",
+    "fault": "none",
+    "injection": "the frozen source declares no fault",
+    "changedKeys": [
+      "candidate-stage-edit"
+    ],
+    "sourceAttemptId": "71e441b83c80204b",
+    "currentAttemptId": "6ccc52ccbbcf373f",
+    "sourceRefs": [
+      {
+        "attemptId": "71e441b83c80204b",
+        "stage": "prepare",
+        "sha256": "d4a541be2767ce5969ea3c3c319ab10362ea60feb2b5cebb21dd6bca68dcdee3"
+      },
+      {
+        "attemptId": "71e441b83c80204b",
+        "stage": "transform",
+        "sha256": "24f4688a1c371613a5da55ca3d2956a7ad3f88254b0b14f6fc66e8d13ffa70b4"
+      },
+      {
+        "attemptId": "71e441b83c80204b",
+        "stage": "evaluate",
+        "sha256": "e77a3aa736a0428d9a03a8df5696ba0641f72f7b9d38438d40b479015f13d7b1"
+      }
+    ],
+    "sourceObserved": {
+      "seed": 20,
+      "prepare": 35,
+      "transform": 107,
+      "evaluate": 11469
+    },
+    "currentObserved": {
+      "seed": 20,
+      "prepare": 35,
+      "transform": 107,
+      "evaluate": 11489
+    },
+    "sourcePayloadDigests": [
+      "90d7ec0f0acef104d8b6252794295f661a0149634868d02a1ae0c358099638f5",
+      "bcea5d7d8b256f1bda5f90a3ede41899e94b89fccb4e4d2786073b5bfaa0002a",
+      "63dd0388dc70e047dfeab114aab5fc273fce524c1d39ec5ea9c11736c49dea4a"
+    ],
+    "currentPayloadDigests": [
+      "90d7ec0f0acef104d8b6252794295f661a0149634868d02a1ae0c358099638f5",
+      "bcea5d7d8b256f1bda5f90a3ede41899e94b89fccb4e4d2786073b5bfaa0002a",
+      "5a54efd44ec8b34c06223a7cbaa077de7058fa3ac5895b11873c922627ae71e6"
+    ],
+    "sourceRecordSha256": "dbde1d134005a1a3557f8e0651f5e5eda07148303d08df4fcf089f177963fbf7",
+    "sourceRecordUnchanged": true,
+    "sourceMetricsSha256": "ad60b39dfb7ebff659ed48f16a608633c56549f683722dd46add595872f58e73",
+    "currentMetricsSha256": "4d8baa2a0c132dca5816482568adc1f9127fc77f0da301c8d32083cb0e979d61",
+    "sourceEvaluatorId": "77bb17137b484ab7fdde340279afe8c63ad6d147527e794d836e8aa8439fc937",
+    "currentEvaluatorId": "b4ecddddefac3d721f39f218d1e825091f1e832e4fd804011787d3183582978b",
+    "evaluatorFresh": true,
+    "sourceExecuted": [
+      "prepare",
+      "transform",
+      "evaluate",
+      "verify"
+    ],
+    "currentExecuted": [
+      "evaluate",
+      "verify"
+    ],
+    "hits": [
+      {
+        "stage": "prepare",
+        "key": "c675221de87a8865672c88bfebec040d70b018713a3f38e175b2a5ab1d9b2067",
+        "source": {
+          "attemptId": "71e441b83c80204b",
+          "stage": "prepare",
+          "sha256": "d4a541be2767ce5969ea3c3c319ab10362ea60feb2b5cebb21dd6bca68dcdee3"
+        }
+      },
+      {
+        "stage": "transform",
+        "key": "f759ac7082042039afecfc87883dbe9da2921e37c49d301169ce9cb8fe7e97e1",
+        "source": {
+          "attemptId": "71e441b83c80204b",
+          "stage": "transform",
+          "sha256": "24f4688a1c371613a5da55ca3d2956a7ad3f88254b0b14f6fc66e8d13ffa70b4"
+        }
+      }
+    ],
+    "misses": [
+      {
+        "stage": "evaluate",
+        "reason": "missing"
+      }
+    ],
+    "freshStages": [
+      "evaluate"
+    ],
+    "counts": {
+      "sourceExecutedStages": 4,
+      "currentExecutedStages": 2,
+      "reusedStages": 2,
+      "currentIndependentSamples": 0
+    },
+    "provenanceStatus": "ok",
+    "comparisonStatus": "ok",
+    "candidateEvidenceSha256": "988274a217badb1d0e26caa2d960db0ab02575a852931453f8bd4a85c6953f8e",
+    "instrumentation": {
+      "sourceSetup": {
+        "wallMs": 898.797047,
+        "parentCpuSeconds": 0.377726,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "current": {
+        "wallMs": 876.7084100000001,
+        "parentCpuSeconds": 0.393128,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "total": {
+        "wallMs": 1776.969662,
+        "parentCpuSeconds": 0.77265,
+        "subprocessCpuSeconds": "unknown"
+      },
+      "wallClock": "performance.now-monotonic",
+      "cpuClock": "process.cpuUsage-parent-process",
+      "totalIncludesCleanup": true,
+      "sourceSetupScope": "shared-fixture-setup-and-optional-source-plus-fault",
+      "currentScope": "current-edits-execution-and-output-verification"
+    },
+    "limitations": [
+      "test instrumentation only; no registered treatment trial, benchmark result, native container proof or adoption decision",
+      "Docker/container transport is fake; Git/tar/Python and producer APIs are real private fixture operations",
+      "parent process CPU excludes subprocess CPU and can include concurrent work; subprocess CPU remains unknown",
+      "source setup and current execution use identical backend and fault helpers in both arms; total includes fixture cleanup"
+    ],
+    "physicalIsolation": "not-established"
+  },
+  "processWallMs": 1815.4413019999993,
+  "humanTimeToFind": "unknown",
+  "costs": {
+    "cpuSeconds": 2.0686679999999997,
+    "gpuDeviceSeconds": "unknown",
+    "providerTokens": "unknown",
+    "providerRequests": "unknown",
+    "wallElapsedMs": 1815.831938000003,
+    "storagePeakBytes": "unknown",
+    "storageByteSeconds": "unknown",
+    "transferBytes": "unknown",
+    "verificationCpuSeconds": 0.000326,
+    "verificationWallMs": 0.2776999999987311,
+    "retentionBytes": "unknown",
+    "retentionByteSeconds": "unknown",
+    "materializationCpuSeconds": 0.000075,
+    "materializationWallMs": 0.07595900000160327,
+    "materializationTransferBytes": 1554,
+    "failureCpuSeconds": 0,
+    "failureGpuDeviceSeconds": "unknown",
+    "failureWallMs": 0,
+    "failureTransferBytes": "unknown",
+    "idleWallMs": "unknown",
+    "personMinutes": "unknown",
+    "monetaryEstimateUsd": "unknown"
+  },
+  "containerCpuSeconds": 2.0704359999999937,
+  "artifact": {
+    "sha256": "785478a3485b233ff0f5a5b59eae394cddd0a2042d62c2997fc237a38902a2dc",
+    "bytes": 3941
+  },
+  "logs": {
+    "stdout": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "stderr": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    }
+  }
+}
