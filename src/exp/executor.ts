@@ -144,6 +144,14 @@ export function setExecutor(dir: string, raw: unknown, actor: Actor): Executor {
   return executor;
 }
 
+/**
+ * The one tar-create rule for archives ares reads or extracts elsewhere: content only. macOS bsdtar otherwise adds
+ * extended-attribute PAX records and AppleDouble `._*` members, which a Linux GNU tar extracts as regular files.
+ * COPYFILE_DISABLE suppresses AppleDouble members and --no-xattrs the attribute records. Used as a `sh -c` prefix
+ * because executor children get a minimal environment that would drop COPYFILE_DISABLE.
+ * ponytail: requires GNU tar >= 1.27 or bsdtar with --no-xattrs; unsupported tar (e.g. BusyBox) fails closed.
+ */
+export const PORTABLE_TAR_CREATE = "COPYFILE_DISABLE=1 tar --no-xattrs";
 /** SSH concatenates its remote command argv into a shell command, so quote every unsafe byte. */
 export function shellQuote(value: string): string {
   return /^[A-Za-z0-9_./:@=+-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;

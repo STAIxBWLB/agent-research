@@ -206,6 +206,17 @@ class TarArtifacts {
   }
 }
 
+/**
+ * Streaming member scan for an archive the caller transfers elsewhere: the same header, PAX and path validation as
+ * artifact reads, exposing each regular member's path and digest when the archive ends.
+ */
+export class TarMemberScan {
+  private readonly parser: TarArtifacts;
+  constructor(maxBytes: number, maxFiles: number) { this.parser = new TarArtifacts(undefined, 0, bound(maxBytes, ARTIFACT_BYTES, "maxBytes"), bound(maxFiles, ARTIFACT_FILES, "maxFiles")); }
+  push(chunk: Uint8Array): void { this.parser.push(chunk); }
+  finish(): ArtifactFile[] { return this.parser.finish().files; }
+}
+
 /** Hash regular artifacts, retaining no payload except an explicitly selected bounded capture. */
 export async function readArtifactArchive(executor: Executor, command: string, args: string[], runner: ProcessRunner, options: ArtifactArchiveOptions = {}): Promise<ArtifactArchive> {
   const capture = options.capture === undefined ? undefined : relative(options.capture), captureBytes = bound(options.captureBytes ?? ARTIFACT_CAPTURE_BYTES, ARTIFACT_CAPTURE_BYTES, "captureBytes");

@@ -8,7 +8,7 @@ import { serveMcp, validArguments } from "../src/mcp.ts";
 import { PLAYBOOK } from "../src/playbook.ts";
 import { openStudy, readLedger, sha256 } from "../src/study.ts";
 import type { ProcessRequest, ProcessResult, ProcessRunner } from "../src/exp/executor.ts";
-import { fakeHttp, tempDir } from "./helpers.ts";
+import { fakeHttp, fakeTarSource, isTarRequest, tempDir } from "./helpers.ts";
 import { metricAttempt, metricProtocol } from "./metric-fixtures.ts";
 
 const actor = { kind: "person" as const }, commit = "a".repeat(40), treeId = "b".repeat(40);
@@ -42,8 +42,8 @@ function executorRuntime(dir: string) {
       if (args.includes("rev-parse")) return ok(treeId);
       if (request.stdoutSink) { await request.stdoutSink(Buffer.from([0, 255, 1])); return ok(); }
     }
-    if (request.command === "tar") {
-      if (request.stdoutSink) await request.stdoutSink(Buffer.from([0, 128, 2]));
+    if (isTarRequest(request)) {
+      if (request.stdoutSink) await fakeTarSource(request, Buffer.from([0, 128, 2]));
       else for await (const _chunk of request.stdin as AsyncIterable<Uint8Array>) { /* synthetic extraction */ }
       return ok();
     }

@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,4 +69,22 @@ export function fakeHubClient(read: (campaign: string, unit: string, taskId?: nu
     return read(campaign, unit, taskId);
   } };
   return { client, calls };
+}
+
+/** True for the portable `sh -c "COPYFILE_DISABLE=1 tar --no-xattrs -C <staging> -cf - ..."` task archive. */
+export function isTaskArchive(request: ProcessRequest): boolean {
+  return request.command === "sh" && request.args[0] === "-c" && /^COPYFILE_DISABLE=1 tar --no-xattrs -C \S*ares-task-\S* -cf - /.test(request.args[1] ?? "");
+}
+/** True for any tar process request, including the portable task archive. */
+export function isTarRequest(request: ProcessRequest): boolean {
+  return request.command === "tar" || isTaskArchive(request);
+}
+
+/**
+ * Archive side of a fake tar host: the task archive is a real tar of ares's private staging copy, so the member check
+ * sees genuine members; other archive reads get the given synthetic bytes. Runs a local tar on synthetic files only.
+ */
+export async function fakeTarSource(request: ProcessRequest, synthetic: Uint8Array): Promise<void> {
+  const bytes = isTaskArchive(request) ? new Uint8Array(spawnSync(request.command, request.args, { maxBuffer: 128 * 1024 * 1024 }).stdout) : synthetic;
+  await request.stdoutSink!(bytes);
 }

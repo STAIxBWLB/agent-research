@@ -5,6 +5,7 @@ import { sha256 } from "../src/study.ts";
 import type { ExperimentRuntime } from "../src/commands.ts";
 import type { ProcessRequest, ProcessResult, ProcessRunner } from "../src/exp/executor.ts";
 import { metricProtocol } from "./metric-fixtures.ts";
+import { fakeTarSource, isTarRequest } from "./helpers.ts";
 
 export const fixtureCommit = "a".repeat(40), fixtureTree = "b".repeat(40);
 export function experimentTree(dir: string): void {
@@ -23,8 +24,8 @@ export function experimentFixture(dir: string) {
       if (a.includes("cat-file")) return ok("commit"); if (a.includes("rev-parse")) return ok(fixtureTree);
       if (a.includes("archive")) { await request.stdoutSink!(Buffer.from([0, 255, 1])); return ok(); }
     }
-    if (request.command === "tar") {
-      if (request.stdoutSink) await request.stdoutSink(Buffer.from([0, 128, 2]));
+    if (isTarRequest(request)) {
+      if (request.stdoutSink) await fakeTarSource(request, Buffer.from([0, 128, 2]));
       else for await (const _chunk of request.stdin as AsyncIterable<Uint8Array>) { /* fake host consumes frozen archive */ }
       return ok();
     }

@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { lstatSync, mkdirSync, mkdtempSync, opendirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
-import { runOnExecutor, spawnRunner, validateExecutor, type Executor, type ProcessResult, type ProcessRunner } from "./executor.ts";
+import { PORTABLE_TAR_CREATE, runOnExecutor, shellQuote, spawnRunner, validateExecutor, type Executor, type ProcessResult, type ProcessRunner } from "./executor.ts";
+import { TarMemberScan, type ArtifactFile } from "./artifacts.ts";
 import { TASK_BYTES, TASK_FILES } from "./protocol.ts";
 import { readBytesBounded, sha256 } from "../study.ts";
 
@@ -101,29 +102,46 @@ export async function transferTask(taskDir: string, executor: Executor, destinat
     capture("", 0);
     const treeHash = sha256(JSON.stringify(entries.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)));
     if (expectedTreeHash !== undefined && treeHash !== expectedTreeHash) throw new Error("task/: content changed since approval; set the protocol, approve design again, and retry ares attempt run");
-    // Bounded tar headers and long-path metadata supplement the 64 MiB task payload cap.
-    const transferred = await transferArchive("task", { command: "tar", args: ["-C", staging, "-cf", "-", includeCandidate ? "." : "evaluator"] }, TASK_BYTES + 16 * 1024 * 1024, executor, destination, runner);
+    // Bounded tar headers and long-path metadata supplement the 64 MiB task payload cap. The archive is created with the
+    // shared content-only tar rule, and its members are checked against the staged files while it streams.
+    const staged = new Map((includeCandidate ? entries : entries.filter(([path]) => path.startsWith("evaluator/"))).map(([path, digest]) => [path, digest]));
+    const transferred = await transferArchive("task", { command: "sh", args: ["-c", `${PORTABLE_TAR_CREATE} -C ${shellQuote(staging)} -cf - ${includeCandidate ? "." : "evaluator"}`] }, TASK_BYTES + 16 * 1024 * 1024, executor, destination, runner, staged);
     return { ...transferred, treeHash };
   } catch (error) {
-    if (error instanceof Error && (error.message.startsWith("task/") || error.message.startsWith("executor "))) throw error;
+    if (error instanceof Error && (error.message.startsWith("task/") || error.message.startsWith("task archive:") || error.message.startsWith("executor "))) throw error;
     throw new Error("task archive capture failed; restore readable task/evaluator files, then retry ares attempt run");
   } finally { rmSync(staging, { recursive: true, force: true }); }
 }
 
-async function transferArchive(kind: "snapshot" | "task", source: { command: string; args: string[] }, limit: number, executorArg: Executor, destination: string, runner: ProcessRunner): Promise<{ sha256: string; bytes: number }> {
+/** Checks a task archive's members against the staged files: refuses AppleDouble `._*` members and any other drift by name. */
+function memberCheck(files: ArtifactFile[], staged: Map<string, string>): void {
+  const metadata = files.find(file => file.path.split("/").some(part => part.startsWith("._")) && !staged.has(file.path));
+  if (metadata) throw new Error(`task archive: AppleDouble/extended-attribute metadata member ${metadata.path.slice(0, 200)} refused; the archive must carry task content only (tar --no-xattrs with COPYFILE_DISABLE=1, GNU tar >= 1.27 or bsdtar), then retry ares attempt run`);
+  const extra = files.find(file => staged.get(file.path) !== file.sha256);
+  if (extra || files.length !== staged.size) throw new Error(`task archive: member ${(extra?.path ?? "set").slice(0, 200)} differs from the staged task files; check the controller tar (GNU tar >= 1.27 or bsdtar) and retry ares attempt run`);
+}
+
+async function transferArchive(kind: "snapshot" | "task", source: { command: string; args: string[] }, limit: number, executorArg: Executor, destination: string, runner: ProcessRunner, staged?: Map<string, string>): Promise<{ sha256: string; bytes: number }> {
   const executor = validateExecutor(executorArg);
   if (!destination.startsWith("/") || destination.length > 4096 || /[\0\r\n,"]/.test(destination) || posix.normalize(destination) === "/") throw new Error("snapshot destination: invalid directory; use a private absolute non-root directory without NUL, newlines, commas or double quotes");
   const stream = new ArchiveChannel(), controller = new AbortController(), hash = createHash("sha256");
-  let bytes = 0, oversized = false, failedSide: "archive" | "extract" | undefined;
+  const scan = staged ? new TarMemberScan(TASK_BYTES, TASK_FILES) : undefined;
+  let bytes = 0, oversized = false, failedSide: "archive" | "extract" | undefined, refused: Error | undefined;
   const archive = (async () => {
     try {
       const result = await runner({ ...source, signal: controller.signal, timeoutMs: 300_000,
         stdoutSink: async chunk => {
           if (bytes + chunk.byteLength > limit) { oversized = true; throw new Error("archive size limit"); }
           bytes += chunk.byteLength; hash.update(chunk);
+          try { scan?.push(chunk); } catch { refused ??= new Error("task archive: malformed or unsupported tar stream refused; check the controller tar (GNU tar >= 1.27 or bsdtar) and retry ares attempt run"); throw refused; }
           await stream.write(chunk);
         } });
       if (!passed(result)) throw gitFailure("archive");
+      if (scan && staged) {
+        let files: ArtifactFile[];
+        try { files = scan.finish(); } catch { refused ??= new Error("task archive: truncated tar stream refused; retry ares attempt run"); throw refused; }
+        try { memberCheck(files, staged); } catch (error) { refused ??= error as Error; throw refused; }
+      }
       stream.end();
     } catch (error) { failedSide ??= "archive"; stream.end(error as Error); throw error; }
   })();
@@ -141,6 +159,8 @@ async function transferArchive(kind: "snapshot" | "task", source: { command: str
     controller.abort(); stream.end(new Error("archive transfer cancelled"));
     await Promise.allSettled([archive, extract]);
     if (oversized) throw new Error(`${kind} archive: larger than ${limit} bytes; reduce the ${kind === "snapshot" ? "committed snapshot" : "task evaluator"} before ares attempt run`);
+    // A refused member is named even though extraction may have begun; the attempt fails and nothing is marked verified.
+    if (refused) throw refused;
     if (failedSide === "archive") throw kind === "snapshot" ? gitFailure("archive") : new Error("task archive failed; restore readable task/evaluator files, then retry ares attempt run");
     throw new Error(`executor ${executor.kind === "ssh" ? executor.host : "local"}: snapshot extraction failed; check the private destination directory and tar on the executor host, then retry ares attempt run`);
   }
