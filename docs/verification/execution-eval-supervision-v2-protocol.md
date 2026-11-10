@@ -65,10 +65,16 @@ Five v2 cases have no v1 source: `truncated-quiet-revision`, `overlap-without-in
 
 `trigger` means a careful person, reading only the facts in the case, would want the supervisor to propose the named existing action on that task now. It is not a prediction that a rule fires. `nextAction` is one of `escalate`, `recheck`, `request_integration` or `none`; `reason` is a short kebab code describing the intent, deliberately not the producer's reason vocabulary, and mapping the two belongs to the integration step. `mustNot` lists behaviors that are wrong whatever the label: creating a duplicate proposal, performing an unapproved task action, and claiming a measured benefit.
 
-- Helpful: the label triggers, the producer reported evaluation coverage for that rule, task and revision, and an observation proposes `nextAction`. A stronger action than the one named does not count as helpful.
+- Helpful: the label triggers, the producer reported evaluation coverage for that rule, task and revision, and an observation on that task and revision proposes `nextAction`. A stronger action than the one named does not count as helpful.
+- Wrong action: the label triggers, coverage for that rule, task and revision was reported, and observations on that task and revision exist but none of them proposes `nextAction`. This is its own count and is never helpful. For acceptance it counts against the same budget as a false proposal, so an evaluator that always proposes the wrong action cannot look error-free, and it is the category that keeps a trigger-shaped case from scoring as nothing.
 - False: the label does not trigger and an observation proposes any action on that task and revision.
-- Missed: the label triggers and no observation exists for that task and revision while coverage for it was reported.
+- Missed: the label triggers, coverage for that rule, task and revision was reported, and no observation exists for that task and revision.
+- Correct non-trigger: the label does not trigger, coverage was reported, and no observation exists for that task and revision.
+
+When one observation proposes `nextAction` and another proposes a different action on the same task and revision, the case is helpful, and each extra action is also counted as a wrong action.
+
+The partition is exhaustive. For the action it names, every covered true-trigger case lands in exactly one of helpful, wrong action or missed; every covered non-trigger case lands in exactly one of false or correct non-trigger. The multi-observation case above is the only shape that contributes to two counts, and it contributes helpful plus one wrong action per extra proposal. No observation on a covered case, and no covered case without an observation, goes unscored.
 
 Absence is scored only inside reported coverage. Where the producer reports no coverage for a rule, task and revision, a missing observation stays insufficient evidence and is neither missed nor a correct non-trigger. `absent-measurement` and `unmeasured-changed-ids` exist to make that distinction testable rather than implicit.
 
-No results have been seen. The corpus has never been run against the evaluator, so no helpful, false or missed count exists for it, and reading these labels is not a measurement.
+No results have been seen. The corpus has never been run against the evaluator, so no helpful, wrong-action, false, missed or correct-non-trigger count exists for it, and reading these labels is not a measurement.
