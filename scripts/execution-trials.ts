@@ -9,6 +9,7 @@ import {bindRunCode, RUN_CODE_FILE_BYTES, RUN_CODE_FILES, verifyRunCodeCommit, t
 import {canonical, COST_FIELDS, FROZEN_RECEIPT, PREREGISTRATION, validateCostRecord, verifyPreregistration, type CostRecord} from "./execution-eval.ts";
 import {verifySupervisionAmendment} from "./execution-supervision-amendment.ts";
 import {verifyReuseRematerializationR2} from "./execution-reuse-rematerialize-r2.ts";
+import {resolveDiagnosticFixture} from "./execution-diagnose.ts";
 import {plain, readBytesBounded, readTextBounded, sha256, writeAtomic} from "../src/study.ts";
 
 export const TREATMENT_RECEIPT_BYTES = 65_536, TREATMENT_BUNDLE_BYTES = 16 * 1024 * 1024;
@@ -21,6 +22,7 @@ export type TreatmentStatus = "succeeded" | "failed" | "cancelled" | "unknown" |
 const STATUSES: TreatmentStatus[] = ["succeeded", "failed", "cancelled", "unknown", "excluded"];
 const ARMS: Record<TreatmentTrial, readonly [TreatmentArm, TreatmentArm]> = {diagnose: ["current-workflow", "H1-A1-C1-lineage-view"], reuse: ["fresh", "eligible-reuse"]};
 export interface TreatmentSlot {seed: number; repetition: number; condition: "cold" | "warm"; slotOrder: TreatmentArm[]; executedSlot: number; arm: TreatmentArm}
+export interface DiagnoseSetupCode {helperSha256: string; fixtureFactorySha256: string}
 interface FileIdentity {path: string; sha256: string; bytes: number}
 interface Binding {registration: string; supervision: string; reuseR2: string; reuseSetup: string}
 export interface TreatmentObservation extends TreatmentSlot {
@@ -29,6 +31,7 @@ export interface TreatmentObservation extends TreatmentSlot {
   status: TreatmentStatus; cause: string | null; matched: boolean | "unknown"; result: unknown; integration: unknown;
   processWallMs: number | "unknown"; humanTimeToFind: "unknown"; costs: CostRecord;
   containerCpuSeconds: number | "unknown";
+  diagnoseSetupCode?: DiagnoseSetupCode;
   artifact: {sha256: string; bytes: number} | null;
   logs: {stdout: {sha256: string; bytes: number}; stderr: {sha256: string; bytes: number}} | null;
 }
@@ -162,6 +165,27 @@ export function readRegisteredTreatmentSchedule(root: string, trial: TreatmentTr
   return {bindings, methodSha256: registration.bindings.methodSha256, inputSha256: registration.bindings.inputSha256, expectedSha256: registration.bindings.expectedSha256, slots, sha256: sha256(canonical(slots))};
 }
 function diagnostic(raw: unknown) {if (!plain(raw)) return null; return {provenance: raw.provenance, nextAction: raw.nextAction, ...(raw.retryOf === undefined ? {} : {retryOf: raw.retryOf}), ...(raw.independentSamples === undefined ? {} : {independentSamples: raw.independentSamples})};}
+export function diagnoseSetupCode(binding: RunCodeBinding): DiagnoseSetupCode {
+  const fileHash = (path: string) => {const files = binding.files.filter(file => file.path === path); if (files.length !== 1) fail("Diagnose setup helpers are absent or duplicated in measured code"); return hash(files[0]!.sha256);};
+  return {helperSha256: fileHash("scripts/execution-diagnose-setup.ts"), fixtureFactorySha256: fileHash("scripts/execution-native-fixtures.ts")};
+}
+function setupCode(raw: unknown): DiagnoseSetupCode {const row = object(raw, ["helperSha256", "fixtureFactorySha256"]); return {helperSha256: hash(row.helperSha256), fixtureFactorySha256: hash(row.fixtureFactorySha256)};}
+export function validateDiagnosticScaffolding(raw: unknown, expected: DiagnoseSetupCode, payload?: unknown): void {
+  const row = object(raw, ["v", "kind", "authority", "source", "independentPhysicalAttestation", "state", "reason", "helperSha256", "fixtureFactorySha256", "setup", "current", "clockScope", "components"]);
+  if (row.v !== 1 || row.kind !== "synthetic-native-scaffolding" || row.authority !== "harness-observed" || row.source !== "visible-facts-only" || row.independentPhysicalAttestation !== false || row.clockScope !== "child-parent-process-only") fail("Diagnose scaffolding authority or clock scope is invalid");
+  if (row.helperSha256 !== expected.helperSha256 || row.fixtureFactorySha256 !== expected.fixtureFactorySha256) fail("Diagnose scaffolding hashes differ from explicit setup code binding");
+  if (row.state !== "materialized" && row.state !== "skipped" || row.state === "materialized" && row.reason !== null || row.state === "skipped" && row.reason !== "no-visible-producer") fail("Diagnose scaffolding state and reason disagree");
+  if (typeof row.components !== "string" || !row.components.trim() || row.components.length > 1024 || /\p{Cc}/u.test(row.components)) fail("Diagnose component clock scope is missing");
+  for (const field of ["setup", "current"]) {const clock = object(row[field], ["wallMs", "parentCpuSeconds", "subprocessCpuSeconds"]); if (clock.subprocessCpuSeconds !== "unknown") fail("Diagnose subprocess CPU must stay unknown"); for (const unit of ["wallMs", "parentCpuSeconds"]) if (typeof clock[unit] !== "number" || !Number.isFinite(clock[unit]) || clock[unit] < 0) fail("Diagnose phase clock must be finite and nonnegative");}
+  if (payload !== undefined && (row.state === "skipped") !== (resolveDiagnosticFixture(payload).provenance.attemptId === null)) fail("Diagnose scaffolding skip state differs from visible producer facts");
+}
+function observationScaffolding(row: TreatmentObservation, expected: DiagnoseSetupCode, payload?: unknown): void {
+  if (canonical(row.diagnoseSetupCode) !== canonical(expected)) fail("diagnostic setup code binding differs from measured helper inventory");
+  if (row.result !== null || row.integration !== null) {
+    if (!plain(row.integration)) fail("observed Diagnose result requires scaffolding metadata");
+    validateDiagnosticScaffolding(row.integration.scaffolding, expected, payload);
+  }
+}
 export function treatmentMatches(trial: TreatmentTrial, truth: unknown, seed: number, result: unknown): boolean {
   if (!plain(truth)) fail("sealed expected object required");
   if (trialName(trial) === "diagnose") return canonical(diagnostic(result)) === canonical(diagnostic(truth));
@@ -176,8 +200,9 @@ function exclusive(file: string, text: string): void {
   finally {if (existsSync(temp)) unlinkSync(temp);}
 }
 export function validateTreatmentObservation(raw: unknown): TreatmentObservation {
-  const row = object(bounded(raw), ["v", "authority", "trial", "caseId", "caseIndex", "slot", "seed", "repetition", "condition", "slotOrder", "executedSlot", "arm", "codeSha256", "methodSha256", "inputSha256", "expectedSha256", "status", "cause", "matched", "result", "integration", "processWallMs", "humanTimeToFind", "costs", "containerCpuSeconds", "artifact", "logs"]);
-  const trial = trialName(row.trial);
+  const normalized = bounded(raw); if (!plain(normalized)) fail("closed observation object required");
+  const trial = trialName(normalized.trial);
+  const row = object(normalized, ["v", "authority", "trial", "caseId", "caseIndex", "slot", "seed", "repetition", "condition", "slotOrder", "executedSlot", "arm", "codeSha256", "methodSha256", "inputSha256", "expectedSha256", "status", "cause", "matched", "result", "integration", "processWallMs", "humanTimeToFind", "costs", "containerCpuSeconds", "artifact", "logs", ...(trial === "diagnose" ? ["diagnoseSetupCode"] : [])]);
   if (row.v !== 1 || row.authority !== "harness-observed" || typeof row.caseId !== "string" || !/^[a-z][a-z0-9-]{0,63}$/.test(row.caseId) || !ARMS[trial].includes(row.arm as TreatmentArm) || !STATUSES.includes(row.status as TreatmentStatus) || !["cold", "warm"].includes(String(row.condition)) || row.humanTimeToFind !== "unknown" || ![true, false, "unknown"].includes(row.matched as boolean | string)) fail("observation identity or state is invalid");
   integer(row.caseIndex, 0, 47); integer(row.slot, 0, SLOTS - 1); integer(row.repetition, 0, 2); integer(row.seed, -2147483648, 2147483647); integer(row.executedSlot, 0, 1);
   const order = array(row.slotOrder, 2); if (order.length !== 2 || new Set(order).size !== 2 || order.some(arm => !ARMS[trial].includes(arm as TreatmentArm)) || order[row.executedSlot as number] !== row.arm) fail("paired slot order is invalid");
@@ -188,6 +213,7 @@ export function validateTreatmentObservation(raw: unknown): TreatmentObservation
   if (row.containerCpuSeconds !== "unknown" && (typeof row.containerCpuSeconds !== "number" || !Number.isFinite(row.containerCpuSeconds) || row.containerCpuSeconds < 0)) fail("container CPU time is invalid");
   validateCostRecord(object(row.costs, COST_FIELDS));
   for (const artifact of [row.artifact, ...(row.logs === null ? [] : Object.values(object(row.logs, ["stdout", "stderr"])))]) if (artifact !== null) {const entry = object(artifact, ["sha256", "bytes"]); hash(entry.sha256); integer(entry.bytes, 0, TREATMENT_BUNDLE_BYTES);}
+  if (trial === "diagnose") observationScaffolding(row as unknown as TreatmentObservation, setupCode(row.diagnoseSetupCode));
   return row as unknown as TreatmentObservation;
 }
 export function readTreatmentObservation(file: string): TreatmentObservation {try {return validateTreatmentObservation(JSON.parse(readTextBounded(file, TREATMENT_RECEIPT_BYTES, {noFollow: true})));} catch {return fail("slot receipt is malformed, linked, unreadable or over-bound");}}
@@ -209,7 +235,7 @@ export function runTreatmentTrials(rootArg: string, outputArg: string, imageDige
   if (!temporaryOutput || isAbsolute(temporaryOutput) || temporaryOutput === ".." || temporaryOutput.startsWith(".." + sep)) fail("output must be inside the controller-capped /tmp filesystem");
   if (lstatSync(dirname(output)).isSymbolicLink() || realpathSync(dirname(output)) !== dirname(output)) fail("output parent must be a physical directory");
   const planned = planCases(cases, trial, protocol.design.seedSets.firstVariant);
-  const rows: TreatmentObservation[] = planned.map(({row, slot}, index) => ({...slot, v: 1, authority: "harness-observed", trial, caseId: row.id, caseIndex: row.index, slot: index, codeSha256: code.codeSha256, methodSha256: registration.bindings.methodSha256, inputSha256: row.inputSha256, expectedSha256: row.expectedSha256, status: "unknown", cause: "not-started", matched: "unknown", result: null, integration: null, processWallMs: "unknown", humanTimeToFind: "unknown", costs: unknownCosts(), containerCpuSeconds: "unknown", artifact: null, logs: null}));
+  const rows: TreatmentObservation[] = planned.map(({row, slot}, index) => ({...slot, ...(trial === "diagnose" ? {diagnoseSetupCode: diagnoseSetupCode(code)} : {}), v: 1, authority: "harness-observed", trial, caseId: row.id, caseIndex: row.index, slot: index, codeSha256: code.codeSha256, methodSha256: registration.bindings.methodSha256, inputSha256: row.inputSha256, expectedSha256: row.expectedSha256, status: "unknown", cause: "not-started", matched: "unknown", result: null, integration: null, processWallMs: "unknown", humanTimeToFind: "unknown", costs: unknownCosts(), containerCpuSeconds: "unknown", artifact: null, logs: null}));
   const work = mkdtempSync(join(tmpdir(), "ares-treatment-")), privateCode = join(work, "code"), home = join(work, "home"), files: FileIdentity[] = [];
   let materialized = 0, retained = 0, transferred = 0, createdOutput = false, trialCpu = 0, totalChildCpu = 0, stopped = false, failure: TreatmentTrialManifest["failure"] = null;
   const retainedInputs = new Map<string, number>();
@@ -266,6 +292,7 @@ export function runTreatmentTrials(rootArg: string, outputArg: string, imageDige
               observation.artifact = {sha256: sha256(bytes), bytes: bytes.length};
               const output = object(bounded(JSON.parse(new TextDecoder("utf-8", {fatal: true}).decode(bytes))), ["result", "integration"]);
               observation.result = output.result; observation.integration = output.integration;
+              if (trial === "diagnose") observationScaffolding(observation, diagnoseSetupCode(code), entry.row.payload);
               observation.matched = treatmentMatches(trial, entry.row.truth, observation.seed, output.result);
               observation.status = observation.matched ? "succeeded" : "failed"; observation.cause = observation.matched ? null : "expected-mismatch";
             } finally {observation.costs.verificationCpuSeconds = cpu(verificationCpu); observation.costs.verificationWallMs = performance.now() - verificationWall;}
@@ -357,7 +384,7 @@ export function readTreatmentTrialManifest(output: string, root = fileURLToPath(
   const registered = readRegisteredTreatmentSchedule(root, manifest.trial);
   if (manifest.schedule.sha256 !== registered.sha256 || canonical(manifest.bindings) !== canonical(registered.bindings)
     || manifest.methodSha256 !== registered.methodSha256 || manifest.inputSha256 !== registered.inputSha256 || manifest.expectedSha256 !== registered.expectedSha256) fail("manifest differs from the frozen registered schedule or source bindings");
-  const registration = verifyPreregistration(root, join(root, FROZEN_RECEIPT)), truth = new Map(loadCases(root, manifest.trial, registration).map(row => [row.id, row.truth]));
+  const registration = verifyPreregistration(root, join(root, FROZEN_RECEIPT)), cases = loadCases(root, manifest.trial, registration), truth = new Map(cases.map(row => [row.id, row.truth])), payload = new Map(cases.map(row => [row.id, row.payload]));
   const rows: TreatmentObservation[] = [];
   for (const entry of manifest.files) {
     const file = join(output, entry.path), text = readTextBounded(file, TREATMENT_RECEIPT_BYTES, {noFollow: true});
@@ -366,6 +393,7 @@ export function readTreatmentTrialManifest(output: string, root = fileURLToPath(
     if (row.trial !== manifest.trial || row.slot !== Number(entry.path.slice(5, 8)) || row.codeSha256 !== manifest.code.codeSha256 || row.methodSha256 !== manifest.methodSha256) fail("slot receipt differs from its trial/code binding");
     const expected = registered.slots[row.slot];
     if (!expected || Object.entries(expected).some(([key, value]) => canonical(row[key as keyof TreatmentObservation]) !== canonical(value))) fail("slot identity differs from the frozen case, seed, repetition, condition, arm or input/expected pair");
+    if (manifest.trial === "diagnose") observationScaffolding(row, diagnoseSetupCode(manifest.code), payload.get(row.caseId));
     if (row.matched !== "unknown" && treatmentMatches(manifest.trial, truth.get(row.caseId), row.seed, row.result) !== row.matched) fail("slot matched flag differs from sealed evaluator truth");
     rows.push(row);
   }

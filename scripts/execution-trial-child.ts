@@ -1,6 +1,9 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import {mkdirSync, mkdtempSync, rmSync} from "node:fs";
+import {fileURLToPath} from "node:url";
+import * as diagnosticSetup from "./execution-diagnose-setup.ts";
 import { types } from "node:util";
-import { plain, readTextBounded, sha256, writeAtomic } from "../src/study.ts";
+import { plain, readBytesBounded, readTextBounded, sha256, writeAtomic } from "../src/study.ts";
 import { resolveDiagnosticFixture, type DiagnosticObservation } from "./execution-diagnose.ts";
 import { diagnoseTreatment, type DiagnosticLineageTreatment } from "./execution-lineage.ts";
 import * as reuseAdapter from "./execution-trial-reuse.ts";
@@ -115,6 +118,34 @@ function reuseIntegration(value: ReuseTrialArmResult) {
       sourceSetupScope: token(value.instrumentation.sourceSetupScope), currentScope: token(value.instrumentation.currentScope)},
     limitations: value.limitations.map(item => info(item)), physicalIsolation: "not-established"};
 }
+function diagnosticClock(wall: number, cpu: NodeJS.CpuUsage) {
+  const elapsed = process.cpuUsage(cpu);
+  return {wallMs: performance.now() - wall, parentCpuSeconds: (elapsed.user + elapsed.system) / 1_000_000, subprocessCpuSeconds: "unknown" as const};
+}
+async function executeDiagnostic(arm: Arm, input: Record<string, unknown>, parent: string) {
+  const wall = performance.now(), cpu = process.cpuUsage(), baseline = resolveDiagnosticFixture(input);
+  const helperSha256 = sha256(readBytesBounded(fileURLToPath(new URL("./execution-diagnose-setup.ts", import.meta.url)), OUTPUT_BYTES, {noFollow: true}));
+  const fixtureFactorySha256 = sha256(readBytesBounded(fileURLToPath(new URL("./execution-native-fixtures.ts", import.meta.url)), OUTPUT_BYTES, {noFollow: true}));
+  let nativeRoot: string | undefined;
+  try {
+    let dir = parent;
+    const skipped = baseline.provenance.attemptId === null;
+    if (!skipped) {
+      nativeRoot = mkdtempSync(join(resolve(parent), "native-scaffold-"));
+      dir = join(nativeRoot, "study"); const work = join(nativeRoot, "executor");
+      mkdirSync(dir, {mode: 0o700}); mkdirSync(work, {mode: 0o700});
+      await diagnosticSetup.bootstrapVisibleDiagnosticStudy(input, dir, work);
+    }
+    const setup = diagnosticClock(wall, cpu), currentWall = performance.now(), currentCpu = process.cpuUsage();
+    const output = arm === "baseline"
+      ? {result: diagnosticResult(resolveDiagnosticFixture(input)), integration: {v: 1, kind: "diagnostic-fixture-baseline", authority: "harness-observed", nativeProducerRead: false, humanTimeToFind: "unknown", costs: "unknown", physicalIsolation: "not-established"}}
+      : (() => {const value = diagnoseTreatment(dir, input); return {result: diagnosticResult(value.diagnostic), integration: diagnosticIntegration(value)};})();
+    const current = diagnosticClock(currentWall, currentCpu);
+    return {...output, integration: {...output.integration, scaffolding: {v: 1, kind: "synthetic-native-scaffolding", authority: "harness-observed", source: "visible-facts-only", independentPhysicalAttestation: false,
+      state: skipped ? "skipped" : "materialized", reason: skipped ? "no-visible-producer" : null, helperSha256, fixtureFactorySha256, setup, current,
+      clockScope: "child-parent-process-only", components: "setup and current are subsets of scheduled process totals, never added again"}}};
+  } finally {if (nativeRoot) rmSync(nativeRoot, {recursive: true, force: true});}
+}
 /** Candidate-only child boundary; studyDir is a private parent binding, never a payload locator. */
 export async function executeTreatmentFixture(trial: Trial, arm: Arm, payload: unknown, seed: number, studyDir: string): Promise<{result: unknown; integration: unknown}> {
   if (!["diagnose", "reuse"].includes(trial) || !["baseline", "treatment"].includes(arm) || !Number.isSafeInteger(seed) || Math.abs(seed) > 1_000_000) fail("trial-arm-or-seed-invalid");
@@ -125,11 +156,7 @@ export async function executeTreatmentFixture(trial: Trial, arm: Arm, payload: u
       const value = await reuseAdapter.runReuseTrialArm(input, seed, arm === "baseline" ? "off" : "eligible");
       output = {result: values(value.currentObserved), integration: reuseIntegration(value)};
     }
-    else if (arm === "baseline") output = {result: diagnosticResult(resolveDiagnosticFixture(input)), integration: {v: 1, kind: "diagnostic-fixture-baseline", authority: "harness-observed", nativeProducerRead: false, humanTimeToFind: "unknown", costs: "unknown", physicalIsolation: "not-established"}};
-    else {
-      const value = diagnoseTreatment(studyDir, input);
-      output = {result: diagnosticResult(value.diagnostic), integration: diagnosticIntegration(value)};
-    }
+    else output = await executeDiagnostic(arm, input, studyDir);
   } catch (error) { if (error instanceof TrialChildError) throw error; return fail(`${trial}-adapter-unavailable`, "inspect the admitted private study and frozen candidate payload, then retry without fabricating producer records"); }
   if (Buffer.byteLength(JSON.stringify(output)) > OUTPUT_BYTES) fail("producer-output-bound");
   return output;

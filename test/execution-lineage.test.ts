@@ -1,44 +1,23 @@
 import { expect, spyOn, test } from "bun:test";
-import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import * as lineage from "../src/provenance.ts";
 import { diagnoseTreatment, LINEAGE_TREATMENT_BYTES } from "../scripts/execution-lineage.ts";
 import { resolveDiagnosticFixture, DIAGNOSTIC_BYTES } from "../scripts/execution-diagnose.ts";
-import { init, protocol as setProtocol } from "../src/commands.ts";
-import { designBinding, protocolHash } from "../src/exp/protocol.ts";
 import { ATTEMPT_BYTES } from "../src/exp/attempts.ts";
-import { metricAttempt, metricProtocol } from "./metric-fixtures.ts";
 import { provenanceFixture } from "./provenance-fixtures.ts";
-import { commit, plain, readJsonFile, readTextBounded, readBytesBounded, sha256, STUDY_BYTES, writeAtomic } from "../src/study.ts";
-import { fakeHttp, tempDir } from "./helpers.ts";
+import { plain, readJsonFile, readTextBounded, readBytesBounded, sha256, writeAtomic } from "../src/study.ts";
+import { tempDir } from "./helpers.ts";
+import { bootstrapVisibleDiagnosticStudy } from "../scripts/execution-diagnose-setup.ts";
 
 const LEDGER_BYTES = 64 * 1024 * 1024;
-const root = resolve(import.meta.dir, ".."), actor = {kind: "person" as const, id: "synthetic-fixture-bootstrap"};
+const root = resolve(import.meta.dir, "..");
 const corpus = JSON.parse(readTextBounded(join(root, "test/fixtures/execution-eval/corpus.json"), 65_536)) as {cases: {trial: string; input: string}[]};
 const cases = corpus.cases.filter(row => row.trial === "diagnose");
 function payload(file: string): Record<string, unknown> { const wrapper = JSON.parse(readTextBounded(join(root, file), DIAGNOSTIC_BYTES)); return wrapper.input; }
-/** Unit scaffolding from visible ids/commit/status/parent facts only, never expected files or outcomes. */
+/** The runtime and unit test share the one reviewed visible-facts bootstrap. */
 async function bootstrap(value: Record<string, unknown>) {
-  const dir = tempDir(), work = tempDir(), created = init(dir, {question: "Synthetic producer metadata fixture", mode: "experiment"}, {actor});
-  const study = plain(value.study) ? value.study : {}, nativeStudy = {...created.study, id: study.id};
-  writeAtomic(join(dir, "study.json"), JSON.stringify(nativeStudy) + "\n", STUDY_BYTES);
-  mkdirSync(join(dir, "task", "evaluator"), {recursive: true}); writeAtomic(join(dir, "task", "task.md"), "synthetic task", 1024);
-  const visible = Array.isArray(value.attempts) ? value.attempts.filter(plain) : [], seeds = [...new Set(visible.map(attempt => Number.isSafeInteger(attempt.seed) ? Number(attempt.seed) : 1))];
-  const protocol = {...metricProtocol(), seeds}; await setProtocol(dir, protocol, {actor, http: fakeHttp([]).http});
-  const artifact = plain(value.artifact) ? value.artifact : {}, events = Array.isArray(value.events) ? value.events.filter(plain) : [];
-  for (const fact of visible) {
-    const record = metricAttempt(), id = String(fact.id), run = typeof fact.run === "string" ? fact.run : "investigate", recordPath = join(dir, "runs", run, "attempts", `${id}.json`);
-    Object.assign(record, {id, studyId: study.id, commit: fact.commit, status: fact.status, seed: Number.isSafeInteger(fact.seed) ? fact.seed : 1, run,
-      protocol, protocolHash: protocolHash(protocol), sealBinding: designBinding(dir)!, metrics: [], outputs: [], label: "synthetic metadata scaffolding", executor: {v: 1, kind: "local", workdir: work},
-      paths: {snapshot: join(work, String(study.id), id, "snapshot"), output: join(work, String(study.id), id, "output"), evaluator: join(work, String(study.id), id, "evaluator"), result: join(work, String(study.id), id, "result")}});
-    if (fact.status === "running") delete record.endedAt; else record.endedAt = "2030-01-01T00:00:01Z";
-    if (typeof fact.parentAttemptId === "string" && events.some(event => event.type === "retry.requested" && event.childAttemptId === fact.id && event.sourceAttemptId === fact.parentAttemptId)) record.retryOf = fact.parentAttemptId;
-    if (artifact.producerAttemptId === fact.id && typeof artifact.digest === "string") record.outputs = [{path: join(work, String(study.id), id, "output", "artifact.json"), sha256: artifact.digest, bytes: 0}];
-    commit(dir, [[recordPath, JSON.stringify(record) + "\n", 1024 * 1024]], [
-      {actor, type: "attempt.started", data: {id, run, commit: fact.commit, seed: record.seed}},
-      {actor, type: `attempt.${String(fact.status)}`, data: {id, run, stage: record.stage, status: fact.status}},
-    ]);
-  }
+  const dir = tempDir(), work = tempDir();
+  await bootstrapVisibleDiagnosticStudy(value, dir, work);
   return dir;
 }
 

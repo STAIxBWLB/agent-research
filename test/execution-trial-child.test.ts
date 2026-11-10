@@ -10,23 +10,32 @@ import {executeTreatmentFixture} from "../scripts/execution-trial-child.ts";
 import type {ReuseTrialArmResult} from "../scripts/execution-trial-reuse.ts";
 import type {DiagnosticLineageTreatment} from "../scripts/execution-lineage.ts";
 
-const hash = "a".repeat(64), commit = "b".repeat(40);
-const diagnosticPayload = {request: "Identify the synthetic producer", study: {selectedHead: commit}, attempts: [{id: "synthetic-attempt", commit, status: "succeeded", seed: 3}], artifact: {producerAttemptId: "synthetic-attempt", present: true}};
+const hash = "a".repeat(64), commit = "b".repeat(40), diagnosticAttempt = "a".repeat(16);
+const diagnosticPayload = {request: "Identify the synthetic producer", study: {id: "fixture-study", selectedHead: commit}, attempts: [{id: diagnosticAttempt, commit, status: "succeeded", seed: 3}], artifact: {producerAttemptId: diagnosticAttempt, present: true}};
 const reusePayload = {request: "Compute the synthetic pipeline", workload: {values: [1, 2], seeds: [3]}, currentContext: {method: "synthetic", globalCodeDigest: hash}, source: null};
 
-test("real child CLI accepts ordinary nested synthetic Diagnose input without a measurement run", () => {
-  const dir = tempDir(), input = join(dir, "candidate.json"), output = join(dir, "result.json");
+test("real child CLI gives both Diagnose arms the same explicit synthetic native setup", () => {
+  const dir = tempDir(), input = join(dir, "candidate.json"), script = fileURLToPath(new URL("../scripts/execution-trial-child.ts", import.meta.url));
   writeAtomic(input, JSON.stringify(diagnosticPayload), 16_384, 0o600);
-  const script = fileURLToPath(new URL("../scripts/execution-trial-child.ts", import.meta.url));
-  const child = spawnSync(process.execPath, [script, "diagnose", "current-workflow", input, output, "3"], {
-    cwd: dir, env: {...process.env, HOME: dir, AGENTHUB_HOME: join(dir, "hub")}, encoding: "utf8", timeout: 15_000, maxBuffer: 65_536,
-  });
-  expect(child.error).toBeUndefined(); expect(child.status).toBe(0); expect(child.stderr).toBe("");
-  const result = JSON.parse(readTextBounded(output, 65_536, {noFollow: true}));
-  expect(result.result).toMatchObject({provenance: {attemptId: "synthetic-attempt", head: commit, status: "succeeded", completeness: "complete"}, nextAction: "inspect-terminal-result"});
-  expect(result.integration).toMatchObject({kind: "diagnostic-fixture-baseline", nativeProducerRead: false, humanTimeToFind: "unknown", costs: "unknown"});
-  expect(Object.keys(result).sort()).toEqual(["integration", "result"]);
+  const results: Record<string, any>[] = [];
+  for (const arm of ["current-workflow", "H1-A1-C1-lineage-view"]) {
+    const output = join(dir, `${arm}.json`);
+    const child = spawnSync(process.execPath, [script, "diagnose", arm, input, output, "3"], {
+      cwd: dir, env: {...process.env, HOME: dir, AGENTHUB_HOME: join(dir, "hub")}, encoding: "utf8", timeout: 15_000, maxBuffer: 65_536,
+    });
+    expect(child.error).toBeUndefined(); expect(child.status).toBe(0); expect(child.stderr).toBe("");
+    const result = JSON.parse(readTextBounded(output, 65_536, {noFollow: true})); results.push(result);
+    expect(result.result).toMatchObject({provenance: {attemptId: diagnosticAttempt, head: commit, status: "succeeded", completeness: "complete"}, nextAction: "inspect-terminal-result"});
+    expect(result.integration.scaffolding).toMatchObject({kind: "synthetic-native-scaffolding", authority: "harness-observed", source: "visible-facts-only", state: "materialized", independentPhysicalAttestation: false});
+    expect(result.integration.scaffolding.helperSha256).toHaveLength(64); expect(result.integration.scaffolding.fixtureFactorySha256).toHaveLength(64);
+    expect(result.integration.scaffolding.setup.wallMs).toBeGreaterThanOrEqual(0); expect(result.integration.scaffolding.current.parentCpuSeconds).toBeGreaterThanOrEqual(0);
+    expect(Object.keys(result).sort()).toEqual(["integration", "result"]);
+  }
+  expect(results[0]!.result).toEqual(results[1]!.result);
+  expect(results[0]!.integration.scaffolding.helperSha256).toBe(results[1]!.integration.scaffolding.helperSha256);
+  expect(results[0]!.integration.nativeProducerRead).toBe(false); expect(results[1]!.integration.state).toBe("matched");
 });
+
 function armResult(mode: "off" | "eligible"): ReuseTrialArmResult {
   const ref = {attemptId: "a".repeat(16), stage: "prepare", sha256: hash};
   const phase = (wallMs: number, parentCpuSeconds: number) => ({wallMs, parentCpuSeconds, subprocessCpuSeconds: "unknown" as const});
@@ -90,22 +99,22 @@ test("private producer info refuses without echoing the path or underlying excep
 test("Diagnose baseline resolves visible fixture facts without invoking native lineage", async () => {
   const called = spyOn(lineage, "diagnoseTreatment").mockImplementation(() => {throw new Error("must not read native sources");});
   try {
-    const result = await executeTreatmentFixture("diagnose", "baseline", diagnosticPayload, 3, "/private/study");
-    expect(result.result).toMatchObject({provenance: {attemptId: "synthetic-attempt", head: commit, status: "succeeded", completeness: "complete"}, nextAction: "inspect-terminal-result"});
+    const result = await executeTreatmentFixture("diagnose", "baseline", diagnosticPayload, 3, tempDir());
+    expect(result.result).toMatchObject({provenance: {attemptId: diagnosticAttempt, head: commit, status: "succeeded", completeness: "complete"}, nextAction: "inspect-terminal-result"});
     expect(result.integration).toMatchObject({nativeProducerRead: false, humanTimeToFind: "unknown", costs: "unknown"});
     expect(called).not.toHaveBeenCalled();
   } finally {called.mockRestore();}
 });
 
-test("Diagnose treatment preserves unavailable metadata without manufacturing native records", async () => {
+test("Diagnose treatment preserves an unavailable reader result after explicit synthetic setup", async () => {
   const adapter: DiagnosticLineageTreatment = {v: 1, kind: "fixture-integration-only", arm: "diagnose-lineage", authority: "harness-observed",
     diagnostic: {provenance: {attemptId: null, head: null, selectedHead: commit, status: "unknown", completeness: "lineage-unavailable"}, nextAction: "inspect-bounded-lineage-source"},
     integration: {state: "unavailable", reason: "native-read-unavailable", producer: null, evidenceSha256: null, producerView: null},
     humanTimeToFind: "unknown", costs: "unknown", resultAuthority: {selection: false, final: false, adoption: false}, limitations: []};
   const called = spyOn(lineage, "diagnoseTreatment").mockReturnValue(adapter);
   try {
-    const result = await executeTreatmentFixture("diagnose", "treatment", diagnosticPayload, 3, "/private/study");
-    expect(called.mock.calls).toEqual([["/private/study", diagnosticPayload]]); expect(result.result).toEqual(adapter.diagnostic);
+    const result = await executeTreatmentFixture("diagnose", "treatment", diagnosticPayload, 3, tempDir());
+    expect(called).toHaveBeenCalledTimes(1); expect(called.mock.calls[0]?.[1]).toEqual(diagnosticPayload); expect(result.result).toEqual(adapter.diagnostic);
     expect(result.integration).toMatchObject({state: "unavailable", reason: "native-read-unavailable", producer: null, lineage: null, comparison: null});
     expect(JSON.stringify(result)).not.toContain("/private/study");
   } finally {called.mockRestore();}

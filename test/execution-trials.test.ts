@@ -4,8 +4,9 @@ import {join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {baselineSlots} from "../scripts/execution-baseline.ts";
 import {bindRunCode} from "../scripts/execution-code-binding.ts";
+import {resolveDiagnosticFixture} from "../scripts/execution-diagnose.ts";
 import {COST_FIELDS} from "../scripts/execution-eval.ts";
-import {TREATMENT_AUTHORITY_DEVIATION, TREATMENT_RECEIPT_BYTES, treatmentSlots, treatmentDenominators, treatmentMatches, treatmentChildCpuSeconds, parseTreatmentCgroupCpu, validateTreatmentObservation, readTreatmentObservation, validateTreatmentTrialManifest, readTreatmentTrialManifest, readRegisteredTreatmentSchedule, serializeTreatmentBundle, type TreatmentObservation, type TreatmentTrialManifest} from "../scripts/execution-trials.ts";
+import {TREATMENT_AUTHORITY_DEVIATION, TREATMENT_RECEIPT_BYTES, treatmentSlots, treatmentDenominators, treatmentMatches, treatmentChildCpuSeconds, parseTreatmentCgroupCpu, validateTreatmentObservation, readTreatmentObservation, validateTreatmentTrialManifest, readTreatmentTrialManifest, readRegisteredTreatmentSchedule, serializeTreatmentBundle, diagnoseSetupCode, validateDiagnosticScaffolding, type DiagnoseSetupCode, type TreatmentObservation, type TreatmentTrialManifest} from "../scripts/execution-trials.ts";
 import {readBytesBounded, readTextBounded, sha256, writeAtomic} from "../src/study.ts";
 import {tempDir} from "./helpers.ts";
 
@@ -29,6 +30,12 @@ function manifest() {
     denominators: treatmentDenominators(rows), costs: observation().costs, admission: {parentCpuSeconds: 1, wallMs: 2, codeMaterializationBytes: 1, tmpfs: {kind: "controller-tmpfs-cap", bytes: 16 * 1024 * 1024}},
     accounting: {cpuScope: "synthetic scope", components: "subsets, never summed again", transferBytes: 65536, retainedBytes: 65537, unpublishedSlots: 144, containerCpuSeconds: "unknown", containerCpuScope: "admitted-container-cgroup"},
     files: [] as {path: string; sha256: string; bytes: number}[], limitations: ["synthetic validator fixture only, no measurements"]};
+}
+function scaffolding(binding: DiagnoseSetupCode, skipped = false) {
+  return {v: 1, kind: "synthetic-native-scaffolding", authority: "harness-observed", source: "visible-facts-only", independentPhysicalAttestation: false,
+    state: skipped ? "skipped" : "materialized", reason: skipped ? "no-visible-producer" : null, ...binding,
+    setup: {wallMs: 2, parentCpuSeconds: 0.1, subprocessCpuSeconds: "unknown"}, current: {wallMs: 3, parentCpuSeconds: 0.2, subprocessCpuSeconds: "unknown"},
+    clockScope: "child-parent-process-only", components: "setup and current are subsets, never added again"};
 }
 
 test("paired slots preserve original corpus parity, seed order and cold/warm labels for all144 slots", () => {
@@ -154,4 +161,37 @@ test("rehashed slot identity forgeries fail against the frozen144-slot schedule 
   publish(original); raw.schedule.sha256 = "0".repeat(64);
   writeAtomic(join(dir, "manifest.json"), JSON.stringify(raw), TREATMENT_RECEIPT_BYTES);
   expect(() => readTreatmentTrialManifest(dir, root)).toThrow("frozen registered schedule");
+});
+
+test("Diagnose alone requires setup code bindings and keeps scaffolding phase clocks separate", () => {
+  const binding = {helperSha256: "a".repeat(64), fixtureFactorySha256: "b".repeat(64)};
+  const row: TreatmentObservation = {...observation(), ...treatmentSlots(0, [3, 11, 19], "diagnose")[0]!, trial: "diagnose", diagnoseSetupCode: binding, result: {}, integration: {scaffolding: scaffolding(binding)}};
+  row.costs.cpuSeconds = 5;
+  expect(validateTreatmentObservation(row).costs.cpuSeconds).toBe(5);
+  const {diagnoseSetupCode: _binding, ...missingBinding} = row;
+  expect(() => validateTreatmentObservation(missingBinding)).toThrow("receipt fields");
+  expect(validateTreatmentObservation(observation()).trial).toBe("reuse");
+  expect(() => validateTreatmentObservation({...row, integration: {scaffolding: {...scaffolding(binding), helperSha256: "c".repeat(64)}}})).toThrow("scaffolding hashes differ");
+  expect(() => validateDiagnosticScaffolding({...scaffolding(binding), current: {wallMs: 1, parentCpuSeconds: -1, subprocessCpuSeconds: "unknown"}}, binding)).toThrow("phase clock");
+  expect(() => validateDiagnosticScaffolding({...scaffolding(binding), independentPhysicalAttestation: true}, binding)).toThrow("authority or clock scope");
+  expect(() => validateDiagnosticScaffolding(scaffolding(binding), binding, {})).toThrow("skip state");
+  expect(() => validateDiagnosticScaffolding(scaffolding(binding, true), binding, {})).not.toThrow();
+});
+
+test("rehashed Diagnose helper forgery fails against the measured historical code inventory", () => {
+  const root = fileURLToPath(new URL("..", import.meta.url)), registered = readRegisteredTreatmentSchedule(root, "diagnose"), code = bindRunCode(root), binding = diagnoseSetupCode(code);
+  const dir = tempDir(), raw = manifest();
+  Object.assign(raw, {trial: "diagnose", bindings: registered.bindings, methodSha256: registered.methodSha256, inputSha256: registered.inputSha256, expectedSha256: registered.expectedSha256, code});
+  raw.schedule.arms = ["current-workflow", "H1-A1-C1-lineage-view"]; raw.schedule.sha256 = registered.sha256;
+  raw.denominators = treatmentDenominators(registered.slots.map(slot => ({arm: slot.arm, status: "unknown" as const}))); raw.accounting.unpublishedSlots = 143;
+  const first = registered.slots[0]!, input = JSON.parse(readTextBounded(join(root, `test/fixtures/execution-eval/${first.caseId}.input.json`), 16384)).input;
+  const skipped = resolveDiagnosticFixture(input).provenance.attemptId === null;
+  const row: TreatmentObservation = {...observation(), ...first, trial: "diagnose", codeSha256: code.codeSha256, methodSha256: registered.methodSha256,
+    diagnoseSetupCode: binding, result: {}, integration: {scaffolding: scaffolding(binding, skipped)}};
+  const publish = () => {const text = JSON.stringify(row) + "\n"; writeAtomic(join(dir, "slot-000.json"), text, TREATMENT_RECEIPT_BYTES); raw.files = [{path: "slot-000.json", sha256: sha256(text), bytes: Buffer.byteLength(text)}]; writeAtomic(join(dir, "manifest.json"), JSON.stringify(raw), TREATMENT_RECEIPT_BYTES);};
+  publish(); expect(readTreatmentTrialManifest(dir, root).trial).toBe("diagnose");
+  row.diagnoseSetupCode = {...binding, helperSha256: "0".repeat(64)};
+  row.integration = {scaffolding: scaffolding(row.diagnoseSetupCode, skipped)};
+  publish();
+  expect(() => readTreatmentTrialManifest(dir, root)).toThrow("diagnostic setup code binding differs from measured helper inventory");
 });
