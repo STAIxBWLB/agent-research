@@ -1,0 +1,165 @@
+{
+  "v": 1,
+  "status": "preregistered-amendment-not-measured",
+  "amends": {
+    "path": "docs/verification/execution-eval-frozen.json",
+    "sha256": "ad2c48aade8fd430727f7c16f90bb33a9283f5fc71593b2fcf8c98f5c58a2d60",
+    "receiptSha256": "72f36f856c2559bf7a626689bca3825ae3cfe49f27c9d8abf544f24bd2778e20"
+  },
+  "bindings": {
+    "methodSha256": "21ad9b9c28aed72024cc11e64c64d26d36bf865d011020bd9f34daec7acd1509",
+    "inputSha256": "f72dd4ec4f2591a9fd7c291ca04758e22c9b2f062dfccdf629b08ccd3f812513",
+    "expectedSha256": "0f09f157a455eeed392dd57a04ab5330e2dedf36116e57db6eeba37b665f6d20",
+    "protocolSha256": "f454c65f24dd43cec92054af35686c21e9d2d929a799b8710f5977600eff818f",
+    "thresholdsSha256": "7f4ac614c71f8ab97e5b10454b091b15feaf9caf20e7011f4b166c59ea867b72",
+    "denominatorsSha256": "fb66698580a5a9c945eba8ea6bb1eb3c729b8e765ba1133bb19e62534e006955"
+  },
+  "files": [
+    {
+      "path": "docs/verification/execution-eval-frozen.json",
+      "sha256": "ad2c48aade8fd430727f7c16f90bb33a9283f5fc71593b2fcf8c98f5c58a2d60",
+      "bytes": 16837
+    },
+    {
+      "path": "docs/verification/execution-eval-preregistration.json",
+      "sha256": "32a28ae8ecacd2eee83802bdc70301d0b82a1291597aec4ca9365428857a46ae",
+      "bytes": 13644
+    },
+    {
+      "path": "docs/verification/execution-eval-protocol.md",
+      "sha256": "0903897938df02ec35390966404fd2ab7858c61b27060834535257b868f75edb",
+      "bytes": 13405
+    },
+    {
+      "path": "docs/verification/execution-eval-supervision-v2-protocol.md",
+      "sha256": "f454c65f24dd43cec92054af35686c21e9d2d929a799b8710f5977600eff818f",
+      "bytes": 14354
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/corpus.json",
+      "sha256": "12cdafed9cee65b28d25eca74cf72c6a4e5d6fe5c47fce431107cb54b6f75c72",
+      "bytes": 5057
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-quiet-check-sequence.input.json",
+      "sha256": "df552ff7d13dc0ab5346252f02d9967672df2a819f9ca755433de715733451c6",
+      "bytes": 888
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-quiet-check-sequence.expected.json",
+      "sha256": "467207ef90f393df809f8600011d99cb1ac8be235e3bfb881a0059c5b744c64c",
+      "bytes": 351
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-recorded-gate-wait.input.json",
+      "sha256": "97eca882b489845a76c6bc835d842c7c636b24189d7c002e1dffa5609ccaefc9",
+      "bytes": 829
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-recorded-gate-wait.expected.json",
+      "sha256": "a790d91137bbbfa94dc97f4c963cadfea4e27c4ada38e5e0dbb0c7192e3b93f1",
+      "bytes": 387
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-completed-intact-deliverables.input.json",
+      "sha256": "4db398108f826cf35d11e696e624075bd3d17c00f2c43e99d4954d3894019524",
+      "bytes": 1135
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-completed-intact-deliverables.expected.json",
+      "sha256": "eaaa5c124c6e5a23dcb82b42e269aa8af66adf4410cbe96fdad15aa8905c806e",
+      "bytes": 362
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-truncated-quiet-revision.input.json",
+      "sha256": "cab754c167b8a13e4d83b5b5904ce4f791db7969f52b12444da1c5be53b347ae",
+      "bytes": 11156
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-ordinary-progress-truncated-quiet-revision.expected.json",
+      "sha256": "431e82edf80471afd38738d5e817a3c6c4c500c5ff9cd7cef2c4c56a80b2693a",
+      "bytes": 436
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-repeated-failure-same-check.input.json",
+      "sha256": "644fa6f1b3d01513da7dc047400909a5600abdc4b4a5a249ec771b9e0dbca087",
+      "bytes": 1058
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-repeated-failure-same-check.expected.json",
+      "sha256": "1b0e9951c4c7dec4c2035c0d9cb9a2c8fe2621b8d02c559f300172f31c19070d",
+      "bytes": 350
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-changed-deliverable-after-pass.input.json",
+      "sha256": "bf83f4d2c25e14fec70a82d75277c7a48ddd2cd14eae207bca1465412b67fe86",
+      "bytes": 1038
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-changed-deliverable-after-pass.expected.json",
+      "sha256": "0bfcd0cd03548d0936411b197302a2755f69992cd8968feb5e9c225ad0d89aad",
+      "bytes": 347
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-overlap-without-integration.input.json",
+      "sha256": "433168b4c088da4681e31a335af4c7ae9eb14ca61e5aefe976cc0c32eff0177d",
+      "bytes": 887
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-overlap-without-integration.expected.json",
+      "sha256": "0fd8e40b0f02affa2e6f7578ed1b813971c59a3ec8850eb694e1340ec172e841",
+      "bytes": 365
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-repeated-failure-current-plan.input.json",
+      "sha256": "824a793a06797db9ccc0b8f547e87eeefcf0fdae503688535db28853b0e1b289",
+      "bytes": 1647
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-true-trigger-repeated-failure-current-plan.expected.json",
+      "sha256": "a979260c3a06906bf80e400d6b6cfaba13ed9dde2ffcd94b0fab43779131cd1d",
+      "bytes": 401
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-absent-measurement.input.json",
+      "sha256": "14d4f5723dcb32685dae74d0b1fcb66ca707d808196a08f6a79c0c6b6ca06216",
+      "bytes": 847
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-absent-measurement.expected.json",
+      "sha256": "ebc97dea3a63c68c28742849cd04a9fd9ccb536ccee1ed05c0eae1fbbda6c315",
+      "bytes": 444
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-long-gap-recorded-progress.input.json",
+      "sha256": "421410b3116e726bbc1c4ab6c57ce4d97f4e254085152b69b208cec0e4e91ca5",
+      "bytes": 896
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-long-gap-recorded-progress.expected.json",
+      "sha256": "07f9de74caf4f649f1a786008d8bf1db5ca68521ed6de3abd82bede6c634a406",
+      "bytes": 396
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-failures-split-by-hand-over.input.json",
+      "sha256": "93d54f879c27af88f2bac391762c575ca01bff4211fd9372fa5d5398325495cd",
+      "bytes": 1157
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-failures-split-by-hand-over.expected.json",
+      "sha256": "29408a3d685d6fa05f0bfea20562a7f3bf4a4a3c9b184b2b13a5c80d019351ae",
+      "bytes": 406
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-unmeasured-changed-ids.input.json",
+      "sha256": "70770884ed71bd62b1564c0f7875d30f3e1828ca77ac78b2854e68ad72c25f16",
+      "bytes": 850
+    },
+    {
+      "path": "test/fixtures/execution-eval-supervision-v2/supervision-v2-misleading-symptom-unmeasured-changed-ids.expected.json",
+      "sha256": "a4a5a62e695417eb2a4074a2043e67b940ce59cc9b4513d0d6f80543bcea84f6",
+      "bytes": 411
+    }
+  ],
+  "receiptSha256": "5fd3cc18a888bd9a11f06db2996a9cff284aae3ff52b3c47eb0609d16a4200cf"
+}
