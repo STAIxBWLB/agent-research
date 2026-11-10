@@ -158,6 +158,13 @@ if (import.meta.main) {
       const file = resolve(output ?? join(root, amendment.AMENDMENT_RECEIPT));
       const receipt = command === "freeze-supervision-v2" ? amendment.freezeSupervisionAmendment(root, file) : amendment.verifySupervisionAmendment(root, file);
       console.log(JSON.stringify({command, status: receipt.status, receiptSha256: receipt.receiptSha256, amends: receipt.amends}));
+    } else if (command === "freeze-reuse-rematerialization-r2" || command === "verify-reuse-rematerialization-r2") {
+      if (extra.length || output?.startsWith("-")) fail("Reuse r2 amendment accepts at most one receipt path and no flags", "use bun scripts/execution-eval.ts freeze-reuse-rematerialization-r2|verify-reuse-rematerialization-r2 [receipt.json]; no trial is run");
+      const amendment = await import("./execution-reuse-rematerialize-r2.ts");
+      const file = resolve(output ?? join(root, amendment.REUSE_R2_RECEIPT));
+      const sealed = command === "freeze-reuse-rematerialization-r2" ? amendment.sealReuseRematerializationR2(root, file) : amendment.verifyReuseRematerializationR2(root, file);
+      if (sealed.state !== "verified") fail(`reuse r2 receipt is ${sealed.state}`, "restore the reviewed r2 sources and receipt, or create a separately reviewed amendment; never overwrite the superseded receipt");
+      console.log(JSON.stringify({command, state: sealed.state, status: sealed.receipt.status, receiptSha256: sealed.receipt.receiptSha256, setupSha256: sealed.receipt.setup.setupSha256, supersedes: sealed.receipt.supersedes}));
     } else if (command === "freeze-reuse-rematerialization" || command === "verify-reuse-rematerialization") {
       if (extra.length || output?.startsWith("-")) fail("Reuse rematerialization accepts at most one receipt path and no flags", "use bun scripts/execution-eval.ts freeze-reuse-rematerialization|verify-reuse-rematerialization [receipt.json]; no evaluator or trial is run");
       const amendment = await import("./execution-reuse-rematerialize.ts");
@@ -172,7 +179,7 @@ if (import.meta.main) {
       if (extra.includes("--emit")) console.log(BASELINE_BUNDLE_PREFIX + emitBaseline(output));
       else console.log(JSON.stringify({ authority: receipt.authority, codeSha256: receipt.code.codeSha256, registrationReceiptSha256: receipt.registrationReceiptSha256, denominators: receipt.denominators }));
     } else {
-      if (extra.length || !["freeze", "verify"].includes(command ?? "")) fail("usage is bun scripts/execution-eval.ts freeze|verify [receipt.json], baseline OUTSIDE_DIR [--emit], integration-check, freeze-supervision-v2|verify-supervision-v2 [receipt.json], or freeze-reuse-rematerialization|verify-reuse-rematerialization [receipt.json]; no treatment-run or supervision command");
+      if (extra.length || !["freeze", "verify"].includes(command ?? "")) fail("usage is bun scripts/execution-eval.ts freeze|verify [receipt.json], baseline OUTSIDE_DIR [--emit], integration-check, freeze-supervision-v2|verify-supervision-v2 [receipt.json], freeze-reuse-rematerialization|verify-reuse-rematerialization [receipt.json], or freeze-reuse-rematerialization-r2|verify-reuse-rematerialization-r2 [receipt.json]; no treatment-run or supervision command");
       const file = resolve(output ?? join(root, FROZEN_RECEIPT));
       const receipt = command === "freeze" ? freezePreregistration(root, file) : verifyPreregistration(root, file);
       console.log(JSON.stringify({ command, status: receipt.status, receiptSha256: receipt.receiptSha256 }));
