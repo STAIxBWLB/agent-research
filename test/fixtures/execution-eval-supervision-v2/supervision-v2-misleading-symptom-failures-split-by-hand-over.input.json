@@ -1,0 +1,46 @@
+{
+  "v": 1,
+  "id": "supervision-v2-misleading-symptom-failures-split-by-hand-over",
+  "trial": "supervision",
+  "scenario": "misleading-symptom",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "facts": {
+      "tasks": [
+        {
+          "id": 503,
+          "state": "in_progress",
+          "history": [
+            {
+              "at": 1760060000000,
+              "by": "peer-a",
+              "event": "accepted"
+            },
+            {
+              "at": 1760060600000,
+              "by": "hub",
+              "event": "check failed",
+              "checkKey": "implement"
+            },
+            {
+              "at": 1760061200000,
+              "by": "hub",
+              "event": "reassigned"
+            },
+            {
+              "at": 1760061800000,
+              "by": "peer-b",
+              "event": "accepted"
+            },
+            {
+              "at": 1760062400000,
+              "by": "hub",
+              "event": "check failed",
+              "checkKey": "implement"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

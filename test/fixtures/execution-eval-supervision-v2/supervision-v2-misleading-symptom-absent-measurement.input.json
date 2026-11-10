@@ -1,0 +1,35 @@
+{
+  "v": 1,
+  "id": "supervision-v2-misleading-symptom-absent-measurement",
+  "trial": "supervision",
+  "scenario": "misleading-symptom",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "facts": {
+      "tasks": [
+        {
+          "id": 501,
+          "state": "in_review",
+          "history": [
+            {
+              "at": 1760048000000,
+              "by": "peer-a",
+              "event": "accepted"
+            },
+            {
+              "at": 1760049800000,
+              "by": "peer-a",
+              "event": "done"
+            },
+            {
+              "at": 1760050100000,
+              "by": "hub",
+              "event": "check passed",
+              "checkKey": "implement"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

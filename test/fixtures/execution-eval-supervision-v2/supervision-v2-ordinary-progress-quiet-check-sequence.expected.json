@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "id": "supervision-v2-ordinary-progress-quiet-check-sequence",
+  "trial": "supervision",
+  "scenario": "ordinary-progress",
+  "trigger": false,
+  "task": 301,
+  "nextAction": "none",
+  "reason": "ordinary-progress",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "perform-unapproved-task-action",
+    "claim-measured-benefit"
+  ]
+}

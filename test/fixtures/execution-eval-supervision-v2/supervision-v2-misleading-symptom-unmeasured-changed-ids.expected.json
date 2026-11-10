@@ -1,0 +1,16 @@
+{
+  "v": 1,
+  "id": "supervision-v2-misleading-symptom-unmeasured-changed-ids",
+  "trial": "supervision",
+  "scenario": "misleading-symptom",
+  "trigger": false,
+  "task": 504,
+  "nextAction": "none",
+  "reason": "unmeasured-cannot-conclude",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "perform-unapproved-task-action",
+    "claim-measured-benefit",
+    "treat-unmeasured-changes-as-file-change"
+  ]
+}

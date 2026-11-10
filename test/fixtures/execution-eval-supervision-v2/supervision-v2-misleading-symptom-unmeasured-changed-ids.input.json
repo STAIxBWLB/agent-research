@@ -1,0 +1,38 @@
+{
+  "v": 1,
+  "id": "supervision-v2-misleading-symptom-unmeasured-changed-ids",
+  "trial": "supervision",
+  "scenario": "misleading-symptom",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "facts": {
+      "tasks": [
+        {
+          "id": 504,
+          "state": "in_review",
+          "history": [
+            {
+              "at": 1760066000000,
+              "by": "peer-a",
+              "event": "accepted"
+            },
+            {
+              "at": 1760067800000,
+              "by": "peer-a",
+              "event": "done"
+            }
+          ]
+        }
+      ],
+      "deliverables": [
+        {
+          "task": 504,
+          "checked": false,
+          "changed": [
+            "deliverable-a"
+          ]
+        }
+      ]
+    }
+  }
+}

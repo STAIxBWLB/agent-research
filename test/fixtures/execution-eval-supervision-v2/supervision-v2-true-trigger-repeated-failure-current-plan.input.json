@@ -1,0 +1,63 @@
+{
+  "v": 1,
+  "id": "supervision-v2-true-trigger-repeated-failure-current-plan",
+  "trial": "supervision",
+  "scenario": "true-trigger",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "facts": {
+      "tasks": [
+        {
+          "id": 405,
+          "state": "in_progress",
+          "history": [
+            {
+              "at": 1760042000000,
+              "by": "peer-a",
+              "event": "accepted"
+            },
+            {
+              "at": 1760042600000,
+              "by": "hub",
+              "event": "check failed",
+              "checkKey": "implement"
+            },
+            {
+              "at": 1760043200000,
+              "by": "hub",
+              "event": "check failed",
+              "checkKey": "implement"
+            },
+            {
+              "at": 1760043800000,
+              "by": "hub",
+              "event": "check failed",
+              "checkKey": "implement"
+            },
+            {
+              "at": 1760044400000,
+              "by": "peer-a",
+              "event": "accepted",
+              "planRevision": {
+                "revision": 2,
+                "fingerprint": "fp-plan-2"
+              }
+            },
+            {
+              "at": 1760045600000,
+              "by": "hub",
+              "event": "check failed",
+              "checkKey": "implement"
+            },
+            {
+              "at": 1760046200000,
+              "by": "hub",
+              "event": "check failed",
+              "checkKey": "implement"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "v": 1,
+  "id": "supervision-v2-ordinary-progress-recorded-gate-wait",
+  "trial": "supervision",
+  "scenario": "ordinary-progress",
+  "input": {
+    "request": "Decide whether an additional supervision proposal is justified; do not execute or change any task.",
+    "facts": {
+      "tasks": [
+        {
+          "id": 302,
+          "state": "in_review",
+          "history": [
+            {
+              "at": 1760003600000,
+              "by": "peer-a",
+              "event": "accepted"
+            },
+            {
+              "at": 1760007200000,
+              "by": "peer-a",
+              "event": "done"
+            }
+          ]
+        }
+      ],
+      "deliverables": [
+        {
+          "task": 302,
+          "checked": true,
+          "changed": [],
+          "missing": []
+        }
+      ]
+    }
+  }
+}

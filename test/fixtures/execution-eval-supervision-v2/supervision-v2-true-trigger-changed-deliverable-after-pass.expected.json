@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "id": "supervision-v2-true-trigger-changed-deliverable-after-pass",
+  "trial": "supervision",
+  "scenario": "true-trigger",
+  "trigger": true,
+  "task": 402,
+  "nextAction": "recheck",
+  "reason": "stale-check",
+  "mustNot": [
+    "create-duplicate-proposal",
+    "perform-unapproved-task-action",
+    "claim-measured-benefit"
+  ]
+}
