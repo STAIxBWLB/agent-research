@@ -212,6 +212,76 @@ test("name collision never kills another study's container", async () => {
   expect(first.status).toBe("failed"); expect(fake.requests.some(r => r.args[0] === "kill")).toBe(false);
 });
 
+test("#149: two studies with the same attempt identity launch without a shared container name", async () => {
+  const left = await setup(), right = await setup();
+  const a = await runAttempt(left.dir, request, left.fake.ctx), b = await runAttempt(right.dir, request, right.fake.ctx);
+  expect(b.id).toBe(a.id);
+  const names = [a.stages.candidate!.containerName!, b.stages.candidate!.containerName!];
+  expect(names[0]).not.toBe(names[1]);
+  expect(a.status).toBe("running"); expect(b.status).toBe("running");
+  for (const [study, name] of [[left, names[0]!], [right, names[1]!]] as const) {
+    expect(study.fake.containers.has(name)).toBe(true);
+    expect(study.fake.containers.has(`ares-${a.id}-candidate`)).toBe(false);
+  }
+  left.fake.containers.get(names[0]!)!.running = false; left.fake.containers.get(names[0]!)!.exitCode = 0;
+  left.fake.containers.get(names[0]!)!.finishedAt = new Date(left.fake.clock.value).toISOString();
+  await reconcileAttempts(left.dir, left.fake.ctx);
+  const evaluator = showAttempt(left.dir, a.id).stages.evaluator!.containerName!;
+  expect(evaluator).not.toBe(showAttempt(right.dir, b.id).stages.candidate!.containerName!);
+  expect(left.fake.containers.has(evaluator)).toBe(true);
+  expect(right.fake.containers.size).toBe(1); expect(right.fake.containers.has(names[1]!)).toBe(true);
+});
+
+test("#149: a foreign container under the new name still fails isolation verification", async () => {
+  const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx), name = first.stages.candidate!.containerName!;
+  const own = fake.containers.get(name)!;
+  // Same name, another study's label: what a leftover container of an earlier study looks like now.
+  fake.containers.set(name, { ...own, args: own.args.map(arg => arg === `ares.study=${first.studyId}` ? "ares.study=another-study" : arg) });
+  await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("executor local: reconcile failed");
+  expect(showAttempt(dir, first.id).error).toContain("container isolation verification");
+  expect(showAttempt(dir, first.id).status).toBe("running");
+  expect(fake.requests.some(r => r.args[0] === "kill")).toBe(false);
+  expect(fake.containers.get(name)!.running).toBe(true);
+});
+
+test("#149: a pre-change attempt record reconciles through its legacy container name", async () => {
+  const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
+  const record = showAttempt(dir, first.id), scoped = record.stages.candidate!.containerName!, legacy = `ares-${record.id}-candidate`;
+  delete record.stages.candidate!.containerName;
+  writeFileSync(join(dir, "runs", record.run, "attempts", `${record.id}.json`), JSON.stringify(record));
+  const container = fake.containers.get(scoped)!; fake.containers.delete(scoped); fake.containers.set(legacy, container);
+  container.running = false; container.exitCode = 0; container.finishedAt = new Date(fake.clock.value).toISOString();
+  await reconcileAttempts(dir, fake.ctx);
+  expect(fake.requests.some(r => r.args[0] === "inspect" && r.args.at(-1) === legacy)).toBe(true);
+  const advanced = showAttempt(dir, first.id);
+  expect(advanced.stage).toBe("evaluator"); expect(advanced.stages.candidate!.exitCode).toBe(0);
+  expect(advanced.stages.evaluator!.containerName).not.toBe(legacy);
+  expect(fake.containers.has(advanced.stages.evaluator!.containerName!)).toBe(true);
+});
+
+test("#149: a pre-change pending stage launches under the name its record resolves", async () => {
+  const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
+  const record = showAttempt(dir, first.id), scoped = record.stages.candidate!.containerName!, legacy = `ares-${record.id}-candidate`;
+  delete record.stages.candidate!.containerName; delete record.stages.candidate!.containerId;
+  record.stages.candidate!.launchPending = true; delete record.launching;
+  writeFileSync(join(dir, "runs", record.run, "attempts", `${record.id}.json`), JSON.stringify(record));
+  fake.containers.clear();
+  const mark = fake.requests.length;
+  expect(scoped).not.toBe(legacy);
+  expect(await reconcileAttempts(dir, fake.ctx)).toHaveLength(1);
+  const runs = fake.requests.slice(mark).filter(r => r.args[0] === "run");
+  expect(runs).toHaveLength(1); expect(runs[0]!.args[runs[0]!.args.indexOf("--name") + 1]).toBe(legacy);
+  expect(fake.containers.size).toBe(1); expect(fake.containers.has(legacy)).toBe(true);
+  const resumed = fake.requests.slice(mark);
+  expect(resumed.some(r => r.args[0] === "inspect" && r.args.at(-1) === legacy)).toBe(true);
+  expect(resumed.some(r => r.args[0] === "ps" && r.args.join(" ").includes(`name=^/${legacy}$`))).toBe(true);
+  const adopted = showAttempt(dir, first.id);
+  expect(adopted.status).toBe("running"); expect(adopted.stages.candidate!.containerId).toBe(fake.containers.get(legacy)!.id);
+  expect(resumed.some(r => r.command === "sh" && r.args.join(" ").includes(`docker kill ${adopted.stages.candidate!.containerId}`))).toBe(true);
+  await reconcileAttempts(dir, fake.ctx);
+  expect(fake.requests.slice(mark).filter(r => r.args[0] === "run")).toHaveLength(1);
+});
+
 test("daemon failure is not confirmed absence and does not free the active attempt", async () => {
   const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx); fake.daemonDown();
   await expect(reconcileAttempts(dir, fake.ctx)).rejects.toThrow("executor local: reconcile failed");
@@ -298,10 +368,10 @@ test("an expired controller cannot overwrite a cancellation after its delayed co
 test("selected seeds reach both executed stages rather than only attempt metadata", async () => {
   const { dir, fake } = await setup();
   for (const seed of [1, 2]) {
-    const attempt = await runAttempt(dir, { ...request, seed }, fake.ctx), candidate = fake.containers.get(`ares-${attempt.id}-candidate`)!;
+    const attempt = await runAttempt(dir, { ...request, seed }, fake.ctx), candidate = fake.containers.get(attempt.stages.candidate!.containerName!)!;
     expect(attempt.status).toBe("running"); expect(candidate.args).toContain(`ARES_SEED=${seed}`);
     candidate.running = false; candidate.finishedAt = new Date(fake.clock.value).toISOString(); await reconcileAttempts(dir, fake.ctx);
-    expect(fake.containers.get(`ares-${attempt.id}-evaluator`)!.args).toContain(`ARES_SEED=${seed}`);
+    expect(fake.containers.get(showAttempt(dir, attempt.id).stages.evaluator!.containerName!)!.args).toContain(`ARES_SEED=${seed}`);
     await cancelAttempt(dir, attempt.id, undefined, fake.ctx);
   }
 });
@@ -325,7 +395,7 @@ test("interrupted running and exited stages recover complete receipts through su
   for (const exitedBeforeRecovery of [false, true]) {
     const { dir, fake } = await setup(), first = await runAttempt(dir, request, fake.ctx);
     for (const stage of ["candidate", "evaluator"] as const) {
-      const record = showAttempt(dir, first.id), container = fake.containers.get(`ares-${first.id}-${stage}`)!;
+      const record = showAttempt(dir, first.id), container = fake.containers.get(record.stages[stage]!.containerName!)!;
       delete record.stages[stage]!.containerId;
       record.stages[stage]!.startedAt = new Date(fake.clock.value - 1000).toISOString();
       if (stage === "candidate") record.sealing.candidateHasNoEvaluator = false;

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { init } from "../src/commands.ts";
-import { buildContainerArgs, checkExecutor, containerName, PROCESS_CONTEXT_ENV_KEYS, processEnvironment, readExecutor, runOnExecutor, setExecutor, shellQuote, spawnRunner, startWatchdog, validateExecutor, type ContainerOptions, type Executor, type ProcessResult } from "../src/exp/executor.ts";
+import { buildContainerArgs, checkExecutor, containerName, PROCESS_CONTEXT_ENV_KEYS, processEnvironment, readExecutor, runOnExecutor, setExecutor, shellQuote, spawnRunner, stageContainerName, startWatchdog, validateExecutor, type ContainerOptions, type Executor, type ProcessResult } from "../src/exp/executor.ts";
 import { setProtocol, type Protocol } from "../src/exp/protocol.ts";
 import { readLedger, withLock } from "../src/study.ts";
 import { fakeDocker, tempDir } from "./helpers.ts";
@@ -46,8 +46,31 @@ test("AC4: candidate and evaluator get separate named containers and fixed isola
 test("AC4: builders reject root users, overlapping or injected mounts and invalid identities", () => {
   for (const user of ["0:0", "0:1000", "1000:0", "root", "1000"]) expect(() => buildContainerArgs({ ...options("candidate"), user })).toThrow("non-root");
   for (const snapshot of ["/executor", "/", "/executor/task/evaluator", "/executor/output/child", "/tmp/a,dst=/eval", '/tmp/a"b', "relative"]) expect(() => buildContainerArgs({ ...options("candidate"), paths: { ...options("candidate").paths, snapshot } })).toThrow();
-  expect(() => containerName("--bad", "candidate")).toThrow("invalid attempt");
-  expect(() => buildContainerArgs({ ...options("candidate"), studyId: "bad\nlabel" })).toThrow("invalid label");
+  expect(() => containerName("synthetic-study", "--bad", "candidate")).toThrow("invalid attempt");
+  expect(() => containerName("bad\nlabel", "0123456789abcdef", "candidate")).toThrow("invalid study id");
+  expect(() => buildContainerArgs({ ...options("candidate"), studyId: "bad\nlabel" })).toThrow("invalid study id");
+});
+
+test("#149: container names bind the study, stay bounded and keep the docker name charset", () => {
+  const attempt = "0123456789abcdef";
+  const name = containerName("synthetic-study", attempt, "candidate");
+  expect(containerName("synthetic-study", attempt, "candidate")).toBe(name);
+  expect(containerName("other-study", attempt, "candidate")).not.toBe(name);
+  expect(containerName("synthetic-study", "fedcba9876543210", "candidate")).not.toBe(name);
+  expect(containerName("synthetic-study", attempt, "evaluator")).not.toBe(name);
+  for (const candidate of [name, containerName("other-study", attempt, "evaluator"), stageContainerName("synthetic-study", attempt, "candidate", "normalize")]) {
+    expect(candidate).toMatch(/^[a-z0-9][a-z0-9_.-]{0,127}$/); expect(candidate.length).toBeLessThanOrEqual(128);
+  }
+  expect(stageContainerName("synthetic-study", attempt, "candidate", "normalize")).toBe(`${name}-normalize`);
+  expect(stageContainerName("synthetic-study", attempt, "candidate")).toBe(name);
+  for (const pipeline of ["Normalize", "-normalize", ""]) expect(() => stageContainerName("synthetic-study", attempt, "candidate", pipeline)).toThrow("invalid stage name");
+  expect(() => stageContainerName("synthetic-study", attempt, "evaluator", "normalize")).toThrow("invalid stage name");
+  const launched = (studyId: string) => { const args = buildContainerArgs({ ...options("candidate"), studyId }); return args[args.indexOf("--name") + 1]; };
+  expect(launched("synthetic-study")).toBe(name); expect(launched("other-study")).toBe(containerName("other-study", attempt, "candidate"));
+  const recorded = (extra: ContainerOptions) => { const args = buildContainerArgs(extra); return args[args.indexOf("--name") + 1]; };
+  expect(recorded({ ...options("candidate"), name: "ares-0123456789abcdef-candidate" })).toBe("ares-0123456789abcdef-candidate");
+  expect(recorded({ ...options("candidate"), name: `${name}-normalize`, pipeline: { name: "normalize", inputRoot: "/executor/in", seed: true } })).toBe(`${name}-normalize`);
+  for (const invalid of ["--bad", "ares name", "", "ares-0123456789abcdef-candidate\n"]) expect(() => buildContainerArgs({ ...options("candidate"), name: invalid })).toThrow("invalid recorded name");
 });
 
 test("selected declared seed reaches both containers once and defaults to the first protocol seed", () => {
@@ -127,14 +150,15 @@ test("AC8: executor failures expose host and step, never remote diagnostics or s
 });
 
 test("watchdog starts detached on the executor host with validated name and wall limit", async () => {
-  const fake = fakeDocker([ok(), new Error("synthetic-sensitive-output")]);
-  await startWatchdog(remote, "0123456789abcdef", "candidate", 60, fake.runner);
+  const fake = fakeDocker([ok(), new Error("synthetic-sensitive-output")]), name = containerName("synthetic-study", "0123456789abcdef", "candidate");
+  await startWatchdog(remote, name, 60, fake.runner);
   const request = fake.requests[0]!;
   expect(request.command).toBe("ssh"); expect(request.args.slice(0, 4)).toEqual(["-o", "BatchMode=yes", "fixture-host", "sh"]);
-  expect(request.args.join(" ")).toContain("sleep 60; docker kill ares-0123456789abcdef-candidate");
+  expect(request.args.join(" ")).toContain(`sleep 60; docker kill ${name}`);
   expect(request.args.join(" ")).toContain("nohup"); expect(request.args.join(" ")).toContain("/dev/null");
-  await expect(startWatchdog(local, "0123456789abcdef", "evaluator", 60, fake.runner)).rejects.toThrow("executor local: watchdog start failed");
-  await expect(startWatchdog(local, "0123456789abcdef", "candidate", 0, fake.runner)).rejects.toThrow("validated protocol limit");
+  await expect(startWatchdog(local, containerName("synthetic-study", "0123456789abcdef", "evaluator"), 60, fake.runner)).rejects.toThrow("executor local: watchdog start failed");
+  await expect(startWatchdog(local, name, 0, fake.runner)).rejects.toThrow("validated protocol limit");
+  for (const invalid of ["--bad", "ares name", ""]) await expect(startWatchdog(local, invalid, 60, fake.runner)).rejects.toThrow("watchdog container name");
 });
 
 test("optional process context keeps identity/config only and preserves default isolation", () => {
