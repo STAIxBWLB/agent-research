@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
+import {loadSupervisionAmendmentCases} from "./execution-supervision-amendment.ts";
 import { bindRunCode } from "./execution-code-binding.ts";
 import { FROZEN_RECEIPT, filePath, verifyPreregistration } from "./execution-eval.ts";
 import { plain, readTextBounded, sha256 } from "../src/study.ts";
@@ -43,6 +44,9 @@ export async function validateTreatmentIntegration(rootArg: string) {
     id: row.id, inputSha256: row.inputSha256, expectedSha256: row.expectedSha256, ...supervision.classifySupervisionFixture(row.payload),
   }));
   const unsupported = supervisionCoverage.filter(row => row.state === "unsupported").length;
+  const amended = loadSupervisionAmendmentCases(rootArg);
+  const amendmentCoverage = amended.cases.map(row => ({id: row.id, inputSha256: row.inputSha256, expectedSha256: row.expectedSha256,
+    ...supervision.classifySupervisionV2Fixture(row.payload)}));
   return {
     v: 1 as const, kind: "synthetic-treatment-integration-check" as const, status: "integrated-not-measured" as const,
     authority: "harness-observed" as const, registrationReceiptSha256: registration.receiptSha256, bindings: registration.bindings, code,
@@ -51,9 +55,13 @@ export async function validateTreatmentIntegration(rootArg: string) {
       reuse: { status: "integrated-fresh-fallback", adapter: "checkReuseTreatmentFixture", producer: "ares-retained-stage-reuse", cases: cases.filter(row => row.trial === "reuse").length, sourceEstablishment: "opaque-frozen-sources-not-numeric-manifests" },
       supervision: { status: "integrated-record-reader", cases: supervisionCases, dependency: "agent-hub#1221", producerCommit: supervision.SUPERVISION_PRODUCER_COMMIT,
         reader: "readShadowSnapshot", scorer: "scoreSupervisionRecords", classifier: "classifySupervisionFixture", fakeShadow: false,
-        coverage: { covered: supervisionCoverage.length - unsupported, unsupported, rows: supervisionCoverage }, helpful: null, false: null, missed: null, personDecisions: 0 as const },
+        coverage: { covered: supervisionCoverage.length - unsupported, unsupported, rows: supervisionCoverage }, helpful: null, false: null, missed: null, personDecisions: 0 as const,
+        amendment: {corpusVersion: 2, status: amended.receipt.status, receiptSha256: amended.receipt.receiptSha256, amends: amended.receipt.amends,
+          bindings: amended.receipt.bindings, cases: amendmentCoverage.length,
+          coverage: {kind: "format-only", covered: amendmentCoverage.length, unsupported: 0, rows: amendmentCoverage},
+          helpful: null, false: null, wrongAction: null, missed: null, correctNonTriggers: null, personDecisions: 0 as const, trialExecutions: 0, treatmentObservations: 0} },
     },
     trialExecutions: 0, treatmentObservations: 0, adoptionDecision: null,
-    limitations: ["integration checks only; T3 paired trials require separate launch authorization", "native container, model/account, human timing and measured cost benefit are unverified", "opaque frozen cached strings cannot establish numeric producer manifests; no hidden warmup or fabricated hits", "frozen supervision task-state payloads are unsupported T1 rule facts; no translation, missed-trigger score or correct-non-trigger claim; corpus re-expression needs an owner decision before T3"],
+    limitations: ["integration checks only; T3 paired trials require separate launch authorization", "native container, model/account, human timing and measured cost benefit are unverified", "opaque frozen cached strings cannot establish numeric producer manifests; no hidden warmup or fabricated hits", "v2 format coverage is not producer evaluation coverage; no evaluator or trial was run", "frozen supervision task-state payloads are unsupported T1 rule facts; no translation, missed-trigger score or correct-non-trigger claim; corpus re-expression needs an owner decision before T3"],
   };
 }

@@ -1,4 +1,5 @@
 import { plain } from "../src/study.ts";
+import {validateSupervisionFacts} from "./execution-supervision-facts.ts";
 import { readShadowSnapshot, readSupervisionTrigger, type ShadowSnapshot, type SupervisionObservation, type SupervisionGap, type SupervisionRuleId } from "./execution-supervision-records.ts";
 
 export const SUPERVISION_PRODUCER_COMMIT = "bc6f46b077dd3a255debaee8152fa17f1f13b79c";
@@ -25,8 +26,8 @@ function size(raw: unknown, bound: number): void {
   try { serialized = JSON.stringify(raw); } catch { fail("input is not serializable JSON"); }
   if (serialized === undefined || Buffer.byteLength(serialized) > bound) fail(`input exceeds the ${bound}-byte bound`);
 }
-function text(raw: unknown, label: string): string {
-  if (typeof raw !== "string" || !raw.length || raw.trim() !== raw || Buffer.byteLength(raw) > 1024 || /\p{Cc}/u.test(raw)) fail(`${label} must be bounded nonempty text without controls`);
+function text(raw: unknown, label: string, maximum = 1024): string {
+  if (typeof raw !== "string" || !raw.length || raw.trim() !== raw || Buffer.byteLength(raw) > maximum || /\p{Cc}/u.test(raw)) fail(`${label} must be bounded nonempty text without controls`);
   return raw;
 }
 function object(raw: unknown, fields: readonly string[], label: string): Record<string, unknown> {
@@ -117,4 +118,13 @@ export function classifySupervisionFixture(input: unknown): {state: "unsupported
   if (!plain(task.observed)) fail("frozen task observed must be a JSON object");
   // Do not walk or reinterpret task-state facts; the sealed file reader already bounds their bytes.
   return {state: "unsupported", reason: "task-state-not-admitted-rule-facts"};
+}
+
+
+/** Format coverage only. Compatible input facts do not prove that any rule was evaluated. */
+export function classifySupervisionV2Fixture(input: unknown): {state: "covered"; reason: "supported-supervision-facts-shape"} {
+  const value = object(input, ["request", "facts"], "Supervision v2 input");
+  text(value.request, "Supervision v2 request", 4000);
+  validateSupervisionFacts(value.facts);
+  return {state: "covered", reason: "supported-supervision-facts-shape"};
 }
