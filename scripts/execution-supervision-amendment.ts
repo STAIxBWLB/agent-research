@@ -62,7 +62,7 @@ export function parseSupervisionIntentLabel(raw: unknown): SupervisionIntentLabe
   const row = object(raw, ["v", "id", "trial", "scenario", "trigger", "task", "nextAction", "reason", "mustNot"], "expected wrapper");
   if (row.v !== 1 || row.trial !== "supervision") fail("expected wrapper version/trial is unsupported");
   if (typeof row.trigger !== "boolean" || !Number.isSafeInteger(row.task) || (row.task as number) < 1) fail("expected trigger and positive task identity are required");
-  if (!["escalate", "recheck", "request_integration", "none"].includes(String(row.nextAction)) || row.trigger === (row.nextAction === "none")) fail("expected action must be none exactly for a non-trigger label");
+  if (typeof row.nextAction !== "string" || !["escalate", "recheck", "request_integration", "none"].includes(row.nextAction) || row.trigger === (row.nextAction === "none")) fail("expected action must be none exactly for a non-trigger label");
   const reason = text(row.reason, 128, "intent reason");
   if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(reason)) fail("intent reason must be a bounded kebab code");
   if (!Array.isArray(row.mustNot) || types.isProxy(row.mustNot) || Object.getPrototypeOf(row.mustNot) !== Array.prototype) fail("mustNot must be a list of at most 32 strings");
@@ -133,7 +133,7 @@ function snapshot(rootArg: string): { receipt: SupervisionAmendmentReceipt; case
       payload: {request: text(payload.request, 4000, "candidate request"), facts}, expected };
   });
   if (SCENARIOS.some(group => counts.get(group) !== 4)) fail("each supervision scenario requires four cases");
-  const body = { v: 1 as const, status: "preregistered-amendment-not-measured" as const,
+  const body: Omit<SupervisionAmendmentReceipt, "receiptSha256"> = { v: 1 as const, status: "preregistered-amendment-not-measured" as const,
     amends: {path: FROZEN_RECEIPT, sha256: parentSource.hash.sha256, receiptSha256: parent.receiptSha256},
     bindings: { methodSha256: sha256(canonical({ inheritedMethodSha256: parent.bindings.methodSha256, methodSha256: method.hash.sha256, amendmentProtocolSha256: protocol.hash.sha256 })),
       inputSha256: sha256(canonical(inputs)), expectedSha256: sha256(canonical(expectedFiles)), protocolSha256: protocol.hash.sha256,

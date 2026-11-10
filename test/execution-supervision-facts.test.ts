@@ -13,7 +13,7 @@ test("all twelve approved v2 corpus inputs satisfy the structural facts contract
   for (const file of files) {
     const envelope = JSON.parse(readTextBounded(join(dir, file), SUPERVISION_FACTS_BYTES)) as {input: {facts: unknown}};
     const before = JSON.stringify(envelope.input.facts);
-    expect(validateSupervisionFacts(envelope.input.facts)).toEqual(envelope.input.facts);
+    expect(validateSupervisionFacts(envelope.input.facts) as unknown).toEqual(envelope.input.facts);
     expect(JSON.stringify(envelope.input.facts)).toBe(before);
   }
 });
@@ -44,7 +44,7 @@ test("deliverables are closed bounded opaque metadata with source true-or-absent
   const record = {id: "d-123456789abc", path: "synthetic/artifact.json", format: "json", version: "1", sha256: "a".repeat(64), bytes: 2, private: true};
   const input = {tasks: [{id: 1, state: "in_review", history: [{at: 0, event: "done", noWrites: true, evidenceOnly: true, deliverables: [record]}]}], deliverables: [{task: 1, checked: false, changed: [record.id], missing: []}], overlaps: [{task: 1, other: 2}]};
   // Unmeasured changed ids and absent overlap sides are admissible facts, not evaluated conditions.
-  expect(validateSupervisionFacts(input)).toEqual(input);
+  expect(validateSupervisionFacts(input) as unknown).toEqual(input);
   const {path: _path, ...privateRecord} = record;
   expect(validateSupervisionFacts({...input, tasks: [{...input.tasks[0]!, history: [{at: 0, event: "done", deliverables: [privateRecord]}]}]}).tasks[0]!.history[0]!.deliverables![0]!.path).toBeUndefined();
 });

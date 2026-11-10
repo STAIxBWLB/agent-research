@@ -154,8 +154,8 @@ test("physical source files, parent directories and receipts refuse links includ
 
 test("intent parser validates the complete evaluator-only label without scoring rule behavior", () => {
   const valid = {v: 1, id: "synthetic-case", trial: "supervision", scenario: "true-trigger", trigger: true, task: 7, nextAction: "recheck", reason: "synthetic-intent", mustNot: ["perform-unapproved-task-action"]};
-  expect(parseSupervisionIntentLabel(valid)).toEqual(valid);
-  const clean = { ...valid, trigger: false, nextAction: "none" }; expect(parseSupervisionIntentLabel(clean)).toEqual(clean);
+  expect(parseSupervisionIntentLabel(valid) as unknown).toEqual(valid);
+  const clean = { ...valid, trigger: false, nextAction: "none" }; expect(parseSupervisionIntentLabel(clean) as unknown).toEqual(clean);
   const invalid = [ {...valid, v: 2}, {...valid, trial: "diagnose"}, {...valid, nextAction: "none"}, {...valid, trigger: false}, {...valid, task: 0}, {...valid, task: 1.5}, {...valid, reason: "not a code"}, {...valid, mustNot: ["x".repeat(257)]}, {...valid, mustNot: Array(33).fill("bounded")}, {...valid, unknown: "refuse"} ];
   for (const row of invalid) expect(() => parseSupervisionIntentLabel(row)).toThrow("execution supervision amendment:");
   let invoked = false;
@@ -165,4 +165,12 @@ test("intent parser validates the complete evaluator-only label without scoring 
   for (const row of [accessor, proxy, {...valid, mustNot: sparse}, {...valid, toJSON: () => { invoked = true; return valid; }}]) expect(() => parseSupervisionIntentLabel(row)).toThrow();
   expect(invoked).toBe(false);
   expect(canonical(valid)).toBe(canonical(parseSupervisionIntentLabel(valid)));
+});
+
+
+test("intent action refuses object coercion without invoking its hooks", () => {
+  let invoked = false;
+  const raw = {v: 1, id: "synthetic-case", trial: "supervision", scenario: "true-trigger", trigger: true, task: 7,
+    nextAction: {toString() {invoked = true; return "recheck";}}, reason: "synthetic-intent", mustNot: []};
+  expect(() => parseSupervisionIntentLabel(raw)).toThrow("expected action"); expect(invoked).toBe(false);
 });
