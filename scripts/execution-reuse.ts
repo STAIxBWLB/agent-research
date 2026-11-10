@@ -25,7 +25,8 @@ export interface ReuseIntegrationCheck {
 const actor = { kind: "person" as const }, BYTES = 16_384;
 const offlineHttp = { env: {}, json: async () => fail("network access is outside the functional fixture"), text: async () => fail("network access is outside the functional fixture") };
 function fail(cause: string, next = "inspect the bounded frozen input and producer adapter, restore valid bindings and rerun the functional integration checks"): never { throw new Error(`execution reuse integration: ${cause}; ${next}`); }
-function sourceState(raw: unknown): Pick<ReuseIntegrationCheck, "sourceEstablishment" | "sourcePopulation" | "sourceStatus" | "sourceIntegrity"> {
+/** Exported so the rematerialization setup refuses exactly the sources this adapter refuses to reuse. */
+export function sourceState(raw: unknown): Pick<ReuseIntegrationCheck, "sourceEstablishment" | "sourcePopulation" | "sourceStatus" | "sourceIntegrity"> {
   if (raw === null || raw === undefined) return { sourceEstablishment: "no-frozen-source", sourcePopulation: "none", sourceStatus: null, sourceIntegrity: "absent" };
   if (!plain(raw)) fail("source shape is invalid");
   const sourceStatus = typeof raw.status === "string" && ["succeeded", "failed", "cancelled", "unknown", "running"].includes(raw.status) ? raw.status : null;
@@ -121,6 +122,16 @@ function transport(env: NodeJS.ProcessEnv) {
 interface ProducerFixture {
   dir: string; repo: string; workdir: string; commit: string; seed: number; fake: ReturnType<typeof transport>; commitFile: (name: string, text: string) => Promise<string>;
 }
+/** The one synthetic v2 protocol shape every fixture in this module runs; only the workload and attempt budget vary. */
+function syntheticProtocol(workload: NumericWorkload, method: string, maxAttempts: 1 | 2): Record<string, unknown> {
+  const reusable = { v: 1, kind: "pure-artifact", inputs: "declared-only", externalState: "none", writableState: "fresh-output-only", modelOutputs: "forbidden", determinism: "byte-exact", toolchain: { description: "Synthetic bounded integer transform, fake container transport", documentationSha256: sha256("fixture-integer-workload-v1") } };
+  const stage = { image: `synthetic@sha256:${"a".repeat(64)}`, seed: true, code: "snapshot", reuse: reusable };
+  return { v: 2, method, candidate: { stages: [
+    { ...stage, name: "prepare", command: ["/fixture-workload", "prepare"], needs: [], inputs: { values: { task: "values.json" } }, outputs: { value: "value.json" } },
+    { ...stage, name: "transform", command: ["/fixture-workload", "transform", String(workload.multiplier), String(workload.offset)], needs: ["prepare"], inputs: { prepared: { stage: "prepare", output: "value" } }, outputs: { value: "value.json" } },
+    { ...stage, name: "evaluate", command: ["/fixture-workload", "evaluate", workload.evaluateOperation], needs: ["transform"], inputs: { transformed: { stage: "transform", output: "value" } }, outputs: { value: "value.json" } },
+  ] }, evaluator: { image: `synthetic@sha256:${"b".repeat(64)}`, command: ["/fixture-workload", "verify"] }, metrics: [{ name: "score", unit: "integer", direction: "max" }], seeds: workload.seeds, limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts, maxWallHours: 1, maxGpuHours: 0 } };
+}
 async function withProducerFixture<T>(input: Record<string, unknown>, seed: number, maxAttempts: 1 | 2, use: (fixture: ProducerFixture) => Promise<T>): Promise<T> {
   if (!plain(input.currentContext)) fail("current context is missing");
   const workload: NumericWorkload = numericWorkload(input, seed), context = input.currentContext;
@@ -136,13 +147,7 @@ async function withProducerFixture<T>(input: Record<string, unknown>, seed: numb
     mkdirSync(join(dir, "task", "evaluator"), { recursive: true, mode: 0o700 });
     writeAtomic(join(dir, "task", "values.json"), JSON.stringify({ values: workload.values, seeds: workload.seeds }) + "\n", BYTES, 0o600);
     writeAtomic(join(dir, "task", "evaluator", "policy.json"), JSON.stringify({ workload: input.workload }) + "\n", BYTES, 0o600);
-    const reusable = { v: 1, kind: "pure-artifact", inputs: "declared-only", externalState: "none", writableState: "fresh-output-only", modelOutputs: "forbidden", determinism: "byte-exact", toolchain: { description: "Synthetic bounded integer transform, fake container transport", documentationSha256: sha256("fixture-integer-workload-v1") } };
-    const stage = { image: `synthetic@sha256:${"a".repeat(64)}`, seed: true, code: "snapshot", reuse: reusable };
-    const protocol = { v: 2, method: context.method, candidate: { stages: [
-      { ...stage, name: "prepare", command: ["/fixture-workload", "prepare"], needs: [], inputs: { values: { task: "values.json" } }, outputs: { value: "value.json" } },
-      { ...stage, name: "transform", command: ["/fixture-workload", "transform", String(workload.multiplier), String(workload.offset)], needs: ["prepare"], inputs: { prepared: { stage: "prepare", output: "value" } }, outputs: { value: "value.json" } },
-      { ...stage, name: "evaluate", command: ["/fixture-workload", "evaluate", workload.evaluateOperation], needs: ["transform"], inputs: { transformed: { stage: "transform", output: "value" } }, outputs: { value: "value.json" } },
-    ] }, evaluator: { image: `synthetic@sha256:${"b".repeat(64)}`, command: ["/fixture-workload", "verify"] }, metrics: [{ name: "score", unit: "integer", direction: "max" }], seeds: workload.seeds, limits: { cpus: 1, memoryMb: 64, pidsLimit: 32, wallSeconds: 60, gpus: 0 }, network: "none", budget: { maxAttempts, maxWallHours: 1, maxGpuHours: 0 } };
+    const protocol = syntheticProtocol(workload, context.method, maxAttempts);
     await withLock(dir, () => { const normalized = setProtocol(dir, protocol, actor); setExecutor(dir, { v: 1, kind: "local", workdir }, actor); setSelection(dir, { v: 1, run: "investigate", metric: "score", baseline: { commit }, minSeeds: 1, minDelta: 0 }, normalized, actor); });
     await gateDecide(dir, "design", "approve", undefined, { actor, http: offlineHttp });
     const commitFile = async (name: string, text: string) => {
@@ -254,6 +259,69 @@ export async function checkProducerReuseUnitFixture(): Promise<ProducerReuseUnit
       sourceRecordSha256: sha256(sourceBytes), sourceRecordUnchanged: true, sourceMetricsSha256: sha256(sourceMetrics), currentMetricsSha256: sha256(canonical(current.metrics)),
       evaluatorFresh: true, pinsHeldBeforeEvaluation: true, pinsReleased: true, executed: [...fake.executed], candidateEvidenceSha256: sha256(canonical(evidence)), costs: unknownCosts(),
       limitations: ["separate hardcoded unit fixture, outside the frozen corpus; no opaque frozen source is rematerialized", "fake container transport validates producer control/dataflow only; no kernel isolation or native container proof", "no treatment trial, benchmark estimate, measured cost or adoption disposition is produced"] };
+  });
+}
+
+export interface RematerializedAdmissionCheck {
+  v: 1; kind: "rematerialized-reuse-admission-check"; authority: "functional-fixture-only";
+  caseId: string; sourcePopulation: "fixture-rematerialized"; frozenCorpus: true;
+  sourceCodeDigest: string; currentCodeDigest: string; changedKeys: string[];
+  status: "succeeded"; sourceAttemptId: string; currentAttemptId: string;
+  sourceRefs: RetainedRef[]; hits: { stage: string; key: string; source: RetainedRef }[];
+  misses: { stage: string; reason: string }[]; freshStages: string[];
+  sourceObserved: FreshValues; currentObserved: FreshValues; expected: FreshValues;
+  sourcePayloadDigests: string[]; currentPayloadDigests: string[];
+  sourceRecordUnchanged: true; sourceRecordSha256: string;
+  evaluatorFresh: true; executed: string[];
+  counts: { reusedStages: number; currentExecutedStages: number };
+  candidateEvidenceSha256: string; costs: CostRecord; limitations: string[];
+}
+/**
+ * Rebuilds one frozen case's source stage outputs as real retained artifacts and asks the #64 reuse path to admit them.
+ * The source runs from `source.workload` and the source's own code digest; the current attempt then runs the case's own
+ * declared code digest and stage edits, so each admitted stage is evidence that the frozen bytes, not a label, decide it.
+ */
+export async function checkRematerializedReuseAdmission(input: unknown, seed: number): Promise<RematerializedAdmissionCheck> {
+  if (!plain(input) || Buffer.byteLength(JSON.stringify(input)) > BYTES || !plain(input.currentContext) || !plain(input.source)) fail("a bounded input with a frozen source is required for rematerialized admission", "supply one frozen reuse case that declares a source workload");
+  const source = input.source, currentContext = input.currentContext;
+  if (!plain(source.workload) || typeof source.globalCodeDigest !== "string" || !/^[a-f0-9]{64}$/.test(source.globalCodeDigest)) fail("the frozen source must declare a workload and a code digest", "restore the frozen source bytes before rematerialized admission");
+  const sourceCode = source.globalCodeDigest, currentCode = currentContext.globalCodeDigest, method = currentContext.method;
+  if (typeof currentCode !== "string" || !/^[a-f0-9]{64}$/.test(currentCode) || typeof method !== "string" || !method.trim() || method.length > 128) fail("the current context must declare a code digest and method");
+  const caseId = typeof input.id === "string" ? input.id : "unnamed", sourceInput: Record<string, unknown> = {...input, workload: source.workload, currentContext: {...currentContext, globalCodeDigest: sourceCode}};
+  return withProducerFixture<RematerializedAdmissionCheck>(sourceInput, seed, 2, async fixture => {
+    const { dir, repo, commit, fake } = fixture;
+    // The rebuilt source must run with reuse eligible: only then does the producer record the stage keys admission compares.
+    const sourceAttempt = await completeProducer(fixture, await runAttempt(dir, {repo, commit, seed, run: "investigate", reuse: "eligible", detach: true}, fake.ctx));
+    if (fake.executed.join(",") !== "prepare,transform,evaluate,verify" || sourceAttempt.pipeline!.completed.some(parent => parent.reuse)) fail("the rematerialized source was not produced fresh");
+    const sourceBytes = attemptBytes(fixture, sourceAttempt), sourceValues = await producerValues(fixture, sourceAttempt);
+    const sourceRefs = sourceAttempt.pipeline!.completed.map(parent => ({...parent.ref})), changedKeys: string[] = [];
+    let currentCommit = commit;
+    if (currentCode !== sourceCode) { changedKeys.push("code-tree"); currentCommit = await fixture.commitFile("global-code-digest.txt", currentCode + "\n"); }
+    if (canonical(input.workload) !== canonical(source.workload)) {
+      changedKeys.push("candidate-stage-edit");
+      writeAtomic(join(dir, "task", "evaluator", "policy.json"), JSON.stringify({workload: input.workload}) + "\n", BYTES, 0o600);
+      const revised = syntheticProtocol(numericWorkload(input, seed), method, 2);
+      await withLock(dir, () => { const normalized = setProtocol(dir, revised, actor); setSelection(dir, {v: 1, run: "investigate", metric: "score", baseline: {commit}, minSeeds: 1, minDelta: 0}, normalized, actor); });
+      await gateDecide(dir, "design", "approve", undefined, {actor, http: offlineHttp});
+    }
+    const current = await completeProducer(fixture, await runAttempt(dir, {repo, commit: currentCommit, seed, run: "investigate", reuse: "eligible", retry: sourceAttempt.id, detach: true}, fake.ctx));
+    const completed = current.pipeline!.completed, hits = completed.flatMap(parent => parent.reuse ? [{stage: parent.name, key: parent.reuse.key, source: {...parent.reuse.source}}] : []);
+    const misses = Object.entries(current.reuse?.stages ?? {}).filter(([, value]) => value.outcome !== "reused").map(([stage, value]) => ({stage, reason: value.reason}));
+    const freshStages = completed.filter(parent => !parent.reuse).map(parent => parent.name);
+    if (hits.length + freshStages.length !== 3) fail("the current attempt did not report one decision per candidate stage");
+    const currentValues = await producerValues(fixture, current), expected = freshValues(input, seed), view = attemptReuseView(current, readLedger(dir));
+    if (!view || view.reusedCandidateStages !== hits.length || view.executedStages !== 1 + freshStages.length) fail("rematerialized admission counts misrepresent the current attempt");
+    if (canonical(currentValues.observed) !== canonical(expected)) fail("the current attempt did not reproduce the current case's declared workload");
+    for (const [index, parent] of completed.entries()) if (parent.reuse && sha256(readBytesBounded(join(current.paths.output, parent.name, "value.json"), BYTES)) !== sourceValues.payloadDigests[index]) fail("an admitted stage materialized bytes that differ from the rebuilt source");
+    if (!sourceBytes.equals(attemptBytes(fixture, showAttempt(dir, sourceAttempt.id)))) fail("rematerialized admission overwrote the original source record");
+    const evidence = {caseId, sourceCodeDigest: sourceCode, currentCodeDigest: currentCode, changedKeys, sourceAttemptId: sourceAttempt.id, currentAttemptId: current.id,
+      sourceRefs, hits, misses, freshStages, sourceObserved: sourceValues.observed, currentObserved: currentValues.observed, expected,
+      sourcePayloadDigests: sourceValues.payloadDigests, currentPayloadDigests: currentValues.payloadDigests, sourceRecordSha256: sha256(sourceBytes),
+      counts: {reusedStages: view.reusedCandidateStages, currentExecutedStages: view.executedStages}};
+    return {v: 1, kind: "rematerialized-reuse-admission-check", authority: "functional-fixture-only", sourcePopulation: "fixture-rematerialized", frozenCorpus: true,
+      status: "succeeded", ...evidence, sourceRecordUnchanged: true, evaluatorFresh: true, executed: [...fake.executed],
+      candidateEvidenceSha256: sha256(canonical(evidence)), costs: unknownCosts(),
+      limitations: ["one first-seed functional admission per frozen case; no treatment trial, comparison estimate, adoption or measured cost", "fake container transport validates producer control, dataflow and admission only; no kernel isolation or native container proof", "the rebuilt source is a synthetic integer pipeline, not a scientific result or a producer manifest of any other workload"]};
   });
 }
 
