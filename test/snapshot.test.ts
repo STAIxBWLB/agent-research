@@ -170,12 +170,37 @@ test("task archive frozen tree hash is pinned and a real archive of an xattr-tag
   writeFileSync(join(task, "task.md"), "synthetic task"); writeFileSync(join(task, "evaluator", "run"), "synthetic evaluator", { mode: 0o755 });
   const pinned = taskTreeHash(study);
   expect(pinned).toBe(PINNED_TASK_TREE_HASH);
-  if (process.platform === "darwin") for (const file of [join(task, "task.md"), join(task, "evaluator", "run")]) expect(spawnSync("xattr", ["-w", "user.ares.synthetic", "x", file]).status).toBe(0);
-  const out = tempDir(), received: Uint8Array[] = [];
-  const result = await transferTask(task, local, "/private/executor/task", realTarRunner([], received), pinned, true);
+  const out = tempDir(), received: Uint8Array[] = [], requests: ProcessRequest[] = [];
+  const archive = realTarRunner(requests, received);
+  // Tag ares's own staged copy right before tar runs, as the pilot's provenance xattr was on process-written files.
+  const tagging: ProcessRunner = async request => {
+    if (request.stdoutSink && process.platform === "darwin") {
+      const staging = /-C (\S+) /.exec(request.args[1]!)![1]!;
+      for (const file of [join(staging, "task.md"), join(staging, "evaluator", "run")]) expect(spawnSync("xattr", ["-w", "user.ares.synthetic", "x", file]).status).toBe(0);
+      expect(spawnSync("sh", ["-c", `tar -C ${staging} -cf - .`]).stdout.toString("latin1")).toContain("._");
+    }
+    return archive(request);
+  };
+  const result = await transferTask(task, local, "/private/executor/task", tagging, pinned, true);
   expect(result.treeHash).toBe(pinned);
   const listing = spawnSync("tar", ["-tf", "-"], { input: Buffer.concat(received) }).stdout.toString();
   expect(listing).not.toContain("._"); expect(spawnSync("tar", ["-xf", "-", "-C", out], { input: Buffer.concat(received) }).status).toBe(0);
   const copy = join(tempDir(), "task"); spawnSync("cp", ["-R", out, copy]);
   expect(taskTreeHash(dirname(copy))).toBe(pinned);
+});
+
+test("task archive member scan admits a full-size task tree of long-named directories and stays bounded past it", async () => {
+  const study = tempDir(), task = join(study, "task"); mkdirSync(join(task, "evaluator"), { recursive: true });
+  writeFileSync(join(task, "task.md"), "t");
+  // 750 long-named (113-char) directories and 499 long-named one-byte files, each needing its own PAX/long-name
+  // header: about 2500 tar headers, past the 2048 artifact-read budget.
+  for (let i = 0; i < 750; i++) {
+    const dir = join(task, "evaluator", `${String(i).padStart(4, "0")}-${"d".repeat(108)}`); mkdirSync(dir);
+    if (i < 499) writeFileSync(join(dir, "f".repeat(113)), "x");
+  }
+  const pinned = taskTreeHash(study);
+  const result = await transferTask(task, local, "/private/executor/task", realTarRunner([], []), pinned);
+  expect(result.treeHash).toBe(pinned);
+  writeFileSync(join(task, "evaluator", "one-past-the-file-limit"), "x");
+  expect(() => taskTreeHash(study)).toThrow();
 });

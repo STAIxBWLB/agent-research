@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, posix } from "node:path";
 import { PORTABLE_TAR_CREATE, runOnExecutor, shellQuote, spawnRunner, validateExecutor, type Executor, type ProcessResult, type ProcessRunner } from "./executor.ts";
 import { TarMemberScan, type ArtifactFile } from "./artifacts.ts";
-import { TASK_BYTES, TASK_FILES } from "./protocol.ts";
+import { TASK_BYTES, TASK_DIRECTORIES, TASK_FILES } from "./protocol.ts";
 import { readBytesBounded, sha256 } from "../study.ts";
 
 export const SNAPSHOT_BYTES = 256 * 1024 * 1024;
@@ -81,7 +81,7 @@ export async function transferTask(taskDir: string, executor: Executor, destinat
       const source = relative ? join(taskDir, relative) : taskDir, label = relative ? `task/${relative}` : "task/", stat = lstatSync(source);
       if (stat.isSymbolicLink()) throw new Error(`${label}: symlink refused; replace it with regular task files before ares attempt run`);
       if (stat.isDirectory()) {
-        if (++directories > 1000 || depth > 64) throw new Error(`${label}: task traversal limit exceeded; reduce task/ to 1000 directories and 64 levels`);
+        if (++directories > TASK_DIRECTORIES || depth > 64) throw new Error(`${label}: task traversal limit exceeded; reduce task/ to 1000 directories and 64 levels`);
         if (relative.startsWith("evaluator/")) mkdirSync(join(staging, relative), { recursive: true, mode: 0o700 });
         const directory = opendirSync(source);
         try { for (let entry = directory.readSync(); entry; entry = directory.readSync()) capture(relative ? `${relative}/${entry.name}` : entry.name, depth + 1); }
@@ -125,7 +125,7 @@ async function transferArchive(kind: "snapshot" | "task", source: { command: str
   const executor = validateExecutor(executorArg);
   if (!destination.startsWith("/") || destination.length > 4096 || /[\0\r\n,"]/.test(destination) || posix.normalize(destination) === "/") throw new Error("snapshot destination: invalid directory; use a private absolute non-root directory without NUL, newlines, commas or double quotes");
   const stream = new ArchiveChannel(), controller = new AbortController(), hash = createHash("sha256");
-  const scan = staged ? new TarMemberScan(TASK_BYTES, TASK_FILES) : undefined;
+  const scan = staged ? new TarMemberScan(TASK_BYTES, TASK_FILES, TASK_FILES + TASK_DIRECTORIES) : undefined;
   let bytes = 0, oversized = false, failedSide: "archive" | "extract" | undefined, refused: Error | undefined;
   const archive = (async () => {
     try {
