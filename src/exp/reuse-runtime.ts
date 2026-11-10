@@ -50,6 +50,10 @@ function producerSemantics(): string | undefined {
   const sources = PRODUCER_SOURCES.map(name => [name, sha256(readBytesBounded(fileURLToPath(new URL(`./${name}`, import.meta.url)), PRODUCER_SOURCE_BYTES))]);
   return `ares-stage-v2/reuse-1:${sha256(canonical({ bun, sources }))}`;
 }
+export function isInvestigationRun(run: string, selection: { run: string } | undefined): boolean {
+  return selection?.run === run && !["ablate", "final", "posthoc"].includes(run);
+}
+
 /** Read-only, source-owned facts. Caller still owns current design/policy/budget fencing at admission. */
 export async function reuseSourceFacts(dir: string, attempt: Attempt, ctx: AttemptContext): Promise<StageReuseSourceFactsResult> {
   const protocol = attempt.pipeline?.definition ?? attempt.protocol;
@@ -59,7 +63,7 @@ export async function reuseSourceFacts(dir: string, attempt: Attempt, ctx: Attem
     if (study.mode !== "experiment" || study.id !== attempt.studyId) return { reason: "unsupported-study" };
     before = population(dir, protocol);
   } catch { return { reason: "population-unavailable" }; }
-  if (attempt.stage !== "candidate" || !before.selection || before.selection.run !== attempt.run || ["ablate", "final", "posthoc"].includes(attempt.run)) return { reason: "outside-investigation" };
+  if (attempt.stage !== "candidate" || !isInvestigationRun(attempt.run, before.selection)) return { reason: "outside-investigation" };
   if (protocol.limits.gpus > 0) return { reason: "unsupported-gpu-abi" };
   if (!identity(process.versions.bun)) return { reason: "producer-runtime-unavailable" };
   let semantics: string | undefined;

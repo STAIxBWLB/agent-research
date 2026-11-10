@@ -21,7 +21,8 @@ import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
 import { setFinalSeeds, finalGateBinding, requireFinalInputs, closeFinal, showPosthoc } from "./exp/final.ts";
 import { addIdea, decideIdea } from "./exp/ideas.ts";
 import { showInvestigation, closeInvestigation } from "./exp/investigate.ts";
-import { setSelection } from "./exp/selection.ts";
+import { isInvestigationRun } from "./exp/reuse-runtime.ts";
+import { readSelection, setSelection } from "./exp/selection.ts";
 import { createHubClient } from "./plan/hub.ts";
 import { runPlan, type ControllerRuntime, type Observation, type StepNode } from "./plan/controller.ts";
 import { resolveSnapshot } from "./exp/snapshot.ts";
@@ -44,7 +45,7 @@ import { assignCitekeys, renderBib } from "./lit/bibtex.ts";
 import { checkCitations } from "./lit/cite.ts";
 import { cardPath, validateCard } from "./lit/cards.ts";
 import { createVaultClient, exportCards, importCards, listCards, previewCardExport } from "./memory/vault-cards.ts";
-import { designBinding, protocolHash, readDesign, setProtocol } from "./exp/protocol.ts";
+import { designBinding, protocolHash, readDesign, readProtocol, setProtocol } from "./exp/protocol.ts";
 import { requireExperiment } from "./study.ts";
 import { checkExecutor, setExecutor, readExecutor, hashExecutorInput, type InputManifest } from "./exp/executor.ts";
 import { cancelAttempt, listAttempts, listAttemptSummaries, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type AttemptListOptions, type AttemptOptions } from "./exp/attempts.ts";
@@ -194,8 +195,14 @@ export const harnessImport = (dir: string, round: string, raw: unknown, ctx: Ctx
 export async function attemptRun(dir: string, options: AttemptOptions, ctx: Ctx) {
   if (options.reuse !== undefined && options.reuse !== "off" && options.reuse !== "eligible") throw new Error("attempt reuse: off or eligible required; select --reuse off|eligible (MCP reuse) and retry");
   if (options.forceFresh !== undefined && typeof options.forceFresh !== "boolean") throw new Error("attempt forceFresh: boolean required; set forceFresh to true/false or use --force-fresh, then retry");
-  try { return await runAttempt(dir, options, ctx); }
-  catch (error) { if (error instanceof GpuAdmissionDeferred) return error.result; throw error; }
+  const protocol = options.reuse === "eligible" ? readProtocol(dir) : undefined;
+  const selection = protocol ? readSelection(dir, protocol) : undefined;
+  const warnings = options.reuse === "eligible" && !isInvestigationRun(options.run ?? "main", selection)
+    ? [{ code: "outside-investigation", cause: "not an investigation run", nextStep: "declare the selection run, or drop --reuse" }] : undefined;
+  let result;
+  try { result = await runAttempt(dir, options, ctx); }
+  catch (error) { if (error instanceof GpuAdmissionDeferred) result = error.result; else throw error; }
+  return warnings ? { ...result, warnings } : result;
 }
 export const attemptList = (dir: string, options: AttemptListOptions = {}) => listAttemptSummaries(dir, options);
 export const attemptShow = (dir: string, id: string) => {
