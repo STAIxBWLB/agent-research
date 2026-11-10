@@ -56,7 +56,8 @@ test("hostile hub objects are refused without running getters or proxy traps", (
 });
 
 test("foreign provenance roots return explicitly unavailable before any filesystem capture", () => {
-  const realpath = spyOn(fs, "realpathSync").mockImplementation((() => {throw new Error("filesystem access forbidden");}) as typeof fs.realpathSync);
+  const forbidden = () => {throw new Error("filesystem access forbidden");};
+  const realpath = spyOn(fs, "realpathSync").mockImplementation(Object.assign(forbidden, {native: forbidden}));
   try {
     const result = readProvenance("/not-a-study", {root: golden});
     expect(result.status).toBe("unavailable"); expect(result.sourceSha256).toBeNull(); expect(result.ledgerPosition).toBeNull();
