@@ -120,3 +120,21 @@ test("receipt, source and parent symlinks and over-bound files refuse without pu
   const h = fixture(), elsewhere = tempDir(), linked = join(h.root, "linked"); symlinkSync(elsewhere, linked);
   expect(() => sealReuseRematerializationR2(h.root, join(linked, "receipt.json"))).toThrow("physical directories");
 });
+
+
+test("the old verify CLI names its verified r2 supersession and the correct next command", () => {
+  const current = readReuseRematerializationR2(sourceRoot), home = tempDir();
+  const originalBefore = readBytesBounded(join(sourceRoot, REMATERIALIZATION_RECEIPT), REUSE_R2_BYTES, {noFollow: true});
+  const r2Before = readBytesBounded(join(sourceRoot, REUSE_R2_RECEIPT), REUSE_R2_BYTES, {noFollow: true});
+  const child = Bun.spawnSync([process.execPath, join(sourceRoot, "scripts/execution-eval.ts"), "verify-reuse-rematerialization"], {
+    cwd: home, env: {HOME: home, XDG_CONFIG_HOME: home, PATH: "/usr/bin:/bin"}, stdout: "pipe", stderr: "pipe", timeout: 5000, maxBuffer: REUSE_R2_BYTES,
+  });
+  expect(child.exitCode).not.toBe(0); expect(child.stdout.length).toBe(0);
+  const message = child.stderr.toString("utf8");
+  expect(message).toContain(`superseded before use by the r2 receipt ${current.receiptSha256}`);
+  expect(message).toContain("run bun scripts/execution-eval.ts verify-reuse-rematerialization-r2");
+  expect(message).not.toContain("restore the committed receipt bytes");
+  expect(message).not.toContain("freeze a reviewed setup again");
+  expect(readBytesBounded(join(sourceRoot, REMATERIALIZATION_RECEIPT), REUSE_R2_BYTES, {noFollow: true})).toEqual(originalBefore);
+  expect(readBytesBounded(join(sourceRoot, REUSE_R2_RECEIPT), REUSE_R2_BYTES, {noFollow: true})).toEqual(r2Before);
+});

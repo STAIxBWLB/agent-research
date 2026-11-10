@@ -170,7 +170,13 @@ if (import.meta.main) {
       const amendment = await import("./execution-reuse-rematerialize.ts");
       const file = resolve(output ?? join(root, amendment.REMATERIALIZATION_RECEIPT));
       const sealed = command === "freeze-reuse-rematerialization" ? amendment.sealReuseRematerialization(root, file) : amendment.verifyReuseRematerializationSeal(root, file);
-      if (sealed.state !== "verified") fail(`reuse rematerialization receipt is ${sealed.state}`, "restore the committed receipt bytes or freeze a reviewed setup again");
+      if (sealed.state !== "verified") {
+        if (file === resolve(root, amendment.REMATERIALIZATION_RECEIPT)) {
+          const r2 = await import("./execution-reuse-rematerialize-r2.ts"), superseding = r2.verifyReuseRematerializationR2(root);
+          if (superseding.state === "verified") fail(`superseded before use by the r2 receipt ${superseding.receipt.receiptSha256}`, "run bun scripts/execution-eval.ts verify-reuse-rematerialization-r2");
+        }
+        fail(`reuse rematerialization receipt is ${sealed.state}`, "restore the committed receipt bytes or freeze a reviewed setup again");
+      }
       console.log(JSON.stringify({command, state: sealed.state, status: sealed.receipt.identity.status, setupSha256: sealed.receipt.setupSha256, amends: sealed.receipt.identity.amends}));
     } else if (command === "baseline") {
       if (!output || output.startsWith("-") || !isAbsolute(output) || extra.some(value => value !== "--emit") || extra.length > 1) fail("baseline arguments require an absolute output operand followed only by optional --emit", "use bun scripts/execution-eval.ts baseline /absolute/fresh-directory [--emit]; no other flags are supported");
