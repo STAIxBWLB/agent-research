@@ -119,7 +119,7 @@ export async function runReuseTrialArm(input: unknown, seed: number, reuse: "off
   });
   // withProducerFixture's finally has now completed; total includes unlocking and deleting private fixture storage.
   const total = phase(totalWall, totalCpu), {sourceSetup, current, ...evidence} = result;
-  return {v: 1, kind: "reuse-arm-fixture-instrumentation", authority: "functional-fixture-only", instrumentationOnly: true, status: "succeeded", ...evidence,
+  return {v: 1, kind: "reuse-arm-fixture-instrumentation", authority: "functional-fixture-only", instrumentationOnly: true, status: "succeeded", evaluatorFresh: true, ...evidence,
     instrumentation: {sourceSetup, current, total, wallClock: "performance.now-monotonic", cpuClock: "process.cpuUsage-parent-process", totalIncludesCleanup: true,
       sourceSetupScope: "shared-fixture-setup-and-optional-source-plus-fault", currentScope: "current-edits-execution-and-output-verification"},
     limitations: ["test instrumentation only; no registered treatment trial, benchmark result, native container proof or adoption decision",
