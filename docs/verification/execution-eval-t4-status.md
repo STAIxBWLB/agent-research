@@ -72,11 +72,11 @@ by this closeout. Unknown costs remain unknown rather than zero; no missing meas
   - Linked issue: [#63](https://github.com/STAIxBWLB/agent-research/issues/63).
 - Cross-platform snapshot integrity and cross-study container identity. Evidence kind: **native**.
   - Closure: demonstrate that a snapshot with native metadata preserves its frozen tree hash across platforms, and that matching attempt identities in different studies cannot collide while foreign-container refusal remains intact.
-  - Separate authorization: implementation and native executor validation of the two pilot findings, preserving compatibility and isolation checks.
+  - Separate authorization: native executor validation of the two pilot findings, preserving compatibility and isolation checks.
   - Linked issues: [#148](https://github.com/STAIxBWLB/agent-research/issues/148), [#149](https://github.com/STAIxBWLB/agent-research/issues/149).
 - Reuse-outside-investigation notice. Evidence kind: **visual**.
-  - Closure: inspect the operator-visible CLI/MCP warning or refusal when eligible reuse is requested outside a matching investigation selection, including the reason and next step. This is notice/usability evidence, not a performance result; reuse remains investigation-only.
-  - Separate authorization: implementation and a bounded interface inspection of the proposed notice.
+  - Closure: inspect the operator-visible CLI/MCP request-time warning when eligible reuse is requested outside a matching investigation selection, including the reason and next step. This is notice/usability evidence, not a performance result; reuse remains investigation-only.
+  - Separate authorization: a bounded interface inspection of the proposed notice.
   - Linked issue: [#150](https://github.com/STAIxBWLB/agent-research/issues/150).
 
 This document opens no gap and authorizes nothing. It records existing gaps without commissioning follow-ups, enabling
