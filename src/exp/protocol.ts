@@ -23,7 +23,7 @@ export function validateProtocolDefinition(raw: unknown): ProtocolDefinition {
   return validateProtocol(raw);
 }
 export const METRIC_LIMIT = 100;
-export const PROTOCOL_BYTES = 65_536, TASK_FILES = 500, TASK_BYTES = 64 * 1024 * 1024;
+export const PROTOCOL_BYTES = 65_536, TASK_FILES = 500, TASK_BYTES = 64 * 1024 * 1024, TASK_DIRECTORIES = 1000;
 export const LIMIT_BOUNDS = { cpus: [0.1, 256], memoryMb: [16, 1_048_576], pidsLimit: [1, 65_536], wallSeconds: [1, 604_800], gpus: [0, 64] } as const;
 function object(raw: unknown, keys: string[], what: string): Record<string, unknown> {
   if (!plain(raw)) throw new Error(`${what}: object required; set ${what} to a JSON object`);
@@ -172,7 +172,7 @@ export function taskTreeHash(dir: string): string {
     if (stat.isSymbolicLink()) throw new Error(`${label}: symlink refused; replace it with a regular file or directory inside task/`);
     if (!relative && !stat.isDirectory()) throw new Error("task/: directory required; replace task with a directory containing task.md and evaluator/");
     if (stat.isDirectory()) {
-      if (depth > 64 || ++directories > 1000) throw new Error(`${label}: too many directories or nesting too deep; reduce task/ to at most 1000 directories and 64 levels`);
+      if (depth > 64 || ++directories > TASK_DIRECTORIES) throw new Error(`${label}: too many directories or nesting too deep; reduce task/ to at most 1000 directories and 64 levels`);
       const directory = opendirSync(path);
       try {
         for (let entry = directory.readSync(); entry; entry = directory.readSync()) walk(relative ? `${relative}/${entry.name}` : entry.name, depth + 1);

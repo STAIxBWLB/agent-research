@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { posix } from "node:path";
 import { plain } from "../study.ts";
-import { runOnExecutor, shellQuote, type ProcessRunner, type Stage } from "./executor.ts";
+import { PORTABLE_TAR_CREATE, runOnExecutor, shellQuote, type ProcessRunner, type Stage } from "./executor.ts";
 import { ARTIFACT_BYTES, ARTIFACT_FILES, ArtifactError, readArtifactArchive } from "./artifacts.ts";
 import type { Attempt, Evaluation } from "./attempts.ts";
 import type { Protocol } from "./protocol.ts";
@@ -104,10 +104,8 @@ export async function collectStageEvidence(attempt: Attempt, stage: Stage, runne
     'if test "$status" -ne 0; then if test "$outcut" = true || test "$errcut" = true; then outcut=true; errcut=true; else exit "$status"; fi; fi',
     'printf \'{"stdout":%s,"stderr":%s}\\n\' "$outcut" "$errcut" > "$statetmp"',
     'mv "$outtmp" "$out"; mv "$errtmp" "$err"; mv "$statetmp" "$state"', 'fi',
-    // Archive content only: BSD tar otherwise emits binary xattr PAX and AppleDouble entries.
-    // ponytail: requires GNU tar >= 1.27 or bsdtar with --no-xattrs; unsupported tar
-    // (e.g. BusyBox) fails closed with the generic stage-log collection error, never a metadata fallback.
-    `COPYFILE_DISABLE=1 tar --no-xattrs -C ${shellQuote(root)} -cf - ${shellQuote(`logs/${stageLabel}.stdout.log`)} ${shellQuote(`logs/${stageLabel}.stderr.log`)} ${shellQuote(statePath)}`,
+    // Archive content only; see PORTABLE_TAR_CREATE for the shared tar portability rule and its ceiling.
+    `${PORTABLE_TAR_CREATE} -C ${shellQuote(root)} -cf - ${shellQuote(`logs/${stageLabel}.stdout.log`)} ${shellQuote(`logs/${stageLabel}.stderr.log`)} ${shellQuote(statePath)}`,
   ].join("\n");
   let logArchive;
   try { logArchive = await readArtifactArchive(attempt.executor, "sh", ["-c", script], runner, { capture: statePath, captureBytes: 1024, maxFiles: 3, maxBytes: LOG_COPY_BYTES * 2 + 1024 }); }

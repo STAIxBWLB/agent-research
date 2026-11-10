@@ -9,7 +9,7 @@ import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunne
 import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
 import { finalGateBinding } from "../src/exp/final.ts";
 import { writeAtomic, readTextBounded, readLedger, sha256, withLock, appendEvent, openStudy } from "../src/study.ts";
-import { deferred, fakeHttp, tempDir } from "./helpers.ts";
+import { deferred, fakeHttp, fakeTarSource, isTarRequest, tempDir } from "./helpers.ts";
 import { logCaptureFixtureRunner, metricLogTar, metricTar } from "./metric-fixtures.ts";
 import { collectStageEvidence, EvidenceError, LOG_COPY_BYTES } from "../src/exp/metrics.ts";
 
@@ -44,8 +44,8 @@ function runtime(dir: string) {
       if (args.includes("rev-parse")) return ok(treeId);
       if (args.includes("archive")) { await request.stdoutSink!(Buffer.from([0, 255, 1])); return ok(); }
     }
-    if (request.command === "tar") {
-      if (request.stdoutSink) await request.stdoutSink(Buffer.from([0, 128, 2]));
+    if (isTarRequest(request)) {
+      if (request.stdoutSink) await fakeTarSource(request, Buffer.from([0, 128, 2]));
       else for await (const _chunk of request.stdin as AsyncIterable<Uint8Array>) { /* consume without real extraction */ }
       return ok();
     }

@@ -6,6 +6,11 @@
 
 - Reuse request warning (#150, product fix): eligible requests outside a matching investigation run still run fresh and return additive, non-persisted warnings with code `outside-investigation`, cause and nextStep. CLI/MCP result shapes are otherwise unchanged; no new command or flag is added.
 
+- Task snapshot archive (#148): `ares attempt run` now creates the task archive with the shared content-only tar rule (`COPYFILE_DISABLE=1 tar --no-xattrs`, also used for stage logs) and checks every streamed member against the staged task files. An AppleDouble `._*` member or any member that differs from the staged files is refused by name, so a macOS controller no longer ships extended-attribute metadata to a Linux executor. The frozen task tree hash is unchanged and pinned by a test.
+  - N-1 CLI: commands and usages stay unchanged.
+  - N-1 MCP: tools, schemas and annotations stay unchanged.
+  - N-1 study/ledger: task tree hashes and receipts keep their format and values.
+
 - Reuse rematerialization r2 preparation (#63 T3): export existing source/fault helpers without changing their implementations, add an arm-neutral fresh/eligible fixture runner and a separate create-once superseding setup receipt. Per-case stage hashes and fault states must equal the original amendment; all frozen inputs, labels, v1/v2 seals and the original Reuse receipt stay unchanged. Phase parent CPU, subprocess unknowns and wall clocks stay distinct. No T3 measurement is included.
   - N-1 CLI: installed commands/usages stay unchanged; repository-only r2 freeze/verify modes are additive.
   - N-1 MCP: tools, schemas and annotations stay unchanged.

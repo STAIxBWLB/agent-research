@@ -4,6 +4,8 @@ import { runOnExecutor, type Executor, type ProcessRunner } from "./executor.ts"
 export const ARTIFACT_FILES = 500, ARTIFACT_BYTES = 256 * 1024 * 1024;
 export const ARTIFACT_CAPTURE_BYTES = 65_536;
 export const ARTIFACT_HEADERS = 2048, ARTIFACT_METADATA_BYTES = 65_536;
+/** One entry header plus at most a GNU long-name (`L`) and a PAX (`x`) header, plus one shared global (`g`) slack. */
+const TAR_HEADERS_PER_ENTRY = 4;
 export const ARTIFACT_WIRE_BYTES = ARTIFACT_BYTES + 16 * 1024 * 1024;
 export type ArtifactErrorCode = "invalid-artifact" | "artifact-limit" | "artifact-read";
 export class ArtifactError extends Error {
@@ -93,7 +95,7 @@ class TarArtifacts {
   private pendingMetadata = false;
   private longName?: string;
   private seen = new Map<string, "file" | "directory">();
-  constructor(private capture: string | undefined, private captureBytes: number, private maxBytes: number, private maxFiles: number) {}
+  constructor(private capture: string | undefined, private captureBytes: number, private maxBytes: number, private maxFiles: number, private maxHeaders = ARTIFACT_HEADERS) {}
   push(chunk: Uint8Array): void {
     if (!(chunk instanceof Uint8Array)) return invalid("non-binary archive stream");
     this.wireBytes += chunk.byteLength;
@@ -126,7 +128,7 @@ class TarArtifacts {
     const header = this.header;
     if (header.every(byte => byte === 0)) { if (++this.zeros === 2) this.ended = true; return; }
     if (this.zeros) return invalid("entry after an incomplete tar end marker");
-    if (++this.headers > ARTIFACT_HEADERS) return limit(`archive exceeds ${ARTIFACT_HEADERS} headers`);
+    if (++this.headers > this.maxHeaders) return limit(`archive exceeds ${this.maxHeaders} headers`);
     const expected = octal(header.subarray(148, 156));
     let checksum = 0;
     for (let i = 0; i < 512; i++) checksum += i >= 148 && i < 156 ? 32 : header[i]!;
@@ -204,6 +206,22 @@ class TarArtifacts {
     if (this.body || this.padding || this.headerBytes || !this.ended || this.pendingMetadata) return invalid("truncated archive, missing end markers or dangling metadata");
     return { files: this.files, ...(this.captured !== undefined ? { captured: this.captured } : {}) };
   }
+}
+
+/**
+ * Streaming member scan for an archive the caller transfers elsewhere: the same header, PAX and path validation as
+ * artifact reads, exposing each regular member's path and digest when the archive ends. The caller sizes the header
+ * budget from its own entry limits (each file or directory: its header plus GNU long-name or PAX headers). Metadata
+ * stays bounded per record by ARTIFACT_METADATA_BYTES, which already exceeds the 4096-byte path limit.
+ */
+export class TarMemberScan {
+  private readonly parser: TarArtifacts;
+  constructor(maxBytes: number, maxFiles: number, maxEntries: number) {
+    const entries = bound(maxEntries, 1_000_000, "maxEntries");
+    this.parser = new TarArtifacts(undefined, 0, bound(maxBytes, ARTIFACT_BYTES, "maxBytes"), bound(maxFiles, ARTIFACT_FILES, "maxFiles"), Math.max(ARTIFACT_HEADERS, entries * TAR_HEADERS_PER_ENTRY));
+  }
+  push(chunk: Uint8Array): void { this.parser.push(chunk); }
+  finish(): ArtifactFile[] { return this.parser.finish().files; }
 }
 
 /** Hash regular artifacts, retaining no payload except an explicitly selected bounded capture. */
