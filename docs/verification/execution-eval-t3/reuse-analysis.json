@@ -1,0 +1,717 @@
+{
+  "v": 1,
+  "kind": "descriptive-reuse-T3-analysis",
+  "captureManifestSha256": "820b5f863e28d6c4f8c7b6a07adee395b6f6e0449fab908d2b887adeceab48b0",
+  "captureCode": "29db7d4259bcb40b264b09a1515da8a934f5fef8",
+  "methodSha256": "84e4aabb8178299ceb84c45711c150228a328d9c6acfc2a83735514f1e8fcd62",
+  "analysisSha256": "945b9bee08758615b99c08a602e70c9ab51a845d0c3b9f7f14b334369e77d96e",
+  "denominators": {
+    "full": 144,
+    "succeeded": 144,
+    "failed": 0,
+    "cancelled": 0,
+    "unknown": 0,
+    "excluded": 0,
+    "arms": {
+      "fresh": {
+        "full": 72,
+        "succeeded": 72,
+        "failed": 0,
+        "cancelled": 0,
+        "unknown": 0,
+        "excluded": 0
+      },
+      "eligible-reuse": {
+        "full": 72,
+        "succeeded": 72,
+        "failed": 0,
+        "cancelled": 0,
+        "unknown": 0,
+        "excluded": 0
+      }
+    }
+  },
+  "definitions": {
+    "eligible": "sealed expected eligibility.reuseStages is nonempty; never selected from observed hits",
+    "primaryNoHit": "frozen scenario exactly no-hit",
+    "sensitivityNoHit": "all frozen cases with empty expected reuseStages, including invalidation/fault suites",
+    "CPU": "registered parent plus reported direct-child process CPU; cgroup CPU and nested phase CPU are separate and never added",
+    "percentage": "100*(fresh-eligible)/fresh for reduction; inverse for overhead",
+    "p95": "nearest rank ceil(.95*n)",
+    "interval": "95 percent percentile interval,1000 bootstrap resamples,seed101; small synthetic sample only"
+  },
+  "conditions": {
+    "cold": {
+      "eligibleComputeReduction": {
+        "fullPairs": 6,
+        "knownPairs": 6,
+        "valuePct": -9.616950537536589,
+        "median95PercentileBootstrap101": [
+          -10.918823956223516,
+          -8.583311002056139
+        ],
+        "rangePct": [
+          -11.366294982833123,
+          -7.926566873652707
+        ]
+      },
+      "noHitP95Overhead": {
+        "fullPairs": 6,
+        "knownPairs": 6,
+        "valuePct": 31.363058477332352,
+        "median95PercentileBootstrap101": null,
+        "rangePct": [
+          29.327278124072432,
+          31.363058477332352
+        ]
+      },
+      "allIneligibleP95Sensitivity": {
+        "fullPairs": 30,
+        "knownPairs": 30,
+        "valuePct": 29.788778932706585,
+        "median95PercentileBootstrap101": null,
+        "rangePct": [
+          4.7198214562368035,
+          31.363058477332352
+        ]
+      }
+    },
+    "warm": {
+      "eligibleComputeReduction": {
+        "fullPairs": 6,
+        "knownPairs": 6,
+        "valuePct": -11.10676447286653,
+        "median95PercentileBootstrap101": [
+          -17.156168726215174,
+          -7.0607941643890655
+        ],
+        "rangePct": [
+          -22.391544300354155,
+          -6.7054002237770405
+        ]
+      },
+      "noHitP95Overhead": {
+        "fullPairs": 6,
+        "knownPairs": 6,
+        "valuePct": 30.739829514516785,
+        "median95PercentileBootstrap101": null,
+        "rangePct": [
+          26.349829580402435,
+          30.739829514516785
+        ]
+      },
+      "allIneligibleP95Sensitivity": {
+        "fullPairs": 30,
+        "knownPairs": 30,
+        "valuePct": 30.58325817784986,
+        "median95PercentileBootstrap101": null,
+        "rangePct": [
+          11.924738106830416,
+          30.739829514516785
+        ]
+      }
+    }
+  },
+  "phaseSummaries": {
+    "cold": {
+      "fresh": {
+        "rows": 36,
+        "sourceSetup": {
+          "medianWallMs": 897.209174,
+          "medianParentCpuSeconds": 0.368522,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "current": {
+          "medianWallMs": 721.4870544999999,
+          "medianParentCpuSeconds": 0.3123745,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "total": {
+          "medianWallMs": 1621.4825125,
+          "medianParentCpuSeconds": 0.6809325,
+          "subprocessCpuSeconds": "unknown"
+        }
+      },
+      "eligible-reuse": {
+        "rows": 36,
+        "sourceSetup": {
+          "medianWallMs": 894.455909,
+          "medianParentCpuSeconds": 0.36912049999999996,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "current": {
+          "medianWallMs": 944.9944155000001,
+          "medianParentCpuSeconds": 0.42658450000000003,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "total": {
+          "medianWallMs": 1843.0166715,
+          "medianParentCpuSeconds": 0.7969200000000001,
+          "subprocessCpuSeconds": "unknown"
+        }
+      }
+    },
+    "warm": {
+      "fresh": {
+        "rows": 36,
+        "sourceSetup": {
+          "medianWallMs": 899.5438555,
+          "medianParentCpuSeconds": 0.37003600000000003,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "current": {
+          "medianWallMs": 723.4719409999999,
+          "medianParentCpuSeconds": 0.311925,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "total": {
+          "medianWallMs": 1631.600682,
+          "medianParentCpuSeconds": 0.6847289999999999,
+          "subprocessCpuSeconds": "unknown"
+        }
+      },
+      "eligible-reuse": {
+        "rows": 36,
+        "sourceSetup": {
+          "medianWallMs": 896.806499,
+          "medianParentCpuSeconds": 0.3692375,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "current": {
+          "medianWallMs": 950.4112175,
+          "medianParentCpuSeconds": 0.426742,
+          "subprocessCpuSeconds": "unknown"
+        },
+        "total": {
+          "medianWallMs": 1846.2668995,
+          "medianParentCpuSeconds": 0.7972764999999999,
+          "subprocessCpuSeconds": "unknown"
+        }
+      }
+    }
+  },
+  "perCase": [
+    {
+      "caseId": "reuse-local-stage-edit-first-variant",
+      "scenario": "local-stage-edit",
+      "condition": "cold",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.947354,
+      "eligibleMedianCpu": 2.158133,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -10.47135292961391,
+        "median95PercentileBootstrap101": [
+          -11.366294982833123,
+          -9.819176925492865
+        ],
+        "rangePct": [
+          -11.366294982833123,
+          -9.819176925492865
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-local-stage-edit-second-variant",
+      "scenario": "local-stage-edit",
+      "condition": "cold",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.92405,
+      "eligibleMedianCpu": 2.105194,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -9.240055130459572,
+        "median95PercentileBootstrap101": [
+          -9.414724149580312,
+          -7.926566873652707
+        ],
+        "rangePct": [
+          -9.414724149580312,
+          -7.926566873652707
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-global-code-change-first-variant",
+      "scenario": "global-code-change",
+      "condition": "cold",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.8946669999999999,
+      "eligibleMedianCpu": 2.1447000000000003,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -13.196672555124483,
+        "median95PercentileBootstrap101": [
+          -13.741264259224112,
+          -12.079471150017621
+        ],
+        "rangePct": [
+          -13.741264259224112,
+          -12.079471150017621
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-global-code-change-second-variant",
+      "scenario": "global-code-change",
+      "condition": "cold",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.8900460000000001,
+      "eligibleMedianCpu": 2.135901,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -14.010367097303488,
+        "median95PercentileBootstrap101": [
+          -14.061774157877624,
+          -12.357349442969747
+        ],
+        "rangePct": [
+          -14.061774157877624,
+          -12.357349442969747
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-no-hit-first-variant",
+      "scenario": "no-hit",
+      "condition": "cold",
+      "fullPairs": 3,
+      "freshMedianCpu": 0.8422499999999999,
+      "eligibleMedianCpu": 1.093939,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -29.788778932706585,
+        "median95PercentileBootstrap101": [
+          -31.363058477332352,
+          -29.327278124072432
+        ],
+        "rangePct": [
+          -31.363058477332352,
+          -29.327278124072432
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-no-hit-second-variant",
+      "scenario": "no-hit",
+      "condition": "cold",
+      "fullPairs": 3,
+      "freshMedianCpu": 0.852928,
+      "eligibleMedianCpu": 1.105298,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -29.58866399039542,
+        "median95PercentileBootstrap101": [
+          -29.72885037561252,
+          -29.52612897682493
+        ],
+        "rangePct": [
+          -29.72885037561252,
+          -29.52612897682493
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-corrupt-artifact-first-variant",
+      "scenario": "corrupt-artifact",
+      "condition": "cold",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.8692229999999999,
+      "eligibleMedianCpu": 2.131794,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -15.055881507984894,
+        "median95PercentileBootstrap101": [
+          -15.40146755914762,
+          -13.618754356494108
+        ],
+        "rangePct": [
+          -15.40146755914762,
+          -13.618754356494108
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-corrupt-artifact-second-variant",
+      "scenario": "corrupt-artifact",
+      "condition": "cold",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.9054200000000001,
+      "eligibleMedianCpu": 2.140563,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -13.20155136400373,
+        "median95PercentileBootstrap101": [
+          -13.664502869746117,
+          -12.04519782291675
+        ],
+        "rangePct": [
+          -13.664502869746117,
+          -12.04519782291675
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-pruned-artifact-first-variant",
+      "scenario": "pruned-artifact",
+      "condition": "cold",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.961175,
+      "eligibleMedianCpu": 2.184034,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -13.447000194269762,
+        "median95PercentileBootstrap101": [
+          -13.921603120578222,
+          -4.7198214562368035
+        ],
+        "rangePct": [
+          -13.921603120578222,
+          -4.7198214562368035
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-pruned-artifact-second-variant",
+      "scenario": "pruned-artifact",
+      "condition": "cold",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.949039,
+      "eligibleMedianCpu": 2.20623,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -13.195785204913815,
+        "median95PercentileBootstrap101": [
+          -13.24763562936559,
+          -10.503235934422356
+        ],
+        "rangePct": [
+          -13.24763562936559,
+          -10.503235934422356
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-interrupted-source-first-variant",
+      "scenario": "interrupted-source",
+      "condition": "cold",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.875358,
+      "eligibleMedianCpu": 2.1593880000000003,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -15.145374909750576,
+        "median95PercentileBootstrap101": [
+          -15.525286512424605,
+          -13.60978183152263
+        ],
+        "rangePct": [
+          -15.525286512424605,
+          -13.60978183152263
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-interrupted-source-second-variant",
+      "scenario": "interrupted-source",
+      "condition": "cold",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.895043,
+      "eligibleMedianCpu": 2.150942,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -13.123639379110285,
+        "median95PercentileBootstrap101": [
+          -14.579880245461446,
+          -13.0813582115525
+        ],
+        "rangePct": [
+          -14.579880245461446,
+          -13.0813582115525
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-local-stage-edit-first-variant",
+      "scenario": "local-stage-edit",
+      "condition": "warm",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.956447,
+      "eligibleMedianCpu": 2.217747,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -11.920793152076193,
+        "median95PercentileBootstrap101": [
+          -22.391544300354155,
+          -11.699854743403524
+        ],
+        "rangePct": [
+          -22.391544300354155,
+          -11.699854743403524
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-local-stage-edit-second-variant",
+      "scenario": "local-stage-edit",
+      "condition": "warm",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.9234760000000002,
+      "eligibleMedianCpu": 2.063755,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -7.416188105001091,
+        "median95PercentileBootstrap101": [
+          -10.513674202329536,
+          -6.7054002237770405
+        ],
+        "rangePct": [
+          -10.513674202329536,
+          -6.7054002237770405
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-global-code-change-first-variant",
+      "scenario": "global-code-change",
+      "condition": "warm",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.879829,
+      "eligibleMedianCpu": 2.153478,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -14.009100590570227,
+        "median95PercentileBootstrap101": [
+          -15.504219822303488,
+          -13.707842575042745
+        ],
+        "rangePct": [
+          -15.504219822303488,
+          -13.707842575042745
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-global-code-change-second-variant",
+      "scenario": "global-code-change",
+      "condition": "warm",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.901919,
+      "eligibleMedianCpu": 2.164286,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -12.697964529509411,
+        "median95PercentileBootstrap101": [
+          -14.018226808338252,
+          -12.338359783158696
+        ],
+        "rangePct": [
+          -14.018226808338252,
+          -12.338359783158696
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-no-hit-first-variant",
+      "scenario": "no-hit",
+      "condition": "warm",
+      "fullPairs": 3,
+      "freshMedianCpu": 0.846641,
+      "eligibleMedianCpu": 1.09283,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -28.74180449919405,
+        "median95PercentileBootstrap101": [
+          -30.739829514516785,
+          -26.349829580402435
+        ],
+        "rangePct": [
+          -30.739829514516785,
+          -26.349829580402435
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-no-hit-second-variant",
+      "scenario": "no-hit",
+      "condition": "warm",
+      "fullPairs": 3,
+      "freshMedianCpu": 0.857459,
+      "eligibleMedianCpu": 1.109674,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -29.80259114429963,
+        "median95PercentileBootstrap101": [
+          -30.58325817784986,
+          -28.641448626841804
+        ],
+        "rangePct": [
+          -30.58325817784986,
+          -28.641448626841804
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-corrupt-artifact-first-variant",
+      "scenario": "corrupt-artifact",
+      "condition": "warm",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.877966,
+      "eligibleMedianCpu": 2.144069,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -13.585699440619731,
+        "median95PercentileBootstrap101": [
+          -15.76671382136649,
+          -12.675415848849237
+        ],
+        "rangePct": [
+          -15.76671382136649,
+          -12.675415848849237
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-corrupt-artifact-second-variant",
+      "scenario": "corrupt-artifact",
+      "condition": "warm",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.9082379999999999,
+      "eligibleMedianCpu": 2.137908,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -13.371830324547052,
+        "median95PercentileBootstrap101": [
+          -13.731096435559925,
+          -11.924738106830416
+        ],
+        "rangePct": [
+          -13.731096435559925,
+          -11.924738106830416
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-pruned-artifact-first-variant",
+      "scenario": "pruned-artifact",
+      "condition": "warm",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.955867,
+      "eligibleMedianCpu": 2.21033,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -13.56135070010762,
+        "median95PercentileBootstrap101": [
+          -13.615469436410246,
+          -13.010240471361287
+        ],
+        "rangePct": [
+          -13.615469436410246,
+          -13.010240471361287
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-pruned-artifact-second-variant",
+      "scenario": "pruned-artifact",
+      "condition": "warm",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.940621,
+      "eligibleMedianCpu": 2.213339,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -14.107755251864715,
+        "median95PercentileBootstrap101": [
+          -14.27929513284664,
+          -12.432129101896289
+        ],
+        "rangePct": [
+          -14.27929513284664,
+          -12.432129101896289
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-interrupted-source-first-variant",
+      "scenario": "interrupted-source",
+      "condition": "warm",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.874389,
+      "eligibleMedianCpu": 2.118835,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -13.29468858377561,
+        "median95PercentileBootstrap101": [
+          -14.093926074043306,
+          -12.363729094502403
+        ],
+        "rangePct": [
+          -14.093926074043306,
+          -12.363729094502403
+        ]
+      }
+    },
+    {
+      "caseId": "reuse-interrupted-source-second-variant",
+      "scenario": "interrupted-source",
+      "condition": "warm",
+      "fullPairs": 3,
+      "freshMedianCpu": 1.906072,
+      "eligibleMedianCpu": 2.136252,
+      "pairedReduction": {
+        "fullPairs": 3,
+        "knownPairs": 3,
+        "valuePct": -12.145877948001717,
+        "median95PercentileBootstrap101": [
+          -20.949845531309194,
+          -12.076144028137438
+        ],
+        "rangePct": [
+          -20.949845531309194,
+          -12.076144028137438
+        ]
+      }
+    }
+  ],
+  "invariants": {
+    "fullPairs": 72,
+    "observedReusedStages": 18,
+    "falseReusedStages": 0,
+    "falseReuseEvidence": [],
+    "equalResultPairs": 72,
+    "equalPayloadDigestPairs": 72,
+    "equalEvaluatorMetricDigestPairs": 72,
+    "freshEvaluators": 144,
+    "immutableSourceRecords": 120,
+    "noSourceRows": 24,
+    "sourceFaultRows": {
+      "none": 72,
+      "corrupt": 24,
+      "pruned": 24,
+      "interrupted": 24
+    }
+  }
+}

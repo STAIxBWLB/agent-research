@@ -1,0 +1,138 @@
+{
+  "slot": {
+    "caseIndex": 6,
+    "repetition": 3,
+    "condition": "warm",
+    "permutation": [
+      "B",
+      "C",
+      "A"
+    ],
+    "shadowIndex": 0
+  },
+  "caseId": "supervision-v2-true-trigger-overlap-without-integration",
+  "inputSha256": "433168b4c088da4681e31a335af4c7ae9eb14ca61e5aefe976cc0c32eff0177d",
+  "status": "succeeded",
+  "failure": null,
+  "costs": {
+    "wallMs": 188.6750350000002,
+    "cpuSeconds": 0.213787,
+    "memoryRssBytes": 45875200
+  },
+  "score": {
+    "authority": "synthetic-intent-join-conformance",
+    "rows": [
+      {
+        "id": "supervision-v2-true-trigger-overlap-without-integration",
+        "task": 403,
+        "revision": "1:none",
+        "nextAction": "request_integration",
+        "rule": "declared_overlap_without_integration",
+        "proposals": [
+          {
+            "identity": "[\"declared_overlap_without_integration\",403,\"1:none\",\"overlap:403:404\"]",
+            "rule": "declared_overlap_without_integration",
+            "action": "request_integration",
+            "classification": "intended-action"
+          }
+        ],
+        "falseCases": 0,
+        "falseProposals": 0,
+        "wrongAction": 0,
+        "falseProposalBudget": 0,
+        "state": "scored",
+        "outcome": "helpful",
+        "helpful": 1,
+        "missed": 0,
+        "correctNonTriggers": null
+      }
+    ],
+    "records": {
+      "observations": [
+        {
+          "rule": "declared_overlap_without_integration",
+          "version": 1,
+          "task": 403,
+          "revision": "1:none",
+          "trigger": "overlap:403:404",
+          "refs": [
+            "task:404",
+            "history:0",
+            "history:0"
+          ],
+          "limits": {
+            "records": 0,
+            "truncated": false
+          },
+          "action": "request_integration",
+          "reason": "unintegrated_overlap"
+        }
+      ],
+      "gap": [],
+      "evaluated": [
+        {
+          "rule": "declared_overlap_without_integration",
+          "task": 403,
+          "revision": "1:none"
+        },
+        {
+          "rule": "deliverable_invalidated_check",
+          "task": 403,
+          "revision": "1:none"
+        },
+        {
+          "rule": "deliverable_invalidated_check",
+          "task": 404,
+          "revision": "1:none"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 403,
+          "revision": "1:none"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 404,
+          "revision": "1:none"
+        }
+      ],
+      "duplicates": 0,
+      "producerCounts": [
+        {
+          "evaluations": 1,
+          "observations": 1,
+          "deduped": 0,
+          "suppressed": 0,
+          "gap": 0,
+          "evaluatedSuppressed": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      ],
+      "retentionSuppressed": false,
+      "evaluatedSuppressed": false
+    },
+    "evaluationCoverage": "explicit-evaluated-triples",
+    "proposalCountScope": "present-observations-only",
+    "coverage": {
+      "total": 1,
+      "formatCompatible": 1,
+      "scored": 1,
+      "insufficient": 0
+    },
+    "scores": {
+      "helpful": 1,
+      "falseCases": 0,
+      "falseProposals": 0,
+      "wrongAction": 0,
+      "falseProposalBudget": 0,
+      "missed": 0,
+      "correctNonTriggers": null
+    },
+    "personDecisions": 0,
+    "workerTurns": 0,
+    "actionWrites": 0,
+    "notifications": 0
+  }
+}

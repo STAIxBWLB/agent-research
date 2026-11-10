@@ -1,0 +1,98 @@
+{
+  "slot": {
+    "caseIndex": 10,
+    "repetition": 1,
+    "condition": "cold",
+    "permutation": [
+      "A",
+      "C",
+      "B"
+    ],
+    "shadowIndex": 2
+  },
+  "caseId": "supervision-v2-misleading-symptom-failures-split-by-hand-over",
+  "inputSha256": "93d54f879c27af88f2bac391762c575ca01bff4211fd9372fa5d5398325495cd",
+  "status": "succeeded",
+  "failure": null,
+  "costs": {
+    "wallMs": 191.54930500000046,
+    "cpuSeconds": 0.21709,
+    "memoryRssBytes": 45875200
+  },
+  "score": {
+    "authority": "synthetic-intent-join-conformance",
+    "rows": [
+      {
+        "id": "supervision-v2-misleading-symptom-failures-split-by-hand-over",
+        "task": 503,
+        "revision": "3:none",
+        "nextAction": "none",
+        "rule": null,
+        "proposals": [],
+        "falseCases": 0,
+        "falseProposals": 0,
+        "wrongAction": 0,
+        "falseProposalBudget": 0,
+        "state": "insufficient-evidence",
+        "reason": "no-evaluation-coverage",
+        "outcome": "insufficient",
+        "helpful": null,
+        "missed": null,
+        "correctNonTriggers": null
+      }
+    ],
+    "records": {
+      "observations": [],
+      "gap": [],
+      "evaluated": [
+        {
+          "rule": "deliverable_invalidated_check",
+          "task": 503,
+          "revision": "3:none"
+        },
+        {
+          "rule": "repeated_failure",
+          "task": 503,
+          "revision": "3:none"
+        }
+      ],
+      "duplicates": 0,
+      "producerCounts": [
+        {
+          "evaluations": 1,
+          "observations": 0,
+          "deduped": 0,
+          "suppressed": 0,
+          "gap": 0,
+          "evaluatedSuppressed": 0,
+          "workerTurns": 0,
+          "actionWrites": 0,
+          "notifications": 0
+        }
+      ],
+      "retentionSuppressed": false,
+      "evaluatedSuppressed": false
+    },
+    "evaluationCoverage": "explicit-evaluated-triples",
+    "proposalCountScope": "present-observations-only",
+    "coverage": {
+      "total": 1,
+      "formatCompatible": 1,
+      "scored": 0,
+      "insufficient": 1
+    },
+    "scores": {
+      "helpful": 0,
+      "falseCases": 0,
+      "falseProposals": 0,
+      "wrongAction": 0,
+      "falseProposalBudget": 0,
+      "missed": null,
+      "correctNonTriggers": null
+    },
+    "personDecisions": 0,
+    "workerTurns": 0,
+    "actionWrites": 0,
+    "notifications": 0
+  }
+}
