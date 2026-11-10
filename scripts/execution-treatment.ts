@@ -38,8 +38,8 @@ export function treatmentCases(rootArg: string): { registration: ReturnType<type
 /** Check-only admission plan. It does not run arms, schedule repetitions, write receipts or decide adoption. */
 export async function validateTreatmentIntegration(rootArg: string) {
   const { registration, cases, supervisionCases } = treatmentCases(rootArg), code = bindRunCode(rootArg);
-  const lineage = await import("./execution-lineage.ts"), reuse = await import("./execution-reuse.ts"), supervision = await import("./execution-supervision.ts"), records = await import("./execution-supervision-records.ts");
-  if (typeof lineage.diagnoseTreatment !== "function" || typeof reuse.checkReuseTreatmentFixture !== "function" || typeof supervision.classifySupervisionFixture !== "function" || typeof supervision.scoreSupervisionRecords !== "function" || typeof records.readShadowSnapshot !== "function") fail("producer adapter unavailable");
+  const lineage = await import("./execution-lineage.ts"), reuse = await import("./execution-reuse.ts"), supervision = await import("./execution-supervision.ts"), records = await import("./execution-supervision-records.ts"), rematerialized = await import("./execution-reuse-rematerialize.ts");
+  if (typeof lineage.diagnoseTreatment !== "function" || typeof reuse.checkReuseTreatmentFixture !== "function" || typeof supervision.classifySupervisionFixture !== "function" || typeof supervision.scoreSupervisionRecords !== "function" || typeof records.readShadowSnapshot !== "function" || typeof rematerialized.verifyReuseRematerializationSeal !== "function") fail("producer adapter unavailable");
   const supervisionCoverage = cases.filter(row => row.trial === "supervision").map(row => ({
     id: row.id, inputSha256: row.inputSha256, expectedSha256: row.expectedSha256, ...supervision.classifySupervisionFixture(row.payload),
   }));
@@ -47,12 +47,27 @@ export async function validateTreatmentIntegration(rootArg: string) {
   const amended = loadSupervisionAmendmentCases(rootArg);
   const amendmentCoverage = amended.cases.map(row => ({id: row.id, inputSha256: row.inputSha256, expectedSha256: row.expectedSha256,
     ...supervision.classifySupervisionV2Fixture(row.payload)}));
+  // The Reuse amendment is verified here, never resealed: an unverified setup cannot claim the cases are hit-capable.
+  const sealed = rematerialized.verifyReuseRematerializationSeal(rootArg);
+  if (sealed.state !== "verified") fail(`reuse rematerialization seal is ${sealed.state}; run bun scripts/execution-eval.ts freeze-reuse-rematerialization from a clean checkout and commit the receipt`);
+  const reuseCases = sealed.receipt.identity.cases, rebuilt = reuseCases.filter(row => row.state === "rematerialized");
+  const reuseRows = reuseCases.map(row => ({id: row.caseId, scenario: row.scenario, state: row.state, reason: row.reason, fault: row.fault, label: row.label, hitCapableStages: row.hitCapableStages}));
   return {
     v: 1 as const, kind: "synthetic-treatment-integration-check" as const, status: "integrated-not-measured" as const,
     authority: "harness-observed" as const, registrationReceiptSha256: registration.receiptSha256, bindings: registration.bindings, code,
     arms: {
       diagnose: { status: "integrated-read-only", adapter: "diagnoseTreatment", producer: "ares-lineage", cases: cases.filter(row => row.trial === "diagnose").length },
-      reuse: { status: "integrated-fresh-fallback", adapter: "checkReuseTreatmentFixture", producer: "ares-retained-stage-reuse", cases: cases.filter(row => row.trial === "reuse").length, sourceEstablishment: "opaque-frozen-sources-not-numeric-manifests" },
+      reuse: { status: "integrated-rematerialized-source", adapter: "checkReuseTreatmentFixture", admissionAdapter: "checkRematerializedReuseAdmission",
+        producer: "ares-retained-stage-reuse", cases: cases.filter(row => row.trial === "reuse").length,
+        sourceEstablishment: "fixture-rematerialized-numeric-manifests", sourcePopulation: "deterministic-rematerialization-setup",
+        rematerialization: {path: rematerialized.REMATERIALIZATION_RECEIPT, state: sealed.state, setupSha256: sealed.receipt.setupSha256,
+          amends: sealed.receipt.identity.amends, bindings: sealed.receipt.identity.bindings, setupCosts: sealed.receipt.setupCosts,
+          cases: reuseCases.length, rebuilt: rebuilt.filter(row => row.fault === "none").length,
+          injectedFault: rebuilt.filter(row => row.fault !== "none").length, noSource: reuseCases.length - rebuilt.length,
+          hitCapable: rebuilt.filter(row => row.hitCapableStages.length > 0).length,
+          hitCapableStages: rebuilt.reduce((total, row) => total + row.hitCapableStages.length, 0), rows: reuseRows,
+          admissionEvidence: "test/execution-reuse-rematerialize.test.ts runs the current attempt with reuse eligible against each rebuilt source, and against the same sources rebuilt healthy and then broken by their own declared fault, in a fake-runner fixture",
+          helpful: null, false: null, missed: null, personDecisions: 0 as const, trialExecutions: 0} },
       supervision: { status: "integrated-record-reader", cases: supervisionCases, dependency: "agent-hub#1221", producerCommit: supervision.SUPERVISION_PRODUCER_COMMIT,
         reader: "readShadowSnapshot", scorer: "scoreSupervisionRecords", classifier: "classifySupervisionFixture", fakeShadow: false,
         coverage: { covered: supervisionCoverage.length - unsupported, unsupported, rows: supervisionCoverage }, helpful: null, false: null, missed: null, personDecisions: 0 as const,
@@ -62,6 +77,6 @@ export async function validateTreatmentIntegration(rootArg: string) {
           helpful: null, false: null, falseCases: null, falseProposals: null, wrongAction: null, falseProposalBudget: null, missed: null, correctNonTriggers: null, personDecisions: 0 as const, trialExecutions: 0, treatmentObservations: 0} },
     },
     trialExecutions: 0, treatmentObservations: 0, adoptionDecision: null,
-    limitations: ["integration checks only; T3 paired trials require separate launch authorization", "native container, model/account, human timing and measured cost benefit are unverified", "opaque frozen cached strings cannot establish numeric producer manifests; no hidden warmup or fabricated hits", "v2 format coverage is not producer evaluation coverage; no evaluator or trial was run", "frozen supervision task-state payloads are unsupported T1 rule facts; no translation, missed-trigger score or correct-non-trigger claim; corpus re-expression needs an owner decision before T3"],
+    limitations: ["integration checks only; T3 paired trials require separate launch authorization", "native container, model/account, human timing and measured cost benefit are unverified", "the opaque frozen cached payloads are still not producer manifests; the sealed setup rebuilds each source from its declared workload, applies six of those sources' own declared faults to the rebuilt artifact after its seal, and proves admission or the reuse path's own refusal in a fake-runner fixture, so no hidden warmup or fabricated hit is claimed", "v2 format coverage is not producer evaluation coverage; no evaluator or trial was run", "frozen supervision task-state payloads are unsupported T1 rule facts; no translation, missed-trigger score or correct-non-trigger claim; corpus re-expression needs an owner decision before T3"],
   };
 }

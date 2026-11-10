@@ -44,7 +44,9 @@ export async function prepareStageReuse(dir: string, attempt: Attempt, ctx: Atte
   let original: Attempt, record: AttemptStage | undefined;
   try {
     original = sourceAttempt(result.ref.attemptId);
-    if (original.status === "running" || original.studyId !== attempt.studyId || !original.pipeline || original.treeId !== attempt.treeId || original.seed !== attempt.seed || original.pipeline.codeSnapshotHash !== pipeline.codeSnapshotHash || original.reuse?.stages[stage.name]?.outcome !== "fresh" || original.reuse.stages[stage.name]?.key !== key || canonical(original.executor) !== canonical(attempt.executor) || !original.sealing.candidateHasNoEvaluator || canonical(original.reuse?.stages[stage.name]?.context) !== canonical(facts)) return fresh("ineligible-source", key);
+    // A valid done-but-not-succeeded receipt never makes a source eligible: a cancelled or unknown attempt's stages may
+    // be partial, so only a succeeded source is admitted, never merely a non-running one.
+    if (original.status !== "succeeded" || original.studyId !== attempt.studyId || !original.pipeline || original.treeId !== attempt.treeId || original.seed !== attempt.seed || original.pipeline.codeSnapshotHash !== pipeline.codeSnapshotHash || original.reuse?.stages[stage.name]?.outcome !== "fresh" || original.reuse.stages[stage.name]?.key !== key || canonical(original.executor) !== canonical(attempt.executor) || !original.sealing.candidateHasNoEvaluator || canonical(original.reuse?.stages[stage.name]?.context) !== canonical(facts)) return fresh("ineligible-source", key);
     const completed = original.pipeline.completed.find(parent => parent.name === stage.name && canonical(parent.ref) === canonical(result.ref) && !parent.reuse);
     record = completed?.record;
     if (!record && original.stage === "candidate" && original.pipeline.definition.candidate.stages[original.pipeline.index]?.name === stage.name) record = original.stages.candidate;

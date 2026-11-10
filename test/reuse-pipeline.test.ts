@@ -9,7 +9,7 @@ import { readAttemptLogs } from "../src/exp/logs.ts";
 import { retainedOperation } from "../src/exp/retention.ts";
 import { canonical, designBinding, readProtocol, setProtocol } from "../src/exp/protocol.ts";
 import { attemptReuseView } from "../src/provenance.ts";
-import { readBytesBounded, readJsonFile, readLedger, readTextBounded, sha256, withLock, writeAtomic } from "../src/study.ts";
+import { commit, readBytesBounded, readJsonFile, readLedger, readTextBounded, sha256, withLock, writeAtomic } from "../src/study.ts";
 import { fakeHttp } from "./helpers.ts";
 import { actor, cleanupPipelineFixtures, setup } from "./pipeline-fixture.ts";
 
@@ -121,6 +121,35 @@ test("pruned and corrupt source bytes are reasoned misses followed by ordinary f
     expect(readTextBounded(join(retried.paths.output, "predict", "predictions.txt"), 1024)).toBe("synthetic:rows:model:predictions");
   }
 }, 40_000);
+
+test("a non-succeeded source attempt misses as ineligible-source while a succeeded one still hits", async () => {
+  for (const status of ["succeeded", "cancelled", "unknown"] as const) {
+    const f = await setup({ reuse: true }), first = await source(f);
+    if (status !== "succeeded") {
+      // Only the recorded status changes: the sealed candidate stages and every other byte stay as the producer wrote them.
+      const recordPath = join(f.dir, "runs", first.run, "attempts", `${first.id}.json`), record = JSON.parse(readTextBounded(recordPath, 1024 * 1024)) as Attempt;
+      record.status = status;
+      commit(f.dir, [[recordPath, JSON.stringify(record, null, 2) + "\n", 1024 * 1024]], [{ actor, type: status === "cancelled" ? "attempt.cancelled" : "attempt.unknown", data: { id: record.id, run: record.run, stage: record.stage, status } }]);
+    }
+    const before = f.fake.executed.length;
+    const retried = await finish(f, await runAttempt(f.dir, { ...runOptions(f), reuse: "eligible", retry: first.id }, f.fake.ctx));
+    expect(retried.status).toBe("succeeded");
+    if (status === "succeeded") {
+      expect(f.fake.executed.slice(before)).toEqual(["evaluate"]);
+      for (const stage of ["prepare", "train", "predict"] as const) expect(retried.reuse?.stages[stage]?.outcome).toBe("reused");
+      expect(attemptReuseView(retried)?.reusedStages).toBe(3);
+    } else {
+      expect(retried.pipeline!.completed.every(completed => completed.reuse === undefined)).toBe(true);
+      expect(f.fake.executed.slice(before)).toEqual(["prepare", "train", "predict", "evaluate"]);
+      // The first stage meets the sealed source and is refused as ineligible-source; a downstream stage's key no longer
+      // matches after that fresh run, so it reports missing rather than a hit.
+      const reasons = (["prepare", "train", "predict"] as const).map(stage => retried.reuse?.stages[stage]?.reason);
+      expect(reasons[0]).toBe("ineligible-source"); expect(reasons.slice(1).every(reason => reason === "missing")).toBe(true);
+      expect((["prepare", "train", "predict"] as const).every(stage => retried.reuse?.stages[stage]?.outcome === "fresh")).toBe(true);
+      expect(attemptReuseView(retried)?.reusedStages).toBe(0);
+    }
+  }
+}, 60_000);
 
 test("a forged matching lookup index cannot admit a manifest with the wrong producing identity", async () => {
   const f = await setup({ reuse: true }), first = await source(f), control = await verifiedHit(f, first);
