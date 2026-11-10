@@ -5,7 +5,7 @@ import {fileURLToPath} from "node:url";
 import {baselineSlots} from "../scripts/execution-baseline.ts";
 import {bindRunCode} from "../scripts/execution-code-binding.ts";
 import {COST_FIELDS} from "../scripts/execution-eval.ts";
-import {TREATMENT_AUTHORITY_DEVIATION, TREATMENT_RECEIPT_BYTES, treatmentSlots, treatmentDenominators, treatmentMatches, treatmentChildCpuSeconds, parseTreatmentCgroupCpu, validateTreatmentObservation, readTreatmentObservation, validateTreatmentTrialManifest, readTreatmentTrialManifest, readRegisteredTreatmentSchedule, serializeTreatmentBundle, type TreatmentObservation} from "../scripts/execution-trials.ts";
+import {TREATMENT_AUTHORITY_DEVIATION, TREATMENT_RECEIPT_BYTES, treatmentSlots, treatmentDenominators, treatmentMatches, treatmentChildCpuSeconds, parseTreatmentCgroupCpu, validateTreatmentObservation, readTreatmentObservation, validateTreatmentTrialManifest, readTreatmentTrialManifest, readRegisteredTreatmentSchedule, serializeTreatmentBundle, type TreatmentObservation, type TreatmentTrialManifest} from "../scripts/execution-trials.ts";
 import {readBytesBounded, readTextBounded, sha256, writeAtomic} from "../src/study.ts";
 import {tempDir} from "./helpers.ts";
 
@@ -61,6 +61,10 @@ test("failed, cancelled, unknown and excluded slots stay in each full denominato
   for (const total of [-1, NaN, Infinity]) expect(treatmentChildCpuSeconds({cpuTime: {total}})).toBe("unknown");
   expect(treatmentChildCpuSeconds({cpuTime: {total: 0}})).toBe(0);
   expect(treatmentChildCpuSeconds({cpuTime: {total: 1500000}})).toBe(1.5);
+  expect(treatmentChildCpuSeconds({cpuTime: {total: 1500000n}})).toBe(1.5);
+  expect(treatmentChildCpuSeconds({cpuTime: {total: 0n}})).toBe(0);
+  expect(treatmentChildCpuSeconds({cpuTime: {total: -1n}})).toBe("unknown");
+  expect(treatmentChildCpuSeconds({cpuTime: {total: BigInt(Number.MAX_SAFE_INTEGER) + 1n}})).toBe("unknown");
   expect(parseTreatmentCgroupCpu("usage_usec 1500000\nuser_usec 1000000\nsystem_usec 500000\n")).toBe(1.5);
   for (const text of ["", "usage_usec -1", "usage_usec 1.5", "usage_usec 1\nusage_usec 2", "x".repeat(4097)]) expect(() => parseTreatmentCgroupCpu(text)).toThrow("execution treatment trials:");
 });
@@ -88,7 +92,7 @@ test("bounded slot receipts preserve unknown units, integration phase scopes and
 });
 
 test("incomplete manifests retain the full144 denominator and bound code, admission and schedule", () => {
-  const raw = manifest(); expect(validateTreatmentTrialManifest(raw)).toEqual(raw);
+  const raw = manifest(); expect(validateTreatmentTrialManifest(raw)).toEqual(raw as unknown as TreatmentTrialManifest);
   expect(raw.denominators.full).toBe(144); expect(raw.denominators.arms.fresh!.full).toBe(72);
   for (const change of [
     (value: ReturnType<typeof manifest>) => {value.state = "complete";},
@@ -145,6 +149,8 @@ test("rehashed slot identity forgeries fail against the frozen144-slot schedule 
     // Both row and file metadata have been rehashed; only the independent frozen schedule detects it.
     expect(() => readTreatmentTrialManifest(dir, root)).toThrow("slot identity differs from the frozen");
   }
+  publish({...original, status: "failed", matched: true, result: {seed: -2147483648, prepare: 42, transform: 42, evaluate: 42}});
+  expect(() => readTreatmentTrialManifest(dir, root)).toThrow("matched flag differs from sealed evaluator truth");
   publish(original); raw.schedule.sha256 = "0".repeat(64);
   writeAtomic(join(dir, "manifest.json"), JSON.stringify(raw), TREATMENT_RECEIPT_BYTES);
   expect(() => readTreatmentTrialManifest(dir, root)).toThrow("frozen registered schedule");

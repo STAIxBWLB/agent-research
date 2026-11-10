@@ -84,8 +84,10 @@ function inert(raw: unknown, depth = 0, budget = {bytes: 0, nodes: 0}): unknown 
 function bounded(raw: unknown): unknown {const normalized = inert(raw); if (Buffer.byteLength(JSON.stringify(normalized)) > TREATMENT_RECEIPT_BYTES) fail("receipt exceeds 64 KiB"); return normalized;}
 function unknownCosts(): CostRecord {return Object.fromEntries(COST_FIELDS.map(key => [key, "unknown"])) as CostRecord;}
 function cpu(before: NodeJS.CpuUsage): number {const used = process.cpuUsage(before); return (used.user + used.system) / 1_000_000;}
-export function treatmentChildCpuSeconds(usage: {cpuTime: {total: number}} | undefined): number | "unknown" {
-  return usage && Number.isFinite(usage.cpuTime.total) && usage.cpuTime.total >= 0 ? usage.cpuTime.total / 1_000_000 : "unknown";
+export function treatmentChildCpuSeconds(usage: {cpuTime: {total: number | bigint}} | undefined): number | "unknown" {
+  if (!usage) return "unknown";
+  const microseconds = Number(usage.cpuTime.total);
+  return Number.isFinite(microseconds) && microseconds >= 0 && microseconds <= Number.MAX_SAFE_INTEGER ? microseconds / 1_000_000 : "unknown";
 }
 export function parseTreatmentCgroupCpu(text: string): number {
   if (text.length > 4096 || Buffer.byteLength(text) > 4096) fail("cgroup CPU meter exceeded its bound");
@@ -181,6 +183,7 @@ export function validateTreatmentObservation(raw: unknown): TreatmentObservation
   const order = array(row.slotOrder, 2); if (order.length !== 2 || new Set(order).size !== 2 || order.some(arm => !ARMS[trial].includes(arm as TreatmentArm)) || order[row.executedSlot as number] !== row.arm) fail("paired slot order is invalid");
   for (const field of ["codeSha256", "methodSha256", "inputSha256", "expectedSha256"]) hash(row[field]);
   if (row.cause !== null && (typeof row.cause !== "string" || !/^[a-z][a-z0-9-]{0,95}$/.test(row.cause))) fail("observation cause must be a safe token");
+  if (row.status === "succeeded" && row.matched !== true || row.result === null && row.matched !== "unknown") fail("observation outcome and available result are inconsistent");
   if (row.processWallMs !== "unknown" && (typeof row.processWallMs !== "number" || !Number.isFinite(row.processWallMs) || row.processWallMs < 0)) fail("process wall time is invalid");
   if (row.containerCpuSeconds !== "unknown" && (typeof row.containerCpuSeconds !== "number" || !Number.isFinite(row.containerCpuSeconds) || row.containerCpuSeconds < 0)) fail("container CPU time is invalid");
   validateCostRecord(object(row.costs, COST_FIELDS));
@@ -284,10 +287,10 @@ export function runTreatmentTrials(rootArg: string, outputArg: string, imageDige
       } else {stopped = true; observation.cause = "budget-stopped-not-started";}
       let text: string;
       try {text = JSON.stringify(validateTreatmentObservation(observation), null, 2) + "\n"; if (Buffer.byteLength(text) > TREATMENT_RECEIPT_BYTES) fail("formatted slot exceeds its bound");}
-      catch {observation.status = "failed"; observation.cause = "receipt-bound-or-invalid"; observation.result = null; observation.integration = null; text = JSON.stringify(validateTreatmentObservation(observation), null, 2) + "\n"; stopped = true;}
+      catch {observation.status = "failed"; observation.cause = "receipt-bound-or-invalid"; observation.result = null; observation.integration = null; observation.matched = "unknown"; observation.costs.failureCpuSeconds = observation.costs.cpuSeconds; observation.costs.failureWallMs = observation.costs.wallElapsedMs; text = JSON.stringify(validateTreatmentObservation(observation), null, 2) + "\n"; stopped = true;}
       const reserved = (SLOTS - index - 1) * STUB_BYTES + TREATMENT_RECEIPT_BYTES;
       if (retained + Buffer.byteLength(text) + reserved > protocol.budgets.trialRetainedBytes || transferred + Buffer.byteLength(text) + reserved > protocol.budgets.trialTransferBytes) {
-        observation.status = "failed"; observation.cause = "retention-or-transfer-budget"; observation.result = null; observation.integration = null;
+        observation.status = "failed"; observation.cause = "retention-or-transfer-budget"; observation.result = null; observation.integration = null; observation.matched = "unknown"; observation.costs.failureCpuSeconds = observation.costs.cpuSeconds; observation.costs.failureWallMs = observation.costs.wallElapsedMs;
         text = JSON.stringify(validateTreatmentObservation(observation), null, 2) + "\n"; stopped = true;
       }
       const name = `slot-${String(index).padStart(3, "0")}.json`; exclusive(join(output, name), text);
@@ -354,6 +357,7 @@ export function readTreatmentTrialManifest(output: string, root = fileURLToPath(
   const registered = readRegisteredTreatmentSchedule(root, manifest.trial);
   if (manifest.schedule.sha256 !== registered.sha256 || canonical(manifest.bindings) !== canonical(registered.bindings)
     || manifest.methodSha256 !== registered.methodSha256 || manifest.inputSha256 !== registered.inputSha256 || manifest.expectedSha256 !== registered.expectedSha256) fail("manifest differs from the frozen registered schedule or source bindings");
+  const registration = verifyPreregistration(root, join(root, FROZEN_RECEIPT)), truth = new Map(loadCases(root, manifest.trial, registration).map(row => [row.id, row.truth]));
   const rows: TreatmentObservation[] = [];
   for (const entry of manifest.files) {
     const file = join(output, entry.path), text = readTextBounded(file, TREATMENT_RECEIPT_BYTES, {noFollow: true});
@@ -362,6 +366,7 @@ export function readTreatmentTrialManifest(output: string, root = fileURLToPath(
     if (row.trial !== manifest.trial || row.slot !== Number(entry.path.slice(5, 8)) || row.codeSha256 !== manifest.code.codeSha256 || row.methodSha256 !== manifest.methodSha256) fail("slot receipt differs from its trial/code binding");
     const expected = registered.slots[row.slot];
     if (!expected || Object.entries(expected).some(([key, value]) => canonical(row[key as keyof TreatmentObservation]) !== canonical(value))) fail("slot identity differs from the frozen case, seed, repetition, condition, arm or input/expected pair");
+    if (row.matched !== "unknown" && treatmentMatches(manifest.trial, truth.get(row.caseId), row.seed, row.result) !== row.matched) fail("slot matched flag differs from sealed evaluator truth");
     rows.push(row);
   }
   const counted = treatmentDenominators([...rows, ...registered.slots.slice(rows.length).map(slot => ({arm: slot.arm, status: "unknown" as const}))]);

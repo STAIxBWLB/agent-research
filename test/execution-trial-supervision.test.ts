@@ -2,7 +2,7 @@ import {expect, spyOn, test} from "bun:test";
 import {canonical} from "../scripts/execution-eval.ts";
 import {SUPERVISION_PRODUCER_COMMIT} from "../scripts/execution-supervision.ts";
 import type {SupervisionAmendmentCase} from "../scripts/execution-supervision-amendment.ts";
-import {scoreSupervisionGeneratedRecords, supervisionSlots, type SupervisionTrialBindings} from "../scripts/execution-trial-supervision.ts";
+import {scoreSupervisionGeneratedRecords, supervisionSlots, type SupervisionTrialBindings, type SupervisionGeneration} from "../scripts/execution-trial-supervision.ts";
 import type {ShadowSnapshot} from "../scripts/execution-supervision-records.ts";
 import {sha256, writeAtomic} from "../src/study.ts";
 import {join, resolve} from "node:path";
@@ -30,7 +30,7 @@ function unit() {
     const snapshot: ShadowSnapshot = {observations: [], gap: [], evaluated: (["repeated_failure", "deliverable_invalidated_check", "declared_overlap_without_integration"] as const).map(rule => ({rule, task, revision: "1:none"})), counts: {evaluations: 1, observations: 0, deduped: 0, suppressed: 0, gap: 0, evaluatedSuppressed: 0, workerTurns: 0, actionWrites: 0, notifications: 0}};
     return {v: 1, slot, caseId: c.id, inputSha256: c.inputSha256, status: "succeeded" as "succeeded" | "failed" | "unknown", snapshot: snapshot as ShadowSnapshot | null, failure: null as null | "producer-failed" | "producer-unknown" | "case-budget" | "budget-stopped", costs: {wallMs: 1, cpuSeconds: 0.001, memoryRssBytes: 1024} as {wallMs: number; cpuSeconds: number; memoryRssBytes: number} | null};
   });
-  const generation = {wallMs: 250, cpuSeconds: 0.2, containerCpuSeconds: 0.5, containerCpuScope: "admitted-container-cgroup", cpuScope: "generator-parent-process-only", slotCpuScope: "slot-child-process", observeCallsScope: "confirmed-child-receipts", observeCallsUnknown: false, subprocessCpuSeconds: "unknown", observeCalls: 144, freshShadowPerSlot: true, coldInput: "reread-private-bytes", warmInput: "retained-input-bytes-only", coldness: "not-os-or-jit"};
+  const generation: SupervisionGeneration = {wallMs: 250, cpuSeconds: 0.2, containerCpuSeconds: 0.5, containerCpuScope: "admitted-container-cgroup", cpuScope: "generator-parent-process-only", slotCpuScope: "slot-child-process", observeCallsScope: "confirmed-child-receipts", observeCallsUnknown: false, subprocessCpuSeconds: "unknown", observeCalls: 144, freshShadowPerSlot: true, coldInput: "reread-private-bytes", warmInput: "retained-input-bytes-only", coldness: "not-os-or-jit"};
   function batch() {
     const files = envelopes.map((row, index) => ({file: `slot-${String(index).padStart(3, "0")}.json`, text: JSON.stringify(row)}));
     const manifest = {v: 1, kind: "supervision-shadow-generated-records", code, environment, bindings, generation, slots: files.map(file => ({file: file.file, sha256: sha256(file.text)}))};
