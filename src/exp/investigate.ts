@@ -58,7 +58,9 @@ export function pairSamples(samples: Sample[], reference: Sample[], direction: "
 function empty(commit: string): CommitResult {
   return { commit, attempts: { running: [], succeeded: [], failed: [], cancelled: [], unknown: [] }, perSeed: [], pairedSeeds: [], pairs: [], mean: null, baselineMean: null, delta: null, eligible: false, reason: "no-counted-success" };
 }
-function inputs(dirArg: string) {
+export type InvestigationInputs = ReturnType<typeof inputs>;
+/** Shared by investigate and the read-only idea report so both see the same pairs. */
+export function inputs(dirArg: string) {
   const { dir, study } = openStudy(dirArg); requireExperiment(study);
   const protocol = readProtocol(dir);
   if (!protocol) throw new Error("investigate: protocol missing; run ares protocol before selecting an investigation rule");
@@ -74,7 +76,7 @@ function inputs(dirArg: string) {
   const reserved = readFinalSeeds(dir, protocol)?.seeds ?? [], reservedSha = finalSeedsHash(dir, protocol);
   return { dir, protocol, rule, ruleSha, events, cutoff, hash, metric, attempts, reserved, reservedSha };
 }
-function calculate(input: ReturnType<typeof inputs>): InvestigateResult {
+export function calculate(input: InvestigationInputs): InvestigateResult {
   const { rule, ruleSha, events, cutoff, hash, metric, attempts, protocol, reserved, reservedSha } = input;
   const ideas = foldIdeas(events), owners = new Map<string, string>();
   // The journal enforces exactly one idea owner for any associated commit.

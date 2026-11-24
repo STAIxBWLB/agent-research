@@ -47,6 +47,8 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "study export", summary: "Export a study bundle or preview its files", example: "study --bundle bundle --list", usage: "study export <dir> --bundle DIR [--list] [--json]", mutates: true, options: { "--bundle": "value", "--list": "flag", ...json } },
   { name: "scope", summary: "Set the study scope", example: "study --file scope.json", usage: "scope <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "idea add", summary: "Record a research idea", example: "study --file idea.json", usage: "idea add <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
+  { name: "idea categories", summary: "Declare the idea category vocabulary", example: "study --file categories.json", usage: "idea categories <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
+  { name: "idea report", summary: "Report idea predictions and search state", example: "study --window 5", usage: "idea report <dir> [--run RUN] [--window N] [--json]", mutates: false, options: { "--run": "value", "--window": "value", ...json } },
   { name: "idea decide", summary: "Record an idea refinement or pivot", example: "study idea-one pivot --reason evidence", usage: "idea decide <dir> <id> <refine|pivot> --reason TEXT [--attempts ID[,ID...]] [--commit SHA] [--cause TEXT] [--retry-when TEXT] [--json]", mutates: true, options: { "--cause": "value", "--retry-when": "value", "--reason": "value", "--attempts": "value", "--commit": "value", ...json } },
   { name: "investigate show", summary: "Show the investigation and selected evidence", example: "study", usage: "investigate show <dir> [--json]", mutates: false, options: json },
   { name: "investigate close", summary: "Close the investigation with current evidence", example: "study", usage: "investigate close <dir> [--json]", mutates: true, options: json },
@@ -184,6 +186,7 @@ export const FLAG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   "--vault": "Select the registered vault ID",
   "--workdir": "Set the executor working directory",
   "--year-from": "Set the earliest publication year",
+  "--window": "Count this many recent measured ideas",
   "--z": "Set the positive noise multiplier (default 2)",
 };
 

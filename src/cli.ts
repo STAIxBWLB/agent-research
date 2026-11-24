@@ -253,6 +253,16 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
       if (reason === undefined) throw new UsageError("idea decide: reason missing; pass --reason TEXT and --commit SHA for refine, plus --attempts for an idea with commits");
       result = await ops.ideaDecide(positional[0]!, positional[1]!, { decision: positional[2], reason, ...(str("--cause") !== undefined ? { cause: str("--cause") } : {}), ...(str("--retry-when") !== undefined ? { retryWhen: str("--retry-when") } : {}), ...(attempts !== undefined ? { attempts: attempts.split(",") } : {}), ...(str("--commit") !== undefined ? { commit: str("--commit") } : {}) }, ctx); break;
     }
+    case "idea categories": {
+      count(spec, positional, 1); const file = str("--file");
+      if (file === undefined) throw new UsageError("idea categories: input missing; pass --file PATH or --file - for JSON");
+      result = await ops.ideaCategories(positional[0]!, await readInput(file, io), ctx); break;
+    }
+    case "idea report": {
+      count(spec, positional, 1); const window = integer(flags["--window"], "--window"), runArg = str("--run");
+      if (window !== undefined && (window < 1 || window > 1000)) throw new UsageError("--window: integer in 1..1000 required");
+      result = ops.ideaReport(positional[0]!, { ...(runArg !== undefined ? { run: runArg } : {}), ...(window !== undefined ? { window } : {}) }); break;
+    }
     case "investigate show": count(spec, positional, 1); result = ops.investigateShow(positional[0]!); break;
     case "investigate close": count(spec, positional, 1); result = await ops.investigateClose(positional[0]!, ctx); break;
     case "ablate add": {

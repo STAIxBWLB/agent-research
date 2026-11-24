@@ -296,6 +296,17 @@ ares idea decide experiment variant-1 pivot --reason "Drop this direction" --att
 
 Pivot optionally records `--cause` and `--retry-when` (at most 2,000 UTF-8 bytes each); refine refuses these fields. Missing pivot fields export as `not recorded`. Refine adds the uniquely owned commit. Pivot refuses `--commit`, closes further decisions and keeps historical attempts and totals. Evidence is at most 200 existing, non-running, same-study attempt ids from the idea's commits; reasons are at most 2,000 bytes. An untested idea may omit `commit` when added, then omit `--attempts` for a first `refine --commit` or a pivot before testing. Once it has commits, nonempty evidence is required. Investigation rows and winner references carry the owning idea id; journal changes join the result's input hash. Survey studies refuse all selection, idea and investigate commands.
 
+An idea may also declare what it expects to move. These fields are optional and older inputs stay valid:
+
+```json
+{"id": "aug-mixup", "title": "Synthetic", "hypothesis": "Mixup helps", "commit": "<40-hex>", "category": "data", "bundle": 1,
+ "predicts": [{"metric": "accuracy", "expect": "improve", "minDelta": 0.01}, {"metric": "train_seconds", "expect": "no-change"}]}
+```
+
+`predicts` holds 1..4 entries, one per declared protocol metric, with `expect` `improve`, `no-change` or `regress` in that metric's direction and an optional finite `minDelta >= 0`. `bundle` (1..16) self-declares how many independent changes the commit holds. `idea decide` cannot add or edit predictions. `ares idea categories <dir> --file PATH` writes `design/idea-categories.json` `{v:1, categories:[...]}` (1..32 names) and one `idea.categories.set` event; once it exists, `idea add` refuses an unknown category and names the declared ones. The vocabulary is a planning aid outside the design seal.
+
+`ares idea report <dir> [--run RUN] [--window 5]` (MCP `ares_idea_report`) is read-only and advisory: it opens no gate, refuses nothing and schedules nothing. Per idea it reports the investigation's own paired delta for the latest measured commit, prediction timing and outcomes, and unpredicted regressions. A prediction counts only when its idea was added before the first attempt of any of its commits started; later ones are `post-hoc` and never scored. `improve` hits when the delta is positive and at least its `minDelta`, `regress` when negative, `no-change` when the absolute delta is below the selection `minDelta` for the primary metric or the prediction's own `minDelta` otherwise. Per category it counts ideas, measured ideas and hits, with the best primary delta of the last `window` measured ideas and `noRecentGain` when that is <= 0. Ideas with `bundle > 1` are listed under `confounded` and left out of category and search counts. The search is `stalled` when the best eligible primary delta among the last `window` measured ideas is no better than before them (or none is positive), and `untried` lists declared categories without a measured idea. Failed, cancelled and unknown attempts stay in per-idea totals.
+
 A conductor can put a no-argument `investigate.close` step after its agent-work hub unit, then bind a local plan gate to that result:
 
 ```json
@@ -837,6 +848,8 @@ ares study export <dir> --bundle DIR [--list] [--json]
 ares scope <dir> --file PATH|- [--json]
 ares idea add <dir> --file PATH|- [--json]
 ares idea decide <dir> <id> <refine|pivot> --reason TEXT [--attempts ID[,ID...]] [--commit SHA] [--cause TEXT] [--retry-when TEXT] [--json]
+ares idea categories <dir> --file PATH|- [--json]
+ares idea report <dir> [--run RUN] [--window N] [--json]
 ares investigate show <dir> [--json]
 ares investigate close <dir> [--json]
 ares ablate add <dir> --file PATH|- [--json]

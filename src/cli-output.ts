@@ -172,11 +172,11 @@ function checkReport(report: Report, command: string, value: Row, context: Outpu
 }
 
 const CHECKS = new Set(["paper check", "cite check", "executor check", "renderer check", "lesson check", "skill check", "experience check", "watch run"]);
-const VIEW_NAMES = new Set(["lessons", "lit flow", "lit queries", "retention inspect", "review checklist", "manifest", "lineage compare", "executor inputs hash"]);
+const VIEW_NAMES = new Set(["idea report", "lessons", "lit flow", "lit queries", "retention inspect", "review checklist", "manifest", "lineage compare", "executor inputs hash"]);
 const PREVIEWS = new Set(["archive", "retention prune", "lit card export", "harness close", "harness adopt"]);
 const COMPLETED: Readonly<Record<string, string>> = {
   init: "Created the study", scope: "Saved the study scope", protocol: "Saved the experiment protocol",
-  selection: "Saved the selection rule", "selection calibrate": "Recorded the calibration recommendation",
+  selection: "Saved the selection rule", "selection calibrate": "Recorded the calibration recommendation", "idea categories": "Saved the idea categories",
   "autonomy set": "Saved the autonomy policy", "executor set": "Saved the executor",
   "gate approve": "Approved the gate", "gate reject": "Rejected the gate",
   "lit search": "Recorded the literature search", "lit screen": "Recorded the screening decision",
@@ -192,7 +192,7 @@ const NEXT: Readonly<Record<string, string[]>> = {
   init: ["status"], scope: ["gate", "list"], protocol: ["executor", "check"], "protocol set": ["executor", "check"],
   "executor set": ["executor", "check"], "lit search": ["lit", "list"], "lit screen": ["lit", "list"], "lit verify": ["lit", "list"],
   "plan set": ["plan", "show"], "watch set": ["watch", "show"], "paper plan set": ["paper", "plan", "show"],
-  "paper build": ["review", "show"], "renderer set": ["renderer", "check"], "paper render record": ["paper", "render", "show"], "review add": ["review", "show"], selection: ["investigate", "show"],
+  "paper build": ["review", "show"], "renderer set": ["renderer", "check"], "paper render record": ["paper", "render", "show"], "review add": ["review", "show"], selection: ["investigate", "show"], "idea categories": ["idea", "report"],
   "investigate close": ["investigate", "show"], "attempt reconcile": ["attempt", "list"], "gate approve": ["gate", "list"],
 };
 
@@ -270,6 +270,24 @@ function renderView(report: Report, command: string, result: unknown, context: O
       report.note(`Resolve ${text(row.reviewId)}/${text(row.findingId)} with the reason for the repair`);
     }
     report.section("Reviews").kv([["Ready", value.ready], ["Reviews", array(value.reviews).length], ["Model families", array(value.families).join(", ")]]);
+    return;
+  }
+  if (command === "idea report") {
+    const search = record(value.search), ideas = array(value.ideas).map(record), untried = array(search.untried).map(text);
+    if (search.stalled === true || untried.length) {
+      report.section("Attention");
+      if (search.stalled === true) report.bullet("warn", `No primary gain over the last ${text(value.window)} measured ideas`);
+      if (untried.length) report.bullet("warn", `Untried categories: ${untried.join(", ")}`);
+    }
+    report.section("Search").kv([["Run", value.run], ["Metric", record(value.metric).name], ["Measured ideas", search.measured], ["Best delta", search.bestDelta ?? "none"], ["Advisory", "yes"]]);
+    report.section("Ideas", String(ideas.length)).table(["ID", "Category", "Timing", "Delta", "Predictions"], ideas.map(row => [
+      text(row.id), row.confounded === true ? "confounded" : text(row.category ?? "-"), text(row.timing), text(row.primaryDelta ?? "-"),
+      array(row.predictions).map(record).map(p => `${text(p.metric)} ${text(p.outcome ?? "post-hoc")}`).join(", ") || "-",
+    ]), 1);
+    const categories = array(value.categories).map(record);
+    if (categories.length) report.section("Categories", String(categories.length)).table(["Name", "Ideas", "Measured", "Hits", "Recent gain"], categories.map(row => [
+      text(row.name), text(row.ideas), text(row.measured), text(row.hits), row.noRecentGain === true ? "none" : text(row.bestRecentDelta ?? "-"),
+    ]), 1);
     return;
   }
   if (command === "executor inputs hash") {

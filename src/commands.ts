@@ -23,7 +23,8 @@ import { checkPaper } from "./paper/check.ts";
 import { setPaperPlan, showPaperPlan } from "./paper/plan.ts";
 import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
 import { setFinalSeeds, finalGateBinding, requireFinalInputs, closeFinal, showPosthoc } from "./exp/final.ts";
-import { addIdea, decideIdea } from "./exp/ideas.ts";
+import { addIdea, decideIdea, setCategories } from "./exp/ideas.ts";
+import { ideaReport as foldIdeaReport } from "./exp/idea-report.ts";
 import { showInvestigation, closeInvestigation } from "./exp/investigate.ts";
 import { isInvestigationRun } from "./exp/reuse-runtime.ts";
 import { calibrateSelection, type CalibrationOptions } from "./exp/calibrate.ts";
@@ -593,6 +594,12 @@ export async function selectionCalibrate(dirArg: string, options: CalibrationOpt
   return withLock(dir, () => calibrateSelection(dir, options, ctx.actor));
 }
 
+export async function ideaCategories(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
+  const { dir, study } = openStudy(dirArg); requireExperiment(study);
+  return withLock(dir, () => setCategories(dir, raw, ctx.actor));
+}
+/** Read-only and advisory: no lock, no write, no gate. */
+export const ideaReport = (dir: string, options: { run?: string; window?: number } = {}) => foldIdeaReport(dir, options);
 export const investigateShow = (dir: string) => showInvestigation(dir);
 export async function investigateClose(dirArg: string, ctx: Pick<Ctx, "actor">) {
   const { dir, study } = openStudy(dirArg); requireExperiment(study);
