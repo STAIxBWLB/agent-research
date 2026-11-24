@@ -5,7 +5,7 @@ import { readDesign, readProtocol, type ProtocolDefinition as Protocol } from ".
 import { listAttempts, type Attempt, type AttemptStatus } from "./attempts.ts";
 import { ablateResultPath, ABLATE_BYTES, foldAblations, readClosedAblate } from "./ablate.ts";
 import { INVESTIGATE_BYTES, investigateResultPath, metricValue, pairSamples, readClosedInvestigation, type PairedSamples, type Sample } from "./investigate.ts";
-import { readSelection } from "./selection.ts";
+import { evaluateSelectionConstraints, readSelection, type ConstraintResult } from "./selection.ts";
 
 export interface FinalSeeds { v: 1; seeds: number[] }
 export const FINAL_SEEDS_BYTES = 65_536;
@@ -115,7 +115,7 @@ export function authorizeFinalAttempt(dir: string, commit: string, seed: number)
   return { binding: input.binding, auto: approvals.length > 0, winner: input.winner };
 }
 interface FinalAttempt { id: string; commit: string; seed: number; status: AttemptStatus; decisive: boolean; reason?: string; retryOf?: string }
-export interface FinalResult {
+export interface FinalResult extends Omit<ConstraintResult, "reason"> {
   v: 1; status: "qualified" | "not_qualified"; reason?: string; winner: string; baseline: string; seeds: number[];
   pairs: PairedSamples["pairs"]; mean: number | null; baselineMean: number | null; delta: number | null;
   decisive: FinalAttempt[]; attempts: FinalAttempt[]; investigateSha256: string; ablateSha256?: string; sealBinding: string; inputsSha256: string;
@@ -154,11 +154,20 @@ function calculateFinal(input: ReturnType<typeof requireFinalInputs>): FinalResu
     return [{ seed, attempt: a.id, value: metricValue(a, input.investigate.result.metric) }];
   });
   const paired = pairSamples(samples(input.winner), samples(input.baseline), input.investigate.result.metric.direction, input.winner);
+  let details: Omit<ConstraintResult, "reason"> = {};
   if (!reason) {
     if (paired.delta === null || paired.delta <= 0 || paired.delta < input.rule.minDelta) reason = "below-margin";
+    else if (input.rule.v === 2 && (input.rule.guards?.length || input.rule.cost)) {
+      const evaluation = evaluateSelectionConstraints(input.rule, input.design.protocol, paired.pairedSeeds.map(seed => ({
+        attempt: chosen.get(`${input.winner}:${seed}`)!, baseline: chosen.get(`${input.baseline}:${seed}`)!,
+      })), paired.delta);
+      const { reason: rejected, ...measurements } = evaluation;
+      reason = rejected;
+      details = measurements;
+    }
   }
   const result: FinalResult = { v: 1, status: reason ? "not_qualified" : "qualified", ...(reason ? { reason } : {}), winner: input.winner, baseline: input.baseline, seeds: input.final.seeds, pairs: paired.pairs, mean: paired.mean, baselineMean: paired.referenceMean, delta: paired.delta, decisive, attempts: rows, investigateSha256: input.investigate.sha256, ...(input.ablate ? { ablateSha256: input.ablate.sha256 } : {}), sealBinding: input.design.binding,
-    inputsSha256: sha256(canonical({ binding: input.binding, attempts: ordered.map(a => ({ record: sha256(canonical(a)), start: starts.get(a.id)?.index ?? null })) })) };
+    inputsSha256: sha256(canonical({ binding: input.binding, attempts: ordered.map(a => ({ record: sha256(canonical(a)), start: starts.get(a.id)?.index ?? null })) })), ...details };
   const text = JSON.stringify(result, null, 2) + "\n"; assertWritable(text, FINAL_RESULT_BYTES, "final result; archive the study and start a new bounded run");
   return result;
 }

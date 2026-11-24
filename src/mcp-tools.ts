@@ -113,11 +113,21 @@ const PLAN = obj({
   edges: { type: "array", maxItems: 512, items: { type: "array", minItems: 2, maxItems: 2, items: planId } },
 }, ["v", "nodes", "edges"]);
 
-const SELECTION = obj({
-  v: { type: "integer", enum: [1] }, run: text(64), metric: text(128),
+const SELECTION_FIELDS = {
+  run: text(64), metric: text(128),
   baseline: obj({ commit: { type: "string", minLength: 40, maxLength: 40 } }, ["commit"]),
   minSeeds: integer(1, 1000), minDelta: { type: "number", minimum: 0 },
-}, ["v", "run", "metric", "baseline", "minSeeds", "minDelta"]);
+};
+const SELECTION_REQUIRED = ["v", "run", "metric", "baseline", "minSeeds", "minDelta"];
+const SELECTION = { oneOf: [
+  obj({ v: { type: "integer", enum: [1] }, ...SELECTION_FIELDS }, SELECTION_REQUIRED),
+  obj({
+    v: { type: "integer", enum: [2] }, ...SELECTION_FIELDS,
+    guards: { type: "array", maxItems: 8, items: obj({ metric: text(128), maxRegression: { type: "number", minimum: 0 } }, ["metric", "maxRegression"]) },
+    cost: obj({ metric: text(128), free: { type: "number", minimum: 0 }, perUnit: { type: "number", minimum: 0 } }, ["metric", "free", "perUnit"]),
+    calibration: obj({ sha256: { type: "string", minLength: 64, maxLength: 64, pattern: "^[a-f0-9]{64}$" } }, ["sha256"]),
+  }, SELECTION_REQUIRED),
+] };
 
 const IDEA = obj({ id: text(64), title: text(500), hypothesis: text(4000), parent: text(64), commit: { type: "string", minLength: 40, maxLength: 40 } }, ["id", "title", "hypothesis"]);
 
@@ -176,6 +186,7 @@ export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_final_close", description: "Close one-shot reserved-seed evaluation under the currently approved final gate. Re-approval keeps first attempt data fixed; later retries never replace it. Winner changes cannot buy a new final; changed protocol is not comparable. Refuses running or missing decisive attempts; writes deterministic qualified/not_qualified with unchanged inputs a no-op. The no-arg final.close plan step emits {sha256,status}; both qualification outcomes complete the step.", inputSchema: obj({ study }, ["study"]), annotations: write },
   { name: "ares_final_seeds", description: "Reserve unused unique declared protocol seeds for final evaluation (new/changed values reject prior use in every run/status), at least one and at most half the declared seeds. New/changed raw file bytes join the design seal; identical bytes are a no-op. Experiment mode only; starts no work.", inputSchema: obj({ study, final: obj({ v: { type: "integer", enum: [1] }, seeds: { type: "array", minItems: 1, maxItems: 500, items: seed } }, ["v", "seeds"]) }, ["study", "final"]), annotations: write },
   { name: "ares_selection_set", description: "Set a declared investigation selection rule before results: run (not reserved ablate/final/posthoc), primary metric, frozen baseline commit, minimum paired seeds and nonnegative improvement. Changes reopen the design gate; identical bytes leave the cutoff unchanged. Requires experiment mode and a protocol; starts no investigation or executor.", inputSchema: obj({ study, selection: SELECTION }, ["study", "selection"]), annotations: write },
+  { name: "ares_selection_calibrate", description: "Record a recommended minimum delta from baseline variance (or paired A/A deltas for identical trees). Requires three non-reserved seeds. Never changes the selection rule or starts attempts.", inputSchema: obj({ study, fromRun: text(64), nullCommit: { type: "string", minLength: 40, maxLength: 40 }, z: { type: "number", minimum: 0 } }, ["study", "fromRun"]), annotations: write },
   { name: "ares_protocol_set", description: "Set an experiment protocol after bounded validation of protocol and task/. Sealed identity changes reopen design approval; same-identity input locator-only edits preserve approval. Comparable attempt identity excludes budget and input locators.", inputSchema: obj({ study, protocol: PROTOCOL }, ["study", "protocol"]), annotations: write },
   { name: "ares_executor_set", description: "Configure local or SSH Docker execution with an explicit private absolute workdir. Stores the host alias only, never credentials. Optional gpu settings enable a one-pass device/memory/load admission check; failed admission defers without an attempt.", inputSchema: obj({ study, kind: { type: "string", enum: ["local", "ssh"] }, host: text(128), workdir: text(4096), retentionCapBytes: integer(1, 1024 ** 4), gpu: obj({ devices: { type: "array", minItems: 1, maxItems: 64, items: { type: ["string", "integer"], maxLength: 40 } }, minFreeMemoryMb: integer(0, 2147483647), maxLoadRatio: { type: "number", exclusiveMinimum: 0, maximum: 1000000 } }, ["devices", "minFreeMemoryMb", "maxLoadRatio"]) }, ["study", "kind", "workdir"]), annotations: write },
   { name: "ares_executor_inputs_hash", description: "Hash a pre-staged input directory on the configured local or SSH executor host. Returns only sha256, files and bytes; never copies input paths or bodies into the study. Read-only external host access, with no gate or ledger write.", inputSchema: obj({ study, path: text(4096) }, ["study", "path"]), annotations: { ...read, openWorldHint: true } },
@@ -277,6 +288,11 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
     ares_final_close: a => ops.finalClose(dir(a), ctx),
     ares_final_seeds: a => ops.finalSeeds(dir(a), a.final, ctx),
     ares_selection_set: a => ops.selection(dir(a), a.selection, ctx),
+    ares_selection_calibrate: a => ops.selectionCalibrate(dir(a), {
+      fromRun: a.fromRun as string,
+      ...(a.nullCommit === undefined ? {} : { nullCommit: a.nullCommit as string }),
+      ...(a.z === undefined ? {} : { z: a.z as number }),
+    }, ctx),
     ares_protocol_set: a => ops.protocol(dir(a), a.protocol, ctx),
     ares_harness_set: a => ops.harnessSet(dir(a), a.round, ctx),
     ares_harness_show: a => ops.harnessShow(dir(a), a.round as string | undefined),

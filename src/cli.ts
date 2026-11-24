@@ -2,6 +2,7 @@ import { version } from "../package.json";
 import { findCommand, helpUsage, type CommandSpec } from "./commands-table.ts";
 import { fillMessage, colorFor, outputAscii, renderError, renderHelp, renderResult, streamWidth, usageHint, type OutputContext, type OutputOptions } from "./cli-output.ts";
 import * as ops from "./commands.ts";
+import { validateCalibrationOptions, type CalibrationOptions } from "./exp/calibrate.ts";
 import { createHttp, type Http } from "./http.ts";
 import { PLAYBOOK } from "./playbook.ts";
 import { validateExecutionReference } from "./provenance.ts";
@@ -268,6 +269,21 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
       const file = str("--file");
       if (file === undefined) throw new UsageError("selection: input missing; pass --file PATH or --file - for a JSON rule");
       result = await ops.selection(positional[0]!, await readInput(file, io), ctx); break;
+    }
+    case "selection calibrate": {
+      count(spec, positional, 1);
+      const fromRun = str("--from-run"), nullCommit = str("--null"), z = str("--z");
+      if (!fromRun) throw new UsageError("selection calibrate: --from-run RUN is required");
+      let options: CalibrationOptions;
+      try {
+        options = validateCalibrationOptions({
+          fromRun, ...(nullCommit === undefined ? {} : { nullCommit }), ...(z === undefined ? {} : { z: Number(z) }),
+        });
+      } catch (error) {
+        throw new UsageError(error instanceof Error ? error.message : "selection calibrate: invalid options");
+      }
+      result = await ops.selectionCalibrate(positional[0]!, options, ctx);
+      break;
     }
     case "retention inspect": {
       count(spec, positional, 1); const offset = str("--offset"), limit = integer(flags["--limit"], "--limit");

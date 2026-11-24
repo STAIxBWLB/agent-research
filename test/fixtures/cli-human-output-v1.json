@@ -370,5 +370,9 @@
   "cite check": [
     " ares Cite check\n\n▸ Passed\n  ✓  No findings\n\n✓ 1 ok",
     "\u001b[1;34m ares Cite check\u001b[0m\n\n\u001b[1;35m▸ Passed\u001b[0m\n  \u001b[1;32m✓ \u001b[0m No findings\n\n\u001b[1;32m✓ 1 ok\u001b[0m"
+  ],
+  "selection calibrate": [
+    " ares Selection calibrate\n  ✓  Recorded the calibration recommendation\n\n▸ Recommendation\n  Method:           seed-sd\n  Minimum delta:    0.5\n  Receipt SHA-256:  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n                    aaaa",
+    "\u001b[1;34m ares Selection calibrate\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Recorded the calibration recommendation\n\n\u001b[1;35m▸ Recommendation\u001b[0m\n  \u001b[34mMethod:\u001b[0m           seed-sd\n  \u001b[34mMinimum delta:\u001b[0m    0.5\n  \u001b[34mReceipt SHA-256:\u001b[0m  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n                    aaaa"
   ]
 }

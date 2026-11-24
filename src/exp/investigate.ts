@@ -6,13 +6,14 @@ import { join } from "node:path";
 import { assertWritable, commit, openStudy, plain, readLedger, readTextBounded, requireExperiment, sha256, type Actor, type LedgerEvent } from "../study.ts";
 import { listAttempts, type Attempt, type AttemptStatus } from "./attempts.ts";
 import { protocolHash, readProtocol } from "./protocol.ts";
-import { readSelection, selectionHash } from "./selection.ts";
+import { evaluateSelectionConstraints, observedMetric, readSelection, sampleMean, selectionHash, type ConstraintResult } from "./selection.ts";
+import { readBoundCalibration } from "./calibrate.ts";
 
 export const INVESTIGATE_BYTES = 1_048_576;
-export type NoWinner = "no-baseline" | "baseline-seeds" | "no-candidate" | "below-margin" | "tie";
+export type NoWinner = "no-baseline" | "baseline-seeds" | "no-candidate" | "below-margin" | "tie" | "constraints";
 type Exclusion = "other-protocol" | "before-selection" | "missing-start-event" | "undeclared-seed" | "later-success" | "reserved-seed";
 export interface Sample { seed: number; attempt: string; value: number }
-export interface CommitResult {
+export interface CommitResult extends Omit<ConstraintResult, "reason"> {
   commit: string; idea?: string; attempts: Record<AttemptStatus, string[]>; perSeed: Sample[];
   pairedSeeds: number[]; pairs: { seed: number; attempt: string; baselineAttempt: string; value: number; baselineValue: number }[];
   mean: number | null; baselineMean: number | null; delta: number | null; eligible: boolean; reason: string;
@@ -23,6 +24,7 @@ export interface InvestigateResult {
   baseline: CommitResult; candidates: CommitResult[];
   totals: { attempts: number; byStatus: Record<AttemptStatus, number>; countedSuccesses: number; excluded: number };
   excluded: { id: string; commit: string; seed: number; status: AttemptStatus; reasons: Exclusion[] }[];
+  calibration?: { recommendedMinDelta: number; minDelta: number; belowNoise: boolean };
   winner: { commit: string; idea?: string; attempts: string[]; mean: number; delta: number } | null; reason?: NoWinner;
 }
 const recover = "; inspect ares attempt show and restore the last valid study inputs before ares investigate show";
@@ -32,21 +34,11 @@ function canonical(raw: unknown): string {
   if (plain(raw)) return `{${Object.keys(raw).sort().map(k => `${JSON.stringify(k)}:${canonical(raw[k])}`).join(",")}}`;
   return JSON.stringify(raw) ?? "null";
 }
-function mean(values: number[]): number | null {
-  if (!values.length) return null;
-  const total = values.reduce((sum, value) => sum + value, 0);
-  if (Number.isFinite(total)) return total / values.length;
-  const scale = Math.max(...values.map(Math.abs));
-  if (!scale) return 0;
-  // Normalize before summing so finite evaluator values never overflow their mean.
-  return Math.max(-1, Math.min(1, values.reduce((sum, v) => sum + v / scale / values.length, 0))) * scale;
-}
 export function metricValue(attempt: Attempt, metric: InvestigateResult["metric"]): number {
   if (!Array.isArray(attempt.metrics)) bad(`attempt ${attempt.id}: primary metrics missing`);
-  const values = attempt.metrics.filter(m => m?.name === metric.name);
-  const value = values[0];
-  if (values.length !== 1 || !value || value.unit !== metric.unit || value.provenance !== "ares-observed" || typeof value.value !== "number" || !Number.isFinite(value.value)) bad(`attempt ${attempt.id}: primary metric missing, duplicate, non-finite or unvalidated`);
-  return value.value;
+  const value = observedMetric(attempt, metric);
+  if (value === undefined) bad(`attempt ${attempt.id}: primary metric missing, duplicate, non-finite or unvalidated`);
+  return value;
 }
 export interface PairedSamples {
   pairedSeeds: number[]; pairs: { seed: number; attempt: string; referenceAttempt: string; value: number; referenceValue: number }[];
@@ -58,7 +50,7 @@ export function pairSamples(samples: Sample[], reference: Sample[], direction: "
     const base = reference.find(b => b.seed === sample.seed);
     return base ? [{ seed: sample.seed, attempt: sample.attempt, referenceAttempt: base.attempt, value: sample.value, referenceValue: base.value }] : [];
   });
-  const candidateMean = mean(pairs.map(p => p.value)), referenceMean = mean(pairs.map(p => p.referenceValue));
+  const candidateMean = sampleMean(pairs.map(p => p.value)), referenceMean = sampleMean(pairs.map(p => p.referenceValue));
   const delta = candidateMean === null || referenceMean === null ? null : direction === "max" ? candidateMean - referenceMean : referenceMean - candidateMean;
   if (delta !== null && !Number.isFinite(delta)) bad(`commit ${commit}: primary metric delta overflows; rescale the metric's unit in a new protocol and rerun attempts`);
   return { pairedSeeds: pairs.map(p => p.seed), pairs, mean: candidateMean, referenceMean, delta };
@@ -118,16 +110,24 @@ function calculate(input: ReturnType<typeof inputs>): InvestigateResult {
   for (const row of rows.values()) { const idea = owners.get(row.commit); if (idea !== undefined) row.idea = idea; }
   const baseline = rows.get(rule.baseline.commit)!;
   for (const row of rows.values()) row.perSeed.sort((a, b) => a.seed - b.seed);
-  baseline.mean = mean(baseline.perSeed.map(s => s.value)); baseline.baselineMean = baseline.mean;
+  baseline.mean = sampleMean(baseline.perSeed.map(s => s.value)); baseline.baselineMean = baseline.mean;
   baseline.pairedSeeds = baseline.perSeed.map(s => s.seed); baseline.delta = baseline.mean === null ? null : 0;
   baseline.eligible = baseline.perSeed.length >= rule.minSeeds;
   baseline.reason = !baseline.perSeed.length ? "no-baseline" : baseline.eligible ? "baseline" : "baseline-seeds";
+  const attemptsById = new Map(attempts.map(attempt => [attempt.id, attempt]));
   const candidates = [...rows.values()].filter(row => row !== baseline).sort((a, b) => a.commit.localeCompare(b.commit));
   for (const row of candidates) {
     const paired = pairSamples(row.perSeed, baseline.perSeed, metric.direction, row.commit);
     row.pairedSeeds = paired.pairedSeeds; row.mean = paired.mean; row.baselineMean = paired.referenceMean; row.delta = paired.delta;
     row.pairs = paired.pairs.map(p => ({ seed: p.seed, attempt: p.attempt, baselineAttempt: p.referenceAttempt, value: p.value, baselineValue: p.referenceValue }));
     row.reason = !baseline.perSeed.length ? "no-baseline" : !baseline.eligible ? "baseline-seeds" : !row.perSeed.length ? "no-counted-success" : row.pairs.length < rule.minSeeds ? "candidate-seeds" : row.delta! <= 0 || row.delta! < rule.minDelta ? "below-margin" : "eligible";
+    if (baseline.eligible && paired.pairs.length >= rule.minSeeds && paired.delta !== null && rule.v === 2 && (rule.guards?.length || rule.cost)) {
+      const { reason, ...details } = evaluateSelectionConstraints(rule, protocol, paired.pairs.map(pair => ({
+        attempt: attemptsById.get(pair.attempt)!, baseline: attemptsById.get(pair.referenceAttempt)!,
+      })), paired.delta);
+      Object.assign(row, details);
+      if (reason) row.reason = reason;
+    }
     row.eligible = row.reason === "eligible";
   }
   const eligible = candidates.filter(row => row.eligible).sort((a, b) => b.delta! - a.delta!);
@@ -135,14 +135,15 @@ function calculate(input: ReturnType<typeof inputs>): InvestigateResult {
   if (!baseline.perSeed.length) reason = "no-baseline";
   else if (!baseline.eligible) reason = "baseline-seeds";
   else if (!candidates.some(row => row.pairedSeeds.length >= rule.minSeeds)) reason = "no-candidate";
-  else if (!eligible.length) reason = "below-margin";
+  else if (!eligible.length) reason = candidates.some(row => /^(?:guard[-:]|cost-)/.test(row.reason)) ? "constraints" : "below-margin";
   else if (eligible.length > 1 && eligible[0]!.delta === eligible[1]!.delta) reason = "tie";
   else { const row = eligible[0]!; winner = { commit: row.commit, ...(row.idea !== undefined ? { idea: row.idea } : {}), attempts: row.pairs.map(p => p.attempt), mean: row.mean!, delta: row.delta! }; }
+  const calibration = rule.v === 2 ? readBoundCalibration(input.dir, rule, protocol) : undefined;
   const result: InvestigateResult = {
     v: 1, run: rule.run, ruleSha256: ruleSha, protocolHash: hash,
     inputsSha256: sha256(canonical({ ruleSha, protocolHash: hash, ...(reservedSha !== undefined ? { finalSeedsSha256: reservedSha } : {}), cutoff, ideas: sha256(canonical(ideas)), attempts: ordered.map(a => ({ record: sha256(canonical(a)), start: starts.get(a.id)?.index ?? null })) })),
     metric, baseline, candidates, totals: { attempts: attempts.length, byStatus, countedSuccesses: [...rows.values()].reduce((n, r) => n + r.perSeed.length, 0), excluded: excluded.length }, excluded,
-    winner, ...(reason ? { reason } : {}),
+    winner, ...(reason ? { reason } : {}), ...(calibration === undefined ? {} : { calibration }),
   };
   assertWritable(JSON.stringify(result, null, 2) + "\n", INVESTIGATE_BYTES, "investigate result; archive this study and use a new bounded run");
   return result;

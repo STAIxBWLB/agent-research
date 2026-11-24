@@ -327,6 +327,9 @@ export function renderResult(command: string, result: unknown, code: number, col
     report.section("Attention").bullet(code === 75 ? "warn" : "fail", text(value.reason ?? value.state ?? value.status) || (code === 75 ? "Temporarily deferred" : "Command reported a failure"));
     rows(report, readable(result, context.now));
   } else {
+    if (command === "investigate close" && record(value.calibration).belowNoise === true) {
+      report.section("Attention").bullet("warn", "The sealed minimum delta is below the calibration recommendation");
+    }
     const identifier = text(value.id ?? value.name ?? value.gate ?? record(value.study).id ?? record(value.record).id ?? record(value.attempt).id ?? record(value.winner).commit);
     const state = text(value.state ?? value.status);
     const description = COMPLETED[command] ?? `${label(command)} completed`;
