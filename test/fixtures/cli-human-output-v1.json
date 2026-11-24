@@ -335,6 +335,26 @@
     " ares Paper build\n  ✓  Built the checked manuscript · synthetic · available\n    →  ares review show '/work/synthetic study'",
     "\u001b[1;34m ares Paper build\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Built the checked manuscript · synthetic · available\n    \u001b[36m→  ares review show '/work/synthetic study'\u001b[0m"
   ],
+  "paper render record": [
+    " ares Paper render record\n  ✓  Recorded the render · synthetic · available\n    →  ares paper render show '/work/synthetic study'",
+    "\u001b[1;34m ares Paper render record\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Recorded the render · synthetic · available\n    \u001b[36m→  ares paper render show '/work/synthetic study'\u001b[0m"
+  ],
+  "paper render show": [
+    " ares Paper render show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Paper render show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "renderer set": [
+    " ares Renderer set\n  ✓  Saved the renderer for this machine · synthetic · available\n    →  ares renderer check '/work/synthetic study'",
+    "\u001b[1;34m ares Renderer set\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the renderer for this machine · synthetic · available\n    \u001b[36m→  ares renderer check '/work/synthetic study'\u001b[0m"
+  ],
+  "renderer show": [
+    " ares Renderer show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Renderer show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "renderer check": [
+    " ares Renderer check\n\n▸ Passed (1)\n  ✓  available\n\n✓ 1 ok",
+    "\u001b[1;34m ares Renderer check\u001b[0m\n\n\u001b[1;35m▸ Passed\u001b[0m\u001b[90m (1)\u001b[0m\n  \u001b[1;32m✓ \u001b[0m available\n\n\u001b[1;32m✓ 1 ok\u001b[0m"
+  ],
   "paper plan set": [
     " ares Paper plan set\n  ✓  Saved the paper plan · synthetic · available\n    →  ares paper plan show '/work/synthetic study'",
     "\u001b[1;34m ares Paper plan set\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the paper plan · synthetic · available\n    \u001b[36m→  ares paper plan show '/work/synthetic study'\u001b[0m"
@@ -350,13 +370,5 @@
   "cite check": [
     " ares Cite check\n\n▸ Passed\n  ✓  No findings\n\n✓ 1 ok",
     "\u001b[1;34m ares Cite check\u001b[0m\n\n\u001b[1;35m▸ Passed\u001b[0m\n  \u001b[1;32m✓ \u001b[0m No findings\n\n\u001b[1;32m✓ 1 ok\u001b[0m"
-  ],
-  "paper render record": [
-    " ares Paper render record\n  ✓  Paper render record completed · synthetic · available",
-    "\u001b[1;34m ares Paper render record\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Paper render record completed · synthetic · available"
-  ],
-  "paper render show": [
-    " ares Paper render show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
-    "\u001b[1;34m ares Paper render show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
   ]
 }
