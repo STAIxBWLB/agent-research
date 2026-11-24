@@ -1,3 +1,4 @@
+import { paperDocument } from "./paper/document.ts";
 import { version } from "../package.json";
 import { findCommand, helpUsage, type CommandSpec } from "./commands-table.ts";
 import { fillMessage, colorFor, outputAscii, renderError, renderHelp, renderResult, streamWidth, usageHint, type OutputContext, type OutputOptions } from "./cli-output.ts";
@@ -119,6 +120,10 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
   if (color instanceof Error) throw new UsageError(color.message);
   const ctx: ops.Ctx = { actor: detectActor(env), http: io.http ?? createHttp(env), ...(io.signal ? { signal: io.signal } : {}), ...(io.sleep ? { sleep: io.sleep } : {}), ...(io.runner ? { runner: io.runner } : {}), ...(io.now ? { now: io.now } : {}), ...(io.collectEvaluation ? { collectEvaluation: io.collectEvaluation } : {}), ...(io.collectStageEvidence ? { collectStageEvidence: io.collectStageEvidence } : {}) };
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
+  const selectDocument = () => {
+    try { return paperDocument(str("--doc")); }
+    catch (error) { throw new UsageError(error instanceof Error ? error.message : "paper document: invalid --doc"); }
+  };
   let result: unknown, code = 0;
   switch (spec.name) {
     case "lineage show": {
@@ -435,13 +440,13 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
     }
     case "review show": count(spec, positional, 1); result = ops.reviewShow(positional[0]!); break;
     case "review checklist": count(spec, positional, 0); result = ops.reviewChecklistShow(); break;
-    case "paper build": count(spec, positional, 1); result = await ops.paperBuild(positional[0]!, ctx); break;
+    case "paper build": count(spec, positional, 1); result = await ops.paperBuild(positional[0]!, ctx, selectDocument()); break;
     case "paper render record": {
       count(spec, positional, 1); const file = str("--file"), receipt = str("--receipt");
       if (file === undefined || receipt === undefined) throw new UsageError("paper render record: --file and --receipt are required; pass the rendered document and the renderer's receipt JSON");
-      result = await ops.paperRenderRecord(positional[0]!, file, receipt, ctx); break;
+      result = await ops.paperRenderRecord(positional[0]!, file, receipt, ctx, selectDocument()); break;
     }
-    case "paper render show": count(spec, positional, 1); result = ops.paperRenderShow(positional[0]!); break;
+    case "paper render show": count(spec, positional, 1); result = ops.paperRenderShow(positional[0]!, selectDocument()); break;
     case "renderer set": {
       count(spec, positional, 1); const command = str("--command"), timeout = str("--timeout-s");
       if (command === undefined) throw new UsageError("renderer set: --command is required; pass the renderer argv as a JSON array using {study} and {out}");
@@ -466,7 +471,7 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
     }
     case "paper plan show": count(spec, positional, 1); result = ops.paperPlanShow(positional[0]!); break;
     case "paper check": {
-      count(spec, positional, 1); const report = ops.paperCheck(positional[0]!);
+      count(spec, positional, 1); const report = ops.paperCheck(positional[0]!, selectDocument());
       if (!report.ok) code = 1;
       result = report; break;
     }

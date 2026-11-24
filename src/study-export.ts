@@ -1,3 +1,4 @@
+import { paperEventFor } from "./paper/document.ts";
 import { attemptReuseView, retentionDisposalIndex, type RetentionDisposalIndex } from "./provenance.ts";
 import {urlOrKeyLike} from "./privacy.ts";
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
@@ -35,7 +36,7 @@ const LEDGER_KEYS: Record<string, readonly string[]> = {
   "plan.set": ["revision", "state", "sha256"], "plan.gates": ["revision"], "plan.paused": ["revision"], "plan.control": ["revision"], "node.observed": ["revision", "status"], "node.intent": ["revision"],
   "executor.set": ["kind"], "protocol.set": ["sha256", "identitySha256", "protocolHash", "treeHash"], "selection.set": ["sha256", "metric"], "selection.calibrated": ["run", "sha256", "protocolHash"], "final.seeds.set": ["sha256"],
   "investigate.closed": ["run", "sha256", "ruleSha256", "winner"], "ablate.closed": ["sha256", "investigateSha256"], "final.closed": ["sha256", "status", "investigateSha256"],
-  "idea.decided": ["decision"], "paper.built": ["manuscriptSha256", "evidenceSha256", "sourceManuscriptSha256"], "paper.rendered": ["evidenceSha256", "manuscriptSha256", "outputSha256", "receiptSha256", "bytes"], "review.added": [], "review.resolved": ["buildSha256"],
+  "idea.decided": ["decision"], "paper.built": ["doc", "manuscriptSha256", "evidenceSha256", "sourceManuscriptSha256"], "paper.rendered": ["doc", "evidenceSha256", "manuscriptSha256", "outputSha256", "receiptSha256", "bytes"], "review.added": [], "review.resolved": ["buildSha256"],
   "attempt.started": ["id", "run", "seed", "commit", "treeId"],
   "retention.pruned": ["fingerprint", "refsSha256", "count"],
   "attempt.stage.reused": ["id", "stage", "candidateStage", "key", "sourceAttemptId", "sourceStage", "sourceSha256"],
@@ -146,7 +147,7 @@ function reviews(events: LedgerEvent[]) {
 }
 /** Content-free per-section rounds and pass at the latest built evidence hash, plus the repair-scope histogram. */
 function reviewSections(rows: ReturnType<typeof reviews>, events: LedgerEvent[]) {
-  const latest = events.filter(e => e.type === "paper.built" && typeof e.data.evidenceSha256 === "string").at(-1)?.data.evidenceSha256 ?? null;
+  const latest = events.filter(e => paperEventFor(e, "paper.built") && typeof e.data.evidenceSha256 === "string").at(-1)?.data.evidenceSha256 ?? null;
   const rounds = new Map<string, number>(), open = new Set<string>(), repairs: Record<string, number> = { edit: 0, paragraph: 0, section: 0 };
   for (const row of rows) {
     for (const section of row.sections) rounds.set(section, (rounds.get(section) ?? 0) + 1);

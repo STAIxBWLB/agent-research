@@ -1,3 +1,4 @@
+import { PAPER_DOCUMENTS, paperDocument } from "./paper/document.ts";
 import { PAPER_FIGURES, PAPER_FIGURE_PATH_BYTES, PAPER_FIGURE_WAIVER_BYTES } from "./paper/figures.ts";
 import { STAGE_REUSE_CONTRACT_SCHEMA } from "./exp/reuse-contract.ts";
 import {HARNESS_MODEL_BYTES} from "./harness/limits.ts";
@@ -15,6 +16,7 @@ import { PLAN_GATE_BYTES } from "./plan/state.ts";
 import { PAPER_PLAN_BYTES, PAPER_PLAN_SECTIONS, PAPER_PLAN_CITES, PAPER_PLAN_POINTS, PAPER_POINT_CLAIM_CHARACTERS, PAPER_POINT_EVIDENCE, PAPER_POINT_EVIDENCE_BYTES, PAPER_PLAN_DEPENDENCIES, PAPER_DEPENDENCY_WAIVER_BYTES, PAPER_DEPENDENCY_KINDS } from "./paper/plan.ts";
 import { detectActor, type Actor } from "./study.ts";
 
+const paperDoc = { type: "string", enum: [...PAPER_DOCUMENTS] };
 const study = { type: "string", minLength: 1, maxLength: 4096, description: "Absolute path of the study directory (holds study.json)" };
 const id = { type: "string", minLength: 1, maxLength: 300 };
 const ids = { type: "array", items: id, maxItems: 200 };
@@ -221,13 +223,13 @@ export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_review_checklist", description: "List the six optional survey checklist keys with their questions, the same wording reviewers answer in checklist.survey. Answers are displayed and never gate. Opens no study.", inputSchema: obj({}, []), annotations: read },
   { name: "ares_paper_plan_set", description: "Validate and atomically store a declared citation routing plan, at most 64 sections/300 keys per section and 64 KiB. Only current included, identifier-verified bibliography keys. Optional experiment dependencies (at most 200; dataset, metric, baseline, model, method or software) each carry verified cites or a written waiver and select stored v3. Optional writing points (40 per section) require citation presence in their own anchor windows; claims/evidence never establish support. Points select stored v2; no dependencies or points keep v1. No automatic routing or relevance judgment. Starts no build/controller/network calls.", inputSchema: obj({study, plan: PAPER_PLAN}, ["study", "plan"]), annotations: write },
   { name: "ares_paper_plan_show", description: "Read the optional paper citation plan, routing coverage (included references routed/total) and dependency coverage (cited/waived/total). Revalidates current references; starts no build/controller/network calls or writes.", inputSchema: obj({study}, ["study"]), annotations: read },
-  { name: "ares_paper_build", description: "Check the bounded manuscript and refuse blocking findings before writing. Commit rendered Markdown, v1 evidence without a plan or v2 plan-bound evidence, and paper.built together; identical inputs/outputs record nothing. Unknown evidence versions are preserved. The no-arg paper.build plan step emits the committed evidence {sha256} for downstream gates. Starts no controller, executor or network calls.", inputSchema: obj({ study }, ["study"]), annotations: write },
-  { name: "ares_paper_render_record", description: "Record an externally rendered document of the current build under paper/build/render/ with its renderReceipt v1 and one paper.rendered event. Refuses before any write unless the receipt's evidence and manuscript hashes match the current build and the file's SHA-256 matches a receipt output; regular files only, at most 64 MiB. Identical file and receipt record nothing. Never runs a renderer or judges fidelity.", inputSchema: obj({ study, file: text(4096), receipt: text(4096) }, ["study", "file", "receipt"]), annotations: write },
-  { name: "ares_paper_render_show", description: "Read-only: the last recorded render and whether it matches the current build. A rebuild with a new evidence hash makes it stale without deleting it.", inputSchema: obj({ study }, ["study"]), annotations: read },
+  { name: "ares_paper_build", description: "Check the bounded manuscript or slides and refuse blocking findings before writing. Commit rendered Markdown, versioned evidence, and paper.built together; identical inputs/outputs record nothing. Unknown evidence versions are preserved. The no-arg paper.build plan step emits the committed evidence {sha256} for downstream gates. Starts no controller, executor or network calls.", inputSchema: obj({ study, doc: paperDoc }, ["study"]), annotations: write },
+  { name: "ares_paper_render_record", description: "Record an externally rendered document of the current build under paper/build/render/ with its renderReceipt v1 and one paper.rendered event. Refuses before any write unless the receipt's evidence and manuscript hashes match the current build and the file's SHA-256 matches a receipt output; regular files only, at most 64 MiB. Identical file and receipt record nothing. Never runs a renderer or judges fidelity.", inputSchema: obj({ study, doc: paperDoc, file: text(4096), receipt: text(4096) }, ["study", "file", "receipt"]), annotations: write },
+  { name: "ares_paper_render_show", description: "Read-only: the last recorded render and whether it matches the current build. A rebuild with a new evidence hash makes it stale without deleting it.", inputSchema: obj({ study, doc: paperDoc }, ["study"]), annotations: read },
   { name: "ares_renderer_set", description: "Set this machine's renderer for the study: an argv array (program first, then arguments with {study} and {out} placeholders) and an optional wall time in seconds. Stored under the family home, never in the study or plan.json; the paper.render plan step runs it.", inputSchema: obj({ study, command: { type: "array", minItems: 1, maxItems: 64, items: text(4096) }, timeoutS: { type: "integer", minimum: 1, maximum: 86400 } }, ["study", "command"]), annotations: write },
   { name: "ares_renderer_show", description: "Read-only: this machine's renderer for the study, or that none is configured.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_renderer_check", description: "Read-only: check the renderer configuration and that its program is on PATH, without running it.", inputSchema: obj({ study }, ["study"]), annotations: read },
-  { name: "ares_paper_check", description: "Read-only manuscript readiness check: positioned bare-number, placeholder, citation, optional paper-plan scope and missing-negative-result findings plus every literal escape. Experiment numbers require closed evidence; survey checks citations and refuses experiment refs. Reads bounded paper/manuscript.md, starts no build/controller/network calls.", inputSchema: obj({ study }, ["study"]), annotations: read },
+  { name: "ares_paper_check", description: "Read-only manuscript readiness check: positioned bare-number, placeholder, citation, optional paper-plan scope and missing-negative-result findings plus every literal escape. Experiment numbers require closed evidence; survey checks citations and refuses experiment refs. Reads bounded paper/manuscript.md or paper/slides.md, starts no build/controller/network calls.", inputSchema: obj({ study, doc: paperDoc }, ["study"]), annotations: read },
   { name: "ares_cite_check", description: "Check [@key] citations in a draft against verified references; lists unknown and unverified keys.", inputSchema: obj({ study, draft: { type: "string", minLength: 1, maxLength: 4096 } }, ["study", "draft"]), annotations: read },
   { name: "ares_playbook", description: "Standalone literature, experiment and plan/conductor workflows, CLI-only controller startup, gate rules and evidence boundaries.", inputSchema: obj({}, []), annotations: read },
 ];
@@ -333,15 +335,15 @@ export function createAresMcp(env: NodeJS.ProcessEnv, http: Http = createHttp(en
     ares_review_resolve: a => ops.reviewResolve(dir(a), a.target as string, a.reason as string, ctx),
     ares_review_show: a => ops.reviewShow(dir(a)),
     ares_review_checklist: () => ops.reviewChecklistShow(),
-    ares_paper_build: a => ops.paperBuild(dir(a), ctx),
-    ares_paper_render_record: a => ops.paperRenderRecord(dir(a), absolute(a.file, "file"), absolute(a.receipt, "receipt"), ctx),
-    ares_paper_render_show: a => ops.paperRenderShow(dir(a)),
+    ares_paper_build: a => ops.paperBuild(dir(a), ctx, paperDocument(a.doc)),
+    ares_paper_render_record: a => ops.paperRenderRecord(dir(a), absolute(a.file, "file"), absolute(a.receipt, "receipt"), ctx, paperDocument(a.doc)),
+    ares_paper_render_show: a => ops.paperRenderShow(dir(a), paperDocument(a.doc)),
     ares_renderer_set: a => ops.rendererSet(dir(a), { command: a.command, ...(a.timeoutS !== undefined ? { timeoutS: a.timeoutS } : {}) }, env),
     ares_renderer_show: a => ops.rendererShow(dir(a), env),
     ares_renderer_check: a => ops.rendererCheck(dir(a), env),
     ares_paper_plan_set: a => ops.paperPlanSet(dir(a), a.plan, ctx),
     ares_paper_plan_show: a => ops.paperPlanShow(dir(a)),
-    ares_paper_check: a => ops.paperCheck(dir(a)),
+    ares_paper_check: a => ops.paperCheck(dir(a), paperDocument(a.doc)),
     ares_cite_check: a => ops.cite(dir(a), absolute(a.draft, "draft")),
     ares_playbook: () => ({ playbook: PLAYBOOK }),
   };

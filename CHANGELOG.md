@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Evidence-bound slides (#164): Use paper check and paper build with --doc slides to validate paper/slides.md using the same evidence placeholders, citation checks and negative-result requirements as the manuscript. The slides use separate rendered Markdown and evidence files. For external decks, use paper render record and paper render show with --doc slides. The manuscript plan and review workflow apply to the manuscript. Existing manuscript output paths and bytes are preserved.
+
 - Paper figures (#168): optional paper plan v3 figures bind local files under paper/ to the build. Declare each image by id, file and kind; plots need current-study card/attempt references or a written waiver, and diagrams need neither. Paper check blocks undeclared or missing assets and unresolved plot evidence. Builds record figure hashes and provenance in paper evidence v3, so changed figures reopen review and make old render receipts stale. Existing plans without figures retain their evidence bytes. Version 0.3.1 refuses plan v3 and evidence v3 with its existing unsupported-version diagnostics.
 
 - Selection v2 (#165) adds optional paired-seed guards and a relative cost rule to investigation and reserved final qualification. `selection calibrate` and MCP `ares_selection_calibrate` record an advisory minimum delta from baseline variance or paired A/A deltas. A bound recommendation reports `belowNoise` without changing eligibility. V1 rule and result bytes are preserved. The 0.3.1 selection reader refuses v2 with its unsupported-version diagnostic.

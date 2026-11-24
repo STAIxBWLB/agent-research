@@ -1,3 +1,4 @@
+import { paperEventFor } from "../paper/document.ts";
 import {recheckLessonExports, boundLessonExportBatch} from "../harness/lesson-candidates.ts";
 import type {SkillCheckOptions} from "./skill-check.ts";
 import { ACCEPT_ARTIFACTS } from "../autonomy.ts";
@@ -46,7 +47,7 @@ export function previewArchive(dir: string): ArchivePreview {
   const unique = new Map(notes.map(note => [sha256(canonical(note)), note]));
   const pending = [...unique].filter(([hash]) => !known.has(hash)).map(([sha256, note]) => ({ sha256, note }));
   // Render status is display-only and never enters the fingerprint; shown once a render was recorded (#162).
-  const render = readLedgerSafe(dir).some(event => event.type === "paper.rendered") ? { render: renderSummary(dir) } : {};
+  const render = readLedgerSafe(dir).some(event => paperEventFor(event, "paper.rendered")) ? { render: renderSummary(dir) } : {};
   return {fingerprint: sha256(canonical(notes)), notes: pending, ...render, ...(sources.contrastNotes?.length ? {recovery: "Receipt-only dedupe: if an earlier archive was interrupted after amem add, operator reconciliation is required before retry; unreceipted writes cannot be detected and may duplicate"} : {})};
 }
 /** Preview and confirmed export use the same note/source bounds and ordered prefix. */

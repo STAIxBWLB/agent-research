@@ -340,6 +340,8 @@ Final here means reserved seeds, the frozen Git snapshot and the sealed evaluato
 
 ## Paper and review workflow
 
+Use paper check and paper build with --doc slides to validate paper/slides.md using the same evidence placeholders, citation checks and negative-result requirements as the manuscript. The slides use separate rendered Markdown and evidence files. For external decks, use paper render record and paper render show with --doc slides. The manuscript plan and review workflow apply to the manuscript. The derived files are `paper/build/slides.md` and `paper/build/slides.evidence.json`. The slides render and its receipt go under `paper/build/slides.render/`. Slides share the existing `accept:paper` gate. The manifest lists both document names in `paperDocuments`. Slides receipts use `doc: "slides"` on the existing `paper.built` and `paper.rendered` events.
+
 Optional paper plan v3 figures bind local files under paper/ to the build. Declare each image by id, file and kind; plots need current-study card/attempt references or a written waiver, and diagrams need neither. Paper check blocks undeclared or missing assets and unresolved plot evidence. Builds record figure hashes and provenance in paper evidence v3, so changed figures reopen review and make old render receipts stale. Each file is capped at 16 MiB, with at most 100 figures. An exact match to recorded artifact bytes is labelled `artifact`; a valid evidence pointer without a byte match is labelled `referenced`. These labels describe the source relationship.
 
 A4 renders Markdown from recorded evidence; it does not write a manuscript or run reviewers for you. Write `paper/manuscript.md` (at most 2 MiB) and put measured values in `{{n:REF}}` placeholders, optionally `{{n:REF|.Nf}}` with N from 0 to 6. At most 5,000 numeric and literal placeholders are allowed together. Use `{{lit:TEXT}}` for a reviewer-visible literal such as a year or cohort label. Every literal is listed by the check; it is an explicit exception, not a measured-value match.
@@ -873,15 +875,15 @@ ares review add <dir> --file PATH|- [--json]
 ares review resolve <dir> <review-id>/<finding-id> --reason TEXT [--json]
 ares review show <dir> [--json]
 ares review checklist [--json]
-ares paper build <dir> [--json]
-ares paper render record <dir> --file PATH --receipt PATH [--json]
-ares paper render show <dir> [--json]
+ares paper build <dir> [--doc manuscript|slides] [--json]
+ares paper render record <dir> --file PATH --receipt PATH [--doc manuscript|slides] [--json]
+ares paper render show <dir> [--doc manuscript|slides] [--json]
 ares renderer set <dir> --command JSON [--timeout-s N] [--json]
 ares renderer show <dir> [--json]
 ares renderer check <dir> [--json]
 ares paper plan set <dir> --file PATH|- [--json]
 ares paper plan show <dir> [--json]
-ares paper check <dir> [--json]
+ares paper check <dir> [--doc manuscript|slides] [--json]
 ares cite check <dir> <draft> [--json]
 ares playbook
 ares mcp

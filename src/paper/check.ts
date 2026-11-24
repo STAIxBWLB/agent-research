@@ -1,3 +1,4 @@
+import { paperDocument, paperSourcePath, type PaperDocument } from "./document.ts";
 import { inspectFigures, type FigureFindingCode, type ImageLink } from "./figures.ts";
 import { CopilotAcceptError } from "../copilot.ts";
 import { existsSync } from "node:fs";
@@ -149,12 +150,12 @@ function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Arra
   }
   return { mask, code, hidden, headingHidden, anchorHidden, images };
 }
-export function manuscriptPath(dir: string): string { return join(dir, "paper", "manuscript.md"); }
-export function checkPaper(dirArg: string) {
-  const { dir, study } = openStudy(dirArg), file = manuscriptPath(dir), settings = readPaperSettings(dir);
+export function manuscriptPath(dir: string): string { return paperSourcePath(dir, "manuscript"); }
+export function checkPaper(dirArg: string, doc: PaperDocument = "manuscript") {
+  const { dir, study } = openStudy(dirArg), file = paperSourcePath(dir, paperDocument(doc)), settings = readPaperSettings(dir);
   let manuscript: string;
   try { manuscript = readTextBounded(file, MANUSCRIPT_BYTES); }
-  catch { throw new Error("paper manuscript: missing, unreadable, invalid UTF-8, non-regular or larger than 2 MiB; restore paper/manuscript.md as a bounded UTF-8 regular file before paper check"); }
+  catch { throw new Error(`paper ${doc}: missing, unreadable, invalid UTF-8, non-regular or larger than 2 MiB; restore paper/${doc}.md as a bounded UTF-8 regular file before paper check`); }
   const masks = markdownMask(manuscript), prose = blank(manuscript, masks.mask), parsed = parsePlaceholders(prose), resolution = resolvePlaceholders(dir, prose);
   const lines = [0]; for (let i = 0; i < manuscript.length; i++) if (manuscript[i] === "\n") lines.push(i + 1);
   const location = (start: number) => {
@@ -177,7 +178,7 @@ export function checkPaper(dirArg: string) {
   }
   for (const problem of parsed.findings) { mark(numberMask, problem.start, problem.end); mark(citationMask, problem.start, problem.end); }
   const citationText = blank(manuscript, citationMask), candidates = loadCandidates(dir), citations = checkCitations(citationText, candidates);
-  const plan = readPaperPlanCheckSnapshot(dir, candidates);
+  const plan = doc === "manuscript" ? readPaperPlanCheckSnapshot(dir, candidates) : undefined;
   const groups = new Map<number, number>();
   for (const hit of citationOccurrences(citationText)) {
     mark(numberMask, hit.start, hit.end); groups.set(hit.groupStart, hit.groupEnd);

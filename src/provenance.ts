@@ -1,3 +1,4 @@
+import { paperEventFor } from "./paper/document.ts";
 import { types } from "node:util";
 import {parseHubExecutionReference, type HubExecutionReferenceV1} from "./harness/hub-reference.ts";
 import { existsSync, lstatSync, opendirSync, realpathSync } from "node:fs";
@@ -365,7 +366,7 @@ function closures(dir: string, graph: Graph, study: ExecutionReferenceV1): void 
   const source = graph.source, records: Closure[] = [], latest = new Map<string, number>();
   const selected = fileJson(source, "design/selection.json")?.run;
   for (const [index, event] of source.events.entries()) {
-    const family = event.type === "investigate.closed" ? "investigate" : event.type === "ablate.closed" ? "ablate" : event.type === "final.closed" ? "final" : event.type === "paper.built" ? "paper" : undefined;
+    const family = event.type === "investigate.closed" ? "investigate" : event.type === "ablate.closed" ? "ablate" : event.type === "final.closed" ? "final" : paperEventFor(event, "paper.built") ? "paper" : undefined;
     if (!family) continue;
     const run = family === "investigate" ? event.data.run : family;
     const hash = family === "paper" ? event.data.evidenceSha256 : event.data.sha256;

@@ -332,13 +332,14 @@ export function renderResult(command: string, result: unknown, code: number, col
     }
     const identifier = text(value.id ?? value.name ?? value.gate ?? record(value.study).id ?? record(value.record).id ?? record(value.attempt).id ?? record(value.winner).commit);
     const state = text(value.state ?? value.status);
-    const description = COMPLETED[command] ?? `${label(command)} completed`;
+    const slides = context.values["--doc"] === "slides";
+    const description = slides && command === "paper build" ? "Built the checked slides" : COMPLETED[command] ?? `${label(command)} completed`;
     const receipt = [value.changed === false ? "Already current" : description, identifier, state].filter(Boolean).join(" · ");
     report.bullet("ok", receipt);
     if (command === "selection calibrate") report.section("Recommendation").kv([
       ["Method", value.method], ["Minimum delta", value.recommendedMinDelta], ["Receipt SHA-256", value.sha256],
     ]);
-    if (context.values.dir && NEXT[command]) report.next(commandLine([...NEXT[command], context.values.dir]));
+    if (context.values.dir && NEXT[command] && !(slides && command === "paper build")) report.next(commandLine([...NEXT[command], context.values.dir]));
     const warnings = array(value.warnings);
     if (warnings.length) {
       report.section("Attention");
