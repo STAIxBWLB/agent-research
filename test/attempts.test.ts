@@ -6,7 +6,8 @@ import { dirname, join } from "node:path";
 import { autonomySet, attemptRun as commandAttemptRun, init, gateDecide, gateList, planSet, planControl, planShow, planRun, finalSeeds, selection, investigateClose } from "../src/commands.ts";
 import { attemptId, budgetUsage, cancelAttempt, CONTROL_STALE_MS, CONTROL_FUTURE_SKEW_MS, listAttempts, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type Evaluation } from "../src/exp/attempts.ts";
 import { setExecutor, type ProcessRequest, type ProcessResult, type ProcessRunner } from "../src/exp/executor.ts";
-import { protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
+import { canonical, protocolHash, setProtocol, type Protocol } from "../src/exp/protocol.ts";
+import { createAresMcp } from "../src/mcp-tools.ts";
 import { finalGateBinding } from "../src/exp/final.ts";
 import { writeAtomic, readTextBounded, readLedger, sha256, withLock, appendEvent, openStudy } from "../src/study.ts";
 import { deferred, fakeHttp, fakeTarSource, isTarRequest, tempDir } from "./helpers.ts";
@@ -27,12 +28,14 @@ function runtime(dir: string) {
   let gpuProbe: ProcessResult | undefined;
   let inputHash = "a".repeat(64);
   let metricsPayload: string | null = '{"score":7}';
+  let screenTree: { blob: string; path: string }[] = [], screenInputBlobs: string[] = [], screenPaths: string[] = [], screenLine = 1;
   const ok = (stdout = ""): ProcessResult => ({ exitCode: 0, stdout, stderr: "" });
   const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1]!;
   const runner: ProcessRunner = async request => {
     expect(existsSync(join(dir, ".ares.lock"))).toBe(false); requests.push(request);
     const args = request.args;
     if (request.command === "python3") {
+      if (args.includes("hashes")) return ok(JSON.stringify({ files: screenInputBlobs.length, bytes: 4, blobs: screenInputBlobs }));
       if (args.at(-1)!.startsWith("/")) {
         const hook = beforeHash; beforeHash = undefined; await hook?.();
         return ok(JSON.stringify({ sha256: inputHash, files: 2, bytes: 123 }));
@@ -41,6 +44,12 @@ function runtime(dir: string) {
     }
     if (request.command === "git") {
       if (args.includes("cat-file")) { const hook = beforeResolve; beforeResolve = undefined; await hook?.(); return ok("commit"); }
+      if (args.includes("--show-object-format")) return ok("sha1\n");
+      if (args.includes("ls-tree")) return ok([...screenTree.map(entry => `100644 blob ${entry.blob}\t${entry.path}`), ""].join("\u0000"));
+      if (args.includes("grep")) {
+        if (!screenPaths.length) return { exitCode: 1, stdout: "", stderr: "" };
+        return ok(args.includes("-l") ? screenPaths.map(path => `${commitSha}:${path}\u0000`).join("") : `${commitSha}:${screenPaths[0]}\u0000${screenLine}:synthetic\n`);
+      }
       if (args.includes("rev-parse")) return ok(treeId);
       if (args.includes("archive")) { await request.stdoutSink!(Buffer.from([0, 255, 1])); return ok(); }
     }
@@ -97,7 +106,7 @@ function runtime(dir: string) {
     const log = { path: `/synthetic/${stage}.log`, sha256: sha256(""), bytes: 0, truncated: false };
     return { logs: { stdout: log, stderr: log }, outputs: [] };
   } };
-  return { requests, containers, clock, ctx, gpuProbe: (result: ProcessResult) => { gpuProbe = result; }, beforeHash: (hook: () => Promise<void>) => { beforeHash = hook; }, inputHash: (hash: string) => { inputHash = hash; }, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; } };
+  return { requests, containers, clock, ctx, gpuProbe: (result: ProcessResult) => { gpuProbe = result; }, beforeHash: (hook: () => Promise<void>) => { beforeHash = hook; }, inputHash: (hash: string) => { inputHash = hash; }, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; }, screenTree: (entries: { blob: string; path: string }[]) => { screenTree = entries; }, screenInputBlobs: (blobs: string[]) => { screenInputBlobs = blobs; }, screenHits: (paths: string[], line = 1) => { screenPaths = paths; screenLine = line; } };
 }
 async function setup(p = protocol(), autonomy = "gates", approved = true) {
   const dir = tempDir(); init(dir, { question: "Synthetic?", mode: "experiment", autonomy }, { actor });
@@ -978,4 +987,53 @@ test("CPU-only attempts skip configured admission and auto-mode deferral records
   expect(await commandAttemptRun(f.dir, request, { ...f.fake.ctx, http: fakeHttp([]).http })).toMatchObject({ status: "deferred", reason: "probe" });
   expect(readLedger(f.dir).some(event => event.type === "gate.approve")).toBe(false);
   expect(listAttempts(f.dir).attempts).toHaveLength(0);
+});
+
+const canary = "synthetic-canary-value";
+
+test("AC2/AC5: a screen hit refuses before any attempt record, budget or container exists", async () => {
+  const { dir, fake } = await setup({ ...protocol(), screen: { literals: [canary] } });
+  fake.screenHits(["src/leak.txt"], 3);
+  await expect(runAttempt(dir, request, fake.ctx)).rejects.toThrow(`attempt screen: candidate commit ${commitSha} carries material held out from the candidate (literal:0 src/leak.txt:3)`);
+  expect(listAttempts(dir).attempts).toHaveLength(0);
+  expect(budgetUsage(listAttempts(dir).attempts, fake.clock.value)).toEqual({ attempts: 0, wallHours: 0, gpuHours: 0 });
+  expect(fake.requests.some(request => request.command === "docker")).toBe(false);
+  const refused = readLedger(dir).find(event => event.type === "attempt.screen.refused")!;
+  expect(refused.data).toEqual({ commit: commitSha, hits: [{ rule: "literal:0", path: "src/leak.txt", line: 3 }] });
+  expect(JSON.stringify(refused)).not.toContain(canary);
+});
+
+test("AC2: a renamed byte copy of an evaluator-only input is refused by input name", async () => {
+  const held = "9".repeat(40), shared = "8".repeat(40);
+  const inputs = {
+    heldout: { path: "/data/heldout", sha256: "f".repeat(64), mount: { evaluator: "/in/heldout" } },
+    shared: { path: "/data/shared", sha256: "e".repeat(64), mount: { candidate: "/in/shared", evaluator: "/in/shared" } },
+  };
+  const { dir, fake } = await setup({ ...protocol(), inputs, screen: { evaluatorInputs: true } });
+  fake.screenTree([{ blob: held, path: "src/copied-under-another-name.txt" }, { blob: shared, path: "src/shared.txt" }]);
+  fake.screenInputBlobs([held]);
+  await expect(runAttempt(dir, request, fake.ctx)).rejects.toThrow("evaluator-input:heldout src/copied-under-another-name.txt");
+  expect(listAttempts(dir).attempts).toHaveLength(0);
+  // Only the evaluator-only mount is read on the executor; the shared mount is invisible to neither side.
+  expect(fake.requests.filter(request => request.command === "python3" && request.args.includes("hashes"))).toHaveLength(1);
+});
+
+test("AC6: a clean screen is summarised in the attempt start event", async () => {
+  const screen = { literals: [canary] };
+  const { dir, fake } = await setup({ ...protocol(), screen });
+  const started = await runAttempt(dir, request, fake.ctx);
+  expect(started.status).toBe("running");
+  expect(readLedger(dir).find(event => event.type === "attempt.started")!.data.screen).toEqual({ rules: ["literals"], sha256: sha256(canonical({ commit: commitSha, screen })) });
+});
+
+test("AC7: CLI and MCP report the same screen refusal object", async () => {
+  const { dir, fake } = await setup({ ...protocol(), screen: { literals: [canary] } });
+  fake.screenHits(["src/leak.txt"], 3);
+  const captured = (value: unknown) => Promise.resolve(value).then(() => "resolved", (error: Error) => error.message);
+  const cli = await captured(commandAttemptRun(dir, request, { ...fake.ctx, http: fakeHttp([]).http }));
+  const server = createAresMcp({}, fakeHttp([]).http, { runner: fake.ctx.runner });
+  const mcp = await captured(server.handlers.ares_attempt_run!({ study: dir, repo: "/synthetic/repo", commit: commitSha }));
+  expect(cli).toContain("attempt screen: candidate commit");
+  expect(mcp).toBe(cli);
+  expect(readLedger(dir).filter(event => event.type === "attempt.screen.refused")).toHaveLength(2);
 });

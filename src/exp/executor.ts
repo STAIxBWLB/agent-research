@@ -231,7 +231,10 @@ export const INPUT_MANIFEST_FILES = 100_000, INPUT_MANIFEST_TIMEOUT_MS = 300_000
 // ponytail: ceiling 100,000 files/directories, depth 64 and 5 minutes; bytes stream in 1 MiB chunks, never into the study.
 export const INPUT_MANIFEST_SCRIPT = String.raw`import os,sys,stat,hashlib,json
 MAX=100000
+mode=sys.argv[2] if len(sys.argv)>2 else 'manifest'
+cap=int(sys.argv[3]) if len(sys.argv)>3 else MAX
 records=[]
+blobs=[]
 entries=0
 directories=0
 total=0
@@ -257,12 +260,14 @@ def walk(fd,prefix,depth):
      walk(child,name,depth+1)
     finally: os.close(child)
    elif stat.S_ISREG(info.st_mode):
-    if len(records)>=MAX or info.st_size>9007199254740991-total: raise ValueError()
+    if len(records)>=(cap if mode=='hashes' else MAX) or info.st_size>9007199254740991-total: raise ValueError()
     child=os.open(item.name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=fd)
     try:
      opened=os.fstat(child)
      if not stat.S_ISREG(opened.st_mode) or identity(opened)!=identity(info): raise ValueError()
      digest=hashlib.sha256()
+     blob=hashlib.sha1()
+     if mode=='hashes': blob.update(('blob %d\0' % info.st_size).encode('utf-8'))
      size=0
      while True:
       chunk=os.read(child,1048576)
@@ -270,10 +275,12 @@ def walk(fd,prefix,depth):
       size+=len(chunk)
       if size>info.st_size: raise ValueError()
       digest.update(chunk)
+      if mode=='hashes': blob.update(chunk)
      if size!=info.st_size or identity(os.fstat(child))!=identity(opened): raise ValueError()
     finally: os.close(child)
     total+=size
     records.append((name,size,digest.hexdigest()))
+    if mode=='hashes': blobs.append(blob.hexdigest())
    else: raise ValueError()
  if identity(os.fstat(fd))!=identity(before): raise ValueError()
 try:
@@ -289,10 +296,13 @@ try:
    fd=child
   walk(fd,'',0)
  finally: os.close(fd)
- digest=hashlib.sha256()
- for row in sorted(records,key=lambda row:row[0].encode('utf-8')):
-  digest.update((json.dumps(row,ensure_ascii=False,separators=(',',':'))+'\n').encode('utf-8'))
- print(json.dumps({'sha256':digest.hexdigest(),'files':len(records),'bytes':total},separators=(',',':')))
+ if mode=='hashes':
+  print(json.dumps({'files':len(records),'bytes':total,'blobs':sorted(set(blobs))},separators=(',',':')))
+ else:
+  digest=hashlib.sha256()
+  for row in sorted(records,key=lambda row:row[0].encode('utf-8')):
+   digest.update((json.dumps(row,ensure_ascii=False,separators=(',',':'))+'\n').encode('utf-8'))
+  print(json.dumps({'sha256':digest.hexdigest(),'files':len(records),'bytes':total},separators=(',',':')))
 except Exception:
  sys.stderr.write('input manifest refused\n')
  sys.exit(1)
@@ -308,6 +318,20 @@ export async function hashExecutorInput(executorArg: Executor, path: string, run
   let raw: unknown; try {raw = JSON.parse(result.stdout);} catch {throw refuse();}
   if (!plain(raw) || Object.keys(raw).some(key => !["sha256", "files", "bytes"].includes(key)) || typeof raw.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(raw.sha256) || !Number.isSafeInteger(raw.files) || Number(raw.files)<0 || Number(raw.files)>INPUT_MANIFEST_FILES || !Number.isSafeInteger(raw.bytes) || Number(raw.bytes)<0) throw refuse();
   return {sha256: raw.sha256, files: raw.files as number, bytes: raw.bytes as number};
+}
+export const SCREEN_INPUT_BLOB_BYTES = 1_048_576;
+/** A pre-execution screen reads the same hardened walk, but reports blob ids only: no names, no contents. */
+export async function hashExecutorInputBlobs(executorArg: Executor, path: string, maxFiles: number, runner: ProcessRunner = spawnRunner): Promise<{ files: number; bytes: number; blobs: string[] }> {
+  const executor = validateExecutor(executorArg), source = directory(path, "executor input path");
+  if (!Number.isSafeInteger(maxFiles) || maxFiles < 1 || maxFiles > INPUT_MANIFEST_FILES) throw new Error(`executor screen: invalid file limit; choose 1..${INPUT_MANIFEST_FILES} files`);
+  const refuse = () => new Error(`executor screen: blob list failed; check Python3 and a stable readable regular directory of at most ${maxFiles} files without special files or symlinked ancestors on the executor, or stop screening evaluator inputs through a design change`);
+  let result: ProcessResult;
+  try {result = await runOnExecutor(executor, "python3", ["-I", "-S", "-c", INPUT_MANIFEST_SCRIPT, source, "hashes", String(maxFiles)], runner, {timeoutMs: INPUT_MANIFEST_TIMEOUT_MS, maxOutputBytes: SCREEN_INPUT_BLOB_BYTES});}
+  catch {throw refuse();}
+  if (result.exitCode !== 0 || result.timedOut || result.truncated || Buffer.byteLength(result.stdout) > SCREEN_INPUT_BLOB_BYTES) throw refuse();
+  let raw: unknown; try {raw = JSON.parse(result.stdout);} catch {throw refuse();}
+  if (!plain(raw) || Object.keys(raw).some(key => !["files", "bytes", "blobs"].includes(key)) || !Number.isSafeInteger(raw.files) || Number(raw.files)<0 || Number(raw.files)>maxFiles || !Number.isSafeInteger(raw.bytes) || Number(raw.bytes)<0 || !Array.isArray(raw.blobs) || raw.blobs.length>maxFiles || raw.blobs.some(blob => typeof blob !== "string" || !/^[a-f0-9]{40}$/.test(blob))) throw refuse();
+  return {files: raw.files as number, bytes: raw.bytes as number, blobs: raw.blobs as string[]};
 }
 /** Verify every declared input without persisting its host locator or manifest rows. */
 export async function verifyExecutorInputs(executor: Executor, protocol: Protocol, runner: ProcessRunner = spawnRunner): Promise<Record<string, string>> {

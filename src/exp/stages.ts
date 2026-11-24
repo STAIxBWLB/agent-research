@@ -96,10 +96,12 @@ function candidateStages(raw: unknown, common: Protocol): CandidateStage[] {
 
 /** Pure preflight: no study writes, process calls, mounts or artifact availability claims. */
 export function validateStageProtocol(raw: unknown): ProtocolV2 {
-  const p = object(raw, ["v", "method", "candidate", "evaluator", "metrics", "seeds", "limits", "network", "budget"], "protocol");
+  const p = object(raw, ["v", "method", "candidate", "evaluator", "metrics", "seeds", "limits", "network", "budget", "screen"], "protocol");
   if (p.v !== 2) throw new Error("protocol.v: unsupported stage version; use a compatible ares release, keeping the original definition unchanged");
   // Validate common fields with the authoritative v1 validator; no common bound is multiplied.
   const common = validateProtocol({ ...p, v: 1, candidate: PLACEHOLDER_EXECUTION });
+  // A stage protocol declares no protocol-level inputs, so no evaluator-only mount exists to compare.
+  if (common.screen?.evaluatorInputs) throw new Error("protocol.screen.evaluatorInputs: stage protocols declare no protocol inputs; screen the declared literals only");
   const { v: _v, candidate: _candidate, inputs: _inputs, ...base } = common;
   const result: ProtocolV2 = { ...base, v: 2, candidate: { stages: candidateStages(p.candidate, common) } };
   if (Buffer.byteLength(JSON.stringify(result, null, 2) + "\n") > PROTOCOL_BYTES) throw new Error(`protocol: too large; reduce the formatted protocol to at most ${PROTOCOL_BYTES} bytes`);
