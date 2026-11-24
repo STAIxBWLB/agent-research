@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- CLI reports (#172): human output highlights actionable findings, summarizes checks, and presents filtered views, mutation receipts and confirmation commands. The executor human check reports independent failures and skipped prerequisites. Attempt logs use section headings and strip terminal controls in text mode. Explicit `--json` and MCP results retain their existing forms and exit codes.
+
 - CLI help (#172): the overview groups commands by workflow. `ares help <command>` and `ares <command> --help` print the command help on stdout and exit 0. The manifest keeps its published usages.
 
 - CLI output standard v1 (#158): command results default to human-readable text on stdout. Use `--json` for the existing compact JSON bytes and exit status. Help, version, playbook, Markdown output, raw attempt logs and MCP framing keep their existing forms. Usage errors exit 2 (previously 1), with the diagnostic and usage on stderr. Operational errors stay on stderr with exit 1, and existing retry advice has its own stderr line. Check failures and temporary refusals keep their original exit codes and result stream.

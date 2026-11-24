@@ -20,14 +20,11 @@ test("status color and ASCII policy, stable JSON bytes and pipe width", () => {
   expect(result.code).toBe(0);
   expect(result.stderr).toBe("");
   expect(result.stdout).not.toContain(esc);
-  expect(result.stdout.replace(status(dir).study, "<study>").split("\n").slice(0, 8)).toEqual([
-    " ares Status",
-    "  Study:     <study>",
+  expect(result.stdout.split("\n").slice(0, 7)).toEqual([
+    " ares Status", "", "▸ Study",
     "  Question:  Study question",
     "  Mode:      survey",
-    "  Autonomy:  gates",
-    "  Bib:       (unset)",
-    "  Events:    1",
+    "  Scope:     Unset",
     "",
   ]);
   const colored = invoke(["status", dir, "--color=always"], { NO_COLOR: "1" });
@@ -38,7 +35,7 @@ test("status color and ASCII policy, stable JSON bytes and pipe width", () => {
   expect(json).toEqual({ stdout: JSON.stringify(status(dir)) + "\n", stderr: "", code: 0 });
   expect(json.stdout).not.toContain(esc);
   const narrow = invoke(["status", dir], { LANG: "C", COLUMNS: "80" });
-  expect(narrow.stdout).toContain("> Gates");
+  expect(narrow.stdout).toContain("> Gates (");
   for (const line of narrow.stdout.split("\n")) expect(cellWidth(line)).toBeLessThanOrEqual(80);
   expect(invoke(["gate", "list", dir]).stdout).toContain("ares Gate list");
   expect(invoke(["autonomy", "show", dir]).stdout).toContain("ares Autonomy show");

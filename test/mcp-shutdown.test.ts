@@ -47,7 +47,7 @@ await runMcp(process.env, http);
     expect(events.filter(row => row.type === "watch.ran")).toHaveLength(1);
     expect(events.at(-1)!.data).toMatchObject({ ok: false, cause: "terminated", queries: [] });
     expect(events.at(-1)!.actor).toEqual({ kind: "agent", id: "synthetic-shutdown" });
-    expect(errors).toContain("terminated; inspect ares watch show"); expect(output).not.toContain("terminated");
+    expect(errors).toContain("ares: watch: terminated"); expect(errors).toContain(`ares watch show ${dir}`); expect(output).not.toContain("terminated");
     expect(readdirSync(dir, { recursive: true }).some(file => String(file).endsWith(".tmp"))).toBe(false);
     await ops.watchSet(dir, { v: 1, queries: [{ id: "after", query: "synthetic after" }] }, ctx);
     expect((ops.watchShow(dir).runs[0]! as Record<string, unknown>).cause).toBe("terminated");

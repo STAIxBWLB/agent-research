@@ -1,6 +1,6 @@
 import { version } from "../package.json";
-import { findCommand, type CommandSpec } from "./commands-table.ts";
-import { colorFor, outputAscii, renderError, renderHelp, renderResult, streamWidth, usageHint, type OutputOptions } from "./cli-output.ts";
+import { findCommand, helpUsage, type CommandSpec } from "./commands-table.ts";
+import { fillMessage, colorFor, outputAscii, renderError, renderHelp, renderResult, streamWidth, usageHint, type OutputContext, type OutputOptions } from "./cli-output.ts";
 import * as ops from "./commands.ts";
 import { createHttp, type Http } from "./http.ts";
 import { PLAYBOOK } from "./playbook.ts";
@@ -14,6 +14,7 @@ class UsageError extends Error {}
 
 interface CliOutput {
   options: OutputOptions;
+  context?: OutputContext;
   spec?: CommandSpec;
   tty?: boolean;
   columns?: number;
@@ -99,6 +100,20 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
   const { spec, rest } = found;
   output.spec = spec;
   const { flags, positional } = parse(spec, rest, output.options);
+  const values: Record<string, string> = {};
+  const declaration = helpUsage(spec).slice(spec.name.length).trim().split(/\s+(?=\[?--)/)[0] ?? "";
+  for (const [index, token] of declaration.split(/\s+/).entries()) {
+    const key = /<([a-z][a-z0-9-]*)>/.exec(token)?.[1];
+    if (key && positional[index] !== undefined) values[key] = positional[index]!;
+  }
+  const commandArgs = [...spec.name.split(" "), ...positional];
+  for (const [flag, value] of Object.entries(flags)) {
+    if (typeof value === "string") values[flag] = value;
+    if (["--json", "--ascii", "--color"].includes(flag)) continue;
+    commandArgs.push(flag);
+    if (typeof value === "string") commandArgs.push(value);
+  }
+  output.context = { args: commandArgs, values, now: io.now?.() ?? Date.now() };
   const color = colorFor(output.options, output.tty ?? false, env);
   if (color instanceof Error) throw new UsageError(color.message);
   const ctx: ops.Ctx = { actor: detectActor(env), http: io.http ?? createHttp(env), ...(io.signal ? { signal: io.signal } : {}), ...(io.sleep ? { sleep: io.sleep } : {}), ...(io.runner ? { runner: io.runner } : {}), ...(io.now ? { now: io.now } : {}), ...(io.collectEvaluation ? { collectEvaluation: io.collectEvaluation } : {}), ...(io.collectStageEvidence ? { collectStageEvidence: io.collectStageEvidence } : {}) };
@@ -263,6 +278,7 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
       count(spec, positional, 1); const file = str("--file"), fingerprint = str("--confirm");
       if (file === undefined) throw new UsageError("retention prune: --file PATH|- is required for explicit retained references");
       const refs = await readInput(file, io);
+      if (!flags["--json"] && Array.isArray(refs)) output.context.previewCount = refs.length;
       result = await ops.retentionPrune(positional[0]!, { refs: refs as Parameters<typeof ops.retentionPrune>[1]["refs"], ...(fingerprint === undefined ? {} : { fingerprint }) }, ctx); break;
     }
     case "protocol": {
@@ -309,7 +325,16 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
       result = await ops.executorSet(positional[0]!, { v: 1, kind, workdir, ...(cap !== undefined ? { retentionCapBytes: Number(cap) } : {}), ...(str("--host") !== undefined ? { host: str("--host") } : {}), ...(gpu ? { gpu } : {}) }, ctx); break;
     }
     case "executor inputs hash": count(spec, positional, 2); result = await ops.executorInputsHash(positional[0]!, positional[1]!, ctx); break;
-    case "executor check": count(spec, positional, 1); result = await ops.executorCheck(positional[0]!, ctx); break;
+    case "executor check": {
+      count(spec, positional, 1);
+      if (flags["--json"]) result = await ops.executorCheck(positional[0]!, ctx);
+      else {
+        const report = await ops.executorCheckReport(positional[0]!, ctx);
+        result = report;
+        if (report.checks.some(row => row.state === "failed")) code = 1;
+      }
+      break;
+    }
     case "attempt run": {
       count(spec, positional, 1);
       const repo = str("--repo"), commit = str("--commit"), chosenSeed = seed(str("--seed"));
@@ -329,7 +354,6 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
     case "attempt logs": {
       count(spec, positional, 2); const tailBytes = integer(flags["--tail"], "--tail");
       const logs = await ops.attemptLogs(positional[0]!, positional[1]!, { ...(str("--stage") !== undefined ? { stage: str("--stage") } : {}), ...(str("--candidate-stage") !== undefined ? { candidateStage: str("--candidate-stage") } : {}), ...(str("--stream") !== undefined ? { stream: str("--stream") } : {}), ...(tailBytes !== undefined ? { tailBytes } : {}) }, ctx);
-      if (!flags["--json"]) return { text: logs.logs.map(log => `[${log.candidateStage === undefined ? log.stage : `candidate:${log.candidateStage}`} ${log.stream}${log.truncated ? ", truncated copy" : ""}]\n${log.text}`).join("\n"), code: 0 };
       result = logs; break;
     }
     case "gate list": count(spec, positional, 1); result = ops.gateList(positional[0]!); break;
@@ -418,7 +442,7 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
     }
     case "cite check": {
       count(spec, positional, 2);
-      const report = ops.cite(positional[0]!, positional[1]!);
+      const report = (flags["--json"] ? ops.cite : ops.citeHuman)(positional[0]!, positional[1]!);
       if (!report.ok) code = 1;
       result = report;
       break;
@@ -427,7 +451,7 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
   }
   const text = output.options.json
     ? JSON.stringify(result)
-    : renderResult(spec.name, result, code, color, outputAscii(output.options, env), streamWidth(output.tty ?? false, output.columns, env));
+    : renderResult(spec.name, result, code, color, outputAscii(output.options, env), streamWidth(output.tty ?? false, output.columns, env), output.context);
   return { text, code };
 }
 
@@ -476,7 +500,7 @@ export async function main(args: string[]): Promise<number> {
     const usage = error instanceof UsageError;
     let message = error instanceof Error ? error.message : "operation failed";
     if (message.startsWith("usage: ares ")) message = `${cli.spec?.name ?? "command"}: missing or invalid arguments`;
-    const diagnostic = renderError(message, tty, color, outputAscii(cli.options, env), columns);
+    const diagnostic = renderError(fillMessage(message, cli.context?.values ?? {}), tty, color, outputAscii(cli.options, env), Math.min(columns ?? 80, 80));
     console.error(diagnostic);
     if (usage) {
       console.error(usageHint(cli.spec, columns));

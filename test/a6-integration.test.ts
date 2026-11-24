@@ -258,7 +258,7 @@ test("admitted detached failures leave a minimal class-only receipt and actionab
       expect(receipt[0]!.actor).toEqual(actor); expect(events.some(row => row.type === "lit.search")).toBe(false);
       expect(existsSync(join(f.dir, ".ares.lock"))).toBe(false);
       expect((ops.watchShow(f.dir).runs[0]! as Record<string, unknown>).cause).toBe(kind);
-      expect(lines.join("\n")).toContain(`failed (${kind})`); expect(lines.join("\n")).toContain("inspect ares watch show");
+      expect(lines.join("\n")).toContain(`failed (${kind})`); expect(lines.join("\n")).toContain(`ares watch show ${f.dir}`);
       expect(journal(f.dir).toString() + lines.join("\n")).not.toMatch(/private|secret|https:|response-body/);
     } finally { stderr.mockRestore(); }
   }
