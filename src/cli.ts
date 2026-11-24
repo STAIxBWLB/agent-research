@@ -1,5 +1,6 @@
 import { version } from "../package.json";
 import { findCommand, help, type CommandSpec } from "./commands-table.ts";
+import { colorFor, outputAscii, renderError, renderResult, streamWidth, type OutputOptions } from "./cli-output.ts";
 import * as ops from "./commands.ts";
 import { createHttp, type Http } from "./http.ts";
 import { PLAYBOOK } from "./playbook.ts";
@@ -9,32 +10,56 @@ import { detectActor, openStudy, readTextBounded, releaseStudyLocksForExit } fro
 const INPUT_BYTES = 65_536;
 export interface Io extends ops.ExperimentRuntime { readStdin?: () => Promise<string>; http?: Http; signal?: AbortSignal }
 
-function parse(spec: CommandSpec, args: string[]): { flags: Record<string, string | true>; positional: string[] } {
+class UsageError extends Error {}
+
+interface CliOutput {
+  options: OutputOptions;
+  spec?: CommandSpec;
+  tty?: boolean;
+  columns?: number;
+}
+
+function parse(spec: CommandSpec, args: string[], output: OutputOptions): { flags: Record<string, string | true>; positional: string[] } {
   const flags: Record<string, string | true> = {}, positional: string[] = [];
   for (let i = 0; i < args.length; i++) {
-    const word = args[i]!;
+    const arg = args[i]!;
+    const word = arg.startsWith("--color=") ? "--color" : arg;
+    if (word === "--ascii" || word === "--color") {
+      if (word in flags) throw new UsageError(`${spec.name}: repeated option ${word}`);
+      if (word === "--ascii") {
+        flags[word] = output.ascii = true;
+      } else {
+        const value = arg === word ? args[++i] : arg.slice("--color=".length);
+        if (value === undefined || value.startsWith("--")) throw new UsageError("--color: expected auto, always or never");
+        flags[word] = output.color = value;
+      }
+      continue;
+    }
     if (word === "-" || !word.startsWith("-")) { positional.push(word); continue; }
     const kind = spec.options[word];
-    if (!kind || word in flags) throw new Error(`${spec.name}: unknown or repeated option ${word}; use ares --help and pass each supported option once`);
+    if (!kind || word in flags) throw new UsageError(`${spec.name}: unknown or repeated option ${word}; use ares --help and pass each supported option once`);
     if (kind === "value") {
       const value = args[++i];
-      if (value === undefined || (value.startsWith("--") && value !== "-")) throw new Error(`${spec.name}: ${word} needs a value; use ares --help for its accepted values`);
+      if (value === undefined || (value.startsWith("--") && value !== "-")) throw new UsageError(`${spec.name}: ${word} needs a value; use ares --help for its accepted values`);
       flags[word] = value;
-    } else flags[word] = true;
+    } else {
+      flags[word] = true;
+      if (word === "--json") output.json = true;
+    }
   }
   return { flags, positional };
 }
 function count(spec: CommandSpec, positional: string[], min: number, max = min): void {
-  if (positional.length < min || positional.length > max) throw new Error(`usage: ares ${spec.usage}`);
+  if (positional.length < min || positional.length > max) throw new UsageError(`usage: ares ${spec.usage}`);
 }
 function integer(value: string | true | undefined, what: string): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !/^\d{1,7}$/.test(value)) throw new Error(`${what}: integer required; pass a nonnegative decimal integer`);
+  if (typeof value !== "string" || !/^\d{1,7}$/.test(value)) throw new UsageError(`${what}: integer required; pass a nonnegative decimal integer`);
   return Number(value);
 }
 function seed(value: string | undefined): number | undefined {
   if (value === undefined) return undefined;
-  if (!/^-?\d{1,10}$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < -2_147_483_648 || Number(value) > 2_147_483_647) throw new Error("--seed: invalid integer; use a declared protocol seed in -2147483648..2147483647");
+  if (!/^-?\d{1,10}$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) < -2_147_483_648 || Number(value) > 2_147_483_647) throw new UsageError("--seed: invalid integer; use a declared protocol seed in -2147483648..2147483647");
   return Number(value);
 }
 async function readInput(path: string, io: Io): Promise<unknown> {
@@ -48,11 +73,19 @@ async function readInput(path: string, io: Io): Promise<unknown> {
 }
 
 export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, io: Io = {}): Promise<{ text: string; code: number }> {
+  return execute(args, env, io, { options: {} });
+}
+
+async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: CliOutput): Promise<{ text: string; code: number }> {
   if (!args.length || (args.length === 1 && ["--help", "-h", "help"].includes(args[0]!))) return { text: help(), code: 0 };
   if (args.length === 1 && args[0] === "--version") return { text: version, code: 0 };
   const found = findCommand(args);
-  if (!found) throw new Error(`unknown command: ${args.slice(0, 2).join(" ")}; use --help`);
-  const { spec, rest } = found, { flags, positional } = parse(spec, rest);
+  if (!found) throw new UsageError(`unknown command: ${args.slice(0, 2).join(" ")}; use --help`);
+  const { spec, rest } = found;
+  output.spec = spec;
+  const { flags, positional } = parse(spec, rest, output.options);
+  const color = colorFor(output.options, output.tty ?? false, env);
+  if (color instanceof Error) throw new UsageError(color.message);
   const ctx: ops.Ctx = { actor: detectActor(env), http: io.http ?? createHttp(env), ...(io.signal ? { signal: io.signal } : {}), ...(io.sleep ? { sleep: io.sleep } : {}), ...(io.runner ? { runner: io.runner } : {}), ...(io.now ? { now: io.now } : {}), ...(io.collectEvaluation ? { collectEvaluation: io.collectEvaluation } : {}), ...(io.collectStageEvidence ? { collectStageEvidence: io.collectStageEvidence } : {}) };
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
   let result: unknown, code = 0;
@@ -61,7 +94,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       count(spec, positional, 1);
       const kind = str("--root"), id = str("--id"), revision = str("--revision"), hash = str("--sha256"), cursor = str("--cursor");
       const hasRoot = [kind, id, revision, hash].some(value => value !== undefined);
-      if (hasRoot && (kind === undefined || id === undefined)) throw new Error("lineage show: partial root reference; pass --root KIND and --id ID together, with optional --revision/--sha256");
+      if (hasRoot && (kind === undefined || id === undefined)) throw new UsageError("lineage show: partial root reference; pass --root KIND and --id ID together, with optional --revision/--sha256");
       let root = hasRoot ? validateExecutionReference({ v: 1, tool: "ares", projectKey: "pending-study-identity", kind, id, ...(revision === undefined ? {} : { revision }), ...(hash === undefined ? {} : { sha256: hash }) }) : undefined;
       if (root) {
         let projectKey: string;
@@ -74,10 +107,10 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "lineage compare": {
       count(spec, positional, 1);
       const attempts = str("--attempts"), candidates = str("--candidates");
-      if (attempts !== undefined && candidates !== undefined) throw new Error("lineage compare: selection flags conflict; pass either --attempts ID,... or --candidates COMMIT,...");
+      if (attempts !== undefined && candidates !== undefined) throw new UsageError("lineage compare: selection flags conflict; pass either --attempts ID,... or --candidates COMMIT,...");
       const list = (value: string) => {
         const values = value.split(",");
-        if (values.length < 1 || values.length > 8 || values.some(item => !item.trim())) throw new Error("lineage compare: selection needs 1..8 nonblank ids; pass a comma-separated --attempts or --candidates list");
+        if (values.length < 1 || values.length > 8 || values.some(item => !item.trim())) throw new UsageError("lineage compare: selection needs 1..8 nonblank ids; pass a comma-separated --attempts or --candidates list");
         return values;
       };
       result = ops.lineageCompare(positional[0]!, { ...(attempts === undefined ? {} : { attempts: list(attempts) }), ...(candidates === undefined ? {} : { candidates: list(candidates) }) }); break;
@@ -87,7 +120,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "console list": count(spec, positional, 0); result = ops.consoleList(env); break;
     case "watch set": {
       count(spec, positional, 1); const file = str("--file");
-      if (file === undefined) throw new Error("watch set: input missing; pass --file PATH or --file - for watch JSON");
+      if (file === undefined) throw new UsageError("watch set: input missing; pass --file PATH or --file - for watch JSON");
       result = await ops.watchSet(positional[0]!, await readInput(file, io), ctx); break;
     }
     case "watch run": {
@@ -97,7 +130,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "watch show": count(spec, positional, 1); result = ops.watchShow(positional[0]!); break;
     case "setup": {
       count(spec, positional, 1);
-      if (flags["--apply"] && flags["--undo"]) throw new Error("setup: --apply and --undo conflict; choose one or omit both for preview");
+      if (flags["--apply"] && flags["--undo"]) throw new UsageError("setup: --apply and --undo conflict; choose one or omit both for preview");
       const root = str("--root"); result = ops.setup(positional[0]!, flags["--apply"] ? "apply" : flags["--undo"] ? "undo" : "dry-run", env, { ...(root === undefined ? {} : { root }) });
       if ((result as ReturnType<typeof ops.setup>).actions.some(action => action.change === "refused")) code = 1;
       break;
@@ -107,19 +140,19 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "lesson propose":
     case "lesson decide": {
       count(spec, positional, spec.name === "lesson propose" ? 1 : 2); const file = str("--file");
-      if (file === undefined) throw new Error(`${spec.name}: input missing; pass --file PATH or --file - for bounded JSON`);
+      if (file === undefined) throw new UsageError(`${spec.name}: input missing; pass --file PATH or --file - for bounded JSON`);
       const raw = await readInput(file, io);
       result = spec.name === "lesson propose" ? await ops.lessonPropose(positional[0]!, raw, ctx, env) : await ops.lessonDecide(positional[0]!, positional[1]!, raw, ctx, env); break;
     }
     case "skill check": count(spec, positional, 2); result = await ops.skillCheck(positional[0]!, positional[1]!, ctx, env); break;
     case "skill propose": {
       count(spec, positional, 1); const file = str("--file");
-      if (file === undefined) throw new Error("skill propose: input missing; pass --file PATH or --file - for proposal JSON");
+      if (file === undefined) throw new UsageError("skill propose: input missing; pass --file PATH or --file - for proposal JSON");
       result = await ops.skillPropose(positional[0]!, await readInput(file, io), ctx, env); break;
     }
     case "skill decide": {
       count(spec, positional, 3); const reason = str("--reason");
-      if (reason === undefined) throw new Error("skill decide: reason missing; pass --reason TEXT and --pr URL for accept");
+      if (reason === undefined) throw new UsageError("skill decide: reason missing; pass --reason TEXT and --pr URL for accept");
       result = await ops.skillDecide(positional[0]!, positional[1]!, positional[2]!, reason, str("--pr"), ctx, undefined, env); break;
     }
     case "skill list": count(spec, positional, 1); result = ops.skillList(positional[0]!); break;
@@ -138,57 +171,57 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     }
     case "manifest": count(spec, positional, 0); result = ops.manifest(); break;
     case "playbook": count(spec, positional, 0); return { text: PLAYBOOK.trimEnd(), code: 0 };
-    case "mcp": throw new Error("mcp: run `ares mcp` with no other arguments");
+    case "mcp": throw new UsageError("mcp: run `ares mcp` with no other arguments");
     case "autonomy show": count(spec, positional, 1); result = ops.autonomyShow(positional[0]!); break;
     case "autonomy set": count(spec, positional, 2); result = await ops.autonomySet(positional[0]!, positional[1]!, str("--phase"), ctx); break;
     case "init": {
       count(spec, positional, 1);
       const question = str("--question");
-      if (question === undefined) throw new Error("init: --question is required");
+      if (question === undefined) throw new UsageError("init: --question is required");
       result = ops.init(positional[0]!, { question, ...(str("--mode") ? { mode: str("--mode")! } : {}), ...(str("--autonomy") ? { autonomy: str("--autonomy")! } : {}) }, ctx);
       break;
     }
     case "plan set": {
       count(spec, positional, 1);
       const file = str("--file");
-      if (file === undefined) throw new Error("plan set: --file is required");
+      if (file === undefined) throw new UsageError("plan set: --file is required");
       result = await ops.planSet(positional[0]!, await readInput(file, io), ctx); break;
     }
     case "plan control": {
       count(spec, positional, 2, 3);
       const commandId = str("--command-id"), expectedRevision = integer(flags["--expected-revision"], "--expected-revision");
-      if (!commandId || expectedRevision === undefined) throw new Error("plan control: command id and revision required; pass --command-id ID --expected-revision N from ares plan show");
+      if (!commandId || expectedRevision === undefined) throw new UsageError("plan control: command id and revision required; pass --command-id ID --expected-revision N from ares plan show");
       result = await ops.planControl(positional[0]!, { action: positional[1]! as Parameters<typeof ops.planControl>[1]["action"], ...(positional[2] !== undefined ? { node: positional[2] } : {}), commandId, expectedRevision }, ctx); break;
     }
     case "plan show": count(spec, positional, 1); result = ops.planShow(positional[0]!); break;
     case "status": count(spec, positional, 1); result = ops.status(positional[0]!); break;
     case "study export": {
       count(spec, positional, 1); const bundle = str("--bundle");
-      if (bundle === undefined) throw new Error("study export: --bundle DIR is required; pass a new or empty output directory");
+      if (bundle === undefined) throw new UsageError("study export: --bundle DIR is required; pass a new or empty output directory");
       result = await ops.studyExport(positional[0]!, { bundle, ...(flags["--list"] ? { list: true } : {}) }); break;
     }
     case "scope": {
       count(spec, positional, 1);
       const file = str("--file");
-      if (file === undefined) throw new Error("scope: --file is required");
+      if (file === undefined) throw new UsageError("scope: --file is required");
       result = await ops.scope(positional[0]!, await readInput(file, io), ctx);
       break;
     }
     case "idea add": {
       count(spec, positional, 1); const file = str("--file");
-      if (file === undefined) throw new Error("idea add: input missing; pass --file PATH or --file - for JSON");
+      if (file === undefined) throw new UsageError("idea add: input missing; pass --file PATH or --file - for JSON");
       result = await ops.ideaAdd(positional[0]!, await readInput(file, io), ctx); break;
     }
     case "idea decide": {
       count(spec, positional, 3); const reason = str("--reason"), attempts = str("--attempts");
-      if (reason === undefined) throw new Error("idea decide: reason missing; pass --reason TEXT and --commit SHA for refine, plus --attempts for an idea with commits");
+      if (reason === undefined) throw new UsageError("idea decide: reason missing; pass --reason TEXT and --commit SHA for refine, plus --attempts for an idea with commits");
       result = await ops.ideaDecide(positional[0]!, positional[1]!, { decision: positional[2], reason, ...(str("--cause") !== undefined ? { cause: str("--cause") } : {}), ...(str("--retry-when") !== undefined ? { retryWhen: str("--retry-when") } : {}), ...(attempts !== undefined ? { attempts: attempts.split(",") } : {}), ...(str("--commit") !== undefined ? { commit: str("--commit") } : {}) }, ctx); break;
     }
     case "investigate show": count(spec, positional, 1); result = ops.investigateShow(positional[0]!); break;
     case "investigate close": count(spec, positional, 1); result = await ops.investigateClose(positional[0]!, ctx); break;
     case "ablate add": {
       count(spec, positional, 1); const file = str("--file");
-      if (file === undefined) throw new Error("ablate add: input missing; pass --file PATH or --file - for JSON");
+      if (file === undefined) throw new UsageError("ablate add: input missing; pass --file PATH or --file - for JSON");
       result = await ops.ablateAdd(positional[0]!, await readInput(file, io), ctx); break;
     }
     case "ablate show": count(spec, positional, 1); result = ops.ablateShow(positional[0]!); break;
@@ -197,67 +230,67 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "final close": count(spec, positional, 1); result = await ops.finalClose(positional[0]!, ctx); break;
     case "final seeds": {
       count(spec, positional, 1); const file = str("--file");
-      if (file === undefined) throw new Error("final seeds: input missing; pass --file PATH or --file - for JSON");
+      if (file === undefined) throw new UsageError("final seeds: input missing; pass --file PATH or --file - for JSON");
       result = await ops.finalSeeds(positional[0]!, await readInput(file, io), ctx); break;
     }
     case "selection": {
       count(spec, positional, 1);
       const file = str("--file");
-      if (file === undefined) throw new Error("selection: input missing; pass --file PATH or --file - for a JSON rule");
+      if (file === undefined) throw new UsageError("selection: input missing; pass --file PATH or --file - for a JSON rule");
       result = await ops.selection(positional[0]!, await readInput(file, io), ctx); break;
     }
     case "retention inspect": {
       count(spec, positional, 1); const offset = str("--offset"), limit = integer(flags["--limit"], "--limit");
-      if (offset !== undefined && !/^[0-9]{1,8}$/.test(offset)) throw new Error("retention inspect: offset must be in 0..16000000");
+      if (offset !== undefined && !/^[0-9]{1,8}$/.test(offset)) throw new UsageError("retention inspect: offset must be in 0..16000000");
       result = await ops.retentionInspect(positional[0]!, ctx, { ...(offset === undefined ? {} : { offset: Number(offset) }), ...(limit === undefined ? {} : { limit }) }); break;
     }
     case "retention prune": {
       count(spec, positional, 1); const file = str("--file"), fingerprint = str("--confirm");
-      if (file === undefined) throw new Error("retention prune: --file PATH|- is required for explicit retained references");
+      if (file === undefined) throw new UsageError("retention prune: --file PATH|- is required for explicit retained references");
       const refs = await readInput(file, io);
       result = await ops.retentionPrune(positional[0]!, { refs: refs as Parameters<typeof ops.retentionPrune>[1]["refs"], ...(fingerprint === undefined ? {} : { fingerprint }) }, ctx); break;
     }
     case "protocol": {
       count(spec, positional, 1);
       const file = str("--file");
-      if (file === undefined) throw new Error("protocol: input file missing; use --file PATH or --file - for JSON standard input");
+      if (file === undefined) throw new UsageError("protocol: input file missing; use --file PATH or --file - for JSON standard input");
       result = await ops.protocol(positional[0]!, await readInput(file, io), ctx); break;
     }
     case "harness stream set": case "experience freeze": case "experience select": {
-      count(spec, positional, 1); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);
+      count(spec, positional, 1); const file = str("--file"); if (!file) throw new UsageError(`usage: ares ${spec.usage}`);
       const raw = await readInput(file, io);
       result = spec.name === "harness stream set" ? await ops.harnessStreamSet(positional[0]!, raw, ctx) : spec.name === "experience freeze" ? await ops.experienceFreeze(positional[0]!, raw, ctx, env) : await ops.experienceSelect(positional[0]!, raw, ctx, env); break;
     }
     case "harness stream show": count(spec, positional, 1); result = ops.harnessStreamShow(positional[0]!); break;
     case "experience check": {
-      count(spec, positional, 2); const model = str("--model"), runtime = str("--runtime"), toolsetSha256 = str("--toolset-sha256"); if (!model || !runtime) throw new Error(`usage: ares ${spec.usage}`);
+      count(spec, positional, 2); const model = str("--model"), runtime = str("--runtime"), toolsetSha256 = str("--toolset-sha256"); if (!model || !runtime) throw new UsageError(`usage: ares ${spec.usage}`);
       result = await ops.experienceCheck(positional[0]!, positional[1]!, {model, runtime, ...(toolsetSha256 !== undefined ? {toolsetSha256} : {})}, ctx, env); break;
     }
     case "harness contrast": case "harness compose": case "harness adopt": case "harness close": {
-      count(spec, positional, 2); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);
+      count(spec, positional, 2); const file = str("--file"); if (!file) throw new UsageError(`usage: ares ${spec.usage}`);
       const form = await readInput(file, io);
       result = spec.name === "harness contrast" ? await ops.harnessContrast(positional[0]!, positional[1]!, form, ctx) : spec.name === "harness compose" ? await ops.harnessCompose(positional[0]!, positional[1]!, form, ctx) : spec.name === "harness close" ? await ops.harnessClose(positional[0]!, positional[1]!, form, str("--confirm"), ctx) : await ops.harnessAdopt(positional[0]!, positional[1]!, form, str("--confirm"), ctx); break;
     }
     case "harness set": {
-      count(spec, positional, 1); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);
+      count(spec, positional, 1); const file = str("--file"); if (!file) throw new UsageError(`usage: ares ${spec.usage}`);
       result = await ops.harnessSet(positional[0]!, await readInput(file, io), ctx); break;
     }
     case "harness show": count(spec, positional, 1); result = ops.harnessShow(positional[0]!, str("--round")); break;
     case "harness import": {
-      count(spec, positional, 2); const file = str("--file"); if (!file) throw new Error(`usage: ares ${spec.usage}`);
+      count(spec, positional, 2); const file = str("--file"); if (!file) throw new UsageError(`usage: ares ${spec.usage}`);
       result = await ops.harnessImport(positional[0]!, positional[1]!, await readInput(file, io), ctx); break;
     }
     case "executor set": {
       count(spec, positional, 1);
       const kind = str("--kind"), workdir = str("--workdir");
-      if (!kind || !workdir) throw new Error("executor set: kind/workdir missing; use --kind local|ssh --workdir PATH and --host ALIAS for ssh");
+      if (!kind || !workdir) throw new UsageError("executor set: kind/workdir missing; use --kind local|ssh --workdir PATH and --host ALIAS for ssh");
       const gpuValues = [str("--gpu-devices"), str("--gpu-min-free-memory-mb"), str("--gpu-max-load-ratio")];
       const gpuRequested = gpuValues.some(value => value !== undefined);
-      if (gpuRequested && gpuValues.some(value => value === undefined)) throw new Error("executor GPU: incomplete settings; pass --gpu-devices, --gpu-min-free-memory-mb and --gpu-max-load-ratio together");
+      if (gpuRequested && gpuValues.some(value => value === undefined)) throw new UsageError("executor GPU: incomplete settings; pass --gpu-devices, --gpu-min-free-memory-mb and --gpu-max-load-ratio together");
       const gpu = gpuRequested ? { devices: gpuValues[0]!.split(",").map(value => value.trim()), minFreeMemoryMb: Number(gpuValues[1]), maxLoadRatio: Number(gpuValues[2]) } : undefined;
-      if (gpu && (!/^[0-9]{1,10}$/.test(gpuValues[1]!) || !/^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$/.test(gpuValues[2]!))) throw new Error("executor GPU: invalid thresholds; use decimal memory MB and a positive decimal load ratio");
+      if (gpu && (!/^[0-9]{1,10}$/.test(gpuValues[1]!) || !/^(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)$/.test(gpuValues[2]!))) throw new UsageError("executor GPU: invalid thresholds; use decimal memory MB and a positive decimal load ratio");
       const cap = str("--retention-cap-bytes");
-      if (cap !== undefined && !/^[0-9]{1,13}$/.test(cap)) throw new Error("--retention-cap-bytes: expected an integer byte count in 1..1099511627776");
+      if (cap !== undefined && !/^[0-9]{1,13}$/.test(cap)) throw new UsageError("--retention-cap-bytes: expected an integer byte count in 1..1099511627776");
       result = await ops.executorSet(positional[0]!, { v: 1, kind, workdir, ...(cap !== undefined ? { retentionCapBytes: Number(cap) } : {}), ...(str("--host") !== undefined ? { host: str("--host") } : {}), ...(gpu ? { gpu } : {}) }, ctx); break;
     }
     case "executor inputs hash": count(spec, positional, 2); result = await ops.executorInputsHash(positional[0]!, positional[1]!, ctx); break;
@@ -265,7 +298,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "attempt run": {
       count(spec, positional, 1);
       const repo = str("--repo"), commit = str("--commit"), chosenSeed = seed(str("--seed"));
-      if (!repo || !commit) throw new Error("attempt run: repo/commit missing; use --repo PATH --commit FULL_40_HEX_SHA");
+      if (!repo || !commit) throw new UsageError("attempt run: repo/commit missing; use --repo PATH --commit FULL_40_HEX_SHA");
       const attempt = await ops.attemptRun(positional[0]!, { repo, commit, ...(chosenSeed !== undefined ? { seed: chosenSeed } : {}), ...(str("--run") !== undefined ? { run: str("--run") } : {}), ...(str("--label") !== undefined ? { label: str("--label") } : {}), ...(str("--retry") !== undefined ? { retry: str("--retry") } : {}), ...(str("--reuse") !== undefined ? { reuse: str("--reuse") as "off" | "eligible" } : {}), ...(flags["--force-fresh"] ? { forceFresh: true } : {}), detach: !!flags["--detach"] }, ctx);
       if (attempt.status === "deferred") code = 75;
       else if (attempt.status !== "running" && attempt.status !== "succeeded") code = 1;
@@ -300,7 +333,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "lit queries": count(spec, positional, 1); result = ops.queries(positional[0]!); break;
     case "lit flow": {
       count(spec, positional, 1);
-      if (flags["--markdown"]) { if (flags["--json"]) throw new Error("lit flow: choose one of --markdown or --json"); return { text: ops.flowMarkdownView(positional[0]!).markdown.trimEnd(), code: 0 }; }
+      if (flags["--markdown"]) { if (flags["--json"]) throw new UsageError("lit flow: choose one of --markdown or --json"); return { text: ops.flowMarkdownView(positional[0]!).markdown.trimEnd(), code: 0 }; }
       result = ops.flow(positional[0]!); break;
     }
     case "lit list": {
@@ -310,15 +343,15 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       break;
     }
     case "lit screen": {
-      if (positional.length < 2) throw new Error(`usage: ares ${spec.usage}`);
-      if (!!flags["--include"] === !!flags["--exclude"]) throw new Error("lit screen: exactly one of --include or --exclude");
+      if (positional.length < 2) throw new UsageError(`usage: ares ${spec.usage}`);
+      if (!!flags["--include"] === !!flags["--exclude"]) throw new UsageError("lit screen: exactly one of --include or --exclude");
       result = await ops.screen(positional[0]!, positional.slice(1), flags["--include"] ? "include" : "exclude", str("--reason"), ctx, undefined, str("--code"));
       break;
     }
     case "lit card export": case "lit card import": {
-      if (positional.length < 2) throw new Error(`usage: ares ${spec.usage}`);
+      if (positional.length < 2) throw new UsageError(`usage: ares ${spec.usage}`);
       const vault = str("--vault");
-      if (vault === undefined) throw new Error(`${spec.name}: --vault is required; pass the registered vault id (vmem vaults list)`);
+      if (vault === undefined) throw new UsageError(`${spec.name}: --vault is required; pass the registered vault id (vmem vaults list)`);
       const confirm = str("--confirm"), family = str("--model-family");
       result = spec.name === "lit card export"
         ? await ops.cardExport(positional[0]!, positional.slice(1), { vault, ...(confirm !== undefined ? { confirm } : {}), ...(family !== undefined ? { modelFamily: family } : {}) }, ctx, env)
@@ -329,20 +362,20 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "lit card": {
       count(spec, positional, 2);
       const file = str("--file");
-      if (file === undefined) throw new Error("lit card: --file is required");
+      if (file === undefined) throw new UsageError("lit card: --file is required");
       result = await ops.card(positional[0]!, positional[1]!, await readInput(file, io), ctx);
       break;
     }
-    case "lit verify": if (!positional.length) throw new Error(`usage: ares ${spec.usage}`); result = await ops.verify(positional[0]!, positional.slice(1), ctx); break;
+    case "lit verify": if (!positional.length) throw new UsageError(`usage: ares ${spec.usage}`); result = await ops.verify(positional[0]!, positional.slice(1), ctx); break;
     case "lit bib": count(spec, positional, 1); result = await ops.bib(positional[0]!, ctx); break;
     case "review add": {
       count(spec, positional, 1); const file = str("--file");
-      if (file === undefined) throw new Error("review add: --file is required; pass --file PATH|- with a current-build report");
+      if (file === undefined) throw new UsageError("review add: --file is required; pass --file PATH|- with a current-build report");
       result = await ops.reviewAdd(positional[0]!, await readInput(file, io), ctx); break;
     }
     case "review resolve": {
       count(spec, positional, 2); const reason = str("--reason");
-      if (reason === undefined) throw new Error("review resolve: --reason is required; explain how the finding was resolved");
+      if (reason === undefined) throw new UsageError("review resolve: --reason is required; explain how the finding was resolved");
       result = await ops.reviewResolve(positional[0]!, positional[1]!, reason, ctx); break;
     }
     case "review show": count(spec, positional, 1); result = ops.reviewShow(positional[0]!); break;
@@ -350,7 +383,7 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
     case "paper build": count(spec, positional, 1); result = await ops.paperBuild(positional[0]!, ctx); break;
     case "paper plan set": {
       count(spec, positional, 1); const file = str("--file");
-      if (file === undefined) throw new Error("paper plan set: input missing; pass --file PATH or --file - with a bounded version-1 paper-plan JSON");
+      if (file === undefined) throw new UsageError("paper plan set: input missing; pass --file PATH or --file - with a bounded version-1 paper-plan JSON");
       let plan: unknown;
       try { plan = await readInput(file, io); }
       catch { throw new Error("paper plan set: input is unreadable, non-regular, invalid UTF-8/JSON or larger than 64 KiB; restore a bounded JSON file or stdin, then retry ares paper plan set <dir> --file PATH|-"); }
@@ -369,9 +402,12 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
       result = report;
       break;
     }
-    default: throw new Error(`unknown command: ${spec.name}`);
+    default: throw new UsageError(`unknown command: ${spec.name}`);
   }
-  return { text: JSON.stringify(result, null, flags["--json"] ? undefined : 2), code };
+  const text = output.options.json
+    ? JSON.stringify(result)
+    : renderResult(spec.name, result, code, color, outputAscii(output.options, env), streamWidth(output.tty ?? false, output.columns, env));
+  return { text, code };
 }
 
 /** `ares mcp`: stdout carries protocol frames only. */
@@ -402,13 +438,28 @@ async function readStdinBounded(): Promise<string> {
 export async function main(args: string[]): Promise<number> {
   const stop = new AbortController(), interrupt = () => stop.abort();
   if (args[0] === "run") { process.on("SIGINT", interrupt); process.on("SIGTERM", interrupt); }
+  const env = process.env;
+  const cli: CliOutput = {
+    options: {},
+    tty: Boolean(process.stdout.isTTY),
+    ...(process.stdout.isTTY ? { columns: process.stdout.columns } : {}),
+  };
   try {
-    const output = await run(args, process.env, { readStdin: readStdinBounded, signal: stop.signal });
+    const output = await execute(args, env, { readStdin: readStdinBounded, signal: stop.signal }, cli);
     console.log(output.text);
     return output.code;
   } catch (error) {
-    console.error(`ares: ${error instanceof Error ? error.message : "operation failed"}`);
-    return 1;
+    const tty = Boolean(process.stderr.isTTY);
+    const columns = streamWidth(tty, process.stderr.columns, env);
+    const color = colorFor(cli.options, tty, env) === true;
+    const message = error instanceof Error ? error.message : "operation failed";
+    const usage = error instanceof UsageError;
+    const diagnostic = renderError(message, tty, color, outputAscii(cli.options, env), columns);
+    console.error(diagnostic);
+    if (usage) {
+      console.error(`Usage: ares ${cli.spec?.usage ?? "<command> [options]"}\nRun 'ares --help' for details.`);
+    }
+    return usage ? 2 : 1;
   } finally {
     if (args[0] === "run") { process.off("SIGINT", interrupt); process.off("SIGTERM", interrupt); }
   }

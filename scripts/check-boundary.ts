@@ -1,12 +1,13 @@
 import ts from "typescript";
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { builtinModules } from "node:module";
 // Usage: bun scripts/check-boundary.ts [project-root]; defaults to the current directory.
-// Runtime code may import only relative files, Node builtins and bun: modules (zero runtime dependencies).
+// Runtime code may import only relative files, Node builtins, bun: modules and the pinned CLI-only renderer.
 const root = process.argv[2] ?? ".";
 const builtins = new Set(builtinModules.flatMap(name => [name, `node:${name}`]));
 const errors: string[] = [];
+const renderer = "@staix/cli-output";
 function inspect(dir: string) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const file = join(dir, entry.name);
@@ -19,7 +20,7 @@ function inspect(dir: string) {
       if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === "require"))) spec = node.arguments[0];
       if (spec) {
         if (!ts.isStringLiteral(spec)) errors.push(`${file}: nonliteral import`);
-        else if (!(spec.text.startsWith(".") || builtins.has(spec.text) || spec.text.startsWith("bun:"))) errors.push(`${file}: forbidden dependency ${spec.text}`);
+        else if (!(spec.text.startsWith(".") || builtins.has(spec.text) || spec.text.startsWith("bun:") || (spec.text === renderer && relative(root, file) === join("src", "cli-output.ts")))) errors.push(`${file}: forbidden dependency ${spec.text}`);
       }
       ts.forEachChild(node, visit);
     }
@@ -28,6 +29,8 @@ function inspect(dir: string) {
 }
 inspect(join(root, "src"));
 const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-if (pkg.dependencies && Object.keys(pkg.dependencies).length) errors.push("runtime dependencies must be empty");
+if (Object.keys(pkg.dependencies ?? {}).length !== 1 || pkg.dependencies?.[renderer] !== "0.1.3") {
+  errors.push("the only runtime dependency must be @staix/cli-output pinned to 0.1.3");
+}
 if (errors.length) { console.error(errors.join("\n")); process.exit(1); }
 console.log("boundary: ok");

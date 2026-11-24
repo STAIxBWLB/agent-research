@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- CLI output standard v1 (#158): command results default to human-readable text on stdout. Use `--json` for the existing compact JSON bytes and exit status. Help, version, playbook, Markdown output, raw attempt logs and MCP framing keep their existing forms. Usage errors exit 2 (previously 1), with the diagnostic and usage on stderr. Operational errors stay on stderr with exit 1, and existing retry advice has its own stderr line. Check failures and temporary refusals keep their original exit codes and result stream.
+- Next minor N-1 (0.3.1): CLI command forms and explicit `--json` result bytes are retained, with the text default and usage exit change above. MCP tool names, schemas and results are unchanged. Study and ledger formats are unchanged and remain readable across the two versions.
+
 ## [0.3.1] - 2026-11-10
 
 Finish or reconcile running attempts before downgrading to 0.3.0.
