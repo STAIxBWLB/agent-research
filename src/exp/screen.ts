@@ -45,10 +45,10 @@ async function literalPaths(repo: string, commit: string, value: string, runner:
 async function literalLine(repo: string, commit: string, path: string, value: string, runner: ProcessRunner): Promise<number | undefined> {
   const result = await git(repo, ["grep", "--no-color", "-a", "-F", "-n", "-z", "-e", value, commit, "--", path], runner);
   if (!passed(result)) return undefined;
-  // With -z the tree-qualified name ends at the first NUL and the line number follows before a colon.
+  // With -z git terminates both the tree-qualified name and the line number with NUL: name\0line\0text.
   const nul = result.stdout.indexOf("\0");
   if (nul < 0 || result.stdout.slice(0, nul) !== `${commit}:${path}`) return undefined;
-  const line = /^(\p{Nd}+):/u.exec(result.stdout.slice(nul + 1))?.[1];
+  const line = /^(\p{Nd}+)\u0000/u.exec(result.stdout.slice(nul + 1))?.[1];
   return line === undefined ? undefined : Number(line);
 }
 /** Runs before the executor is asked to execute anything: no attempt record and no budget exist yet. */

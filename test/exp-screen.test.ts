@@ -1,9 +1,13 @@
 import { expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { canonical, protocolHash, validateProtocol, type Protocol } from "../src/exp/protocol.ts";
 import { validateStageProtocol } from "../src/exp/stages.ts";
 import { screenCandidate, SCREEN_FILES } from "../src/exp/screen.ts";
 import type { ProcessRequest, ProcessResult, ProcessRunner } from "../src/exp/executor.ts";
 import { sha256 } from "../src/study.ts";
+import { tempDir } from "./helpers.ts";
 
 const image = `fixture@sha256:${"a".repeat(64)}`, commit = "c".repeat(40), blob = "1".repeat(40), other = "2".repeat(40);
 function protocol(): Protocol {
@@ -47,7 +51,7 @@ test("AC2/AC3: an evaluator-only input copy and a declared literal are hits, and
     if (args.includes("--show-object-format")) return ok("sha1\n");
     if (args.includes("ls-tree")) return ok([`100644 blob ${blob}\tsrc/held-out.txt`, `100644 blob ${other}\tsrc/other.txt`, ""].join("\u0000"));
     if (args.includes("grep") && args.includes("-l")) return args[args.indexOf("-e") + 1] === literal ? ok(`${commit}:src/leak.txt\0`) : { exitCode: 1, stdout: "", stderr: "" };
-    if (args.includes("grep")) return ok(`${commit}:src/leak.txt\0${7}:${literal}\n`);
+    if (args.includes("grep")) return ok(`${commit}:src/leak.txt\u0000${7}\u0000${literal}\n`);
     throw new Error(`unscripted synthetic process ${request.command} ${args.join(" ")}`);
   };
   const screen = { evaluatorInputs: true as const, literals: [literal] };
@@ -68,4 +72,16 @@ test("AC5: the screen refuses a non-sha1 object format instead of vouching for b
     throw new Error(`unscripted synthetic process ${request.command} ${request.args.join(" ")}`);
   };
   await expect(screenCandidate("/synthetic/repo", commit, { evaluatorInputs: true }, {}, { v: 1, kind: "local", workdir: "/private/synthetic-executor" }, runner)).rejects.toThrow("object format is not sha-1");
+});
+
+test("AC3: a literal hit carries the line number real git reports", async () => {
+  const dir = tempDir(), git = (...args: string[]) => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  git("init", "-q");
+  writeFileSync(join(dir, "plain.txt"), `first line\n${literal} on the second\n${literal} again\n`);
+  writeFileSync(join(dir, "other.txt"), "synthetic prose\n");
+  git("add", ".");
+  git("-c", "user.name=synthetic", "-c", "user.email=synthetic@example.test", "commit", "-q", "-m", "synthetic");
+  const head = git("rev-parse", "HEAD").trim();
+  const result = await screenCandidate(dir, head, { literals: [literal] }, {}, { v: 1, kind: "local", workdir: dir });
+  expect(result.hits).toEqual([{ rule: "literal:0", path: "plain.txt", line: 2 }]);
 });

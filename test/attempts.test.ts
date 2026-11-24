@@ -48,7 +48,7 @@ function runtime(dir: string) {
       if (args.includes("ls-tree")) return ok([...screenTree.map(entry => `100644 blob ${entry.blob}\t${entry.path}`), ""].join("\u0000"));
       if (args.includes("grep")) {
         if (!screenPaths.length) return { exitCode: 1, stdout: "", stderr: "" };
-        return ok(args.includes("-l") ? screenPaths.map(path => `${commitSha}:${path}\u0000`).join("") : `${commitSha}:${screenPaths[0]}\u0000${screenLine}:synthetic\n`);
+        return ok(args.includes("-l") ? screenPaths.map(path => `${commitSha}:${path}\u0000`).join("") : `${commitSha}:${screenPaths[0]}\u0000${screenLine}\u0000synthetic\n`);
       }
       if (args.includes("rev-parse")) return ok(treeId);
       if (args.includes("archive")) { await request.stdoutSink!(Buffer.from([0, 255, 1])); return ok(); }
