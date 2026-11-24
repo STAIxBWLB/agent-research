@@ -1,3 +1,4 @@
+import { figuresStillMatch, validFigureEvidence, type FigureEvidence } from "./figures.ts";
 import { requireCopilotAccept } from "../copilot.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -15,11 +16,15 @@ interface EvidenceBody {
     source: { file: string; sha256: string };
   }[];
 }
-export type PaperEvidence = EvidenceBody & ({ v: 1 } | { v: 2; planSha256: string });
+export type PaperEvidence = EvidenceBody & ({ v: 1 } | { v: 2; planSha256: string } | { v: 3; planSha256: string; figures: FigureEvidence[] });
 /** Legacy evidence stays readable; plan-bound evidence requires a reader that understands its binding. */
-export function paperEvidenceVersion(raw: unknown): 1 | 2 {
-  if (!plain(raw) || (raw.v !== 1 && raw.v !== 2)) throw new Error("paper evidence: unsupported version; use an ares version that supports it, keeping paper/build/evidence.json unchanged");
+export function paperEvidenceVersion(raw: unknown): 1 | 2 | 3 {
+  if (!plain(raw) || (raw.v !== 1 && raw.v !== 2 && raw.v !== 3)) throw new Error("paper evidence: unsupported version; use an ares version that supports it, keeping paper/build/evidence.json unchanged");
   if (raw.v === 2 && (Object.keys(raw).some(key => !["v", "manuscriptSha256", "placeholders", "planSha256"].includes(key)) || typeof raw.planSha256 !== "string" || !/^[a-f0-9]{64}$/.test(raw.planSha256))) throw new Error("paper evidence: invalid v2 plan binding or unknown field; restore the last valid paper/build/evidence.json, then run ares paper check and paper build");
+  if (raw.v === 3 && (Object.keys(raw).some(key => !["v", "manuscriptSha256", "placeholders", "planSha256", "figures"].includes(key))
+    || typeof raw.planSha256 !== "string" || !/^[a-f0-9]{64}$/.test(raw.planSha256) || !validFigureEvidence(raw.figures))) {
+    throw new Error("paper evidence: invalid v3 plan binding or figure evidence; restore paper/build/evidence.json, then run ares paper check and paper build");
+  }
   return raw.v;
 }
 export function paperBuildPaths(dir: string) { return { manuscript: join(dir, "paper", "build", "manuscript.md"), evidence: join(dir, "paper", "build", "evidence.json") }; }
@@ -44,7 +49,10 @@ function calculatePaper(dir: string) {
     const reasons = blocking.slice(0, 10).map(f => `${f.code} at ${f.line}:${f.column}`).join(", ");
     throw new Error(`paper build: paper check found ${blocking.length} blocking finding(s): ${reasons}; run ares paper check <dir> --json and fix every finding before rebuilding`);
   }
-  const evidence: PaperEvidence = { ...(report.planSha256 === undefined ? { v: 1 as const } : { v: 2 as const, planSha256: report.planSha256 }), manuscriptSha256: report.manuscriptSha256, placeholders: report.placeholders.map(entry => {
+  const version = report.planSha256 === undefined ? { v: 1 as const }
+    : report.figures === undefined ? { v: 2 as const, planSha256: report.planSha256 }
+      : { v: 3 as const, planSha256: report.planSha256, figures: report.figures };
+  const evidence: PaperEvidence = { ...version, manuscriptSha256: report.manuscriptSha256, placeholders: report.placeholders.map(entry => {
     const token = entry.placeholder;
     return { kind: token.kind, raw: token.raw, start: token.start, end: token.end, line: token.line, column: token.column,
       ...(token.kind === "number" ? { ref: token.ref, ...(token.format === undefined ? {} : { format: token.format }) } : {}),
@@ -67,6 +75,7 @@ export function buildPaper(dirArg: string, actor: Actor) {
   const changed = oldManuscript !== report.rendered || oldEvidence !== text || receipt?.data.manuscriptSha256 !== manuscriptSha256 || receipt.data.evidenceSha256 !== evidenceSha256;
   if (sha256(readTextBounded(manuscriptPath(dir), MANUSCRIPT_BYTES)) !== report.manuscriptSha256) throw new Error("paper build: source manuscript changed during checking; rerun ares paper check and paper build on the current manuscript");
   if (readPaperPlanSnapshot(dir)?.sha256 !== report.planSha256) throw new Error("paper build: source plan was added, removed or changed during checking; rerun ares paper check and paper build on the current paper/plan.json");
+  if (report.figures && !figuresStillMatch(dir, report.figures)) throw new Error("paper build: figure bytes or paths changed during checking; restore the figures and rerun ares paper check and paper build");
   if (changed) commit(dir, [[paths.manuscript, report.rendered, MANUSCRIPT_BYTES], [paths.evidence, text, PAPER_EVIDENCE_BYTES]], [{ actor, type: "paper.built", data: { manuscriptSha256, evidenceSha256, sourceManuscriptSha256: report.manuscriptSha256, ...(report.planSha256 === undefined ? {} : {planSha256: report.planSha256}) } }]);
   return { manuscriptSha256, evidenceSha256, changed };
 }

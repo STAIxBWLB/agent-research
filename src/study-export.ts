@@ -164,7 +164,7 @@ function evidence(dir: string) {
   if (!plain(raw) || !Array.isArray(raw.placeholders)) throw new Error("study export: paper/build/evidence.json has an unsupported shape; rebuild the paper before exporting");
   return {
     v: 1, manuscriptSha256: typeof raw.manuscriptSha256 === "string" && SHA256.test(raw.manuscriptSha256) ? raw.manuscriptSha256 : null,
-    ...(raw.v === 2 ? {planSha256: raw.planSha256} : {}),
+    ...((raw.v === 2 || raw.v === 3) ? {planSha256: raw.planSha256} : {}),
     placeholders: (raw.placeholders as Record<string, unknown>[]).filter(p => p.kind === "number").map(p => {
       const ref = typeof p.ref === "string" ? p.ref : "", attempt = /^(?:attempt|posthoc):([a-f0-9]{16})\./.exec(ref)?.[1];
       const source = plain(p.source) ? p.source : {};
