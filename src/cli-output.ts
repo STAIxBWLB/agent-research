@@ -181,7 +181,7 @@ const COMPLETED: Readonly<Record<string, string>> = {
   "gate approve": "Approved the gate", "gate reject": "Rejected the gate",
   "lit search": "Recorded the literature search", "lit screen": "Recorded the screening decision",
   "lit verify": "Checked the selected identifiers", "lit card": "Saved the extraction card", "lit bib": "Built the verified bibliography",
-  "plan set": "Saved the study plan", "watch set": "Saved the watch configuration", "paper build": "Built the checked manuscript", "renderer set": "Saved this machine's renderer", "paper render record": "Recorded the render",
+  "plan set": "Saved the study plan", "watch set": "Saved the watch configuration", "paper build": "Built the checked manuscript", "renderer set": "Saved the renderer for this machine", "paper render record": "Recorded the render",
   "paper plan set": "Saved the paper plan", "review add": "Recorded the review", "review resolve": "Resolved the review finding",
   "attempt run": "Recorded the attempt", "attempt cancel": "Cancelled the attempt", "attempt reconcile": "Reconciled the attempts",
   "console add": "Registered the study", "console remove": "Removed the study registration",
@@ -375,7 +375,7 @@ const HELP_GROUPS = [
   ["Experiments", "protocol", "executor", "attempt", "idea", "investigate", "ablate", "posthoc", "final", "selection", "retention", "lineage"],
   ["Harness and experience", "harness", "experience"],
   ["Memory", "archive", "lesson", "lessons", "skill"],
-  ["Paper and review", "paper", "review", "cite"],
+  ["Paper and review", "paper", "renderer", "review", "cite"],
   ["Integration", "setup", "console", "manifest", "mcp"],
 ] as const;
 
