@@ -398,7 +398,7 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
     case "paper build": count(spec, positional, 1); result = await ops.paperBuild(positional[0]!, ctx); break;
     case "paper render record": {
       count(spec, positional, 1); const file = str("--file"), receipt = str("--receipt");
-      if (file === undefined || receipt === undefined) throw new Error("paper render record: --file and --receipt are required; pass the rendered document and the renderer's receipt JSON");
+      if (file === undefined || receipt === undefined) throw new UsageError("paper render record: --file and --receipt are required; pass the rendered document and the renderer's receipt JSON");
       result = await ops.paperRenderRecord(positional[0]!, file, receipt, ctx); break;
     }
     case "paper render show": count(spec, positional, 1); result = ops.paperRenderShow(positional[0]!); break;

@@ -113,3 +113,12 @@ test("CLI, MCP and study export carry the render receipt without document bytes"
   expect(event.data).toMatchObject({ outputSha256: sha256(PDF), renderer: { tool: "synthetic-renderer", version: "v0.0.1", environment: "fixture" } });
   for (const name of ["manifest.json", "ledger.jsonl", "evidence.json"]) expect(readFileSync(join(bundle, name), "utf8")).not.toContain("synthetic render");
 });
+
+test("missing --file or --receipt is a usage error that exits 2 with the usage hint", async () => {
+  const dir = await setup(), { pdf, receipt } = files(dir), cli = join(import.meta.dir, "..", "bin", "ares.js");
+  for (const args of [["--file", pdf], ["--receipt", receipt], []]) {
+    const result = Bun.spawnSync([process.execPath, cli, "paper", "render", "record", dir, ...args], { env: { PATH: process.env.PATH, LANG: "C.UTF-8" }, stdout: "pipe", stderr: "pipe" });
+    expect(result.exitCode).toBe(2); expect(result.stdout.toString()).toBe("");
+    expect(result.stderr.toString()).toContain("--file and --receipt are required"); expect(result.stderr.toString()).toContain("\nUsage: ares ");
+  }
+});
