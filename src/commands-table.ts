@@ -57,6 +57,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "final close", summary: "Close the final experiment phase", example: "study", usage: "final close <dir> [--json]", mutates: true, options: json },
   { name: "final seeds", summary: "Record the final experiment seeds", example: "study --file seeds.json", usage: "final seeds <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "selection", summary: "Set the investigation selection rule", example: "study --file selection.json", usage: "selection <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
+  { name: "selection calibrate", summary: "Recommend a minimum delta from baseline attempts", example: "study --from-run baseline", usage: "selection calibrate <dir> --from-run RUN [--null COMMIT] [--z NUMBER] [--json]", mutates: true, options: { "--from-run": "value", "--null": "value", "--z": "value", ...json } },
   { name: "protocol", summary: "Set the experiment protocol", example: "study --file protocol.json", usage: "protocol <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "executor set", summary: "Configure an experiment executor", example: "study --kind local --workdir /tmp/ares", usage: "executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH [--retention-cap-bytes BYTES] [--gpu-devices IDS --gpu-min-free-memory-mb MB --gpu-max-load-ratio RATIO] [--json]", mutates: true, options: { "--kind": "value", "--host": "value", "--workdir": "value", "--retention-cap-bytes": "value", "--gpu-devices": "value", "--gpu-min-free-memory-mb": "value", "--gpu-max-load-ratio": "value", ...json } },
   { name: "executor inputs hash", summary: "Hash an input directory on the executor", example: "study /data/inputs", usage: "executor inputs hash <dir> <path> [--json]", mutates: "network", options: json },
@@ -134,6 +135,7 @@ export const FLAG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   "--file": "Read the input file or use - for stdin",
   "--for": "Set the intent for ranking lessons",
   "--force-fresh": "Require fresh execution",
+  "--from-run": "Read baseline attempts from this run",
   "--gpu-devices": "Select GPU IDs as ID[,ID...]",
   "--gpu-max-load-ratio": "Set the maximum GPU load ratio",
   "--gpu-min-free-memory-mb": "Set minimum free GPU memory in MB",
@@ -150,6 +152,7 @@ export const FLAG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   "--mode": "Choose a survey or experiment study",
   "--model": "Select the model used for the check",
   "--model-family": "Record the model family",
+  "--null": "Pair with an identical-tree A/A commit",
   "--offset": "Skip this many records",
   "--parallel": "Set concurrency from 1 to 8",
   "--phase": "Limit the policy to one phase",
@@ -180,6 +183,7 @@ export const FLAG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   "--vault": "Select the registered vault ID",
   "--workdir": "Set the executor working directory",
   "--year-from": "Set the earliest publication year",
+  "--z": "Set the positive noise multiplier (default 2)",
 };
 
 export const FLAG_OVERRIDES: Readonly<Record<string, string>> = {

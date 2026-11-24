@@ -15,6 +15,8 @@ const esc = ROLE_SGR.header[0]!;
 const render = (command: string, result: unknown, code = 0, color = false, ascii = false) => renderResult(command, result, code, color, ascii, 80, context);
 
 const cases = [
+  ["selection calibrate", { method: "seed-sd", recommendedMinDelta: 0.5, sha256: "a".repeat(64) },
+    ["Recorded the calibration recommendation", "Recommendation", "seed-sd", "0.5"]],
   ["status", { question: "Synthetic?", mode: "survey", scope: { set: true }, gates: [{ gate: "scope", state: "pending", current: "private-sha" }], literature: { unverified: 1 }, events: 99 },
     ["▸ Attention", "ares gate approve '/work/synthetic study' scope", "▸ Study", "▸ Gates"]],
   ["lit list", { total: 1, candidates: [{ id: "doi:10.0000/example", year: 2024, status: "included", verified: true, title: "Synthetic title", abstract: "Hidden abstract", authors: ["Hidden author"] }] },

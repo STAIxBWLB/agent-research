@@ -25,6 +25,7 @@ import { setFinalSeeds, finalGateBinding, requireFinalInputs, closeFinal, showPo
 import { addIdea, decideIdea } from "./exp/ideas.ts";
 import { showInvestigation, closeInvestigation } from "./exp/investigate.ts";
 import { isInvestigationRun } from "./exp/reuse-runtime.ts";
+import { calibrateSelection, type CalibrationOptions } from "./exp/calibrate.ts";
 import { readSelection, setSelection } from "./exp/selection.ts";
 import { createHubClient } from "./plan/hub.ts";
 import { runPlan, type ControllerRuntime, type Observation, type StepNode } from "./plan/controller.ts";
@@ -584,6 +585,12 @@ export async function selection(dirArg: string, raw: unknown, ctx: Pick<Ctx, "ac
   });
 }
 
+
+export async function selectionCalibrate(dirArg: string, options: CalibrationOptions, ctx: Pick<Ctx, "actor">) {
+  const { dir, study } = openStudy(dirArg);
+  requireExperiment(study);
+  return withLock(dir, () => calibrateSelection(dir, options, ctx.actor));
+}
 
 export const investigateShow = (dir: string) => showInvestigation(dir);
 export async function investigateClose(dirArg: string, ctx: Pick<Ctx, "actor">) {

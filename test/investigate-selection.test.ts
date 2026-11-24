@@ -115,7 +115,7 @@ test("CLI and MCP share selection validation, agent attribution and non-executin
   const before = readFileSync(join(b, "ledger.jsonl"));
   await expect(server.handlers.ares_selection_set!({ study: b, selection: { ...rule(), metric: "foreign" } })).rejects.toThrow("selection.metric");
   expect(readFileSync(join(b, "ledger.jsonl"))).toEqual(before);
-  expect(ops.manifest().formats).toMatchObject({ experimentSelection: 1, investigateResult: 1 });
+  expect(ops.manifest().formats).toMatchObject({ experimentSelection: 2, selectionCalibration: 1, investigateResult: 1 });
 });
 
 test("survey mode and missing protocol refuse selection without writes", async () => {
