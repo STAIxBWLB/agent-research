@@ -7,9 +7,10 @@ import {validateHarnessExecution, type DeclaredExecutionRef, type HarnessRound, 
 export const HARNESS_CONTRASTS = 64, HARNESS_SECTIONS = 32;
 export interface ProbeRef {probe: string; projectionSha256: string; outputManifestHash?: string}
 interface Form {v: 1; id: string; fingerprint: string; model?: string; sourceExecution?: DeclaredExecutionRef}
+interface Presentation {first: "baseline" | "arm"; verdict: "first" | "second" | "tie"}
 export interface HarnessContrast extends Form {
   arm: string; outcome: "improved" | "unchanged" | "regressed" | "inconclusive";
-  basis: "deterministic-check" | "blinded-judgment" | "actor-claim"; judge?: "human" | "model"; observations: string; uncertainty: string; explanations: string[]; evidence: ProbeRef[];
+  basis: "deterministic-check" | "blinded-judgment" | "actor-claim"; judge?: "human" | "model"; observations: string; uncertainty: string; explanations: string[]; evidence: ProbeRef[]; presentations?: Presentation[];
 }
 export interface HarnessComposition extends Form {sections: {section: string; decision: "keep" | "drop" | "revise"; contrasts: {id: string; sha256: string}[]; reason: string}[]; successorSha256: string | null}
 export interface IndependentCheck {state: "passed" | "failed" | "unavailable"; source: {kind: "deterministic-executable" | "unavailable"; refs: ProbeRef[]}}
@@ -43,11 +44,31 @@ function base(row: Record<string, unknown>, input: "contrast" | "compose" | "ado
   if (row.sourceExecution !== undefined) {try {sourceExecution = validateHarnessExecution(row.sourceExecution);} catch {throw new Error(`harness ${input} sourceExecution: malformed or unsafe; correct sourceExecution in the ${input} input form, then retry with the current fingerprint from ares harness show --json`);}}
   return {v: 1, id: id(row.id), fingerprint: digest(row.fingerprint), ...(row.model !== undefined ? {model: text(row.model, HARNESS_MODEL_BYTES)} : {}), ...(sourceExecution ? {sourceExecution} : {})};
 }
+function parsePresentations(raw: unknown, outcome: HarnessContrast["outcome"]): Presentation[] {
+  const presentations = list(raw, 2, 2).map((value): Presentation => {
+    const {first, verdict} = object(value, ["first", "verdict"]);
+    if ((first !== "baseline" && first !== "arm") || (verdict !== "first" && verdict !== "second" && verdict !== "tie")) {
+      transitionFail("presentation first must be baseline or arm and verdict must be first, second or tie");
+    }
+    return {first, verdict};
+  });
+  if (presentations[0]!.first === presentations[1]!.first) transitionFail("presentations must alternate which output is first");
+  const [first, second] = presentations.map(({first, verdict}) =>
+    verdict === "tie" ? "tie" : verdict === "first" ? first : first === "baseline" ? "arm" : "baseline");
+  const expected = first !== second ? "inconclusive" : first === "arm" ? "improved" : first === "baseline" ? "regressed" : "unchanged";
+  if (outcome !== expected) transitionFail(`swapped presentations require outcome: ${expected}`);
+  return presentations;
+}
 export function parseContrast(raw: unknown): HarnessContrast {
-  const row = object(raw, ["v", "id", "fingerprint", "arm", "outcome", "basis", "judge", "model", "sourceExecution", "observations", "uncertainty", "explanations", "evidence"]);
+  const row = object(raw, ["v", "id", "fingerprint", "arm", "outcome", "basis", "judge", "model", "sourceExecution", "observations", "uncertainty", "explanations", "evidence", "presentations"]);
   if (!["improved", "unchanged", "regressed", "inconclusive"].includes(row.outcome as string) || !["deterministic-check", "blinded-judgment", "actor-claim"].includes(row.basis as string)) transitionFail("invalid contrast outcome/basis");
-  const form = {...base(row, "contrast"), arm: id(row.arm), outcome: row.outcome as HarnessContrast["outcome"], basis: row.basis as HarnessContrast["basis"], ...(row.judge !== undefined ? {judge: row.judge as "human" | "model"} : {}), observations: text(row.observations), uncertainty: text(row.uncertainty), explanations: list(row.explanations, 8).map(value => text(value, 1000)), evidence: refs(row.evidence)};
-  if (!form.evidence.length || form.basis === "blinded-judgment" && !["human", "model"].includes(String(form.judge)) || form.basis !== "blinded-judgment" && form.judge !== undefined || form.judge === "model" && !form.model) transitionFail("contrast needs admitted evidence and blinded judgments need a human/model identity (model name when applicable)"); return form;
+  const form: HarnessContrast = {...base(row, "contrast"), arm: id(row.arm), outcome: row.outcome as HarnessContrast["outcome"], basis: row.basis as HarnessContrast["basis"], ...(row.judge !== undefined ? {judge: row.judge as "human" | "model"} : {}), observations: text(row.observations), uncertainty: text(row.uncertainty), explanations: list(row.explanations, 8).map(value => text(value, 1000)), evidence: refs(row.evidence)};
+  if (!form.evidence.length || form.basis === "blinded-judgment" && !["human", "model"].includes(String(form.judge)) || form.basis !== "blinded-judgment" && form.judge !== undefined || form.judge === "model" && !form.model) transitionFail("contrast needs admitted evidence and blinded judgments need a human/model identity (model name when applicable)");
+  if (Object.hasOwn(row, "presentations")) {
+    if (form.basis !== "blinded-judgment") transitionFail("presentations require basis: blinded-judgment");
+    form.presentations = parsePresentations(row.presentations, form.outcome);
+  }
+  return form;
 }
 export function parseComposition(raw: unknown): HarnessComposition {
   const row = object(raw, ["v", "id", "fingerprint", "sections", "successorSha256", "model", "sourceExecution"]);
@@ -101,7 +122,18 @@ export function transitionView(round: HarnessRound, binding: string, probes: Dec
   const closures = history.slice(-16).map(record => ({...record, current: record.binding === binding && record.form.fingerprint === fingerprint && record.sha256 === closure?.sha256}));
   const successor = successorView(probes, bucket);
   const nextStep = closure?.current ? "Round disposition recorded; separately review source-backed lessons or start a new round" : closure ? "Round/evidence changed; use the current fingerprint to preview ares harness close/adopt again" : successor?.execution === "unexecuted" ? "Import the exact successor fixture with ares harness import; its parents do not execute it" : !bucket.contrasts.size ? "Record admitted comparisons with ares harness contrast, or close baseline-kept/inconclusive/withdrawn with ares harness close" : !bucket.composition ? "Use ares harness compose for per-section decisions, or close without adoption using ares harness close" : "Preview ares harness adopt or ares harness close with the current fingerprint";
-  return {fingerprint, nextStep, contrasts: [...bucket.contrasts.values()], composition: bucket.composition ?? null, adoption: bucket.adoption ?? null, closure, closures, remainingClosures: Math.max(0, history.length - closures.length), successor, readiness: {state: closure ? closure.current ? "closed" as const : "stale" as const : "open" as const, experimental: true as const, correctness: "unavailable" as const, transfer: "not-demonstrated" as const}};
+  const contrasts = [...bucket.contrasts.values()].map(record => ({
+    ...record, orderControl: record.form.presentations ? "swapped" as const : "none" as const,
+  }));
+  const swapped = contrasts.filter(record => record.orderControl === "swapped").length;
+  const composition = bucket.composition ? {
+    ...bucket.composition,
+    sectionOrderControl: bucket.composition.form.sections.map(section => ({
+      section: section.section,
+      orderControlled: section.contrasts.filter(ref => bucket.contrasts.get(ref.id)?.form.presentations !== undefined).length,
+    })),
+  } : null;
+  return {fingerprint, nextStep, contrasts, orderControlCounts: {swapped, none: contrasts.length - swapped}, composition, adoption: bucket.adoption ?? null, closure, closures, remainingClosures: Math.max(0, history.length - closures.length), successor, readiness: {state: closure ? closure.current ? "closed" as const : "stale" as const : "open" as const, experimental: true as const, correctness: "unavailable" as const, transfer: "not-demonstrated" as const}};
 }
 /** Verify each transition at its ledger position. Fixture records never manufacture native checks or metrics. */
 export function applyTransition(state: TransitionState, event: LedgerEvent, round: HarnessRound, binding: string, probes: DeclaredProbe[]): void {
