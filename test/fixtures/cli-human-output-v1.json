@@ -179,6 +179,14 @@
     " ares Idea add\n  ✓  Idea add completed · synthetic · available",
     "\u001b[1;34m ares Idea add\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Idea add completed · synthetic · available"
   ],
+  "idea categories": [
+    " ares Idea categories\n  ✓  Saved the idea categories · synthetic · available\n    →  ares idea report '/work/synthetic study'",
+    "\u001b[1;34m ares Idea categories\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the idea categories · synthetic · available\n    \u001b[36m→  ares idea report '/work/synthetic study'\u001b[0m"
+  ],
+  "idea report": [
+    " ares Idea report\n\n▸ Search\n  Run:             (unset)\n  Metric:          (unset)\n  Measured ideas:  (unset)\n  Best delta:      none\n  Advisory:        yes\n\n▸ Ideas (0)",
+    "\u001b[1;34m ares Idea report\u001b[0m\n\n\u001b[1;35m▸ Search\u001b[0m\n  \u001b[34mRun:\u001b[0m             \u001b[90m(unset)\u001b[0m\n  \u001b[34mMetric:\u001b[0m          \u001b[90m(unset)\u001b[0m\n  \u001b[34mMeasured ideas:\u001b[0m  \u001b[90m(unset)\u001b[0m\n  \u001b[34mBest delta:\u001b[0m      none\n  \u001b[34mAdvisory:\u001b[0m        yes\n\n\u001b[1;35m▸ Ideas\u001b[0m\u001b[90m (0)\u001b[0m"
+  ],
   "idea decide": [
     " ares Idea decide\n  ✓  Idea decide completed · synthetic · available",
     "\u001b[1;34m ares Idea decide\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Idea decide completed · synthetic · available"
@@ -218,6 +226,10 @@
   "selection": [
     " ares Selection\n  ✓  Saved the selection rule · synthetic · available\n    →  ares investigate show '/work/synthetic study'",
     "\u001b[1;34m ares Selection\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the selection rule · synthetic · available\n    \u001b[36m→  ares investigate show '/work/synthetic study'\u001b[0m"
+  ],
+  "selection calibrate": [
+    " ares Selection calibrate\n  ✓  Recorded the calibration recommendation\n\n▸ Recommendation\n  Method:           seed-sd\n  Minimum delta:    0.5\n  Receipt SHA-256:  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n                    aaaa",
+    "\u001b[1;34m ares Selection calibrate\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Recorded the calibration recommendation\n\n\u001b[1;35m▸ Recommendation\u001b[0m\n  \u001b[34mMethod:\u001b[0m           seed-sd\n  \u001b[34mMinimum delta:\u001b[0m    0.5\n  \u001b[34mReceipt SHA-256:\u001b[0m  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n                    aaaa"
   ],
   "protocol": [
     " ares Protocol\n  ✓  Saved the experiment protocol · synthetic · available\n    →  ares executor check '/work/synthetic study'",
@@ -370,9 +382,5 @@
   "cite check": [
     " ares Cite check\n\n▸ Passed\n  ✓  No findings\n\n✓ 1 ok",
     "\u001b[1;34m ares Cite check\u001b[0m\n\n\u001b[1;35m▸ Passed\u001b[0m\n  \u001b[1;32m✓ \u001b[0m No findings\n\n\u001b[1;32m✓ 1 ok\u001b[0m"
-  ],
-  "selection calibrate": [
-    " ares Selection calibrate\n  ✓  Recorded the calibration recommendation\n\n▸ Recommendation\n  Method:           seed-sd\n  Minimum delta:    0.5\n  Receipt SHA-256:  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n                    aaaa",
-    "\u001b[1;34m ares Selection calibrate\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Recorded the calibration recommendation\n\n\u001b[1;35m▸ Recommendation\u001b[0m\n  \u001b[34mMethod:\u001b[0m           seed-sd\n  \u001b[34mMinimum delta:\u001b[0m    0.5\n  \u001b[34mReceipt SHA-256:\u001b[0m  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n                    aaaa"
   ]
 }

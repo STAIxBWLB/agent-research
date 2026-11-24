@@ -1,10 +1,18 @@
-import { boundedText, commit, onlyKeys, openStudy, plain, readLedger, requireExperiment, type Actor, type LedgerEvent } from "../study.ts";
+import { boundedText, commit, onlyKeys, openStudy, plain, readLedger, readTextBounded, requireExperiment, sha256, type Actor, type LedgerEvent } from "../study.ts";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { listAttempts } from "./attempts.ts";
+import { readProtocol } from "./protocol.ts";
+import { readSelection } from "./selection.ts";
 
 export const MAX_IDEAS = 1000, MAX_DECISION_ATTEMPTS = 200;
-export interface IdeaInput { id: string; title: string; hypothesis: string; parent?: string; commit?: string }
+export const MAX_PREDICTIONS = 4, MAX_BUNDLE = 16, MAX_CATEGORIES = 32, CATEGORIES_BYTES = 8192;
+export type Expectation = "improve" | "no-change" | "regress";
+export interface Prediction { metric: string; expect: Expectation; minDelta?: number }
+export interface IdeaPlanning { category?: string; bundle?: number; predicts?: Prediction[] }
+export interface IdeaInput extends IdeaPlanning { id: string; title: string; hypothesis: string; parent?: string; commit?: string }
 export interface IdeaDecision { decision: "refine" | "pivot"; reason: string; attempts: string[]; commit?: string; cause?: string; retryWhen?: string }
-export interface Idea { id: string; title: string; hypothesis: string; parent?: string; commits: string[]; state: "open" | "pivoted"; decisions: IdeaDecision[] }
+export interface Idea extends IdeaPlanning { id: string; title: string; hypothesis: string; parent?: string; commits: string[]; state: "open" | "pivoted"; decisions: IdeaDecision[] }
 const recovery = "; correct the idea input and retry ares idea add or ares idea decide";
 function bad(reason: string): never { throw new Error(`idea: ${reason}${recovery}`); }
 function name(raw: unknown, field: string): string {
@@ -15,11 +23,84 @@ function commitId(raw: unknown): string {
   if (typeof raw !== "string" || !/^[a-fA-F0-9]{40}$/.test(raw)) bad("commit: full 40-hex SHA required");
   return raw.toLowerCase();
 }
+function prediction(raw: unknown, strict: boolean): Prediction {
+  if (!plain(raw)) bad("predicts: objects with metric and expect required");
+  if (strict) onlyKeys(raw, ["metric", "expect", "minDelta"], "idea prediction");
+  const metric = boundedText(raw.metric, "idea prediction metric", 128);
+  if (raw.expect !== "improve" && raw.expect !== "no-change" && raw.expect !== "regress") bad("predicts.expect: use improve, no-change or regress");
+  if (raw.minDelta !== undefined && (typeof raw.minDelta !== "number" || !Number.isFinite(raw.minDelta) || raw.minDelta < 0)) bad("predicts.minDelta: finite number >= 0 required in the metric's unit");
+  return { metric, expect: raw.expect, ...(raw.minDelta !== undefined ? { minDelta: raw.minDelta as number } : {}) };
+}
+/** Optional planning fields; absent fields are omitted so older ideas fold to identical objects. */
+function planning(raw: Record<string, unknown>, strict: boolean): IdeaPlanning {
+  const out: IdeaPlanning = {};
+  if (raw.category !== undefined) out.category = name(raw.category, "category");
+  if (raw.bundle !== undefined) {
+    if (!Number.isSafeInteger(raw.bundle) || (raw.bundle as number) < 1 || (raw.bundle as number) > MAX_BUNDLE) bad(`bundle: integer in 1..${MAX_BUNDLE} required (independent changes in the commit)`);
+    out.bundle = raw.bundle as number;
+  }
+  if (raw.predicts !== undefined) {
+    if (!Array.isArray(raw.predicts) || !raw.predicts.length || raw.predicts.length > MAX_PREDICTIONS) bad(`predicts: 1..${MAX_PREDICTIONS} predictions required`);
+    const predicts = raw.predicts.map(p => prediction(p, strict));
+    if (new Set(predicts.map(p => p.metric)).size !== predicts.length) bad("predicts: one prediction per metric");
+    out.predicts = predicts;
+  }
+  return out;
+}
 function validateIdea(raw: unknown, strict: boolean): IdeaInput {
   if (!plain(raw)) bad("JSON object required");
-  if (strict) onlyKeys(raw, ["id", "title", "hypothesis", "parent", "commit"], "idea");
+  if (strict) onlyKeys(raw, ["id", "title", "hypothesis", "parent", "commit", "category", "bundle", "predicts"], "idea");
   return { id: name(raw.id, "id"), title: boundedText(raw.title, "idea.title", 500), hypothesis: boundedText(raw.hypothesis, "idea.hypothesis", 4000),
-    ...(raw.parent !== undefined ? { parent: name(raw.parent, "parent") } : {}), ...(raw.commit !== undefined ? { commit: commitId(raw.commit) } : {}) };
+    ...(raw.parent !== undefined ? { parent: name(raw.parent, "parent") } : {}), ...(raw.commit !== undefined ? { commit: commitId(raw.commit) } : {}), ...planning(raw, strict) };
+}
+export function categoriesPath(dir: string): string { return join(dir, "design", "idea-categories.json"); }
+function validateCategories(raw: unknown): { v: 1; categories: string[] } {
+  if (!plain(raw)) bad("categories: JSON object {v:1,categories:[...]} required");
+  onlyKeys(raw, ["v", "categories"], "idea categories");
+  if (raw.v !== 1) bad("categories.v: 1 required");
+  if (!Array.isArray(raw.categories) || !raw.categories.length || raw.categories.length > MAX_CATEGORIES) bad(`categories: 1..${MAX_CATEGORIES} names required`);
+  const categories = raw.categories.map(c => name(c, "category"));
+  if (new Set(categories).size !== categories.length) bad("categories: duplicate name; list each category once");
+  return { v: 1, categories };
+}
+/** The study-local vocabulary, or undefined when none is declared. It is a planning aid outside the design seal. */
+export function readCategories(dir: string): string[] | undefined {
+  const file = categoriesPath(dir);
+  if (!existsSync(file)) return undefined;
+  let text: string;
+  try { text = readTextBounded(file, CATEGORIES_BYTES); }
+  catch { bad(`design/idea-categories.json: unreadable, non-regular, invalid UTF-8 or larger than ${CATEGORIES_BYTES} bytes; restore a valid file within that bound`); }
+  let raw: unknown;
+  try { raw = JSON.parse(text); } catch { bad("design/idea-categories.json: invalid JSON; restore the last valid vocabulary"); }
+  return validateCategories(raw).categories;
+}
+/** Caller holds the study lock; identical bytes record nothing. */
+export function setCategories(dir: string, raw: unknown, actor: Actor): { categories: string[]; sha256: string; changed: boolean } {
+  return safe(() => {
+    requireExperiment(openStudy(dir).study);
+    const value = validateCategories(raw), text = JSON.stringify(value, null, 2) + "\n", hash = sha256(text), file = categoriesPath(dir);
+    let previous: string | undefined;
+    // A valid new vocabulary may replace an unreadable or invalid one.
+    if (existsSync(file)) { try { previous = readTextBounded(file, CATEGORIES_BYTES); } catch { previous = undefined; } }
+    const changed = previous !== text;
+    if (changed) commit(dir, [[file, text, CATEGORIES_BYTES]], [{ actor, type: "idea.categories.set", data: { sha256: hash, count: value.categories.length } }]);
+    return { categories: value.categories, sha256: hash, changed };
+  });
+}
+function checkPlanning(dir: string, input: IdeaInput): void {
+  if (input.category !== undefined) {
+    const declared = readCategories(dir);
+    if (declared && !declared.includes(input.category)) bad(`category ${input.category} is not declared; use one of ${declared.join(", ")}`);
+  }
+  if (input.predicts) {
+    const protocol = readProtocol(dir);
+    if (!protocol) bad("predicts: protocol missing; run ares protocol before predicting metrics, or omit predicts");
+    const names = protocol.metrics.map(m => m.name);
+    for (const p of input.predicts) if (!names.includes(p.metric)) bad(`predicts.metric ${p.metric} is not declared; use one of ${names.join(", ")}`);
+    // Only the primary metric has a selection margin; elsewhere no-change needs its own tolerance or it can never hit.
+    const primary = readSelection(dir, protocol)?.metric;
+    for (const p of input.predicts) if (p.expect === "no-change" && p.minDelta === undefined && p.metric !== primary) bad(`predicts ${p.metric}: no-change on a non-primary metric needs minDelta; add minDelta in that metric's unit`);
+  }
 }
 function pivotContext(raw: Record<string, unknown>, strict: boolean): Pick<IdeaDecision, "cause" | "retryWhen"> {
   if (strict && raw.decision !== "pivot" && (raw.cause !== undefined || raw.retryWhen !== undefined)) bad("cause and retryWhen are pivot-only; omit --cause and --retry-when for refine");
@@ -66,7 +147,9 @@ export function foldIdeas(events: LedgerEvent[]): Idea[] {
         if (ideas.size >= MAX_IDEAS) bad(`limit ${MAX_IDEAS} reached; start a new study for more ideas`);
         if (input.parent !== undefined && !ideas.has(input.parent)) bad(`parent ${input.parent} does not exist; add its parent idea first`);
         claim(ideas.values(), input.id, input.commit);
-        ideas.set(input.id, { id: input.id, title: input.title, hypothesis: input.hypothesis, ...(input.parent !== undefined ? { parent: input.parent } : {}), commits: input.commit ? [input.commit] : [], state: "open", decisions: [] });
+        const { category, bundle, predicts } = input;
+        ideas.set(input.id, { id: input.id, title: input.title, hypothesis: input.hypothesis, ...(input.parent !== undefined ? { parent: input.parent } : {}), commits: input.commit ? [input.commit] : [], state: "open", decisions: [],
+          ...(category !== undefined ? { category } : {}), ...(bundle !== undefined ? { bundle } : {}), ...(predicts !== undefined ? { predicts } : {}) });
       } else if (event.type === "idea.decided") {
         const id = name(event.data.id, "id"), input = validateDecision(event.data, false), target = ideas.get(id);
         if (!target) bad(`unknown id ${id}; add the idea before deciding`);
@@ -90,6 +173,7 @@ export function addIdea(dir: string, raw: unknown, actor: Actor): Idea {
     if (ideas.length >= MAX_IDEAS) bad(`limit ${MAX_IDEAS} reached; start a new study for more ideas`);
     if (input.parent !== undefined && !ideas.some(i => i.id === input.parent)) bad(`parent ${input.parent} does not exist; add its parent idea first`);
     claim(ideas, input.id, input.commit);
+    checkPlanning(dir, input);
     const added = commit(dir, [], [{ actor, type: "idea.added", data: { idea: input } }]);
     return foldIdeas([...events, ...added]).find(i => i.id === input.id)!;
   });

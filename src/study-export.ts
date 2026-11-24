@@ -36,7 +36,7 @@ const LEDGER_KEYS: Record<string, readonly string[]> = {
   "plan.set": ["revision", "state", "sha256"], "plan.gates": ["revision"], "plan.paused": ["revision"], "plan.control": ["revision"], "node.observed": ["revision", "status"], "node.intent": ["revision"],
   "executor.set": ["kind"], "protocol.set": ["sha256", "identitySha256", "protocolHash", "treeHash"], "selection.set": ["sha256", "metric"], "selection.calibrated": ["run", "sha256", "protocolHash"], "final.seeds.set": ["sha256"],
   "investigate.closed": ["run", "sha256", "ruleSha256", "winner"], "ablate.closed": ["sha256", "investigateSha256"], "final.closed": ["sha256", "status", "investigateSha256"],
-  "idea.decided": ["decision"], "paper.built": ["doc", "manuscriptSha256", "evidenceSha256", "sourceManuscriptSha256"], "paper.rendered": ["doc", "evidenceSha256", "manuscriptSha256", "outputSha256", "receiptSha256", "bytes"], "review.added": [], "review.resolved": ["buildSha256"],
+  "idea.decided": ["decision"], "idea.categories.set": ["sha256", "count"], "paper.built": ["doc", "manuscriptSha256", "evidenceSha256", "sourceManuscriptSha256"], "paper.rendered": ["doc", "evidenceSha256", "manuscriptSha256", "outputSha256", "receiptSha256", "bytes"], "review.added": [], "review.resolved": ["buildSha256"],
   "attempt.started": ["id", "run", "seed", "commit", "treeId"],
   "retention.pruned": ["fingerprint", "refsSha256", "count"],
   "attempt.stage.reused": ["id", "stage", "candidateStage", "key", "sourceAttemptId", "sourceStage", "sourceSha256"],
