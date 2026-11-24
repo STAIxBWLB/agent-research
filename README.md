@@ -57,7 +57,7 @@ ares lit bib study                          # writes study/refs/references.bib
 ares cite check study draft.md              # exit 1 on unknown or unverified [@keys]
 ```
 
-`ares playbook` prints the full standalone workflow and its rules. Study commands accept `--json`; see the command list for exact usage.
+`ares playbook` prints the full standalone workflow and its rules. Command results default to text. Use `--json` for compact machine output on commands that support it, `--color=auto|always|never` to control color, or `--ascii` for ASCII markers. Results go to stdout and diagnostics go to stderr. Usage errors exit 2. See the command list for exact usage.
 
 `lit search --intent lexical|semantic|background` records why a query was issued: exact terms and acronyms, a concept description, or adjacent foundations. Without it the `lit.search` event keeps its earlier shape and reports as `unspecified`. Each candidate a search creates stores that search's id (`firstQuery`, `search-<n>` by order in the ledger); later merges never change it, and candidates from older studies have none. `lit queries` lists every search with its intent, sources, added/merged counts and how many of the candidates it first added are now included, excluded or still new, plus a per-intent summary, the queries with no included yield and the count of unattributed candidates. ares does not write, rank or embed queries. `study export --bundle` keeps query text out and adds the intent to `lit.search` rows and a per-intent summary to `counts.litQueries`.
 
