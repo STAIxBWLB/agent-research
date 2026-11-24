@@ -44,10 +44,12 @@ test("planning fields validate before any write and decide cannot add prediction
     [{ predicts: [{ metric: "score", expect: "up" }] }, "expect"], [{ predicts: [{ metric: "score", expect: "improve", minDelta: -1 }] }, "minDelta"],
     [{ predicts: [{ metric: "missing", expect: "improve" }] }, "score, secs"], [{ predicts: [{ metric: "score", expect: "improve" }, { metric: "score", expect: "regress" }] }, "one prediction"],
     [{ category: "../x" }, "category"],
+    [{ predicts: [{ metric: "secs", expect: "no-change" }] }, "predicts secs: no-change on a non-primary metric needs minDelta; add minDelta in that metric's unit"],
   ] as [Record<string, unknown>, string][]) {
     await expect(ops.ideaAdd(dir, idea("bad", sha(1), extra), ctx)).rejects.toThrow(message);
     expect(readFileSync(join(dir, "ledger.jsonl"))).toEqual(before);
   }
+  expect((await ops.ideaAdd(dir, idea("primary", sha(5), { predicts: [{ metric: "score", expect: "no-change" }] }), ctx)).predicts).toHaveLength(1);
   await ops.ideaAdd(dir, idea("ok", sha(1)), ctx); const evidence = attempt(dir, sha(1), 11);
   await expect(ops.ideaDecide(dir, "ok", { decision: "pivot", reason: "why", attempts: [evidence], predicts: [{ metric: "score", expect: "improve" }] }, ctx)).rejects.toThrow("unknown field");
 });
@@ -65,6 +67,10 @@ test("AC5: a declared vocabulary refuses unknown categories by name, and untried
   await ops.ideaAdd(dir, idea("o", sha(2), { category: "optimizer" }), ctx);
   expect(ops.ideaReport(dir).search.untried).toEqual(["optimizer", "arch"]);
   await expect(ops.ideaCategories(dir, { v: 1, categories: ["a", "a"] }, ctx)).rejects.toThrow("duplicate");
+  writeFileSync(join(dir, "design", "idea-categories.json"), "{broken");
+  await expect(ops.ideaAdd(dir, idea("y", sha(3), { category: "data" }), ctx)).rejects.toThrow("invalid JSON");
+  expect((await ops.ideaCategories(dir, { v: 1, categories: ["data"] }, ctx)).changed).toBe(true);
+  expect((await ops.ideaAdd(dir, idea("y", sha(3), { category: "data" }), ctx)).category).toBe("data");
   await expect(ops.ideaCategories(dir, { v: 1, categories: Array.from({ length: 33 }, (_, i) => `c${i}`) }, ctx)).rejects.toThrow("1..32");
 });
 

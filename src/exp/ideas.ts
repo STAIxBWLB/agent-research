@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { listAttempts } from "./attempts.ts";
 import { readProtocol } from "./protocol.ts";
+import { readSelection } from "./selection.ts";
 
 export const MAX_IDEAS = 1000, MAX_DECISION_ATTEMPTS = 200;
 export const MAX_PREDICTIONS = 4, MAX_BUNDLE = 16, MAX_CATEGORIES = 32, CATEGORIES_BYTES = 8192;
@@ -79,7 +80,8 @@ export function setCategories(dir: string, raw: unknown, actor: Actor): { catego
     requireExperiment(openStudy(dir).study);
     const value = validateCategories(raw), text = JSON.stringify(value, null, 2) + "\n", hash = sha256(text), file = categoriesPath(dir);
     let previous: string | undefined;
-    if (existsSync(file)) { readCategories(dir); previous = readTextBounded(file, CATEGORIES_BYTES); }
+    // A valid new vocabulary may replace an unreadable or invalid one.
+    if (existsSync(file)) { try { previous = readTextBounded(file, CATEGORIES_BYTES); } catch { previous = undefined; } }
     const changed = previous !== text;
     if (changed) commit(dir, [[file, text, CATEGORIES_BYTES]], [{ actor, type: "idea.categories.set", data: { sha256: hash, count: value.categories.length } }]);
     return { categories: value.categories, sha256: hash, changed };
@@ -95,6 +97,9 @@ function checkPlanning(dir: string, input: IdeaInput): void {
     if (!protocol) bad("predicts: protocol missing; run ares protocol before predicting metrics, or omit predicts");
     const names = protocol.metrics.map(m => m.name);
     for (const p of input.predicts) if (!names.includes(p.metric)) bad(`predicts.metric ${p.metric} is not declared; use one of ${names.join(", ")}`);
+    // Only the primary metric has a selection margin; elsewhere no-change needs its own tolerance or it can never hit.
+    const primary = readSelection(dir, protocol)?.metric;
+    for (const p of input.predicts) if (p.expect === "no-change" && p.minDelta === undefined && p.metric !== primary) bad(`predicts ${p.metric}: no-change on a non-primary metric needs minDelta; add minDelta in that metric's unit`);
   }
 }
 function pivotContext(raw: Record<string, unknown>, strict: boolean): Pick<IdeaDecision, "cause" | "retryWhen"> {
