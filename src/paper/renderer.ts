@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { accessSync, chmodSync, constants, existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { openStudy, plain, readTextBounded, writeAtomic, type Actor } from "../study.ts";
@@ -75,9 +75,13 @@ export function showRenderer(home: string, dirArg: string) {
   const config = readRenderer(home, dirArg);
   return config ? { configured: true, command: config.command, timeoutS: config.timeoutS } : { configured: false, reason: `no renderer configured on this machine; run ${SET_HINT}` };
 }
+/** Follows links (Homebrew and /usr/local/bin entries are symlinks) and requires an executable regular file. */
+function executable(path: string): boolean {
+  try { return statSync(path).isFile() && (accessSync(path, constants.X_OK), true); } catch { return false; }
+}
 function onPath(program: string, env: NodeJS.ProcessEnv): boolean {
-  if (program.includes("/")) { try { return lstatSync(resolve(program)).isFile(); } catch { return false; } }
-  return (env.PATH ?? "").split(delimiter).filter(Boolean).some(dir => { try { return lstatSync(join(dir, program)).isFile(); } catch { return false; } });
+  if (program.includes("/")) return executable(resolve(program));
+  return (env.PATH ?? "").split(delimiter).filter(Boolean).some(dir => executable(join(dir, program)));
 }
 /** Read-only; runs nothing. */
 export function checkRenderer(home: string, dirArg: string, env: NodeJS.ProcessEnv) {

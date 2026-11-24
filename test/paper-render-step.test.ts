@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as ops from "../src/commands.ts";
 import { paperRenderDir } from "../src/paper/render.ts";
@@ -125,4 +125,16 @@ test("tests never touch the real family home: every renderer path takes an expli
   const id = JSON.parse(readFileSync(join(dir, "study.json"), "utf8")).id;
   expect(existsSync(join(home, "research", "renderers", `${id}.json`))).toBe(true);
   expect(existsSync(join(real, `${id}.json`))).toBe(false);
+});
+
+test("renderer check follows symlinked programs on PATH and by path, and requires the execute bit", async () => {
+  const { dir, env } = await setup(), target = renderer(), bin = tempDir(), link = join(bin, "linked-render");
+  symlinkSync(target, link);
+  const onPath = { ...env, PATH: `${bin}:/usr/bin:/bin` };
+  ops.rendererSet(dir, { command: ["linked-render", "{study}", "{out}"] }, onPath);
+  expect(ops.rendererCheck(dir, onPath)).toMatchObject({ ok: true });
+  ops.rendererSet(dir, { command: [link, "{study}", "{out}"] }, onPath);
+  expect(ops.rendererCheck(dir, onPath).ok).toBe(true);
+  chmodSync(target, 0o644);
+  expect(ops.rendererCheck(dir, onPath).checks.find(c => c.name === "Renderer program")?.state).toBe("failed");
 });
