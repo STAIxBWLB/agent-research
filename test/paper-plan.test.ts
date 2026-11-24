@@ -31,7 +31,7 @@ test("paper plan versions stored data, preserves exact headings and allows empty
 
 test("closed shape, slug ids, unique headings/ids/keys and exact heading grammar refuse", () => {
   const section = plan().sections[0]!;
-  const invalid = [null, {}, [], { v: 1 as const, sections: {} }, { ...plan(), v: 3 }, { ...plan(), extra: true },
+  const invalid = [null, {}, [], { v: 1 as const, sections: {} }, { ...plan(), v: 4 }, { ...plan(), extra: true },
     { v: 1 as const, sections: [{ ...section, extra: true }] }, { v: 1 as const, sections: [{ ...section, id: "Upper" }] }, { v: 1 as const, sections: [{ ...section, id: "../outside" }] }, { v: 1 as const, sections: [{ ...section, id: "a".repeat(65) }] },
     ...["", " ", " Introduction", "Introduction ", "bad\0heading"].map(heading => ({ v: 1 as const, sections: [{ ...section, heading }] })),
     { v: 1 as const, sections: [section, { ...section, heading: "Other" }] }, { v: 1 as const, sections: [section, { ...section, id: "other" }] },
@@ -114,9 +114,9 @@ test("readers reject non-UTF8, over-bound plans and linked paper/plan paths with
 test("coverage counts included references once even when routed repeatedly, while absent plan shows zero routing", async () => {
   const included = reference("second"), unverified = reference("unverified"); unverified.verify!.match = "no";
   const f = setup([reference(), included, unverified, reference("excluded", "excluded")]);
-  expect(showPaperPlan(f.dir)).toEqual({ plan: null, coverage: { routed: 0, total: 3 } });
+  expect(showPaperPlan(f.dir)).toEqual({ plan: null, coverage: { routed: 0, total: 3 }, dependencyCoverage: { cited: 0, waived: 0, total: 0 } });
   const value = { v: 1 as const, sections: [{ id: "intro", heading: "Introduction", cites: ["known2026"] }, { id: "methods", heading: "Methods", cites: ["known2026"] }] };
-  await withLock(f.dir, () => setPaperPlan(f.dir, value, actor)); expect(showPaperPlan(f.dir)).toEqual({ plan: value, coverage: { routed: 1, total: 3 } });
+  await withLock(f.dir, () => setPaperPlan(f.dir, value, actor)); expect(showPaperPlan(f.dir)).toEqual({ plan: value, coverage: { routed: 1, total: 3 }, dependencyCoverage: { cited: 0, waived: 0, total: 0 } });
 });
 
 test("the formatted byte boundary is shared by validator reader and atomic writer", async () => {
@@ -142,13 +142,13 @@ test("the formatted byte boundary is shared by validator reader and atomic write
 test("stored version is mandatory and unsupported versions cannot be overwritten", async () => {
   const f = setup(); await withLock(f.dir, () => setPaperPlan(f.dir, {sections: plan().sections}, actor));
   expect(readPaperPlanSnapshot(f.dir)!.plan.v).toBe(1);
-  writeAtomic(f.file, JSON.stringify({...plan(), v: 3}), PAPER_PLAN_BYTES);
+  writeAtomic(f.file, JSON.stringify({...plan(), v: 4}), PAPER_PLAN_BYTES);
   const before = planBytes(f.file), ledger = ledgerBytes(f.dir);
-  expect(() => readPaperPlanSnapshot(f.dir)).toThrow("supported v: 1");
+  expect(() => readPaperPlanSnapshot(f.dir)).toThrow("supported v:");
   await expect(withLock(f.dir, () => setPaperPlan(f.dir, plan(), actor))).rejects.toThrow("unsupported stored plan version");
   expect(planBytes(f.file)).toEqual(before); expect(ledgerBytes(f.dir)).toEqual(ledger);
   writeAtomic(f.file, JSON.stringify({sections: plan().sections}), PAPER_PLAN_BYTES);
-  expect(() => readPaperPlanSnapshot(f.dir)).toThrow("supported v: 1");
+  expect(() => readPaperPlanSnapshot(f.dir)).toThrow("supported v:");
   await withLock(f.dir, () => setPaperPlan(f.dir, {sections: plan().sections}, actor));
   expect(readPaperPlanSnapshot(f.dir)!.plan.v).toBe(1);
 });

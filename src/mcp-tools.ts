@@ -11,7 +11,7 @@ import type { RetainedRef } from "./exp/retention.ts";
 import { PLAYBOOK } from "./playbook.ts";
 import { PLAN_ID_BYTES, STEP_COMMANDS } from "./plan/definition.ts";
 import { PLAN_GATE_BYTES } from "./plan/state.ts";
-import { PAPER_PLAN_BYTES, PAPER_PLAN_SECTIONS, PAPER_PLAN_CITES, PAPER_PLAN_POINTS, PAPER_POINT_CLAIM_CHARACTERS, PAPER_POINT_EVIDENCE, PAPER_POINT_EVIDENCE_BYTES } from "./paper/plan.ts";
+import { PAPER_PLAN_BYTES, PAPER_PLAN_SECTIONS, PAPER_PLAN_CITES, PAPER_PLAN_POINTS, PAPER_POINT_CLAIM_CHARACTERS, PAPER_POINT_EVIDENCE, PAPER_POINT_EVIDENCE_BYTES, PAPER_PLAN_DEPENDENCIES, PAPER_DEPENDENCY_WAIVER_BYTES, PAPER_DEPENDENCY_KINDS } from "./paper/plan.ts";
 import { detectActor, type Actor } from "./study.ts";
 
 const study = { type: "string", minLength: 1, maxLength: 4096, description: "Absolute path of the study directory (holds study.json)" };
@@ -26,7 +26,14 @@ const obj = (properties: Record<string, unknown>, required: string[]) => ({ type
 const text = (max: number) => ({ type: "string", minLength: 1, maxLength: max });
 const texts = (items: number, max: number) => ({ type: "array", items: text(max), maxItems: items });
 const year = { type: "integer", minimum: 1000, maximum: 2100 };
-const PAPER_PLAN = obj({v: {type: "integer", enum: [1, 2]}, sections: {type: "array", maxItems: PAPER_PLAN_SECTIONS, items: obj({
+const PAPER_DEPENDENCY = obj({
+  id: {...text(64), pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+  kind: {type: "string", enum: [...PAPER_DEPENDENCY_KINDS]},
+  name: text(PAPER_PLAN_BYTES),
+  cites: {type: "array", minItems: 1, maxItems: PAPER_PLAN_CITES, uniqueItems: true, items: text(PAPER_PLAN_BYTES)},
+  waiver: text(PAPER_DEPENDENCY_WAIVER_BYTES),
+}, ["id", "kind", "name"]);
+const PAPER_PLAN = obj({v: {type: "integer", enum: [1, 2, 3]}, sections: {type: "array", maxItems: PAPER_PLAN_SECTIONS, items: obj({
   id: {...text(64), pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"}, heading: text(PAPER_PLAN_BYTES),
   cites: {type: "array", maxItems: PAPER_PLAN_CITES, uniqueItems: true, items: text(PAPER_PLAN_BYTES)},
   points: {type: "array", maxItems: PAPER_PLAN_POINTS, items: obj({
@@ -36,7 +43,7 @@ const PAPER_PLAN = obj({v: {type: "integer", enum: [1, 2]}, sections: {type: "ar
     requires: {type: "array", maxItems: PAPER_PLAN_CITES, uniqueItems: true, items: text(PAPER_PLAN_BYTES)},
     evidence: {type: "array", maxItems: PAPER_POINT_EVIDENCE, items: {...text(PAPER_POINT_EVIDENCE_BYTES), description: "Existing current-study card:<paper-id> or attempt:<16-hex-id>, at most 4096 UTF-8 bytes; existence only"}},
   }, ["id", "claim", "requires"])},
-}, ["id", "heading", "cites"])}}, ["sections"]);
+}, ["id", "heading", "cites"])}, dependencies: {type: "array", maxItems: PAPER_PLAN_DEPENDENCIES, items: PAPER_DEPENDENCY}}, ["sections"]);
 const EXECUTION_REFERENCE = obj({ v: { type: "integer", enum: [1] }, tool: { type: "string", enum: ["ares"] }, projectKey: text(256), kind: { type: "string", enum: [...PROVENANCE_KINDS] }, id: text(256), revision: text(128), sha256: { type: "string", minLength: 64, maxLength: 64 } }, ["v", "tool", "projectKey", "kind", "id"]);
 const LINEAGE_ATTEMPTS = { type: "array", minItems: 1, maxItems: 8, items: { ...text(16), minLength: 16 } };
 const LINEAGE_CANDIDATES = { type: "array", minItems: 1, maxItems: 8, items: { ...text(40), minLength: 40 } };
@@ -190,8 +197,8 @@ export const ARES_TOOLS: readonly McpTool[] = [
   { name: "ares_review_resolve", description: "Resolve a recorded review-id/finding-id with an explicit reason and actor. No votes or automatic contradiction resolution; historical reports stay in the ledger.", inputSchema: obj({ study, target: text(257), reason: text(4000) }, ["study", "target", "reason"]), annotations: write },
   { name: "ares_review_show", description: "Read current build/check readiness, review families, checklists and unresolved blocking findings. Claims readiness is unavailable (agent-hub#931) and nonblocking. Starts no network, build or controller.", inputSchema: obj({ study }, ["study"]), annotations: read },
   { name: "ares_review_checklist", description: "List the six optional survey checklist keys with their questions, the same wording reviewers answer in checklist.survey. Answers are displayed and never gate. Opens no study.", inputSchema: obj({}, []), annotations: read },
-  { name: "ares_paper_plan_set", description: "Validate and atomically store a declared citation routing plan, at most 64 sections/300 keys per section and 64 KiB. Only current included, identifier-verified bibliography keys. Optional writing points (40 per section) require citation presence in their own anchor windows; claims/evidence never establish support. Points select stored v2; no points keep v1. No automatic routing or relevance judgment. Starts no build/controller/network calls.", inputSchema: obj({study, plan: PAPER_PLAN}, ["study", "plan"]), annotations: write },
-  { name: "ares_paper_plan_show", description: "Read the optional paper citation plan and routing coverage (included references routed/total). Revalidates current references; starts no build/controller/network calls or writes.", inputSchema: obj({study}, ["study"]), annotations: read },
+  { name: "ares_paper_plan_set", description: "Validate and atomically store a declared citation routing plan, at most 64 sections/300 keys per section and 64 KiB. Only current included, identifier-verified bibliography keys. Optional experiment dependencies (at most 200; dataset, metric, baseline, model, method or software) each carry verified cites or a written waiver and select stored v3. Optional writing points (40 per section) require citation presence in their own anchor windows; claims/evidence never establish support. Points select stored v2; no dependencies or points keep v1. No automatic routing or relevance judgment. Starts no build/controller/network calls.", inputSchema: obj({study, plan: PAPER_PLAN}, ["study", "plan"]), annotations: write },
+  { name: "ares_paper_plan_show", description: "Read the optional paper citation plan, routing coverage (included references routed/total) and dependency coverage (cited/waived/total). Revalidates current references; starts no build/controller/network calls or writes.", inputSchema: obj({study}, ["study"]), annotations: read },
   { name: "ares_paper_build", description: "Check the bounded manuscript and refuse blocking findings before writing. Commit rendered Markdown, v1 evidence without a plan or v2 plan-bound evidence, and paper.built together; identical inputs/outputs record nothing. Unknown evidence versions are preserved. The no-arg paper.build plan step emits the committed evidence {sha256} for downstream gates. Starts no controller, executor or network calls.", inputSchema: obj({ study }, ["study"]), annotations: write },
   { name: "ares_paper_render_record", description: "Record an externally rendered document of the current build under paper/build/render/ with its renderReceipt v1 and one paper.rendered event. Refuses before any write unless the receipt's evidence and manuscript hashes match the current build and the file's SHA-256 matches a receipt output; regular files only, at most 64 MiB. Identical file and receipt record nothing. Never runs a renderer or judges fidelity.", inputSchema: obj({ study, file: text(4096), receipt: text(4096) }, ["study", "file", "receipt"]), annotations: write },
   { name: "ares_paper_render_show", description: "Read-only: the last recorded render and whether it matches the current build. A rebuild with a new evidence hash makes it stale without deleting it.", inputSchema: obj({ study }, ["study"]), annotations: read },

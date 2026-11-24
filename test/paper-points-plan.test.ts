@@ -30,7 +30,7 @@ test("writing points auto-select v2, while absent/empty points normalize to byte
     expect(normalized).toEqual(legacy); expect(Object.hasOwn(normalized.sections[0]!, "points")).toBe(false);
     expect(JSON.stringify(normalized, null, 2) + "\n").toBe(JSON.stringify(legacy, null, 2) + "\n");
   }
-  expect(() => validatePaperPlan({ v: 3, ...value }, candidates)).toThrow("unsupported plan version");
+  expect(() => validatePaperPlan({ v: 4, ...value }, candidates)).toThrow("unsupported plan version");
 });
 
 test("point ids are global, requires are unique section-scope subsets and points retain a closed shape", () => {
@@ -98,8 +98,8 @@ test("stored versions remain consistent, known v2 can intentionally clear points
   await withLock(f.dir, () => setPaperPlan(f.dir, { v: 2, sections: [{ ...legacy.sections[0]!, points: [] }] }, actor));
   expect(bytes(f.file).toString("utf8")).toBe(JSON.stringify(legacy, null, 2) + "\n");
   writeAtomic(f.file, JSON.stringify({ v: 2, sections: legacy.sections }), PAPER_PLAN_BYTES);
-  expect(() => readPaperPlanSnapshot(f.dir)).toThrow("does not match its points");
-  const future = JSON.stringify({ v: 3, sections: raw().sections }); writeAtomic(f.file, future, PAPER_PLAN_BYTES); const before = ledger(f.dir);
+  expect(() => readPaperPlanSnapshot(f.dir)).toThrow("does not match its declared content");
+  const future = JSON.stringify({ v: 4, sections: raw().sections }); writeAtomic(f.file, future, PAPER_PLAN_BYTES); const before = ledger(f.dir);
   expect(() => readPaperPlanCheckSnapshot(f.dir)).toThrow("supported v:");
   await expect(withLock(f.dir, () => setPaperPlan(f.dir, raw(), actor))).rejects.toThrow("unsupported stored plan version");
   expect(bytes(f.file).toString("utf8")).toBe(future); expect(ledger(f.dir)).toEqual(before);

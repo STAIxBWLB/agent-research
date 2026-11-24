@@ -12,11 +12,12 @@ import { finalResultPath } from "../exp/final.ts";
 import { MANUSCRIPT_BYTES, parsePlaceholders, resolvePlaceholders } from "./placeholders.ts";
 import { hygieneFindings, readPaperSettings, type HygieneCode } from "./hygiene.ts";
 import { readPaperPlanCheckSnapshot } from "./plan.ts";
+import { paperDependencyFindings, type DependencyFindingCode } from "./dependencies.ts";
 import { paperPointFindings, type PointFindingCode } from "./points.ts";
 import { paperPlanFindings, type ScopeFindingCode } from "./scopes.ts";
 
 export const MAX_CODE_NUMBERS = 500;
-export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "unaccepted-draft" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result" | HygieneCode | ScopeFindingCode | PointFindingCode; severity: "blocking" | "warning"; section?: string[]; sectionId?: string; pointId?: string; start: number; end: number; line: number; column: number; message: string }
+export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "unaccepted-draft" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result" | HygieneCode | ScopeFindingCode | PointFindingCode | DependencyFindingCode; severity: "blocking" | "warning"; section?: string[]; sectionId?: string; pointId?: string; dependencyId?: string; start: number; end: number; line: number; column: number; message: string }
 function blank(text: string, mask: Uint8Array): string { return text.split("").map((char, index) => mask[index] && char !== "\n" && char !== "\r" ? " " : char).join(""); }
 function mark(mask: Uint8Array, start: number, end: number) { mask.fill(1, start, end); }
 function escaped(text: string, index: number): boolean { let slashes = 0; while (index > 0 && text[--index] === "\\") slashes++; return slashes % 2 === 1; }
@@ -169,6 +170,7 @@ export function checkPaper(dirArg: string) {
       mark(numberMask, offset, offset + numbers.length);
     }
   }
+  let protocolMetrics: readonly string[] = [];
   if (study.mode === "experiment") {
     for (const match of manuscript.matchAll(/^ {0,3}[0-9]+[.)](?=[ \t])/gm)) mark(numberMask, match.index, match.index + match[0].length);
     for (const match of blank(manuscript, numberMask).matchAll(/\p{Nd}+(?:[.,]\p{Nd}+)*/gu)) findings.push(finding("bare-number", match.index, match.index + match[0].length, "prose number has no evidence ref; use {{n:REF}} for a measured value or {{lit:TEXT}} for a reviewer-visible literal"));
@@ -177,7 +179,9 @@ export function checkPaper(dirArg: string) {
     };
     if (existsSync(finalResultPath(dir))) requireRef("final.status");
     try {
-      const protocol = readProtocol(dir), rule = protocol ? readSelection(dir, protocol) : undefined;
+      const protocol = readProtocol(dir);
+      if (protocol) protocolMetrics = protocol.metrics.map(metric => metric.name);
+      const rule = protocol ? readSelection(dir, protocol) : undefined;
       if (rule && existsSync(investigateResultPath(dir, rule.run))) {
         try { if (readClosedInvestigation(dir).result.winner === null) requireRef("investigate.reason"); }
         catch (error) { findings.push(error instanceof CopilotAcceptError ? finding("unaccepted-draft", 0, 0, error.message) : finding("unresolved-ref", 0, 0, "investigate result is not current and closed; run ares investigate close before checking the paper")); }
@@ -191,6 +195,7 @@ export function checkPaper(dirArg: string) {
   }
   if (plan) for (const hit of paperPlanFindings(manuscript, masks.headingHidden, citationText, plan.plan, candidates)) findings.push({...hit, ...location(hit.start)});
   if (plan) for (const hit of paperPointFindings(dir, manuscript, masks.anchorHidden, masks.headingHidden, citationText, plan.plan)) findings.push({...hit, ...location(hit.start)});
+  if (plan) for (const hit of paperDependencyFindings(citationText, plan.plan, candidates, protocolMetrics)) findings.push({...hit, ...location(hit.start)});
   let rendered = "", cursor = 0;
   for (const entry of resolution.placeholders) { rendered += manuscript.slice(cursor, entry.placeholder.start) + entry.rendered; cursor = entry.placeholder.end; }
   rendered += manuscript.slice(cursor);
