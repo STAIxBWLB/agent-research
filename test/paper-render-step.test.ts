@@ -117,3 +117,12 @@ test("renderer set stays machine-local; CLI and MCP agree; usage errors exit 2",
     expect(result.exitCode).toBe(2);
   }
 });
+
+test("tests never touch the real family home: every renderer path takes an explicit AGENTHUB_HOME", async () => {
+  const real = join(process.env.AGENTHUB_HOME?.trim() || join(process.env.HOME ?? "", ".agenthub"), "research", "renderers");
+  const { dir, home, env } = await setup();
+  ops.rendererSet(dir, { command: [renderer(), "{study}", "{out}"] }, env);
+  const id = JSON.parse(readFileSync(join(dir, "study.json"), "utf8")).id;
+  expect(existsSync(join(home, "research", "renderers", `${id}.json`))).toBe(true);
+  expect(existsSync(join(real, `${id}.json`))).toBe(false);
+});

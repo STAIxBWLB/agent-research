@@ -554,7 +554,7 @@ export async function planRun(dirArg: string, options: { parallel?: number; env?
         }
         case "paper.render": {
           // Fail closed: every renderer refusal is a failed step with its reason and no study write (#163).
-          try { const result = await paperRenderStep(dir, ctx, options.env); return { status: "done", output: { sha256: result.sha256 } }; }
+          try { const result = await paperRenderStep(dir, ctx, options.env ?? process.env); return { status: "done", output: { sha256: result.sha256 } }; }
           catch (error) { if (error instanceof StudyLockBusyError) throw error; return { status: "failed", reason: error instanceof Error ? error.message : "renderer failed; run ares renderer check" }; }
         }
         case "cite.check": { const value = cite(dir, resolve(dir, stepText(node, "draft"))); result = value; ok = value.ok; break; }
@@ -650,10 +650,10 @@ export async function paperRenderRecord(dirArg: string, file: string, receipt: s
 }
 export const paperRenderShow = (dir: string) => showPaperRender(dir);
 /** Machine-local renderer settings live under the family home, never in the study (#163). */
-export const rendererSet = (dir: string, raw: { command: unknown; timeoutS?: unknown }, env: NodeJS.ProcessEnv = process.env) => setRenderer(consoleHome(env), dir, raw);
-export const rendererShow = (dir: string, env: NodeJS.ProcessEnv = process.env) => showRenderer(consoleHome(env), dir);
-export const rendererCheck = (dir: string, env: NodeJS.ProcessEnv = process.env) => checkRenderer(consoleHome(env), dir, env);
-export async function paperRenderStep(dirArg: string, ctx: Pick<Ctx, "actor" | "runner">, env: NodeJS.ProcessEnv = process.env) {
+export const rendererSet = (dir: string, raw: { command: unknown; timeoutS?: unknown }, env: NodeJS.ProcessEnv) => setRenderer(consoleHome(env), dir, raw);
+export const rendererShow = (dir: string, env: NodeJS.ProcessEnv) => showRenderer(consoleHome(env), dir);
+export const rendererCheck = (dir: string, env: NodeJS.ProcessEnv) => checkRenderer(consoleHome(env), dir, env);
+export async function paperRenderStep(dirArg: string, ctx: Pick<Ctx, "actor" | "runner">, env: NodeJS.ProcessEnv) {
   const { dir } = openStudy(dirArg);
   return runRenderStep(dir, { home: consoleHome(env), actor: ctx.actor, ...(ctx.runner ? { runner: ctx.runner } : {}) }, (file, receipt) => withLock(dir, () => recordPaperRender(dir, file, receipt, ctx.actor)));
 }
