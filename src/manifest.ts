@@ -15,6 +15,7 @@ export const FORMAT_VERSIONS = {
   paperEvidence: 2,
   paperPlan: 3,
   paperRender: 1,
+  rendererConfig: 1,
   skillProposal: 2,
   studyRegistry: 1,
   watchConfig: 1,

@@ -17,6 +17,7 @@ import { previewArchive, exportArchive, type ArchivePreview, type ArchiveResult 
 import { addReview, resolveReview, reviewChecklist, reviewReadiness, reviewBinding, requireReviewReady } from "./paper/review.ts";
 import { buildPaper } from "./paper/build.ts";
 import { recordPaperRender, showPaperRender } from "./paper/render.ts";
+import { checkRenderer, runRenderStep, setRenderer, showRenderer } from "./paper/renderer.ts";
 import { checkPaper } from "./paper/check.ts";
 import { setPaperPlan, showPaperPlan } from "./paper/plan.ts";
 import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
@@ -37,7 +38,7 @@ import { existsSync, readdirSync, utimesSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Http } from "./http.ts";
 import { readScope, scopeHash, setScope } from "./scope.ts";
-import { boundedText, commit, decideGate, gateState, GATES, initStudy, openStudy, readBytesBounded, readLedger, readTextBounded, requireGate, isHarnessGate, sha256, withLock, readPlanOwner, type Actor, type Binder, type GateName, type Study, STUDY_BYTES } from "./study.ts";
+import { boundedText, commit, decideGate, gateState, GATES, initStudy, openStudy, readBytesBounded, readLedger, readTextBounded, requireGate, isHarnessGate, sha256, withLock, readPlanOwner, StudyLockBusyError, type Actor, type Binder, type GateName, type Study, STUDY_BYTES } from "./study.ts";
 import { candidatesFile, includedHash, isVerified, loadCandidates, mergeCandidates, sameWork, verifySubject, type Candidate } from "./lit/candidates.ts";
 import { litQueries, nextSearchId, validateIntent } from "./lit/queries.ts";
 import { flowMarkdown, litFlow } from "./lit/flow.ts";
@@ -480,7 +481,7 @@ function stepNumber(node: StepNode, key: string): number | undefined {
   if ((typeof value !== "string" && typeof value !== "number") || !/^-?\d+$/.test(String(value)) || !Number.isSafeInteger(Number(value))) throw new Error(`plan step ${node.id}.${key}: integer required; correct the argument with ares plan set`);
   return Number(value);
 }
-export async function planRun(dirArg: string, options: { parallel?: number }, ctx: Ctx) {
+export async function planRun(dirArg: string, options: { parallel?: number; env?: NodeJS.ProcessEnv }, ctx: Ctx) {
   const { dir } = openStudy(dirArg);
   const attemptOptions = (node: StepNode, retryOf?: string): AttemptOptions => {
     const parent = retryOf ?? (node.args.retry !== undefined ? stepText(node, "retry") : undefined);
@@ -550,6 +551,11 @@ export async function planRun(dirArg: string, options: { parallel?: number }, ct
         case "paper.build": {
           const result = await paperBuild(dir, ctx);
           return { status: "done", output: { sha256: result.evidenceSha256 } };
+        }
+        case "paper.render": {
+          // Fail closed: every renderer refusal is a failed step with its reason and no study write (#163).
+          try { const result = await paperRenderStep(dir, ctx, options.env); return { status: "done", output: { sha256: result.sha256 } }; }
+          catch (error) { if (error instanceof StudyLockBusyError) throw error; return { status: "failed", reason: error instanceof Error ? error.message : "renderer failed; run ares renderer check" }; }
         }
         case "cite.check": { const value = cite(dir, resolve(dir, stepText(node, "draft"))); result = value; ok = value.ok; break; }
       }
@@ -643,6 +649,14 @@ export async function paperRenderRecord(dirArg: string, file: string, receipt: s
   const { dir } = openStudy(dirArg); return withLock(dir, () => recordPaperRender(dir, file, receipt, ctx.actor));
 }
 export const paperRenderShow = (dir: string) => showPaperRender(dir);
+/** Machine-local renderer settings live under the family home, never in the study (#163). */
+export const rendererSet = (dir: string, raw: { command: unknown; timeoutS?: unknown }, env: NodeJS.ProcessEnv = process.env) => setRenderer(consoleHome(env), dir, raw);
+export const rendererShow = (dir: string, env: NodeJS.ProcessEnv = process.env) => showRenderer(consoleHome(env), dir);
+export const rendererCheck = (dir: string, env: NodeJS.ProcessEnv = process.env) => checkRenderer(consoleHome(env), dir, env);
+export async function paperRenderStep(dirArg: string, ctx: Pick<Ctx, "actor" | "runner">, env: NodeJS.ProcessEnv = process.env) {
+  const { dir } = openStudy(dirArg);
+  return runRenderStep(dir, { home: consoleHome(env), actor: ctx.actor, ...(ctx.runner ? { runner: ctx.runner } : {}) }, (file, receipt) => withLock(dir, () => recordPaperRender(dir, file, receipt, ctx.actor)));
+}
 
 export async function reviewAdd(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
   const { dir } = openStudy(dirArg); return withLock(dir, () => addReview(dir, raw, ctx.actor));

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `paper.render` plan step (#163, new feature, ships in 0.4.0): a no-argument step runs this machine's renderer on the current build and records its receipt through the #162 render-record path. It emits the rendered output `{sha256}` for a downstream `plan:<id>` gate. `ares renderer set|show|check` (MCP `ares_renderer_set|show|check`) keep the renderer argv (with `{study}` and `{out}` placeholders) and wall time under the family home, never in `plan.json` or a committed study file. No renderer, a nonzero exit, a timeout or a missing or mismatching receipt fails the step and writes nothing. An unchanged retry is a no-op. `ares manifest` adds `formats.rendererConfig: 1`. Existing plans and studies are unchanged.
+
 - CLI reports (#172): human output highlights actionable findings, summarizes checks, and presents filtered views, mutation receipts and confirmation commands. The executor human check reports independent failures and skipped prerequisites. Attempt logs use section headings and strip terminal controls in text mode. Explicit `--json` and MCP results retain their existing forms and exit codes.
 
 - Harness contrasts (#169) can declare swapped presentation orders for blinded judgments. Agreement determines the outcome and disagreement is recorded as inconclusive. The round and composition views count order-controlled records. Existing fingerprints are preserved.

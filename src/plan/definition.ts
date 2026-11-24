@@ -6,7 +6,7 @@ import { validateIntent } from "../lit/queries.ts";
 import { boundedText, commit, onlyKeys, plain, readJsonFile, sha256, type Actor } from "../study.ts";
 
 export const PLAN_BYTES = 65_536, PLAN_ID_BYTES = 128;
-export const STEP_COMMANDS = ["lit.search", "lit.verify", "lit.bib", "cite.check", "attempt.run", "investigate.close", "ablate.close", "final.close", "paper.build", "watch.run"] as const;
+export const STEP_COMMANDS = ["lit.search", "lit.verify", "lit.bib", "cite.check", "attempt.run", "investigate.close", "ablate.close", "final.close", "paper.build", "paper.render", "watch.run"] as const;
 export type StepCommand = typeof STEP_COMMANDS[number];
 export type StepArgs = Record<string, string | number | boolean | string[]>;
 type BaseNode = { id: string; needs: string[]; phase?: Phase };
@@ -30,6 +30,11 @@ function references(raw: unknown, name: string): string[] {
 function stepArgs(raw: unknown, command: StepCommand, id: string): StepArgs {
   const where = `plan step ${id} (${command})`;
   if (!plain(raw)) throw new Error(`${where}.args: object required`);
+  // paper.render takes no arguments: the renderer command is machine-local and never comes from plan.json (#163).
+  if (command === "paper.render") {
+    if (Object.keys(raw).length) throw new Error(`${where}.args: paper.render takes no arguments; configure the renderer with ares renderer set and run ares plan set again`);
+    return {};
+  }
   const spec = COMMANDS.find(c => c.name === command.replace(".", " "))!;
   const args: StepArgs = {};
   for (const [key, value] of Object.entries(raw)) {

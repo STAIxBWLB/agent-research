@@ -196,7 +196,7 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
     }
     case "run": {
       count(spec, positional, 1); const parallel = integer(flags["--parallel"], "--parallel");
-      const completed = await ops.planRun(positional[0]!, { ...(parallel !== undefined ? { parallel } : {}) }, ctx);
+      const completed = await ops.planRun(positional[0]!, { ...(parallel !== undefined ? { parallel } : {}), env }, ctx);
       result = completed; if (completed.state === "failed") code = 1; break;
     }
     case "manifest": count(spec, positional, 0); result = ops.manifest(); break;
@@ -426,6 +426,20 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
       result = await ops.paperRenderRecord(positional[0]!, file, receipt, ctx); break;
     }
     case "paper render show": count(spec, positional, 1); result = ops.paperRenderShow(positional[0]!); break;
+    case "renderer set": {
+      count(spec, positional, 1); const command = str("--command"), timeout = str("--timeout-s");
+      if (command === undefined) throw new UsageError("renderer set: --command is required; pass the renderer argv as a JSON array using {study} and {out}");
+      let argv: unknown;
+      try { argv = JSON.parse(command); } catch { throw new UsageError("renderer set: --command must be a JSON array of strings"); }
+      if (timeout !== undefined && !/^[0-9]{1,6}$/.test(timeout)) throw new UsageError("--timeout-s: expected an integer number of seconds");
+      result = ops.rendererSet(positional[0]!, { command: argv, ...(timeout !== undefined ? { timeoutS: Number(timeout) } : {}) }, env); break;
+    }
+    case "renderer show": count(spec, positional, 1); result = ops.rendererShow(positional[0]!, env); break;
+    case "renderer check": {
+      count(spec, positional, 1); const report = ops.rendererCheck(positional[0]!, env);
+      if (!report.ok) code = 1;
+      result = report; break;
+    }
     case "paper plan set": {
       count(spec, positional, 1); const file = str("--file");
       if (file === undefined) throw new UsageError("paper plan set: input missing; pass --file PATH or --file - with a bounded version-1 paper-plan JSON");
