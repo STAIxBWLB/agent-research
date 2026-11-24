@@ -1,3 +1,4 @@
+import type { PaperDocument } from "./paper/document.ts";
 import { colorFor, fillMessage, outputAscii, renderError, streamWidth } from "./cli-output.ts";
 import {proposeLesson, decideLesson, checkLesson, listLessonCandidates} from "./harness/lesson-candidates.ts";
 import type {SkillCheckOptions} from "./memory/skill-check.ts";
@@ -642,20 +643,20 @@ export async function finalClose(dirArg: string, ctx: Pick<Ctx, "actor">) {
 
 export const posthocShow = (dir: string) => showPosthoc(dir);
 
-export const paperCheck = (dir: string) => checkPaper(dir);
+export const paperCheck = (dir: string, doc?: PaperDocument) => checkPaper(dir, doc);
 export async function paperPlanSet(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
   const { dir } = openStudy(dirArg); return withLock(dir, () => setPaperPlan(dir, raw, ctx.actor));
 }
 export const paperPlanShow = (dir: string) => showPaperPlan(dir);
 
-export async function paperBuild(dirArg: string, ctx: Pick<Ctx, "actor">) {
-  const { dir } = openStudy(dirArg); return withLock(dir, () => buildPaper(dir, ctx.actor));
+export async function paperBuild(dirArg: string, ctx: Pick<Ctx, "actor">, doc?: PaperDocument) {
+  const { dir } = openStudy(dirArg); return withLock(dir, () => buildPaper(dir, ctx.actor, doc));
 }
 /** Records an external render of the current build; never runs a renderer (#162). */
-export async function paperRenderRecord(dirArg: string, file: string, receipt: string, ctx: Pick<Ctx, "actor">) {
-  const { dir } = openStudy(dirArg); return withLock(dir, () => recordPaperRender(dir, file, receipt, ctx.actor));
+export async function paperRenderRecord(dirArg: string, file: string, receipt: string, ctx: Pick<Ctx, "actor">, doc?: PaperDocument) {
+  const { dir } = openStudy(dirArg); return withLock(dir, () => recordPaperRender(dir, file, receipt, ctx.actor, doc));
 }
-export const paperRenderShow = (dir: string) => showPaperRender(dir);
+export const paperRenderShow = (dir: string, doc?: PaperDocument) => showPaperRender(dir, doc);
 /** Machine-local renderer settings live under the family home, never in the study (#163). */
 export const rendererSet = (dir: string, raw: { command: unknown; timeoutS?: unknown }, env: NodeJS.ProcessEnv) => setRenderer(consoleHome(env), dir, raw);
 export const rendererShow = (dir: string, env: NodeJS.ProcessEnv) => showRenderer(consoleHome(env), dir);

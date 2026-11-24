@@ -1,3 +1,4 @@
+import { paperEventFor } from "../paper/document.ts";
 /** Console api1 contract subset; runtime imports stay within ares/Node/Bun. Real contract/conformance is test-only. */
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -93,6 +94,7 @@ export function gateWaitingTimes(events: LedgerEvent[], inputs: GateInputs, obse
       case "ablation.added": hasAblations = true; experiment(event.at); break;
       case "ablate.closed": if (typeof data.sha256 === "string") ablate = data.sha256; experiment(event.at); break;
       case "paper.built":
+        if (!paperEventFor(event, "paper.built")) break;
         if (typeof data.manuscriptSha256 === "string" && typeof data.evidenceSha256 === "string") paper = [data.manuscriptSha256, data.evidenceSha256];
         review(event.at); break;
       case "review.added": if (typeof data.id === "string" && inputs.review?.ids.has(data.id)) { reviewChanges++; review(event.at); } break;
@@ -192,7 +194,7 @@ function loadStudy(dir: string, features: readonly string[], input: { panel: str
   }
   const archive = detailed ? readCall("archive", () => { const preview = previewArchive(dir); return { pendingCount: preview.notes.length, fingerprint: preview.fingerprint }; }, errors) : null;
   const manuscript = detailed && readCall("manuscript", () => {
-    const paths = paperBuildPaths(dir), recorded = recordPresent(paths.manuscript) || recordPresent(paths.evidence) || events.some(event => event.type === "paper.built");
+    const paths = paperBuildPaths(dir), recorded = recordPresent(paths.manuscript) || recordPresent(paths.evidence) || events.some(event => paperEventFor(event, "paper.built"));
     return recorded ? readCurrentBuild(dir) : null;
   }, errors) ? { id: `manuscript:${study.id}` } : null;
   const failures = Object.entries(errors);

@@ -1,3 +1,4 @@
+import { paperDocument, paperEventFor, type PaperDocument } from "./document.ts";
 import { existsSync, lstatSync } from "node:fs";
 import { join } from "node:path";
 import { commit, hashFileBounded, openStudy, plain, readBytesBounded, readLedger, sha256, type Actor } from "../study.ts";
@@ -10,8 +11,9 @@ import { readCurrentBuild } from "./build.ts";
 export const RENDER_RECEIPT_VERSION = 1;
 export const PAPER_RENDER_BYTES = 64 * 1024 * 1024, RENDER_RECEIPT_BYTES = 64 * 1024, RENDER_OUTPUTS = 16;
 const HEX64 = /^[a-f0-9]{64}$/, NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-export function paperRenderDir(dir: string) { return join(dir, "paper", "build", "render"); }
-const receiptPath = (dir: string) => join(paperRenderDir(dir), "receipt.json");
+const renderFolder = (doc: PaperDocument) => doc === "slides" ? "slides.render" : "render";
+export function paperRenderDir(dir: string, doc: PaperDocument = "manuscript") { return join(dir, "paper", "build", renderFolder(doc)); }
+const receiptPath = (dir: string, doc: PaperDocument) => join(paperRenderDir(dir, doc), "receipt.json");
 
 export interface RenderReceipt { v: 1; tool: string; version: string; environment: string; evidenceSha256: string; manuscriptSha256: string; template: string; outputs: { name: string; sha256: string; pages: number }[] }
 function bad(detail: string): never { throw new Error(`paper render: receipt ${detail}; pass a renderReceipt v1 JSON with tool, version, environment, evidenceSha256, manuscriptSha256, template and outputs`); }
@@ -42,16 +44,17 @@ function parseReceipt(bytes: Buffer): RenderReceipt {
   return validateRenderReceipt(raw);
 }
 /** The reserved derived path must be real directories, so a stored file never lands outside the study. */
-function assertReservedPath(dir: string): void {
-  for (const part of [join(dir, "paper"), join(dir, "paper", "build"), paperRenderDir(dir)]) {
+function assertReservedPath(dir: string, doc: PaperDocument): void {
+  for (const part of [join(dir, "paper"), join(dir, "paper", "build"), paperRenderDir(dir, doc)]) {
     if (!existsSync(part)) continue;
     const info = lstatSync(part);
-    if (info.isSymbolicLink() || !info.isDirectory()) throw new Error("paper render: paper/build/render must be a real directory without symbolic links; restore it before recording");
+    if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(`paper render: paper/build/${renderFolder(doc)} must be a real directory without symbolic links; restore it before recording`);
   }
 }
 
 /** Caller holds the study lock. Every check precedes the single file-and-receipt commit. */
-export function recordPaperRender(dirArg: string, file: string, receiptFile: string, actor: Actor) {
+export function recordPaperRender(dirArg: string, file: string, receiptFile: string, actor: Actor, doc: PaperDocument = "manuscript") {
+  paperDocument(doc);
   const { dir } = openStudy(dirArg);
   let receiptBytes: Buffer, output: Buffer;
   try { receiptBytes = readBytesBounded(receiptFile, RENDER_RECEIPT_BYTES, { noFollow: true }); }
@@ -59,27 +62,27 @@ export function recordPaperRender(dirArg: string, file: string, receiptFile: str
   const receipt = parseReceipt(receiptBytes);
   try { output = readBytesBounded(file, PAPER_RENDER_BYTES, { noFollow: true }); }
   catch { throw new Error(`paper render: file is missing, a symbolic link, not a regular file or larger than ${PAPER_RENDER_BYTES} bytes; pass the rendered document itself`); }
-  const current = readCurrentBuild(dir), outputSha256 = sha256(output);
-  if (receipt.evidenceSha256 !== current.evidenceSha256) throw new Error("paper render: receipt evidenceSha256 does not match the current paper/build/evidence.json; render the current build and retry");
+  const current = readCurrentBuild(dir, doc), outputSha256 = sha256(output);
+  if (receipt.evidenceSha256 !== current.evidenceSha256) throw new Error(`paper render: receipt evidenceSha256 does not match the current paper/build/${doc === "slides" ? "slides.evidence.json" : "evidence.json"}; render the current build and retry`);
   if (receipt.manuscriptSha256 !== current.manuscriptSha256) throw new Error("paper render: receipt manuscriptSha256 does not match the current rendered manuscript; render the current build and retry");
   const entry = receipt.outputs.find(item => item.sha256 === outputSha256);
   if (!entry) throw new Error("paper render: the file's SHA-256 matches no output in the receipt; pass the file the receipt describes");
-  assertReservedPath(dir);
-  const receiptSha256 = sha256(receiptBytes), stored = join(paperRenderDir(dir), entry.name);
-  const last = readLedger(dir).findLast(event => event.type === "paper.rendered");
-  const same = last?.data.receiptSha256 === receiptSha256 && last.data.outputSha256 === outputSha256 && last.data.name === entry.name && stillStored(dir, entry.name, outputSha256, receiptSha256);
-  const result = { evidenceSha256: current.evidenceSha256, outputSha256, bytes: output.length, name: entry.name, receiptSha256, path: `paper/build/render/${entry.name}` };
+  assertReservedPath(dir, doc);
+  const receiptSha256 = sha256(receiptBytes), stored = join(paperRenderDir(dir, doc), entry.name);
+  const last = readLedger(dir).findLast(event => paperEventFor(event, "paper.rendered", doc));
+  const same = last?.data.receiptSha256 === receiptSha256 && last.data.outputSha256 === outputSha256 && last.data.name === entry.name && stillStored(dir, entry.name, outputSha256, receiptSha256, doc);
+  const result = { evidenceSha256: current.evidenceSha256, outputSha256, bytes: output.length, name: entry.name, receiptSha256, path: `paper/build/${renderFolder(doc)}/${entry.name}` };
   if (same) return { ...result, changed: false };
-  commit(dir, [[stored, output, PAPER_RENDER_BYTES], [receiptPath(dir), receiptBytes, RENDER_RECEIPT_BYTES]], [{ actor, type: "paper.rendered", data: {
-    evidenceSha256: current.evidenceSha256, manuscriptSha256: current.manuscriptSha256, outputSha256, bytes: output.length, name: entry.name, receiptSha256,
+  commit(dir, [[stored, output, PAPER_RENDER_BYTES], [receiptPath(dir, doc), receiptBytes, RENDER_RECEIPT_BYTES]], [{ actor, type: "paper.rendered", data: {
+    ...(doc === "slides" ? { doc } : {}), evidenceSha256: current.evidenceSha256, manuscriptSha256: current.manuscriptSha256, outputSha256, bytes: output.length, name: entry.name, receiptSha256,
     renderer: { tool: receipt.tool, version: receipt.version, environment: receipt.environment }, template: receipt.template,
   } }]);
   return { ...result, changed: true };
 }
-function stillStored(dir: string, name: string, outputSha256: string, receiptSha256: string): boolean {
+function stillStored(dir: string, name: string, outputSha256: string, receiptSha256: string, doc: PaperDocument): boolean {
   try {
-    return hashFileBounded(join(paperRenderDir(dir), name), PAPER_RENDER_BYTES, { noFollow: true }).sha256 === outputSha256
-      && sha256(readBytesBounded(receiptPath(dir), RENDER_RECEIPT_BYTES, { noFollow: true })) === receiptSha256;
+    return hashFileBounded(join(paperRenderDir(dir, doc), name), PAPER_RENDER_BYTES, { noFollow: true }).sha256 === outputSha256
+      && sha256(readBytesBounded(receiptPath(dir, doc), RENDER_RECEIPT_BYTES, { noFollow: true })) === receiptSha256;
   } catch { return false; }
 }
 
@@ -89,17 +92,18 @@ export interface RenderStatus {
   render: { evidenceSha256: string; outputSha256: string; bytes: number; name: string; path: string; receiptSha256: string; renderer: unknown; template: unknown; at: string } | null;
 }
 /** Read-only. A rebuild with a new evidence hash makes the last render stale without deleting it. */
-export function showPaperRender(dirArg: string): RenderStatus {
-  const { dir } = openStudy(dirArg), last = readLedger(dir).findLast(event => event.type === "paper.rendered");
+export function showPaperRender(dirArg: string, doc: PaperDocument = "manuscript"): RenderStatus {
+  paperDocument(doc);
+  const { dir } = openStudy(dirArg), last = readLedger(dir).findLast(event => paperEventFor(event, "paper.rendered", doc));
   if (!last) return { current: false, reason: "no render recorded; run ares paper render record after rendering the current build", render: null };
   const data = last.data, name = typeof data.name === "string" && NAME.test(data.name) ? data.name : undefined;
   if (!name || typeof data.evidenceSha256 !== "string" || typeof data.outputSha256 !== "string" || typeof data.receiptSha256 !== "string") return { current: false, reason: "the last paper.rendered event is malformed; record the render again", render: null };
-  const render = { evidenceSha256: data.evidenceSha256, outputSha256: data.outputSha256, bytes: typeof data.bytes === "number" ? data.bytes : 0, name, path: `paper/build/render/${name}`, receiptSha256: data.receiptSha256, renderer: data.renderer ?? null, template: data.template ?? null, at: last.at };
+  const render = { evidenceSha256: data.evidenceSha256, outputSha256: data.outputSha256, bytes: typeof data.bytes === "number" ? data.bytes : 0, name, path: `paper/build/${renderFolder(doc)}/${name}`, receiptSha256: data.receiptSha256, renderer: data.renderer ?? null, template: data.template ?? null, at: last.at };
   let build: ReturnType<typeof readCurrentBuild>;
-  try { build = readCurrentBuild(dir); }
-  catch { return { current: false, reason: "no current paper build; run ares paper build, render it and record the render", render }; }
+  try { build = readCurrentBuild(dir, doc); }
+  catch { return { current: false, reason: `no current paper build; run ares paper build${doc === "slides" ? " --doc slides" : ""}, render it and record the render`, render }; }
   if (build.evidenceSha256 !== data.evidenceSha256 || build.manuscriptSha256 !== data.manuscriptSha256) return { current: false, reason: "the recorded render belongs to an earlier build; render the current build and record it", render };
-  if (!stillStored(dir, name, data.outputSha256, data.receiptSha256)) return { current: false, reason: "the stored render or receipt changed or is missing; record the render again", render };
+  if (!stillStored(dir, name, data.outputSha256, data.receiptSha256, doc)) return { current: false, reason: "the stored render or receipt changed or is missing; record the render again", render };
   return { current: true, reason: null, render };
 }
 /** Never throws: summaries for review show and archive preview. */
