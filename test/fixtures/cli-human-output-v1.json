@@ -1,0 +1,354 @@
+{
+  "retention inspect": [
+    " ares Retention inspect\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Retention inspect\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "retention prune": [
+    " ares Retention prune\n\n▸ Preview\n  Remove the retained references from refs.json\n    →  ares retention prune study --file refs.json --confirm \\\n       aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "\u001b[1;34m ares Retention prune\u001b[0m\n\n\u001b[1;35m▸ Preview\u001b[0m\n  Remove the retained references from refs.json\n    \u001b[36m→  ares retention prune study --file refs.json --confirm \\\u001b[0m\n       \u001b[36maaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\u001b[0m"
+  ],
+  "skill check": [
+    " ares Skill check\n\n▸ Passed (1)\n  ✓  available\n\n✓ 1 ok",
+    "\u001b[1;34m ares Skill check\u001b[0m\n\n\u001b[1;35m▸ Passed\u001b[0m\u001b[90m (1)\u001b[0m\n  \u001b[1;32m✓ \u001b[0m available\n\n\u001b[1;32m✓ 1 ok\u001b[0m"
+  ],
+  "harness close": [
+    " ares Harness close\n  ✓  Harness close completed · synthetic · available",
+    "\u001b[1;34m ares Harness close\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Harness close completed · synthetic · available"
+  ],
+  "harness contrast": [
+    " ares Harness contrast\n  ✓  Harness contrast completed · synthetic · available",
+    "\u001b[1;34m ares Harness contrast\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Harness contrast completed · synthetic · available"
+  ],
+  "harness compose": [
+    " ares Harness compose\n  ✓  Harness compose completed · synthetic · available",
+    "\u001b[1;34m ares Harness compose\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Harness compose completed · synthetic · available"
+  ],
+  "harness adopt": [
+    " ares Harness adopt\n  ✓  Harness adopt completed · synthetic · available",
+    "\u001b[1;34m ares Harness adopt\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Harness adopt completed · synthetic · available"
+  ],
+  "harness stream set": [
+    " ares Harness stream set\n  ✓  Harness stream set completed · synthetic · available",
+    "\u001b[1;34m ares Harness stream set\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Harness stream set completed · synthetic · available"
+  ],
+  "harness stream show": [
+    " ares Harness stream show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Harness stream show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "experience select": [
+    " ares Experience select\n  ✓  Experience select completed · synthetic · available",
+    "\u001b[1;34m ares Experience select\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Experience select completed · synthetic · available"
+  ],
+  "experience freeze": [
+    " ares Experience freeze\n  ✓  Experience freeze completed · synthetic · available",
+    "\u001b[1;34m ares Experience freeze\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Experience freeze completed · synthetic · available"
+  ],
+  "experience check": [
+    " ares Experience check\n\n▸ Passed (1)\n  ✓  available\n\n✓ 1 ok",
+    "\u001b[1;34m ares Experience check\u001b[0m\n\n\u001b[1;35m▸ Passed\u001b[0m\u001b[90m (1)\u001b[0m\n  \u001b[1;32m✓ \u001b[0m available\n\n\u001b[1;32m✓ 1 ok\u001b[0m"
+  ],
+  "harness set": [
+    " ares Harness set\n  ✓  Harness set completed · synthetic · available",
+    "\u001b[1;34m ares Harness set\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Harness set completed · synthetic · available"
+  ],
+  "harness show": [
+    " ares Harness show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Harness show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "harness import": [
+    " ares Harness import\n  ✓  Harness import completed · synthetic · available",
+    "\u001b[1;34m ares Harness import\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Harness import completed · synthetic · available"
+  ],
+  "lineage show": [
+    " ares Lineage show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Lineage show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "lineage compare": [
+    " ares Lineage compare\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Lineage compare\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "autonomy show": [
+    " ares Autonomy show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Autonomy show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "autonomy set": [
+    " ares Autonomy set\n  ✓  Saved the autonomy policy · synthetic · available",
+    "\u001b[1;34m ares Autonomy set\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the autonomy policy · synthetic · available"
+  ],
+  "lesson propose": [
+    " ares Lesson propose\n  ✓  Lesson propose completed · synthetic · available",
+    "\u001b[1;34m ares Lesson propose\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Lesson propose completed · synthetic · available"
+  ],
+  "lesson list": [
+    " ares Lesson list\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Lesson list\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "lesson check": [
+    " ares Lesson check\n\n▸ Passed (1)\n  ✓  available\n\n✓ 1 ok",
+    "\u001b[1;34m ares Lesson check\u001b[0m\n\n\u001b[1;35m▸ Passed\u001b[0m\u001b[90m (1)\u001b[0m\n  \u001b[1;32m✓ \u001b[0m available\n\n\u001b[1;32m✓ 1 ok\u001b[0m"
+  ],
+  "lesson decide": [
+    " ares Lesson decide\n  ✓  Lesson decide completed · synthetic · available",
+    "\u001b[1;34m ares Lesson decide\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Lesson decide completed · synthetic · available"
+  ],
+  "skill propose": [
+    " ares Skill propose\n  ✓  Skill propose completed · synthetic · available",
+    "\u001b[1;34m ares Skill propose\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Skill propose completed · synthetic · available"
+  ],
+  "skill decide": [
+    " ares Skill decide\n  ✓  Skill decide completed · synthetic · available",
+    "\u001b[1;34m ares Skill decide\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Skill decide completed · synthetic · available"
+  ],
+  "skill list": [
+    " ares Skill list\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Skill list\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "lessons": [
+    " ares Lessons\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Lessons\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "archive": [
+    " ares Archive\n  ✓  Published the selected notes · synthetic · available",
+    "\u001b[1;34m ares Archive\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Published the selected notes · synthetic · available"
+  ],
+  "setup": [
+    " ares Setup\n  ✓  Setup completed · synthetic · available",
+    "\u001b[1;34m ares Setup\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Setup completed · synthetic · available"
+  ],
+  "watch set": [
+    " ares Watch set\n  ✓  Saved the watch configuration · synthetic · available\n    →  ares watch show '/work/synthetic study'",
+    "\u001b[1;34m ares Watch set\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the watch configuration · synthetic · available\n    \u001b[36m→  ares watch show '/work/synthetic study'\u001b[0m"
+  ],
+  "watch run": [
+    " ares Watch run\n\n▸ Passed\n  ✓  No findings\n\n✓ 1 ok",
+    "\u001b[1;34m ares Watch run\u001b[0m\n\n\u001b[1;35m▸ Passed\u001b[0m\n  \u001b[1;32m✓ \u001b[0m No findings\n\n\u001b[1;32m✓ 1 ok\u001b[0m"
+  ],
+  "watch show": [
+    " ares Watch show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Watch show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "console add": [
+    " ares Console add\n  ✓  Registered the study · synthetic · available",
+    "\u001b[1;34m ares Console add\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Registered the study · synthetic · available"
+  ],
+  "console remove": [
+    " ares Console remove\n  ✓  Removed the study registration · synthetic · available",
+    "\u001b[1;34m ares Console remove\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Removed the study registration · synthetic · available"
+  ],
+  "console list": [
+    " ares Console list\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Console list\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "manifest": [
+    " ares Manifest\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Manifest\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "init": [
+    " ares Init\n  ✓  Created the study · synthetic · available\n    →  ares status '/work/synthetic study'",
+    "\u001b[1;34m ares Init\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Created the study · synthetic · available\n    \u001b[36m→  ares status '/work/synthetic study'\u001b[0m"
+  ],
+  "run": [
+    " ares Run\n  ✓  Run completed · synthetic · available",
+    "\u001b[1;34m ares Run\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Run completed · synthetic · available"
+  ],
+  "plan set": [
+    " ares Plan set\n  ✓  Saved the study plan · synthetic · available\n    →  ares plan show '/work/synthetic study'",
+    "\u001b[1;34m ares Plan set\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the study plan · synthetic · available\n    \u001b[36m→  ares plan show '/work/synthetic study'\u001b[0m"
+  ],
+  "plan control": [
+    " ares Plan control\n  ✓  Plan control completed · synthetic · available",
+    "\u001b[1;34m ares Plan control\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Plan control completed · synthetic · available"
+  ],
+  "plan show": [
+    " ares Plan show\n  Controller:  none\n\n▸ Definition\n\n▸ Nodes (1)\n    Id:    scope\n    Kind:  gate",
+    "\u001b[1;34m ares Plan show\u001b[0m\n  \u001b[34mController:\u001b[0m  none\n\n\u001b[1;35m▸ Definition\u001b[0m\n\n\u001b[1;35m▸ Nodes\u001b[0m\u001b[90m (1)\u001b[0m\n    \u001b[34mId:\u001b[0m    scope\n    \u001b[34mKind:\u001b[0m  gate"
+  ],
+  "status": [
+    " ares Status\n\n▸ Attention\n  ⚠  scope gate is pending\n    →  ares gate approve '/work/synthetic study' scope\n  ⚠  1 included references need verification\n    →  ares lit verify '/work/synthetic study'\n\n▸ Study\n  Question:  Synthetic?\n  Mode:      survey\n  Scope:     Set\n\n▸ Gates (1)\n  GATE   STATE       ACTOR       WHEN\n  scope  ~  pending  -           -\n\n▸ Literature\n  Unverified:  1",
+    "\u001b[1;34m ares Status\u001b[0m\n\n\u001b[1;35m▸ Attention\u001b[0m\n  \u001b[1;33m⚠ \u001b[0m scope gate is pending\n    \u001b[36m→  ares gate approve '/work/synthetic study' scope\u001b[0m\n  \u001b[1;33m⚠ \u001b[0m 1 included references need verification\n    \u001b[36m→  ares lit verify '/work/synthetic study'\u001b[0m\n\n\u001b[1;35m▸ Study\u001b[0m\n  \u001b[34mQuestion:\u001b[0m  Synthetic?\n  \u001b[34mMode:\u001b[0m      survey\n  \u001b[34mScope:\u001b[0m     Set\n\n\u001b[1;35m▸ Gates\u001b[0m\u001b[90m (1)\u001b[0m\n  \u001b[34mGATE \u001b[0m  \u001b[34mSTATE     \u001b[0m  \u001b[34mACTOR     \u001b[0m  \u001b[34mWHEN\u001b[0m\n  scope  \u001b[90m~  pending\u001b[0m  \u001b[90m-         \u001b[0m  \u001b[90m-\u001b[0m\n\n\u001b[1;35m▸ Literature\u001b[0m\n  \u001b[34mUnverified:\u001b[0m  1"
+  ],
+  "study export": [
+    " ares Study export\n  ✓  Study export completed · synthetic · available",
+    "\u001b[1;34m ares Study export\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Study export completed · synthetic · available"
+  ],
+  "scope": [
+    " ares Scope\n  ✓  Saved the study scope · scope-one\n    →  ares gate list '/work/synthetic study'",
+    "\u001b[1;34m ares Scope\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the study scope · scope-one\n    \u001b[36m→  ares gate list '/work/synthetic study'\u001b[0m"
+  ],
+  "idea add": [
+    " ares Idea add\n  ✓  Idea add completed · synthetic · available",
+    "\u001b[1;34m ares Idea add\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Idea add completed · synthetic · available"
+  ],
+  "idea decide": [
+    " ares Idea decide\n  ✓  Idea decide completed · synthetic · available",
+    "\u001b[1;34m ares Idea decide\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Idea decide completed · synthetic · available"
+  ],
+  "investigate show": [
+    " ares Investigate show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Investigate show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "investigate close": [
+    " ares Investigate close\n  ✓  Investigate close completed · synthetic · available\n    →  ares investigate show '/work/synthetic study'",
+    "\u001b[1;34m ares Investigate close\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Investigate close completed · synthetic · available\n    \u001b[36m→  ares investigate show '/work/synthetic study'\u001b[0m"
+  ],
+  "ablate add": [
+    " ares Ablate add\n  ✓  Ablate add completed · synthetic · available",
+    "\u001b[1;34m ares Ablate add\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Ablate add completed · synthetic · available"
+  ],
+  "ablate show": [
+    " ares Ablate show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Ablate show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "ablate close": [
+    " ares Ablate close\n  ✓  Ablate close completed · synthetic · available",
+    "\u001b[1;34m ares Ablate close\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Ablate close completed · synthetic · available"
+  ],
+  "posthoc show": [
+    " ares Posthoc show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Posthoc show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "final close": [
+    " ares Final close\n  ✓  Final close completed · synthetic · available",
+    "\u001b[1;34m ares Final close\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Final close completed · synthetic · available"
+  ],
+  "final seeds": [
+    " ares Final seeds\n  ✓  Final seeds completed · synthetic · available",
+    "\u001b[1;34m ares Final seeds\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Final seeds completed · synthetic · available"
+  ],
+  "selection": [
+    " ares Selection\n  ✓  Saved the selection rule · synthetic · available\n    →  ares investigate show '/work/synthetic study'",
+    "\u001b[1;34m ares Selection\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the selection rule · synthetic · available\n    \u001b[36m→  ares investigate show '/work/synthetic study'\u001b[0m"
+  ],
+  "protocol": [
+    " ares Protocol\n  ✓  Saved the experiment protocol · synthetic · available\n    →  ares executor check '/work/synthetic study'",
+    "\u001b[1;34m ares Protocol\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the experiment protocol · synthetic · available\n    \u001b[36m→  ares executor check '/work/synthetic study'\u001b[0m"
+  ],
+  "executor set": [
+    " ares Executor set\n  ✓  Saved the executor · synthetic · available\n    →  ares executor check '/work/synthetic study'",
+    "\u001b[1;34m ares Executor set\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the executor · synthetic · available\n    \u001b[36m→  ares executor check '/work/synthetic study'\u001b[0m"
+  ],
+  "executor inputs hash": [
+    " ares Executor inputs hash\n\n▸ Input manifest\n  SHA-256:  (unset)\n  Files:    (unset)\n  Bytes:    (unset)",
+    "\u001b[1;34m ares Executor inputs hash\u001b[0m\n\n\u001b[1;35m▸ Input manifest\u001b[0m\n  \u001b[34mSHA-256:\u001b[0m  \u001b[90m(unset)\u001b[0m\n  \u001b[34mFiles:\u001b[0m    \u001b[90m(unset)\u001b[0m\n  \u001b[34mBytes:\u001b[0m    \u001b[90m(unset)\u001b[0m"
+  ],
+  "executor check": [
+    " ares Executor check\n\n▸ Passed (1)\n  ✓  available\n\n✓ 1 ok",
+    "\u001b[1;34m ares Executor check\u001b[0m\n\n\u001b[1;35m▸ Passed\u001b[0m\u001b[90m (1)\u001b[0m\n  \u001b[1;32m✓ \u001b[0m available\n\n\u001b[1;32m✓ 1 ok\u001b[0m"
+  ],
+  "gate list": [
+    " ares Gate list\n\n▸ Gates (0)\n  GATE  STATE  ACTOR       WHEN",
+    "\u001b[1;34m ares Gate list\u001b[0m\n\n\u001b[1;35m▸ Gates\u001b[0m\u001b[90m (0)\u001b[0m\n  \u001b[34mGATE\u001b[0m  \u001b[34mSTATE\u001b[0m  \u001b[34mACTOR     \u001b[0m  \u001b[34mWHEN\u001b[0m"
+  ],
+  "gate approve": [
+    " ares Gate approve\n  ✓  Approved the gate · synthetic · available\n    →  ares gate list '/work/synthetic study'",
+    "\u001b[1;34m ares Gate approve\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Approved the gate · synthetic · available\n    \u001b[36m→  ares gate list '/work/synthetic study'\u001b[0m"
+  ],
+  "gate reject": [
+    " ares Gate reject\n  ✓  Rejected the gate · synthetic · available",
+    "\u001b[1;34m ares Gate reject\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Rejected the gate · synthetic · available"
+  ],
+  "attempt run": [
+    " ares Attempt run\n  ✓  Recorded the attempt · synthetic · available",
+    "\u001b[1;34m ares Attempt run\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Recorded the attempt · synthetic · available"
+  ],
+  "attempt list": [
+    " ares Attempt list\n\n▸ Attempts (0)",
+    "\u001b[1;34m ares Attempt list\u001b[0m\n\n\u001b[1;35m▸ Attempts\u001b[0m\u001b[90m (0)\u001b[0m"
+  ],
+  "attempt show": [
+    " ares Attempt show\n\n▸ Attention\n  ?  1234 unknown\n    →  ares attempt reconcile '/work/synthetic study'\n\n▸ Attempt\n  ID:       1234\n  Run:      investigate\n  Seed:     1\n  State:    unknown\n  Started:  1d ago",
+    "\u001b[1;34m ares Attempt show\u001b[0m\n\n\u001b[1;35m▸ Attention\u001b[0m\n  \u001b[90m? \u001b[0m 1234 unknown\n    \u001b[36m→  ares attempt reconcile '/work/synthetic study'\u001b[0m\n\n\u001b[1;35m▸ Attempt\u001b[0m\n  \u001b[34mID:\u001b[0m       1234\n  \u001b[34mRun:\u001b[0m      investigate\n  \u001b[34mSeed:\u001b[0m     1\n  \u001b[34mState:\u001b[0m    unknown\n  \u001b[34mStarted:\u001b[0m  1d ago"
+  ],
+  "attempt cancel": [
+    " ares Attempt cancel\n  ✓  Cancelled the attempt · synthetic · available",
+    "\u001b[1;34m ares Attempt cancel\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Cancelled the attempt · synthetic · available"
+  ],
+  "attempt reconcile": [
+    " ares Attempt reconcile\n  ✓  Reconciled the attempts · synthetic · available\n    →  ares attempt list '/work/synthetic study'",
+    "\u001b[1;34m ares Attempt reconcile\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Reconciled the attempts · synthetic · available\n    \u001b[36m→  ares attempt list '/work/synthetic study'\u001b[0m"
+  ],
+  "attempt logs": [
+    " ares Attempt logs\n\n▸ candidate stdout\nhello world",
+    "\u001b[1;34m ares Attempt logs\u001b[0m\n\n\u001b[1;35m▸ candidate stdout\u001b[0m\nhello world"
+  ],
+  "lit search": [
+    " ares Lit search\n  ✓  Recorded the literature search · synthetic · available\n    →  ares lit list '/work/synthetic study'",
+    "\u001b[1;34m ares Lit search\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Recorded the literature search · synthetic · available\n    \u001b[36m→  ares lit list '/work/synthetic study'\u001b[0m"
+  ],
+  "lit queries": [
+    " ares Lit queries\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Lit queries\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "lit flow": [
+    " ares Lit flow\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Lit flow\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "lit list": [
+    " ares Lit list\n\n▸ Candidates (1 of 1)\n  ID                   YEAR  STATUS       VERIFIED  TITLE\n  doi:10.0000/example  2024  ✓  included  yes       Synthetic title",
+    "\u001b[1;34m ares Lit list\u001b[0m\n\n\u001b[1;35m▸ Candidates\u001b[0m\u001b[90m (1 of 1)\u001b[0m\n  \u001b[34mID                 \u001b[0m  \u001b[34mYEAR\u001b[0m  \u001b[34mSTATUS     \u001b[0m  \u001b[34mVERIFIED\u001b[0m  \u001b[34mTITLE\u001b[0m\n  doi:10.0000/example  2024  \u001b[1;32m✓  included\u001b[0m  yes       Synthetic title"
+  ],
+  "lit screen": [
+    " ares Lit screen\n  ✓  Recorded the screening decision · synthetic · available\n    →  ares lit list '/work/synthetic study'",
+    "\u001b[1;34m ares Lit screen\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Recorded the screening decision · synthetic · available\n    \u001b[36m→  ares lit list '/work/synthetic study'\u001b[0m"
+  ],
+  "lit card": [
+    " ares Lit card\n  ✓  Saved the extraction card · synthetic · available",
+    "\u001b[1;34m ares Lit card\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the extraction card · synthetic · available"
+  ],
+  "lit card export": [
+    " ares Lit card export\n  ✓  Exported the selected cards · synthetic · available",
+    "\u001b[1;34m ares Lit card export\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Exported the selected cards · synthetic · available"
+  ],
+  "lit card import": [
+    " ares Lit card import\n  ✓  Lit card import completed · synthetic · available",
+    "\u001b[1;34m ares Lit card import\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Lit card import completed · synthetic · available"
+  ],
+  "lit card list": [
+    " ares Lit card list\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Lit card list\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "lit verify": [
+    " ares Lit verify\n  ✓  Checked the selected identifiers · synthetic · available\n    →  ares lit list '/work/synthetic study'",
+    "\u001b[1;34m ares Lit verify\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Checked the selected identifiers · synthetic · available\n    \u001b[36m→  ares lit list '/work/synthetic study'\u001b[0m"
+  ],
+  "lit bib": [
+    " ares Lit bib\n  ✓  Built the verified bibliography · synthetic · available",
+    "\u001b[1;34m ares Lit bib\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Built the verified bibliography · synthetic · available"
+  ],
+  "review add": [
+    " ares Review add\n  ✓  Recorded the review · synthetic · available\n    →  ares review show '/work/synthetic study'",
+    "\u001b[1;34m ares Review add\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Recorded the review · synthetic · available\n    \u001b[36m→  ares review show '/work/synthetic study'\u001b[0m"
+  ],
+  "review resolve": [
+    " ares Review resolve\n  ✓  Resolved the review finding · synthetic · available",
+    "\u001b[1;34m ares Review resolve\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Resolved the review finding · synthetic · available"
+  ],
+  "review show": [
+    " ares Review show\n\n▸ Reviews\n  Ready:           (unset)\n  Reviews:         0\n  Model families:  (unset)",
+    "\u001b[1;34m ares Review show\u001b[0m\n\n\u001b[1;35m▸ Reviews\u001b[0m\n  \u001b[34mReady:\u001b[0m           \u001b[90m(unset)\u001b[0m\n  \u001b[34mReviews:\u001b[0m         0\n  \u001b[34mModel families:\u001b[0m  \u001b[90m(unset)\u001b[0m"
+  ],
+  "review checklist": [
+    " ares Review checklist\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Review checklist\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "paper build": [
+    " ares Paper build\n  ✓  Built the checked manuscript · synthetic · available\n    →  ares review show '/work/synthetic study'",
+    "\u001b[1;34m ares Paper build\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Built the checked manuscript · synthetic · available\n    \u001b[36m→  ares review show '/work/synthetic study'\u001b[0m"
+  ],
+  "paper plan set": [
+    " ares Paper plan set\n  ✓  Saved the paper plan · synthetic · available\n    →  ares paper plan show '/work/synthetic study'",
+    "\u001b[1;34m ares Paper plan set\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Saved the paper plan · synthetic · available\n    \u001b[36m→  ares paper plan show '/work/synthetic study'\u001b[0m"
+  ],
+  "paper plan show": [
+    " ares Paper plan show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Paper plan show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
+  ],
+  "paper check": [
+    " ares Paper check\n\n▸ Failures (1)\n  ✗  2:1 bad-format: Synthetic failure\n\n▸ Warnings (1)\n  ⚠  3:2 warning: Synthetic warning\n\n✗ 1 failed  ⚠ 1 warning",
+    "\u001b[1;34m ares Paper check\u001b[0m\n\n\u001b[1;35m▸ Failures\u001b[0m\u001b[90m (1)\u001b[0m\n  \u001b[1;31m✗ \u001b[0m 2:1 bad-format: Synthetic failure\n\n\u001b[1;35m▸ Warnings\u001b[0m\u001b[90m (1)\u001b[0m\n  \u001b[1;33m⚠ \u001b[0m 3:2 warning: Synthetic warning\n\n\u001b[1;31m✗ 1 failed\u001b[0m  \u001b[1;33m⚠ 1 warning\u001b[0m"
+  ],
+  "cite check": [
+    " ares Cite check\n\n▸ Passed\n  ✓  No findings\n\n✓ 1 ok",
+    "\u001b[1;34m ares Cite check\u001b[0m\n\n\u001b[1;35m▸ Passed\u001b[0m\n  \u001b[1;32m✓ \u001b[0m No findings\n\n\u001b[1;32m✓ 1 ok\u001b[0m"
+  ]
+}

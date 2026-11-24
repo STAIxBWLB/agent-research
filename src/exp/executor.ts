@@ -341,21 +341,82 @@ export async function checkExecutor(dir: string, runner: ProcessRunner = spawnRu
   }
   return checkExecutorInputs(executor, protocol, runner);
 }
-/** Check a frozen attempt's configuration rather than mutable study files. */
-export async function checkExecutorInputs(executor: Executor, protocol: Protocol, runner: ProcessRunner = spawnRunner): Promise<ExecutorCheck> {
-  if (Object.keys(protocol.inputs ?? {}).length) await step(executor, "Python3 input manifest runtime", "python3", ["-I", "-S", "-c", "import sys; assert sys.version_info.major == 3"], runner);
+async function dockerVersion(executor: Executor, runner: ProcessRunner): Promise<string> {
   const version = (await step(executor, "Docker server version", "docker", ["version", "--format", "{{.Server.Version}}"], runner)).stdout.trim();
   if (!/^[0-9]+\.[0-9]+(?:\.[0-9]+)?[A-Za-z0-9.+_-]*$/.test(version) || version.length > 128) throw failed(executor, "Docker server version");
+  return version;
+}
+async function ensureImage(executor: Executor, image: string, runner: ProcessRunner): Promise<void> {
+  let present: ProcessResult;
+  try { present = await runOnExecutor(executor, "docker", ["image", "inspect", "--format", "{{.Id}}", image], runner); }
+  catch { throw failed(executor, "image availability"); }
+  if (present.timedOut || present.truncated) throw failed(executor, "image availability");
+  if (present.exitCode !== 0) await step(executor, "image pull", "docker", ["pull", image], runner, { timeoutMs: 300_000 });
+}
+
+export interface ExecutorCheckRow { name: string; state: "ok" | "failed" | "skipped"; detail: string }
+export interface ExecutorCheckReport { checks: ExecutorCheckRow[] }
+const PYTHON_RUNTIME = ["-I", "-S", "-c", "import sys; assert sys.version_info.major == 3"];
+
+export async function checkExecutorReport(dir: string, runner: ProcessRunner = spawnRunner): Promise<ExecutorCheckReport> {
+  const checks: ExecutorCheckRow[] = [];
+  const check = async (name: string, operation: () => unknown | Promise<unknown>, prerequisite?: string): Promise<boolean> => {
+    if (prerequisite) { checks.push({ name, state: "skipped", detail: prerequisite }); return false; }
+    try {
+      const detail = await operation();
+      checks.push({ name, state: "ok", detail: typeof detail === "string" ? detail : "" });
+      return true;
+    } catch (error) {
+      checks.push({ name, state: "failed", detail: error instanceof Error ? error.message : "Check failed" });
+      return false;
+    }
+  };
+  requireExperiment(openStudy(dir).study);
+  const config: { executor?: Executor; protocol?: NonNullable<ReturnType<typeof readProtocol>> } = {};
+  await check("Executor configuration", () => {
+    const executor = readExecutor(dir);
+    if (!executor) throw new Error("Configure the executor with ares executor set <dir>");
+    config.executor = executor;
+    return executor.kind;
+  });
+  await check("Protocol", () => {
+    const protocol = readProtocol(dir);
+    if (!protocol) throw new Error("Set the protocol with ares protocol <dir> --file PATH");
+    config.protocol = protocol;
+  });
+  const { executor, protocol } = config;
+  const connected = !!executor && (executor.kind !== "ssh" || await check("SSH connection", () => step(executor!, "SSH connection", "true", [], runner, { timeoutMs: 10_000 })));
+  const unavailable = connected ? undefined : "Executor unavailable";
+  if (protocol && (protocol.v === 1 ? Object.keys(protocol.inputs ?? {}).length > 0 : protocol.candidate.stages.some(stage => Object.keys(stage.inputs).length > 0))) {
+    await check("Python 3", () => step(executor!, "Python3 input manifest runtime", "python3", PYTHON_RUNTIME, runner), unavailable);
+  }
+  const docker = await check("Docker server version", () => dockerVersion(executor!, runner), unavailable);
+  for (const [name, flag] of [["UID", "-u"], ["GID", "-g"]] as const) {
+    await check(name, async () => {
+      const value = (await step(executor!, `host ${name.toLowerCase()}`, "id", [flag], runner)).stdout.trim();
+      if (!/^[1-9][0-9]{0,9}$/.test(value)) throw failed(executor!, `non-root host ${name.toLowerCase()}`);
+      return value;
+    }, unavailable);
+  }
+  if (protocol) {
+    const candidates = protocol.v === 1 ? [protocol.candidate.image] : protocol.candidate.stages.map(stage => stage.image);
+    for (const image of new Set([...candidates, protocol.evaluator.image])) {
+      await check(`Image ${image}`, () => ensureImage(executor!, image, runner), docker ? undefined : "Docker unavailable");
+    }
+  }
+  return { checks };
+}
+
+/** Check a frozen attempt's configuration rather than mutable study files. */
+export async function checkExecutorInputs(executor: Executor, protocol: Protocol, runner: ProcessRunner = spawnRunner): Promise<ExecutorCheck> {
+  if (Object.keys(protocol.inputs ?? {}).length) await step(executor, "Python3 input manifest runtime", "python3", PYTHON_RUNTIME, runner);
+  const version = await dockerVersion(executor, runner);
   const uid = (await step(executor, "host uid", "id", ["-u"], runner)).stdout.trim();
   const gid = (await step(executor, "host gid", "id", ["-g"], runner)).stdout.trim();
   if (!/^[1-9][0-9]{0,9}$/.test(uid) || !/^[1-9][0-9]{0,9}$/.test(gid)) throw failed(executor, "non-root host uid:gid");
   const images: ExecutorCheck["images"] = [];
   for (const image of new Set([protocol.candidate.image, protocol.evaluator.image])) {
-    let present: ProcessResult;
-    try { present = await runOnExecutor(executor, "docker", ["image", "inspect", "--format", "{{.Id}}", image], runner); }
-    catch { throw failed(executor, "image availability"); }
-    if (present.timedOut || present.truncated) throw failed(executor, "image availability");
-    if (present.exitCode !== 0) await step(executor, "image pull", "docker", ["pull", image], runner, { timeoutMs: 300_000 });
+    await ensureImage(executor, image, runner);
     images.push({ image, available: true });
   }
   return { ...(Object.keys(protocol.inputs ?? {}).length ? { inputRuntime: "python3" as const } : {}), executor, serverVersion: version, user: `${uid}:${gid}`, images, pull: "missing" };

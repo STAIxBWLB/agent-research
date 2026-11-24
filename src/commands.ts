@@ -1,3 +1,4 @@
+import { colorFor, fillMessage, outputAscii, renderError, streamWidth } from "./cli-output.ts";
 import {proposeLesson, decideLesson, checkLesson, listLessonCandidates} from "./harness/lesson-candidates.ts";
 import type {SkillCheckOptions} from "./memory/skill-check.ts";
 import {setHarnessStream, readHarnessStream, selectExperience, freezeExperience, checkExperience} from "./harness/experience.ts";
@@ -42,12 +43,12 @@ import { flowMarkdown, litFlow } from "./lit/flow.ts";
 import { searchSource, SOURCES, type SourceName } from "./lit/sources.ts";
 import { verifyCandidates } from "./lit/verify.ts";
 import { assignCitekeys, renderBib } from "./lit/bibtex.ts";
-import { checkCitations } from "./lit/cite.ts";
+import { checkCitations, citationOccurrences } from "./lit/cite.ts";
 import { cardPath, validateCard } from "./lit/cards.ts";
 import { createVaultClient, exportCards, importCards, listCards, previewCardExport } from "./memory/vault-cards.ts";
 import { designBinding, protocolHash, readDesign, readProtocol, setProtocol } from "./exp/protocol.ts";
 import { requireExperiment } from "./study.ts";
-import { checkExecutor, setExecutor, readExecutor, hashExecutorInput, type InputManifest } from "./exp/executor.ts";
+import { checkExecutor, checkExecutorReport, setExecutor, readExecutor, hashExecutorInput, type InputManifest } from "./exp/executor.ts";
 import { cancelAttempt, listAttempts, listAttemptSummaries, reconcileAttempts, runAttempt, showAttempt, type AttemptContext, type AttemptListOptions, type AttemptOptions } from "./exp/attempts.ts";
 import { readAttemptLogs, type LogOptions } from "./exp/logs.ts";
 import { retainedOperation, type RetainedRef, type RetentionResult } from "./exp/retention.ts";
@@ -121,6 +122,7 @@ export async function executorInputsHash(dirArg: string, path: string, ctx: Ctx)
   if (!executor) throw new Error("executor: not configured; run ares executor set <dir> --kind local|ssh [--host ALIAS] --workdir PATH");
   return hashExecutorInput(executor, path, ctx.runner);
 }
+export const executorCheckReport = (dir: string, ctx: Ctx) => checkExecutorReport(dir, ctx.runner);
 export const executorCheck = (dir: string, ctx: Ctx) => checkExecutor(dir, ctx.runner);
 
 function retentionRefs(raw: unknown): RetainedRef[] {
@@ -402,9 +404,29 @@ export async function bib(dirArg: string, ctx: Ctx) {
   });
 }
 
-export function cite(dirArg: string, draft: string) {
+function inspectCitations(dirArg: string, draft: string) {
   const { dir } = openStudy(dirArg), path = resolve(draft);
-  return { draft: path, ...checkCitations(readTextBounded(path, DRAFT_BYTES), loadCandidates(dir)) };
+  const source = readTextBounded(path, DRAFT_BYTES);
+  return { source, result: { draft: path, ...checkCitations(source, loadCandidates(dir)) } };
+}
+export function cite(dirArg: string, draft: string) { return inspectCitations(dirArg, draft).result; }
+export function citeHuman(dirArg: string, draft: string) {
+  const { source, result } = inspectCitations(dirArg, draft);
+  const unknown = new Set(result.unknown), unverified = new Set(result.notVerified);
+  let start = 0, line = 1, nextLine = source.indexOf("\n");
+  const findings = [];
+  for (const citation of citationOccurrences(source)) {
+    while (nextLine >= 0 && nextLine < citation.start) {
+      start = nextLine + 1;
+      nextLine = source.indexOf("\n", start);
+      line++;
+    }
+    if (unknown.has(citation.key) || unverified.has(citation.key)) {
+      const kind = unknown.has(citation.key) ? "Unknown" : "Unverified";
+      findings.push({ name: `${line}:${citation.start - start + 1}`, state: "failed", detail: `${kind} citation ${citation.key}` });
+    }
+  }
+  return { ...result, checks: findings };
 }
 
 export async function planSet(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
@@ -684,6 +706,11 @@ export interface WatchStarted { started: true; configSha256: string }
 /** Acknowledge only validated admission; the finite pass keeps the same lock until its receipt is written. */
 export function watchRunDetached(dirArg: string, ctx: Ctx, track?: (completion: Promise<void>, terminate: () => void) => void): Promise<WatchStarted> {
   const { dir, study } = openStudy(dirArg);
+  const report = (message: string) => {
+    const tty = Boolean(process.stderr.isTTY);
+    const columns = Math.min(streamWidth(tty, process.stderr.columns) ?? 80, 80);
+    console.error(renderError(fillMessage(message, { dir }), tty, colorFor({}, tty) === true, outputAscii({}, process.env), columns));
+  };
   let accept!: (value: WatchStarted) => void, reject!: (cause: unknown) => void, started = false;
   let terminate = () => {};
   const admission = new Promise<WatchStarted>((resolve, refuse) => { accept = resolve; reject = refuse; });
@@ -693,7 +720,7 @@ export function watchRunDetached(dirArg: string, ctx: Ctx, track?: (completion: 
     terminate = () => {
       if (settled) return; settled = true;
       recordWatchFailure(dir, snapshot, ctx.actor, "terminated");
-      console.error("ares watch: terminated; inspect ares watch show and lit list before retrying");
+      report("watch: terminated; run ares watch show <dir>");
     };
     started = true; accept({ started: true, configSha256: snapshot.sha256 });
     try { await watchRunLocked(dir, snapshot, ctx); settled = true; }
@@ -701,11 +728,11 @@ export function watchRunDetached(dirArg: string, ctx: Ctx, track?: (completion: 
       if (settled) return; settled = true;
       const kind = watchFailureClass(cause);
       recordWatchFailure(dir, snapshot, ctx.actor, kind);
-      console.error(`ares watch: background pass failed (${kind}); inspect ares watch show and lit list before retrying`);
+      report(`watch: background pass failed (${kind}); run ares watch show <dir>`);
     }
   }).then(() => {}, cause => {
     if (!started) reject(cause);
-    else console.error(`ares watch: failure receipt could not be written (${watchFailureClass(cause)}); restore study storage, inspect ares watch show and lit list, then retry`);
+    else report(`watch: failure receipt could not be written (${watchFailureClass(cause)}); restore study storage and run ares watch show <dir>`);
   });
   track?.(completion, () => terminate());
   return admission;
