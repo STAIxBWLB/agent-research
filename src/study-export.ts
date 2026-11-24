@@ -35,7 +35,7 @@ const LEDGER_KEYS: Record<string, readonly string[]> = {
   "plan.set": ["revision", "state", "sha256"], "plan.gates": ["revision"], "plan.paused": ["revision"], "plan.control": ["revision"], "node.observed": ["revision", "status"], "node.intent": ["revision"],
   "executor.set": ["kind"], "protocol.set": ["sha256", "identitySha256", "protocolHash", "treeHash"], "selection.set": ["sha256", "metric"], "final.seeds.set": ["sha256"],
   "investigate.closed": ["run", "sha256", "ruleSha256", "winner"], "ablate.closed": ["sha256", "investigateSha256"], "final.closed": ["sha256", "status", "investigateSha256"],
-  "idea.decided": ["decision"], "paper.built": ["manuscriptSha256", "evidenceSha256", "sourceManuscriptSha256"], "review.added": [], "review.resolved": ["buildSha256"],
+  "idea.decided": ["decision"], "paper.built": ["manuscriptSha256", "evidenceSha256", "sourceManuscriptSha256"], "paper.rendered": ["evidenceSha256", "manuscriptSha256", "outputSha256", "receiptSha256", "bytes"], "review.added": [], "review.resolved": ["buildSha256"],
   "attempt.started": ["id", "run", "seed", "commit", "treeId"],
   "retention.pruned": ["fingerprint", "refsSha256", "count"],
   "attempt.stage.reused": ["id", "stage", "candidateStage", "key", "sourceAttemptId", "sourceStage", "sourceSha256"],
@@ -74,6 +74,8 @@ function reduceEvent(event: LedgerEvent) {
   const actor = { kind: ACTOR_KINDS.has(event.actor?.kind as string) ? event.actor.kind : "other", ...(event.actor.id !== undefined ? { idSha256: sha256(event.actor.id) } : {}) };
   const at = isoAt(event.at), data = reduceData(plain(event.data) ? event.data : {}, (Object.hasOwn(LEDGER_KEYS, event.type) ? LEDGER_KEYS[event.type]! : []));
   if (event.type === "retention.pruned" && Array.isArray(event.data.refs) && event.data.refs.length > 0 && event.data.refs.length <= 500 && retentionDisposalIndex([event]).size === event.data.refs.length) data.refs = event.data.refs.map(ref => [...ref as string[]]);
+  // Render receipt (#162): hashes plus renderer identity as closed tokens only, never the document bytes or free text.
+  if (event.type === "paper.rendered" && plain(event.data.renderer)) data.renderer = reduceData(event.data.renderer, ["tool", "version", "environment"]);
   return { v: event.v, at, actor, type: TOKEN.test(event.type) ? event.type : "other", data };
 }
 // Closed codes emitted by attempts.ts, metrics.ts and artifacts.ts; never derive a class from user prose.

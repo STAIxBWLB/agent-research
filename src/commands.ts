@@ -15,6 +15,7 @@ import { createAmemClient } from "./memory/amem.ts";
 import { previewArchive, exportArchive, type ArchivePreview, type ArchiveResult } from "./memory/archive.ts";
 import { addReview, resolveReview, reviewChecklist, reviewReadiness, reviewBinding, requireReviewReady } from "./paper/review.ts";
 import { buildPaper } from "./paper/build.ts";
+import { recordPaperRender, showPaperRender } from "./paper/render.ts";
 import { checkPaper } from "./paper/check.ts";
 import { setPaperPlan, showPaperPlan } from "./paper/plan.ts";
 import { addAblation, showAblate, closeAblate } from "./exp/ablate.ts";
@@ -615,6 +616,11 @@ export const paperPlanShow = (dir: string) => showPaperPlan(dir);
 export async function paperBuild(dirArg: string, ctx: Pick<Ctx, "actor">) {
   const { dir } = openStudy(dirArg); return withLock(dir, () => buildPaper(dir, ctx.actor));
 }
+/** Records an external render of the current build; never runs a renderer (#162). */
+export async function paperRenderRecord(dirArg: string, file: string, receipt: string, ctx: Pick<Ctx, "actor">) {
+  const { dir } = openStudy(dirArg); return withLock(dir, () => recordPaperRender(dir, file, receipt, ctx.actor));
+}
+export const paperRenderShow = (dir: string) => showPaperRender(dir);
 
 export async function reviewAdd(dirArg: string, raw: unknown, ctx: Pick<Ctx, "actor">) {
   const { dir } = openStudy(dirArg); return withLock(dir, () => addReview(dir, raw, ctx.actor));

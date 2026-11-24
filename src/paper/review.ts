@@ -1,6 +1,7 @@
 import { requireCopilotAccept, CopilotAcceptError } from "../copilot.ts";
 import { boundedText, commit, onlyKeys, openStudy, plain, readLedger, sha256, type Actor, type LedgerEvent } from "../study.ts";
 import { readCurrentBuild } from "./build.ts";
+import { renderSummary } from "./render.ts";
 import { checkPaper } from "./check.ts";
 import { DEFAULT_PAPER_SETTINGS, readPaperSettings, readReviewSettings, type SurveyChecklistMode } from "./hygiene.ts";
 export const REVIEW_KINDS = ["contradiction", "unsupported-claim", "number", "citation", "method", "clarity", "other"] as const;
@@ -153,7 +154,12 @@ export function reviewReadiness(dirArg: string) {
   const openBlocking = reviews.flatMap(row => row.report.findings.filter(f => f.blocking && !row.resolutions[f.id]).map(f => ({ reviewId: row.id, findingId: f.id, kind: f.kind, location: f.location, text: f.text })));
   if (openBlocking.length) unmet.push({ code: "blocking-findings", message: `open blocking findings: ${openBlocking.map(f => `${f.reviewId}/${f.findingId} (${f.kind})`).join(", ")}; resolve each with a reason using ares review resolve` });
   const rounds = roundsView(dir, rows, buildSha256), survey = surveyView(dir, study.mode, reviews), points = pointView(reviews);
-  return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, ...points, checklists: reviews.map(row => { const { survey: answers, ...rest } = row.report.checklist; return { reviewId: row.id, ...rest, ...(survey.surveyChecklist === "off" || answers === undefined ? {} : { survey: answers }) }; }), claims: "unavailable (STAIxBWLB/agent-hub#931)", unmet, ...rounds, ...survey, info: [...rounds.info, ...survey.info] };
+  // Render status is informational unless study.toml [paper] requireRender = true (#162).
+  const render = renderSummary(dir);
+  let requireRender = false;
+  try { requireRender = readPaperSettings(dir).requireRender === true; } catch { /* roundsView already reports unreadable settings */ }
+  if (requireRender && !render.current) unmet.push({ code: "render", message: `requireRender is set and ${render.reason ?? "no current render"}` });
+  return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, ...points, checklists: reviews.map(row => { const { survey: answers, ...rest } = row.report.checklist; return { reviewId: row.id, ...rest, ...(survey.surveyChecklist === "off" || answers === undefined ? {} : { survey: answers }) }; }), claims: "unavailable (STAIxBWLB/agent-hub#931)", render, unmet, ...rounds, ...survey, info: [...rounds.info, ...survey.info] };
 }
 /** Exact location metadata only: no paper-plan lookup, support judgment or readiness change. */
 function pointView(reviews: ReviewRecord[]): { openByPoint?: ReviewPointFindings[] } {

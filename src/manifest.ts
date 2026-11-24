@@ -14,6 +14,7 @@ export const FORMAT_VERSIONS = {
   study: 2,
   paperEvidence: 2,
   paperPlan: 2,
+  paperRender: 1,
   skillProposal: 2,
   studyRegistry: 1,
   watchConfig: 1,
@@ -31,7 +32,7 @@ export const FORMAT_VERSIONS = {
 } as const;
 export const MEMORY_LEDGER_EVENTS = ["archive.exported", "skill.proposed", "skill.decided", "lesson.proposed", "lesson.decided"] as const;
 export const WATCH_LEDGER_EVENTS = ["watch.set", "watch.ran"] as const;
-export const LEDGER_EVENTS = [...MEMORY_LEDGER_EVENTS, ...WATCH_LEDGER_EVENTS, "autonomy.set", "harness.round.set", "harness.probe.declared", "harness.contrast.recorded", "harness.composition.recorded", "harness.adoption.decided", "harness.round.closed", "experience.stream.set", "experience.frozen", "retention.pruned", "attempt.pipeline.code", "attempt.pipeline.inputs", "attempt.stage.terminated", "attempt.reuse.preflight", "attempt.reuse.fresh-intent", "attempt.reuse.materialized", "attempt.reuse.miss", "attempt.stage.reused", "paper.plan.set"] as const;
+export const LEDGER_EVENTS = [...MEMORY_LEDGER_EVENTS, ...WATCH_LEDGER_EVENTS, "autonomy.set", "harness.round.set", "harness.probe.declared", "harness.contrast.recorded", "harness.composition.recorded", "harness.adoption.decided", "harness.round.closed", "experience.stream.set", "experience.frozen", "retention.pruned", "attempt.pipeline.code", "attempt.pipeline.inputs", "attempt.stage.terminated", "attempt.reuse.preflight", "attempt.reuse.fresh-intent", "attempt.reuse.materialized", "attempt.reuse.miss", "attempt.stage.reused", "paper.plan.set", "paper.rendered"] as const;
 export interface Manifest {
   v: 1;
   name: "ares";
