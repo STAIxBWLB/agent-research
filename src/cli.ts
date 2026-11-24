@@ -1,6 +1,6 @@
 import { version } from "../package.json";
-import { findCommand, help, type CommandSpec } from "./commands-table.ts";
-import { colorFor, outputAscii, renderError, renderResult, streamWidth, type OutputOptions } from "./cli-output.ts";
+import { findCommand, type CommandSpec } from "./commands-table.ts";
+import { colorFor, outputAscii, renderError, renderHelp, renderResult, streamWidth, usageHint, type OutputOptions } from "./cli-output.ts";
 import * as ops from "./commands.ts";
 import { createHttp, type Http } from "./http.ts";
 import { PLAYBOOK } from "./playbook.ts";
@@ -19,7 +19,7 @@ interface CliOutput {
   columns?: number;
 }
 
-function parse(spec: CommandSpec, args: string[], output: OutputOptions): { flags: Record<string, string | true>; positional: string[] } {
+export function parse(spec: CommandSpec, args: string[], output: OutputOptions = {}): { flags: Record<string, string | true>; positional: string[] } {
   const flags: Record<string, string | true> = {}, positional: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -77,9 +77,24 @@ export async function run(args: string[], env: NodeJS.ProcessEnv = process.env, 
 }
 
 async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: CliOutput): Promise<{ text: string; code: number }> {
-  if (!args.length || (args.length === 1 && ["--help", "-h", "help"].includes(args[0]!))) return { text: help(), code: 0 };
+  const leadingHelp = args[0] === "help" || args[0] === "--help" || args[0] === "-h";
+  const helpArgs = leadingHelp ? args.slice(1) : args;
+  const helpCommand = args[0] === "help" || !leadingHelp ? findCommand(helpArgs) : undefined;
+  const trailingHelp = !leadingHelp && helpCommand?.rest[0] === "--help";
+  if (!args.length || leadingHelp || trailingHelp) {
+    const formatting = trailingHelp ? helpCommand.rest.slice(1) : helpCommand?.rest ?? helpArgs;
+    const spec = helpCommand?.spec;
+    if (spec) output.spec = spec;
+    const { positional } = parse({ name: spec?.name ?? "help", usage: "", mutates: false, options: {}, summary: "" }, formatting, output.options);
+    if (positional.length) {
+      throw new UsageError(spec ? `${spec.name}: unexpected help argument ${positional[0]}` : `unknown help command: ${positional.join(" ")}`);
+    }
+    const color = colorFor(output.options, output.tty ?? false, env);
+    if (color instanceof Error) throw new UsageError(color.message);
+    return { text: renderHelp(spec, color, outputAscii(output.options, env)), code: 0 };
+  }
   if (args.length === 1 && args[0] === "--version") return { text: version, code: 0 };
-  const found = findCommand(args);
+  const found = helpCommand;
   if (!found) throw new UsageError(`unknown command: ${args.slice(0, 2).join(" ")}; use --help`);
   const { spec, rest } = found;
   output.spec = spec;
@@ -452,12 +467,13 @@ export async function main(args: string[]): Promise<number> {
     const tty = Boolean(process.stderr.isTTY);
     const columns = streamWidth(tty, process.stderr.columns, env);
     const color = colorFor(cli.options, tty, env) === true;
-    const message = error instanceof Error ? error.message : "operation failed";
     const usage = error instanceof UsageError;
+    let message = error instanceof Error ? error.message : "operation failed";
+    if (message.startsWith("usage: ares ")) message = `${cli.spec?.name ?? "command"}: missing or invalid arguments`;
     const diagnostic = renderError(message, tty, color, outputAscii(cli.options, env), columns);
     console.error(diagnostic);
     if (usage) {
-      console.error(`Usage: ares ${cli.spec?.usage ?? "<command> [options]"}\nRun 'ares --help' for details.`);
+      console.error(usageHint(cli.spec, columns));
     }
     return usage ? 2 : 1;
   } finally {

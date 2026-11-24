@@ -51,7 +51,7 @@ describe("AC8 CLI", () => {
     await expect(run(["lit", "screen", "/tmp/x", "id", "--include", "--exclude"], {}, io())).rejects.toThrow("exactly one");
   });
   test("help and version", async () => {
-    expect((await run(["--help"], {}, io())).text).toContain("ares lit verify <dir>");
+    expect((await run(["--help"], {}, io())).text).toContain("lit verify");
     expect((await run(["playbook"], {}, io())).text).toContain("Only included and verified papers");
   });
 });
