@@ -35,14 +35,14 @@ test("paper plan file/stdin CLI and MCP share validation, storage and routing co
   expect(await server.handlers.ares_paper_plan_set!({study: f.dir, plan: raw})).toEqual(raw);
   expect(JSON.parse((await run(["paper", "plan", "set", f.dir, "--file", "-", "--json"], {}, {http: ctx.http, readStdin: async () => JSON.stringify(raw)})).text)).toEqual(raw);
   const shown = await server.handlers.ares_paper_plan_show!({study: f.dir});
-  expect(shown).toEqual({plan: raw, coverage: {routed: 1, total: 3}});
+  expect(shown).toEqual({plan: raw, coverage: {routed: 1, total: 3}, dependencyCoverage: {cited: 0, waived: 0, total: 0}});
   expect(JSON.parse((await run(["paper", "plan", "show", f.dir, "--json"], {}, {http: ctx.http})).text)).toEqual(shown);
   expect(ARES_TOOLS.find(tool => tool.name === "ares_paper_plan_show")!.annotations.readOnlyHint).toBe(true);
   const schema = ARES_TOOLS.find(tool => tool.name === "ares_paper_plan_set")!.inputSchema;
   expect(validArguments({study: f.dir, plan: raw}, schema)).toBe(true);
   expect(validArguments({study: f.dir, plan: {...raw, unexpected: true}}, schema)).toBe(false);
   const beforePlan = readBytesBounded(f.file, plans.PAPER_PLAN_BYTES), beforeLedger = ledger(f.dir);
-  for (const invalid of [{...raw, v: 3}, {v: 1 as const, sections: [{...raw.sections[0]!, cites: ["unknown"]}]}]) {
+  for (const invalid of [{...raw, v: 4}, {v: 1 as const, sections: [{...raw.sections[0]!, cites: ["unknown"]}]}]) {
     await expect(server.handlers.ares_paper_plan_set!({study: f.dir, plan: invalid})).rejects.toThrow("paper plan");
     await expect(run(["paper", "plan", "set", f.dir, "--file", "-"], {}, {http: ctx.http, readStdin: async () => JSON.stringify(invalid)})).rejects.toThrow("paper plan");
     expect(readBytesBounded(f.file, plans.PAPER_PLAN_BYTES)).toEqual(beforePlan); expect(ledger(f.dir)).toEqual(beforeLedger);
