@@ -10,7 +10,7 @@ import { serveMcp, validArguments } from "../src/mcp.ts";
 import { loadCandidates } from "../src/lit/candidates.ts";
 import { watchPath, type WatchConfig, type WatchRun } from "../src/lit/watch.ts";
 import { readLedger, sha256 } from "../src/study.ts";
-import { deferred, fakeHttp, fakeRunner, ok, status, tempDir, type Route } from "./helpers.ts";
+import { deferred, fakeHttp, unwrapShellContinuations, fakeRunner, ok, status, tempDir, type Route } from "./helpers.ts";
 
 const actor = { kind: "agent" as const, id: "synthetic" };
 const watch: WatchConfig = { v: 1, queries: [{ id: "first", query: "synthetic first", source: "openalex" }, { id: "second", query: "synthetic second", source: "openalex" }], rubric: "Synthetic display-only rubric" };
@@ -258,7 +258,7 @@ test("admitted detached failures leave a minimal class-only receipt and actionab
       expect(receipt[0]!.actor).toEqual(actor); expect(events.some(row => row.type === "lit.search")).toBe(false);
       expect(existsSync(join(f.dir, ".ares.lock"))).toBe(false);
       expect((ops.watchShow(f.dir).runs[0]! as Record<string, unknown>).cause).toBe(kind);
-      expect(lines.join("\n")).toContain(`failed (${kind})`); expect(lines.join("\n")).toContain(`ares watch show ${f.dir}`);
+      expect(lines.join("\n")).toContain(`failed (${kind})`); expect(unwrapShellContinuations(lines.join("\n"))).toContain(`ares watch show ${f.dir}`);
       expect(journal(f.dir).toString() + lines.join("\n")).not.toMatch(/private|secret|https:|response-body/);
     } finally { stderr.mockRestore(); }
   }

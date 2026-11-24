@@ -88,3 +88,8 @@ export async function fakeTarSource(request: ProcessRequest, synthetic: Uint8Arr
   const bytes = isTaskArchive(request) ? new Uint8Array(spawnSync(request.command, request.args, { maxBuffer: 128 * 1024 * 1024 }).stdout) : synthetic;
   await request.stdoutSink!(bytes);
 }
+
+/** Shell next steps wrap with a backslash-newline. Compare the copyable command. */
+export function unwrapShellContinuations(stderr: string): string {
+  return stderr.replace(/ \\\r?\n[ \t]*/g, " ");
+}

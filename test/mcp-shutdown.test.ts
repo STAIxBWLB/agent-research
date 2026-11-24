@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as ops from "../src/commands.ts";
 import { readLedger, withLock } from "../src/study.ts";
-import { deferred, fakeHttp, tempDir } from "./helpers.ts";
+import { deferred, fakeHttp, unwrapShellContinuations, tempDir } from "./helpers.ts";
 
 test("SIGTERM during an admitted MCP pass records termination and immediately unlocks only its study", async () => {
   const home = tempDir(), dir = join(home, "study"), foreign = join(home, ".ares.lock"), actor = { kind: "person" as const }, ctx = { actor, http: fakeHttp([]).http };
@@ -47,7 +47,7 @@ await runMcp(process.env, http);
     expect(events.filter(row => row.type === "watch.ran")).toHaveLength(1);
     expect(events.at(-1)!.data).toMatchObject({ ok: false, cause: "terminated", queries: [] });
     expect(events.at(-1)!.actor).toEqual({ kind: "agent", id: "synthetic-shutdown" });
-    expect(errors).toContain("ares: watch: terminated"); expect(errors).toContain(`ares watch show ${dir}`); expect(output).not.toContain("terminated");
+    expect(errors).toContain("ares: watch: terminated"); expect(unwrapShellContinuations(errors)).toContain(`ares watch show ${dir}`); expect(output).not.toContain("terminated");
     expect(readdirSync(dir, { recursive: true }).some(file => String(file).endsWith(".tmp"))).toBe(false);
     await ops.watchSet(dir, { v: 1, queries: [{ id: "after", query: "synthetic after" }] }, ctx);
     expect((ops.watchShow(dir).runs[0]! as Record<string, unknown>).cause).toBe("terminated");

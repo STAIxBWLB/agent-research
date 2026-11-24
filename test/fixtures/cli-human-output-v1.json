@@ -350,5 +350,13 @@
   "cite check": [
     " ares Cite check\n\n▸ Passed\n  ✓  No findings\n\n✓ 1 ok",
     "\u001b[1;34m ares Cite check\u001b[0m\n\n\u001b[1;35m▸ Passed\u001b[0m\n  \u001b[1;32m✓ \u001b[0m No findings\n\n\u001b[1;32m✓ 1 ok\u001b[0m"
+  ],
+  "paper render record": [
+    " ares Paper render record\n  ✓  Paper render record completed · synthetic · available",
+    "\u001b[1;34m ares Paper render record\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Paper render record completed · synthetic · available"
+  ],
+  "paper render show": [
+    " ares Paper render show\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",
+    "\u001b[1;34m ares Paper render show\u001b[0m\n  \u001b[34mId:\u001b[0m          synthetic\n  \u001b[34mState:\u001b[0m       available\n  \u001b[34mChanged:\u001b[0m     true\n  \u001b[34mStarted At:\u001b[0m  1d ago"
   ]
 }
