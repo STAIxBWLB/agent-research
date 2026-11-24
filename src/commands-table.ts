@@ -86,6 +86,8 @@ export const COMMANDS: readonly CommandSpec[] = [
   { name: "review show", summary: "Show paper reviews and open findings", example: "study", usage: "review show <dir> [--json]", mutates: false, options: json },
   { name: "review checklist", summary: "Show the paper review checklist", usage: "review checklist [--json]", mutates: false, options: json },
   { name: "paper build", summary: "Build the checked paper manuscript", example: "study", usage: "paper build <dir> [--json]", mutates: true, options: json },
+  { name: "paper render record", summary: "Record an external render of the current build", example: "study --file paper.pdf --receipt receipt.json", usage: "paper render record <dir> --file PATH --receipt PATH [--json]", mutates: true, options: { "--file": "value", "--receipt": "value", ...json } },
+  { name: "paper render show", summary: "Show whether a render matches the current build", example: "study", usage: "paper render show <dir> [--json]", mutates: false, options: json },
   { name: "paper plan set", summary: "Set the paper plan", example: "study --file paper-plan.json", usage: "paper plan set <dir> --file PATH|- [--json]", mutates: true, options: { "--file": "value", ...json } },
   { name: "paper plan show", summary: "Show the current paper plan", example: "study", usage: "paper plan show <dir> [--json]", mutates: false, options: json },
   { name: "paper check", summary: "Check paper claims and cited evidence", example: "study", usage: "paper check <dir> [--json]", mutates: false, options: json },
@@ -150,6 +152,7 @@ export const FLAG_DESCRIPTIONS: Readonly<Record<string, string>> = {
   "--pr": "Link the pull request for acceptance",
   "--question": "Set the research question",
   "--reason": "Record the reason for the decision",
+  "--receipt": "Read the renderer receipt JSON",
   "--repo": "Select the candidate repository",
   "--retention-cap-bytes": "Set the study storage cap in bytes",
   "--retry": "Retry the selected attempt ID",
@@ -180,6 +183,7 @@ export const FLAG_OVERRIDES: Readonly<Record<string, string>> = {
   "lit list --limit": "Return 1 to 500 candidates",
   "lit card --file": "Read the extraction card JSON",
   "harness import --file": "Read fixture JSON from a file or stdin",
+  "paper render record --file": "Read the rendered document file",
 };
 
 export function flagDescription(spec: CommandSpec, flag: string): string | undefined {

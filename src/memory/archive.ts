@@ -2,7 +2,9 @@ import {recheckLessonExports, boundLessonExportBatch} from "../harness/lesson-ca
 import type {SkillCheckOptions} from "./skill-check.ts";
 import { ACCEPT_ARTIFACTS } from "../autonomy.ts";
 import { requireCopilotAccept } from "../copilot.ts";
-import { commit, prepareCommit, openStudy, plain, sha256, type Actor, type LedgerEvent } from "../study.ts";
+import { commit, prepareCommit, openStudy, plain, readLedger, sha256, type Actor, type LedgerEvent } from "../study.ts";
+import { renderSummary } from "../paper/render.ts";
+const readLedgerSafe = (dir: string) => { try { return readLedger(dir); } catch { return []; } };
 import { canonical } from "../plan/state.ts";
 import { createAmemClient, type AmemNote } from "./amem.ts";
 import { deriveLessons, readLessonSources } from "./lessons.ts";
@@ -10,7 +12,7 @@ import type { ProcessRunner } from "../exp/executor.ts";
 
 export const ARCHIVE_NOTES = 200;
 export interface ArchiveReceipt { sha256: string; id: string }
-export interface ArchivePreview { recovery?: string; fingerprint: string; notes: { sha256: string; note: AmemNote }[] }
+export interface ArchivePreview { recovery?: string; fingerprint: string; notes: { sha256: string; note: AmemNote }[]; render?: { current: boolean; reason: string | null } }
 export interface ArchiveResult extends ArchivePreview { written: ArchiveReceipt[]; remaining: number }
 /** Carries receipt progress for adapters; CLI/MCP retain the existing retry instruction verbatim. */
 export class ArchivePartialError extends Error {
@@ -43,7 +45,9 @@ export function previewArchive(dir: string): ArchivePreview {
   const sources = readLessonSources(dir), notes = deriveLessons(sources), known = new Set(archiveReceiptIndex(sources.events).keys());
   const unique = new Map(notes.map(note => [sha256(canonical(note)), note]));
   const pending = [...unique].filter(([hash]) => !known.has(hash)).map(([sha256, note]) => ({ sha256, note }));
-  return {fingerprint: sha256(canonical(notes)), notes: pending, ...(sources.contrastNotes?.length ? {recovery: "Receipt-only dedupe: if an earlier archive was interrupted after amem add, operator reconciliation is required before retry; unreceipted writes cannot be detected and may duplicate"} : {})};
+  // Render status is display-only and never enters the fingerprint; shown once a render was recorded (#162).
+  const render = readLedgerSafe(dir).some(event => event.type === "paper.rendered") ? { render: renderSummary(dir) } : {};
+  return {fingerprint: sha256(canonical(notes)), notes: pending, ...render, ...(sources.contrastNotes?.length ? {recovery: "Receipt-only dedupe: if an earlier archive was interrupted after amem add, operator reconciliation is required before retry; unreceipted writes cannot be detected and may duplicate"} : {})};
 }
 /** Preview and confirmed export use the same note/source bounds and ordered prefix. */
 export function archiveExportBatch(dir: string, notes: ArchivePreview["notes"]) {

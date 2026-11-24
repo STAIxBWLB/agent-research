@@ -48,11 +48,15 @@ export const sha256 = (data: string | Uint8Array) => createHash("sha256").update
  * Write a file by temp + fsync + rename so readers never see a partial file. `maxBytes` must be the bound the
  * file's reader uses, so nothing is written that the tool cannot read back.
  */
-export function writeAtomic(path: string, text: string, maxBytes: number, mode = 0o644): void {
+export function writeAtomic(path: string, text: string | Uint8Array, maxBytes: number, mode = 0o644): void {
   assertWritable(text, maxBytes, path);
   const tmp = `${path}.${randomUUID()}.tmp`;
   const fd = openSync(tmp, "wx", mode);
-  try { writeSync(fd, text); fsyncSync(fd); } finally { closeSync(fd); }
+  try {
+    if (typeof text === "string") writeSync(fd, text);
+    else for (let offset = 0; offset < text.length;) offset += writeSync(fd, text, offset, text.length - offset);
+    fsyncSync(fd);
+  } finally { closeSync(fd); }
   try { renameSync(tmp, path); } catch (error) { try { unlinkSync(tmp); } catch { /* already gone */ } throw error; }
 }
 
@@ -96,7 +100,7 @@ export function readJsonFile(path: string, maxBytes: number): unknown {
   try { return JSON.parse(text); } catch { throw new Error(`${path}: not valid JSON`); }
 }
 /** Refuse a write that the matching bounded read could not load back. */
-export function assertWritable(text: string, maxBytes: number, what: string): void {
+export function assertWritable(text: string | Uint8Array, maxBytes: number, what: string): void {
   if (Buffer.byteLength(text) > maxBytes) throw new Error(`${what} would exceed ${maxBytes} bytes`);
 }
 
@@ -210,7 +214,8 @@ export async function withLock<T>(dir: string, fn: (permit: StudyReadLock) => Pr
 }
 
 export interface PendingEvent { actor: Actor; type: string; data: Record<string, unknown> }
-export type FileWrite = [path: string, text: string, maxBytes: number];
+/** Text or exact bytes (for example a recorded render); either is bounded by its reader's limit. */
+export type FileWrite = [path: string, text: string | Uint8Array, maxBytes: number];
 
 /** Validate command capacity without writing; callers can reserve receipt space before outward effects. */
 export function prepareCommit(dir: string, files: FileWrite[], pending: PendingEvent[]): { events: LedgerEvent[]; lines: string[] } {
