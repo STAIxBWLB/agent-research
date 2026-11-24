@@ -171,7 +171,7 @@ function checkReport(report: Report, command: string, value: Row, context: Outpu
   report.summary(counts);
 }
 
-const CHECKS = new Set(["paper check", "cite check", "executor check", "lesson check", "skill check", "experience check", "watch run"]);
+const CHECKS = new Set(["paper check", "cite check", "executor check", "renderer check", "lesson check", "skill check", "experience check", "watch run"]);
 const VIEW_NAMES = new Set(["lessons", "lit flow", "lit queries", "retention inspect", "review checklist", "manifest", "lineage compare", "executor inputs hash"]);
 const PREVIEWS = new Set(["archive", "retention prune", "lit card export", "harness close", "harness adopt"]);
 const COMPLETED: Readonly<Record<string, string>> = {
@@ -181,7 +181,7 @@ const COMPLETED: Readonly<Record<string, string>> = {
   "gate approve": "Approved the gate", "gate reject": "Rejected the gate",
   "lit search": "Recorded the literature search", "lit screen": "Recorded the screening decision",
   "lit verify": "Checked the selected identifiers", "lit card": "Saved the extraction card", "lit bib": "Built the verified bibliography",
-  "plan set": "Saved the study plan", "watch set": "Saved the watch configuration", "paper build": "Built the checked manuscript",
+  "plan set": "Saved the study plan", "watch set": "Saved the watch configuration", "paper build": "Built the checked manuscript", "renderer set": "Saved the renderer for this machine", "paper render record": "Recorded the render",
   "paper plan set": "Saved the paper plan", "review add": "Recorded the review", "review resolve": "Resolved the review finding",
   "attempt run": "Recorded the attempt", "attempt cancel": "Cancelled the attempt", "attempt reconcile": "Reconciled the attempts",
   "console add": "Registered the study", "console remove": "Removed the study registration",
@@ -192,7 +192,7 @@ const NEXT: Readonly<Record<string, string[]>> = {
   init: ["status"], scope: ["gate", "list"], protocol: ["executor", "check"], "protocol set": ["executor", "check"],
   "executor set": ["executor", "check"], "lit search": ["lit", "list"], "lit screen": ["lit", "list"], "lit verify": ["lit", "list"],
   "plan set": ["plan", "show"], "watch set": ["watch", "show"], "paper plan set": ["paper", "plan", "show"],
-  "paper build": ["review", "show"], "review add": ["review", "show"], selection: ["investigate", "show"],
+  "paper build": ["review", "show"], "renderer set": ["renderer", "check"], "paper render record": ["paper", "render", "show"], "review add": ["review", "show"], selection: ["investigate", "show"],
   "investigate close": ["investigate", "show"], "attempt reconcile": ["attempt", "list"], "gate approve": ["gate", "list"],
 };
 
@@ -375,7 +375,7 @@ const HELP_GROUPS = [
   ["Experiments", "protocol", "executor", "attempt", "idea", "investigate", "ablate", "posthoc", "final", "selection", "retention", "lineage"],
   ["Harness and experience", "harness", "experience"],
   ["Memory", "archive", "lesson", "lessons", "skill"],
-  ["Paper and review", "paper", "review", "cite"],
+  ["Paper and review", "paper", "renderer", "review", "cite"],
   ["Integration", "setup", "console", "manifest", "mcp"],
 ] as const;
 
