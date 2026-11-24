@@ -1,3 +1,4 @@
+import { inspectFigures, type FigureFindingCode, type ImageLink } from "./figures.ts";
 import { CopilotAcceptError } from "../copilot.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -17,12 +18,12 @@ import { paperPointFindings, type PointFindingCode } from "./points.ts";
 import { paperPlanFindings, type ScopeFindingCode } from "./scopes.ts";
 
 export const MAX_CODE_NUMBERS = 500;
-export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "unaccepted-draft" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result" | HygieneCode | ScopeFindingCode | PointFindingCode | DependencyFindingCode; severity: "blocking" | "warning"; section?: string[]; sectionId?: string; pointId?: string; dependencyId?: string; start: number; end: number; line: number; column: number; message: string }
+export interface PaperFinding { code: "bare-number" | "unresolved-ref" | "unaccepted-draft" | "bad-format" | "unknown-citation" | "unverified-citation" | "missing-negative-result" | HygieneCode | ScopeFindingCode | PointFindingCode | DependencyFindingCode | FigureFindingCode; severity: "blocking" | "warning"; section?: string[]; sectionId?: string; pointId?: string; dependencyId?: string; figureId?: string; start: number; end: number; line: number; column: number; message: string }
 function blank(text: string, mask: Uint8Array): string { return text.split("").map((char, index) => mask[index] && char !== "\n" && char !== "\r" ? " " : char).join(""); }
 function mark(mask: Uint8Array, start: number, end: number) { mask.fill(1, start, end); }
 function escaped(text: string, index: number): boolean { let slashes = 0; while (index > 0 && text[--index] === "\\") slashes++; return slashes % 2 === 1; }
 /** Masks syntax-only destinations and code while retaining original offsets. Visible link labels remain prose. */
-function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Array; code: Uint8Array; hidden: Uint8Array; headingHidden: Uint8Array; anchorHidden: Uint8Array } {
+function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Array; code: Uint8Array; hidden: Uint8Array; headingHidden: Uint8Array; anchorHidden: Uint8Array; images: ImageLink[] } {
   const mask = new Uint8Array(text.length), protectedText = new Uint8Array(text.length), tokens = parsePlaceholders(text);
   for (const token of [...tokens.placeholders, ...tokens.findings]) mark(protectedText, token.start, token.end);
   let fence: { char: string; length: number } | undefined, paragraph = false, indented = false;
@@ -75,7 +76,11 @@ function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Arra
     if (close !== undefined) { mark(mask, runs[i]!.index, runs[close]!.index + runs[close]![0].length); i = close; }
   }
   const code = mask.slice(), anchorHidden = code.slice();
-  const labels: number[] = [];
+  const labels: number[] = [], images: ImageLink[] = [];
+  const referenceImages: {label: string; start: number; end: number}[] = [];
+  const references = new Map<string, string>();
+  const referenceLabel = /\[([^\[\]\n]*)\]/y;
+  const referenceKey = (label: string) => label.trim().replace(/\s+/g, " ").toLowerCase();
   for (let i = 0; i < text.length; i++) {
     if (mask[i] || protectedText[i] || knownHidden?.[i] || (text[i] !== "<" && text[i] !== "]" && text[i] !== "[") || escaped(text, i)) continue;
     if (text[i] === "[") { labels.push(i); continue; }
@@ -85,7 +90,16 @@ function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Arra
     }
     if (text[i] !== "]") continue;
     const label = labels.pop();
-    if (label === undefined || text[i + 1] !== "(") continue;
+    if (label === undefined) continue;
+    const image = label > 0 && text[label - 1] === "!" && !escaped(text, label - 1);
+    if (text[i + 1] !== "(") {
+      if (image) {
+        referenceLabel.lastIndex = i + 1;
+        const reference = referenceLabel.exec(text);
+        referenceImages.push({label: referenceKey(reference?.[1] || text.slice(label + 1, i)), start: label - 1, end: i + 1 + (reference?.[0].length ?? 0)});
+      }
+      continue;
+    }
     let start = i + 2; while (/\s/.test(text[start] ?? "") && start < text.length) start++;
     let end = start, depth = 0;
     if (text[start] === "<") { end = text.indexOf(">", start + 1); if (end < 0) continue; end++; }
@@ -105,7 +119,10 @@ function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Arra
       const quote = text[tail++]!; while (tail < text.length && (text[tail] !== quote || escaped(text, tail))) tail++;
       if (tail >= text.length) continue; tail++; while (/\s/.test(text[tail] ?? "") && tail < text.length) tail++;
     }
-    if (text[tail] === ")") { mark(mask, start, end); mark(anchorHidden, i + 1, tail + 1); }
+    if (text[tail] === ")") {
+      mark(mask, start, end); mark(anchorHidden, i + 1, tail + 1);
+      if (image) images.push({target: text.slice(start, end), start: label - 1, end: tail + 1});
+    }
   }
   // Point anchors are comments in prose, never examples in syntax-only destinations/titles or placeholders.
   for (let i = 0; i < mask.length; i++) if (mask[i] || protectedText[i]) anchorHidden[i] = 1;
@@ -114,17 +131,23 @@ function markdownMask(text: string, knownHidden?: Uint8Array): { mask: Uint8Arra
     if (!code[comment.index] && !protectedText[comment.index]) { mark(mask, comment.index, comment.index + comment[0].length); mark(hidden, comment.index, comment.index + comment[0].length); hasComment = true; }
   }
   // Reference definitions do not count as visible negative-result prose; labels/titles still get numeric checks.
-  for (const match of text.matchAll(/^ {0,3}\[[^\]\n]+\]:[ \t]*(<[^>\n]*>|[^\s]+)(?:[ \t]|$)/gm)) {
-    const target = match[1]!, start = match.index + match[0].lastIndexOf(target);
+  for (const match of text.matchAll(/^ {0,3}\[([^\]\n]+)\]:[ \t]*(<[^>\n]*>|[^\s]+)(?:[ \t]|$)/gm)) {
+    const target = match[2]!, start = match.index + match[0].lastIndexOf(target);
     if (!mask[start] && !protectedText[start]) {
       mark(mask, start, start + target.length);
+      const key = referenceKey(match[1]!);
+      if (!references.has(key)) references.set(key, target);
       const lineEnd = text.indexOf("\n", match.index); mark(hidden, match.index, lineEnd < 0 ? text.length : lineEnd); mark(anchorHidden, match.index, lineEnd < 0 ? text.length : lineEnd);
     }
   }
   // Reclassify once with non-code comments excluded, so a fence inside a comment cannot hide later prose.
   if (!knownHidden && hasComment) return markdownMask(text, hidden);
   const headingHidden = blockCode.slice(); for (let i = 0; i < hidden.length; i++) if (hidden[i]) headingHidden[i] = 1;
-  return { mask, code, hidden, headingHidden, anchorHidden };
+  for (const reference of referenceImages) {
+    const target = references.get(reference.label);
+    if (target !== undefined) images.push({target, start: reference.start, end: reference.end});
+  }
+  return { mask, code, hidden, headingHidden, anchorHidden, images };
 }
 export function manuscriptPath(dir: string): string { return join(dir, "paper", "manuscript.md"); }
 export function checkPaper(dirArg: string) {
@@ -196,6 +219,8 @@ export function checkPaper(dirArg: string) {
   if (plan) for (const hit of paperPlanFindings(manuscript, masks.headingHidden, citationText, plan.plan, candidates)) findings.push({...hit, ...location(hit.start)});
   if (plan) for (const hit of paperPointFindings(dir, manuscript, masks.anchorHidden, masks.headingHidden, citationText, plan.plan)) findings.push({...hit, ...location(hit.start)});
   if (plan) for (const hit of paperDependencyFindings(citationText, plan.plan, candidates, protocolMetrics)) findings.push({...hit, ...location(hit.start)});
+  const figures = plan?.plan.figures === undefined ? undefined : inspectFigures(dir, plan.plan.figures, masks.images);
+  if (figures) for (const hit of figures.findings) findings.push({ ...hit, ...location(hit.start) });
   let rendered = "", cursor = 0;
   for (const entry of resolution.placeholders) { rendered += manuscript.slice(cursor, entry.placeholder.start) + entry.rendered; cursor = entry.placeholder.end; }
   rendered += manuscript.slice(cursor);
@@ -209,5 +234,5 @@ export function checkPaper(dirArg: string) {
     catch (error) { unreadableCards.push({ citekey: key, id: candidate!.id, message: error instanceof Error ? error.message : "card unreadable; record it again with ares lit card" }); return []; }
     return card?.reused ? [{ citekey: key, id: candidate!.id, vault: card.reused.vault, note: card.reused.note, at: card.reused.at, provenance: card.reused.provenance }] : [];
   });
-  return { ok: !findings.some(f => f.severity === "blocking"), settings, manuscriptSha256: sha256(manuscript), ...(plan ? {planSha256: plan.sha256} : {}), rendered, placeholders: resolution.placeholders, findings: findings.sort((a, b) => a.start - b.start || a.code.localeCompare(b.code)), literals: resolution.literals, codeNumbers, codeNumberCount, citations, ...(reusedCards.length ? { reusedCards } : {}), ...(unreadableCards.length ? { unreadableCards } : {}) };
+  return { ok: !findings.some(f => f.severity === "blocking"), settings, manuscriptSha256: sha256(manuscript), ...(plan ? {planSha256: plan.sha256} : {}), rendered, ...(figures ? { figures: figures.evidence } : {}), placeholders: resolution.placeholders, findings: findings.sort((a, b) => a.start - b.start || a.code.localeCompare(b.code)), literals: resolution.literals, codeNumbers, codeNumberCount, citations, ...(reusedCards.length ? { reusedCards } : {}), ...(unreadableCards.length ? { unreadableCards } : {}) };
 }

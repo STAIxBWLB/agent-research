@@ -1,10 +1,11 @@
 import { readCard } from "../lit/cards.ts";
-import { ATTEMPT_BYTES, validateAttemptRecord } from "../exp/attempts.ts";
+import { ATTEMPT_BYTES, validateAttemptRecord, type Attempt } from "../exp/attempts.ts";
 import { lstatSync, opendirSync } from "node:fs";
 import { join } from "node:path";
-import { openStudy, readTextBounded } from "../study.ts";
+import { openStudy, plain, readTextBounded } from "../study.ts";
 
-export interface PointEvidenceResolution { resolved: boolean; reason?: string; code?: "run-limit" }
+interface EvidenceArtifact { sha256: string; bytes: number; retained?: { attemptId: string; stage: string; sha256: string } }
+export interface PointEvidenceResolution { resolved: boolean; reason?: string; code?: "run-limit"; artifacts?: EvidenceArtifact[] }
 /** Only typed local failure classes may become advice; never propagate a source's free-text error. */
 export function pointEvidenceAdvice(resolution: PointEvidenceResolution): string {
   return resolution.code === "run-limit" ? "more than 4096 run directories; archive the study before checking point evidence" : "restore the referenced card or attempt record, or revise the point evidence";
@@ -15,10 +16,10 @@ function physicalDirectory(file: string): boolean {
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
 }
 /** Read only the addressed payload; unrelated attempts never enter point planning or checking. */
-function existingAttempt(dir: string, wanted: string): boolean {
+function existingAttempt(dir: string, wanted: string): Attempt | undefined {
   const {study} = openStudy(dir), runs = join(dir, "runs");
-  if (study.mode !== "experiment" || !physicalDirectory(runs)) return false;
-  const directory = opendirSync(runs); let count = 0, found = false;
+  if (study.mode !== "experiment" || !physicalDirectory(runs)) return undefined;
+  const directory = opendirSync(runs); let count = 0, found: Attempt | undefined;
   try {
     for (let entry = directory.readSync(); entry; entry = directory.readSync()) {
       if (++count > 4096) throw new PointEvidenceBound("point evidence: more than 4096 run directories; archive the study before checking point evidence");
@@ -30,18 +31,31 @@ function existingAttempt(dir: string, wanted: string): boolean {
       try {
         const stat = lstatSync(file);
         if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("unsafe attempt record");
-        if (found) return false; // The address has no run component; duplicate matches are ambiguous.
+        if (found) return undefined; // The address has no run component; duplicate matches are ambiguous.
         raw = readTextBounded(file, ATTEMPT_BYTES, {noFollow: true});
       }
       catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
-      if (validateAttemptRecord(JSON.parse(raw), entry.name, wanted).studyId !== study.id) return false;
-      found = true;
+      found = validateAttemptRecord(JSON.parse(raw), entry.name, wanted);
+      if (found.studyId !== study.id) return undefined;
     }
     return found;
   } finally { directory.closeSync(); }
 }
+function attemptArtifacts(attempt: Attempt): EvidenceArtifact[] {
+  const files = (raw: unknown, retained?: EvidenceArtifact["retained"]): EvidenceArtifact[] => {
+    if (!Array.isArray(raw)) return [];
+    return raw.flatMap(output => plain(output) && typeof output.sha256 === "string" && /^[a-f0-9]{64}$/.test(output.sha256)
+      && typeof output.bytes === "number" && Number.isSafeInteger(output.bytes) && output.bytes >= 0
+      ? [{sha256: output.sha256, bytes: output.bytes, ...(retained ? {retained} : {})}] : []);
+  };
+  if (!attempt.pipeline) return files(attempt.outputs);
+  return [
+    ...files(attempt.stages.evaluator?.evidence?.outputs),
+    ...attempt.pipeline.completed.flatMap(stage => files(stage.record.evidence?.outputs, stage.ref)),
+  ];
+}
 /** Existence and record integrity only, never support, correctness or a successful outcome. */
-export function resolvePointEvidence(dir: string, reference: string): PointEvidenceResolution {
+export function resolvePointEvidence(dir: string, reference: string, includeArtifacts = false): PointEvidenceResolution {
   if (typeof reference !== "string" || Buffer.byteLength(reference) > 4096 || reference.includes("\0")) return {resolved: false, reason: "invalid local evidence address; use card:<paper-id> or attempt:<16-hex-id>"};
   try {
     if (reference.startsWith("card:")) {
@@ -52,8 +66,9 @@ export function resolvePointEvidence(dir: string, reference: string): PointEvide
     if (reference.startsWith("attempt:")) {
       const id = reference.slice(8);
       if (!/^[a-f0-9]{16}$/.test(id)) return {resolved: false, reason: "attempt address is invalid; select an id from ares attempt list"};
-      if (!existingAttempt(dir, id)) return {resolved: false, reason: "attempt is missing, ambiguous or belongs to another source; select a current-study record from ares attempt list"};
-      return {resolved: true};
+      const attempt = existingAttempt(dir, id);
+      if (!attempt) return {resolved: false, reason: "attempt is missing, ambiguous or belongs to another source; select a current-study record from ares attempt list"};
+      return {resolved: true, ...(includeArtifacts ? {artifacts: attemptArtifacts(attempt)} : {})};
     }
   } catch (error) {
     if (error instanceof PointEvidenceBound) return {resolved: false, code: "run-limit", reason: error.message};

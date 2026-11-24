@@ -1,3 +1,4 @@
+import { figureCoverage, validateFigures, type PaperFigure } from "./figures.ts";
 import { resolvePointEvidence, pointEvidenceAdvice, type PointEvidenceResolution } from "./point-evidence.ts";
 import { lstatSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -9,10 +10,10 @@ export type PaperDependencyKind = typeof PAPER_DEPENDENCY_KINDS[number];
 export interface PaperPoint { id: string; claim: string; requires: string[]; evidence?: string[] }
 export interface PaperDependency { id: string; kind: PaperDependencyKind; name: string; cites?: string[]; waiver?: string }
 export interface PaperSection { id: string; heading: string; cites: string[]; points?: PaperPoint[] }
-export interface PaperPlan { v: 1 | 2 | 3; sections: PaperSection[]; dependencies?: PaperDependency[] }
+export interface PaperPlan { v: 1 | 2 | 3; sections: PaperSection[]; dependencies?: PaperDependency[]; figures?: PaperFigure[] }
 export interface PaperPlanSnapshot { plan: PaperPlan; sha256: string }
 export interface PaperDependencyCoverage { cited: number; waived: number; total: number }
-export interface PaperPlanView { plan: PaperPlan | null; coverage: { routed: number; total: number }; dependencyCoverage: PaperDependencyCoverage }
+export interface PaperPlanView { plan: PaperPlan | null; coverage: { routed: number; total: number }; dependencyCoverage: PaperDependencyCoverage; figureCoverage?: ReturnType<typeof figureCoverage> }
 export const PAPER_PLAN_BYTES = 65_536, PAPER_PLAN_SECTIONS = 64, PAPER_PLAN_CITES = 300;
 export const PAPER_PLAN_POINTS = 40, PAPER_POINT_CLAIM_CHARACTERS = 500, PAPER_POINT_EVIDENCE = 64, PAPER_POINT_EVIDENCE_BYTES = 4096;
 export const PAPER_PLAN_DEPENDENCIES = 200, PAPER_DEPENDENCY_WAIVER_BYTES = 500;
@@ -116,11 +117,13 @@ function dependencies(raw: unknown, byKey: Map<string, Candidate[]>, verifiedKey
   });
 }
 export function validatePaperPlan(raw: unknown, candidates: Candidate[], resolveEvidence?: PaperPointEvidenceResolver, deferDependencyCitations = false): PaperPlan {
-  const value = object(raw, ["v", "sections", "dependencies"], "plan");
+  const value = object(raw, ["v", "sections", "dependencies", "figures"], "plan");
   if (value.v !== undefined && value.v !== 1 && value.v !== 2 && value.v !== 3) invalid("unsupported plan version; use a compatible version-1, version-2 or version-3 plan reader, keeping unsupported plan bytes unchanged");
   if (!Array.isArray(value.sections) || value.sections.length > PAPER_PLAN_SECTIONS) invalid("sections must be an array of at most 64 sections");
   if (value.v === 1 && value.sections.some(section => plain(section) && Array.isArray(section.points) && section.points.length)) invalid("version-1 plan cannot contain writing points; omit v or use v: 2 for a points plan");
   if ((value.v === 1 || value.v === 2) && Array.isArray(value.dependencies) && value.dependencies.length) invalid(`version-${value.v} plan cannot contain experiment dependencies; omit v or use v: 3 for a dependencies plan`);
+  if ((value.v === 1 || value.v === 2) && value.figures !== undefined) invalid("figures require paper plan v: 3");
+  const figures = value.figures === undefined ? undefined : validateFigures(value.figures, pointReference);
   const pointIds = new Set<string>(), resolutions = new Map<string, PointEvidenceResolution>();
   const byKey = candidateKeys(candidates), ids = new Set<string>(), headings = new Set<string>(), verifiedKeys = new Set<string>();
   const sections = value.sections.map((rawSection): PaperSection => {
@@ -134,7 +137,7 @@ export function validatePaperPlan(raw: unknown, candidates: Candidate[], resolve
     return { id: section.id, heading: section.heading, cites, ...(pointList.length ? { points: pointList } : {}) };
   });
   const dependencyList = dependencies(value.dependencies, byKey, verifiedKeys, !deferDependencyCitations);
-  const plan: PaperPlan = { v: value.v === 3 || dependencyList.length ? 3 : pointIds.size ? 2 : 1, sections, ...(dependencyList.length ? { dependencies: dependencyList } : {}) };
+  const plan: PaperPlan = { v: value.v === 3 || dependencyList.length || figures !== undefined ? 3 : pointIds.size ? 2 : 1, sections, ...(dependencyList.length ? { dependencies: dependencyList } : {}), ...(figures === undefined ? {} : { figures }) };
   if (Buffer.byteLength(JSON.stringify(plan, null, 2) + "\n") > PAPER_PLAN_BYTES) invalid("formatted plan exceeds the 64 KiB bound; reduce sections, dependencies, citation keys or heading lengths");
   return plan;
 }
@@ -205,5 +208,5 @@ export function setPaperPlan(dirArg: string, raw: unknown, actor: Actor): PaperP
 }
 export function showPaperPlan(dirArg: string): PaperPlanView {
   const { dir } = openStudy(dirArg), candidates = currentCandidates(dir), plan = readPaperPlan(dir, candidates);
-  return { plan: plan ?? null, coverage: paperPlanCoverage(plan ?? { v: 1, sections: [] }, candidates), dependencyCoverage: paperDependencyCoverage(plan ?? { v: 1, sections: [] }) };
+  return { plan: plan ?? null, coverage: paperPlanCoverage(plan ?? { v: 1, sections: [] }, candidates), dependencyCoverage: paperDependencyCoverage(plan ?? { v: 1, sections: [] }), ...(plan?.figures === undefined ? {} : { figureCoverage: figureCoverage(dir, plan.figures) }) };
 }

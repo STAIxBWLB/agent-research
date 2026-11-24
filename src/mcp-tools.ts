@@ -1,3 +1,4 @@
+import { PAPER_FIGURES, PAPER_FIGURE_PATH_BYTES, PAPER_FIGURE_WAIVER_BYTES } from "./paper/figures.ts";
 import { STAGE_REUSE_CONTRACT_SCHEMA } from "./exp/reuse-contract.ts";
 import {HARNESS_MODEL_BYTES} from "./harness/limits.ts";
 import { PROVENANCE_KINDS, type ExecutionReferenceV1 } from "./provenance.ts";
@@ -33,6 +34,12 @@ const PAPER_DEPENDENCY = obj({
   cites: {type: "array", minItems: 1, maxItems: PAPER_PLAN_CITES, uniqueItems: true, items: text(PAPER_PLAN_BYTES)},
   waiver: text(PAPER_DEPENDENCY_WAIVER_BYTES),
 }, ["id", "kind", "name"]);
+const PAPER_FIGURE = obj({
+  id: {...text(64), pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+  file: text(PAPER_FIGURE_PATH_BYTES), kind: {type: "string", enum: ["plot", "diagram"]},
+  evidence: {type: "array", minItems: 1, maxItems: PAPER_POINT_EVIDENCE, items: text(PAPER_POINT_EVIDENCE_BYTES)},
+  waiver: text(PAPER_FIGURE_WAIVER_BYTES),
+}, ["id", "file", "kind"]);
 const PAPER_PLAN = obj({v: {type: "integer", enum: [1, 2, 3]}, sections: {type: "array", maxItems: PAPER_PLAN_SECTIONS, items: obj({
   id: {...text(64), pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$"}, heading: text(PAPER_PLAN_BYTES),
   cites: {type: "array", maxItems: PAPER_PLAN_CITES, uniqueItems: true, items: text(PAPER_PLAN_BYTES)},
@@ -43,7 +50,7 @@ const PAPER_PLAN = obj({v: {type: "integer", enum: [1, 2, 3]}, sections: {type: 
     requires: {type: "array", maxItems: PAPER_PLAN_CITES, uniqueItems: true, items: text(PAPER_PLAN_BYTES)},
     evidence: {type: "array", maxItems: PAPER_POINT_EVIDENCE, items: {...text(PAPER_POINT_EVIDENCE_BYTES), description: "Existing current-study card:<paper-id> or attempt:<16-hex-id>, at most 4096 UTF-8 bytes; existence only"}},
   }, ["id", "claim", "requires"])},
-}, ["id", "heading", "cites"])}, dependencies: {type: "array", maxItems: PAPER_PLAN_DEPENDENCIES, items: PAPER_DEPENDENCY}}, ["sections"]);
+}, ["id", "heading", "cites"])}, dependencies: {type: "array", maxItems: PAPER_PLAN_DEPENDENCIES, items: PAPER_DEPENDENCY}, figures: {type: "array", maxItems: PAPER_FIGURES, items: PAPER_FIGURE}}, ["sections"]);
 const EXECUTION_REFERENCE = obj({ v: { type: "integer", enum: [1] }, tool: { type: "string", enum: ["ares"] }, projectKey: text(256), kind: { type: "string", enum: [...PROVENANCE_KINDS] }, id: text(256), revision: text(128), sha256: { type: "string", minLength: 64, maxLength: 64 } }, ["v", "tool", "projectKey", "kind", "id"]);
 const LINEAGE_ATTEMPTS = { type: "array", minItems: 1, maxItems: 8, items: { ...text(16), minLength: 16 } };
 const LINEAGE_CANDIDATES = { type: "array", minItems: 1, maxItems: 8, items: { ...text(40), minLength: 40 } };

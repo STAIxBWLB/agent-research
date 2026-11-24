@@ -340,6 +340,8 @@ Final here means reserved seeds, the frozen Git snapshot and the sealed evaluato
 
 ## Paper and review workflow
 
+Optional paper plan v3 figures bind local files under paper/ to the build. Declare each image by id, file and kind; plots need current-study card/attempt references or a written waiver, and diagrams need neither. Paper check blocks undeclared or missing assets and unresolved plot evidence. Builds record figure hashes and provenance in paper evidence v3, so changed figures reopen review and make old render receipts stale. Each file is capped at 16 MiB, with at most 100 figures. An exact match to recorded artifact bytes is labelled `artifact`; a valid evidence pointer without a byte match is labelled `referenced`. These labels describe the source relationship.
+
 A4 renders Markdown from recorded evidence; it does not write a manuscript or run reviewers for you. Write `paper/manuscript.md` (at most 2 MiB) and put measured values in `{{n:REF}}` placeholders, optionally `{{n:REF|.Nf}}` with N from 0 to 6. At most 5,000 numeric and literal placeholders are allowed together. Use `{{lit:TEXT}}` for a reviewer-visible literal such as a year or cohort label. Every literal is listed by the check; it is an explicit exception, not a measured-value match.
 
 | Ref | Closed source |

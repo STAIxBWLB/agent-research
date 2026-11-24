@@ -383,8 +383,8 @@ function closures(dir: string, graph: Graph, study: ExecutionReferenceV1): void 
     if (matches) {
       try {
         record.raw = fileJson(source, record.file);
-        if (record.raw && record.family === "paper" && (record.raw.v === 1 || record.raw.v === 2)) record.nativeVersion = paperEvidenceVersion(record.raw);
-        if (!record.raw || (record.raw.v !== 1 && !(record.family === "paper" && record.raw.v === 2))) { state = "unavailable"; graph.issue("unsupported-closed-version", record.ref); }
+        if (record.raw && record.family === "paper" && (record.raw.v === 1 || record.raw.v === 2 || record.raw.v === 3)) record.nativeVersion = paperEvidenceVersion(record.raw);
+        if (!record.raw || (record.raw.v !== 1 && !(record.family === "paper" && (record.raw.v === 2 || record.raw.v === 3)))) { state = "unavailable"; graph.issue("unsupported-closed-version", record.ref); }
         else if (record.family === "paper" ? !Array.isArray(record.raw.placeholders) || typeof record.raw.manuscriptSha256 !== "string" : typeof record.raw.inputsSha256 !== "string" || record.family === "final" && !["qualified", "not_qualified"].includes(String(record.raw.status))) { state = "corrupt"; graph.issue("malformed-closed-artifact", record.ref); }
         else if (record.latest && !(record.family === "investigate" && record.ref.id !== selected)) {
           try {
