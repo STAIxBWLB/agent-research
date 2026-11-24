@@ -14,6 +14,7 @@ import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, r
 import { canonical, designBinding, sameProtocolInputs, frozenProtocol, validateStoredProtocol, protocolHash, readProtocol, readDesign, type Protocol } from "./protocol.ts";
 import { buildContainerArgs, probeGpuAdmission, GpuAdmissionDeferred, validateGpuDevices, validateContainerInputSources, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, stageContainerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
 import { resolveSnapshot, transferSnapshot, transferTask } from "./snapshot.ts";
+import { screenCandidate, type ScreenSummary } from "./screen.ts";
 import { collectEvaluation as defaultEvaluationCollector, collectStageEvidence as defaultStageCollector, EvidenceError, MetricsError, OUTPUT_METADATA_BYTES, outputBudget, type StageEvidence } from "./metrics.ts";
 
 export type AttemptStatus = "running" | "succeeded" | "failed" | "cancelled" | "unknown";
@@ -609,6 +610,17 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   validateContainerInputSources(protocol, { snapshot: posix.join(inputRoot, "snapshot"), output: posix.join(inputRoot, "output"), evaluator: posix.join(inputRoot, "task", "evaluator"), result: posix.join(inputRoot, "result") });
   const existingAttempt = await withLock(dir, () => load(dir).find(a => a.id === wanted)), existing = existingAttempt !== undefined;
   if (existingAttempt) existingReuseControls(existingAttempt, options);
+  // The screen runs before any budget, record or container exists, so a hit costs nothing but the read.
+  let screened: ScreenSummary | undefined;
+  if (!existing && definition.screen !== undefined) {
+    const { hits, summary } = await screenCandidate(options.repo, snapshot.commit, definition.screen, protocol.inputs ?? {}, executor, ctx.runner ?? spawnRunner);
+    if (hits.length) {
+      // Ledger only: the rule and the candidate path stay, the matched text never does.
+      await withLock(dir, () => commit(dir, [], [{ actor: ctx.actor, type: "attempt.screen.refused", data: { commit: snapshot.commit, hits } }]));
+      throw new Error(`attempt screen: candidate commit ${snapshot.commit} carries material held out from the candidate (${hits.map(hit => `${hit.rule} ${hit.path}${hit.line === undefined ? "" : `:${hit.line}`}`).join(", ")}); remove that material from the candidate commit, or change the screen through an approved design change, then retry ares attempt run`);
+    }
+    screened = summary;
+  }
   const verifiedInputs = !existing && protocol.inputs !== undefined ? await verifyExecutorInputs(executor, protocol, ctx.runner ?? spawnRunner) : undefined;
   let gpuDevices: string[] | undefined;
   if (!existing && executor.gpu && protocol.limits.gpus > 0) {
@@ -640,7 +652,7 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
     if (record.pipeline) record.paths = pipelinePaths(record);
     if (approval.length) record.pendingAutoApproval = binding!;
     if (finalAuthorization) { record.finalBinding = finalAuthorization.binding; record.finalWinner = finalAuthorization.winner; if (finalAuthorization.auto) record.pendingFinalApproval = finalAuthorization.binding; }
-    commit(dir, [[file(dir, record), JSON.stringify(record, null, 2) + "\n", ATTEMPT_BYTES]], [{ actor: ctx.actor, type: "attempt.started", data: { id: wanted, run, seed, commit: record.commit, treeId: record.treeId } }]);
+    commit(dir, [[file(dir, record), JSON.stringify(record, null, 2) + "\n", ATTEMPT_BYTES]], [{ actor: ctx.actor, type: "attempt.started", data: { id: wanted, run, seed, commit: record.commit, treeId: record.treeId, ...(screened === undefined ? {} : { screen: screened }) } }]);
     created = true; return record;
   }); } catch (error) {
     if (reserved) await withLock(dir, async () => {

@@ -78,6 +78,10 @@ const PROTOCOL_V1 = obj({
   network: { type: "string", enum: ["none"] },
   inputs: { type: "object", maxProperties: 8, properties: {}, additionalProperties: obj({ path: text(4096), sha256: text(64), mount: obj({ candidate: text(256), evaluator: text(256) }, []) }, ["path", "sha256", "mount"]) },
   budget: obj({ maxAttempts: integer(1, 1_000_000), maxWallHours: { type: "number", minimum: 0.000001, maximum: 1_000_000 }, maxGpuHours: { type: "number", minimum: 0, maximum: 64_000_000 } }, ["maxAttempts", "maxWallHours", "maxGpuHours"]),
+  screen: obj({
+    evaluatorInputs: { type: "boolean", enum: [true], description: "Refuse a candidate commit that carries a byte copy of an input mounted only for the evaluator" },
+    literals: { type: "array", minItems: 1, maxItems: 64, items: { type: "string", minLength: 8, maxLength: 200 }, description: "Fixed strings of 8..200 bytes searched over the candidate commit's files" },
+  }, []),
 }, ["v", "method", "candidate", "evaluator", "metrics", "seeds", "limits", "network", "budget"]);
 
 const STAGE_PROTOCOL = obj({ ...PROTOCOL_V1.properties,

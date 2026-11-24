@@ -8,8 +8,11 @@ import { commit, openStudy, plain, readBytesBounded, readJsonFile, readTextBound
 
 export interface Limits { cpus: number; memoryMb: number; pidsLimit: number; wallSeconds: number; gpus: number }
 export interface ProtocolInput { path?: string; sha256: string; mount: { candidate?: string; evaluator?: string } }
+/** Deterministic only: exact evaluator-only input copies and declared literals, never a model decision. */
+export interface ProtocolScreen { evaluatorInputs?: true; literals?: string[] }
 export interface Protocol {
   v: 1; method: string; inputs?: Record<string, ProtocolInput>;
+  screen?: ProtocolScreen;
   candidate: { image: string; command: string[]; env?: Record<string, string> };
   evaluator: { image: string; command: string[] };
   metrics: { name: string; unit: string; direction: "max" | "min" }[];
@@ -23,6 +26,7 @@ export function validateProtocolDefinition(raw: unknown): ProtocolDefinition {
   return validateProtocol(raw);
 }
 export const METRIC_LIMIT = 100;
+export const SCREEN_LITERALS = 64, SCREEN_LITERAL_MIN_BYTES = 8, SCREEN_LITERAL_BYTES = 200;
 export const PROTOCOL_BYTES = 65_536, TASK_FILES = 500, TASK_BYTES = 64 * 1024 * 1024, TASK_DIRECTORIES = 1000;
 export const LIMIT_BOUNDS = { cpus: [0.1, 256], memoryMb: [16, 1_048_576], pidsLimit: [1, 65_536], wallSeconds: [1, 604_800], gpus: [0, 64] } as const;
 function object(raw: unknown, keys: string[], what: string): Record<string, unknown> {
@@ -95,12 +99,32 @@ function protocolInputs(raw: unknown, stored: boolean): Record<string, ProtocolI
   }
   return Object.fromEntries(result);
 }
+/** A declared screen is closed and deterministic: no warning mode, no inferred material. */
+function screenField(raw: unknown): ProtocolScreen {
+  const value = object(raw, ["evaluatorInputs", "literals"], "protocol.screen"), result: ProtocolScreen = {};
+  if (value.evaluatorInputs !== undefined) {
+    if (value.evaluatorInputs !== true) throw new Error("protocol.screen.evaluatorInputs: true or omitted required; the screen has no warning mode, so omit the field instead of disabling it");
+    result.evaluatorInputs = true;
+  }
+  if (value.literals !== undefined) {
+    const literals = array(value.literals, "protocol.screen.literals", SCREEN_LITERALS).map((item, index) => {
+      const text = literal(item, `protocol.screen.literals[${index}]`, SCREEN_LITERAL_BYTES), bytes = Buffer.byteLength(text);
+      if (bytes < SCREEN_LITERAL_MIN_BYTES) throw new Error(`protocol.screen.literals[${index}]: at least ${SCREEN_LITERAL_MIN_BYTES} UTF-8 bytes required; declare a longer fixed string`);
+      if (bytes > SCREEN_LITERAL_BYTES) throw new Error(`protocol.screen.literals[${index}]: at most ${SCREEN_LITERAL_BYTES} UTF-8 bytes allowed; shorten that fixed string`);
+      return text;
+    });
+    if (new Set(literals).size !== literals.length) throw new Error("protocol.screen.literals: duplicate string; declare each fixed string once");
+    result.literals = literals;
+  }
+  if (!Object.keys(result).length) throw new Error("protocol.screen: empty screen; declare evaluatorInputs, a literals list, or omit protocol.screen");
+  return result;
+}
 /** Public configuration always requires executor-local locators for declared inputs. */
 export function validateProtocol(raw: unknown): Protocol { return protocolShape(raw, false); }
 /** Frozen attempt records carry identities only, never executor-host locators. */
 export function validateStoredProtocol(raw: unknown): Protocol { return protocolShape(raw, true); }
 function protocolShape(raw: unknown, stored: boolean): Protocol {
-  const p = object(raw, ["v", "method", "candidate", "evaluator", "metrics", "seeds", "limits", "network", "budget", "inputs"], "protocol");
+  const p = object(raw, ["v", "method", "candidate", "evaluator", "metrics", "seeds", "limits", "network", "budget", "inputs", "screen"], "protocol");
   if (p.v !== 1) throw new Error("protocol.v: unsupported version; this executor supports v1 only; use a compatible ares release for stage protocols, keeping the original definition unchanged");
   if (p.network !== "none") throw new Error('protocol.network: network access is unsupported; set protocol.network to "none"');
   const limitsRaw = object(p.limits, Object.keys(LIMIT_BOUNDS), "protocol.limits");
@@ -120,6 +144,7 @@ function protocolShape(raw: unknown, stored: boolean): Protocol {
     maxGpuHours: number(budget.maxGpuHours, "budget.maxGpuHours", 0, 64_000_000, false),
   } };
   if (p.inputs !== undefined) protocol.inputs = protocolInputs(p.inputs, stored);
+  if (p.screen !== undefined) protocol.screen = screenField(p.screen);
   if (Buffer.byteLength(JSON.stringify(protocol, null, 2) + "\n") > PROTOCOL_BYTES) throw new Error(`protocol: too large; reduce the formatted protocol to at most ${PROTOCOL_BYTES} bytes`);
   return protocol;
 }
