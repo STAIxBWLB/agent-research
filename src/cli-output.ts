@@ -1,4 +1,6 @@
-import { asciiMarkers, errorLine, errorSpans, paint, Report, resolveColor, streamEnv, streamWidth } from "@staix/cli-output";
+import { cellWidth, wrap, asciiMarkers, errorLine, errorSpans, paint, Report, resolveColor, streamEnv, streamWidth } from "@staix/cli-output";
+
+import { COMMANDS, GLOBAL_HELP_FLAGS, flagDescription, helpFlagLabel, helpUsage, type CommandSpec } from "./commands-table.ts";
 
 export interface OutputOptions {
   color?: string;
@@ -70,3 +72,54 @@ export { streamWidth };
 export function outputAscii(options: OutputOptions, env: NodeJS.ProcessEnv): boolean {
   return asciiMarkers(env, options.ascii);
 }
+
+const HELP_GROUPS = [
+  ["Study", "init", "status", "study", "scope", "playbook"],
+  ["Literature", "lit", "watch"],
+  ["Gates", "gate", "autonomy"],
+  ["Plan", "plan", "run"],
+  ["Experiments", "protocol", "executor", "attempt", "idea", "investigate", "ablate", "posthoc", "final", "selection", "retention", "lineage"],
+  ["Harness and experience", "harness", "experience"],
+  ["Memory", "archive", "lesson", "lessons", "skill"],
+  ["Paper and review", "paper", "review", "cite"],
+  ["Integration", "setup", "console", "manifest", "mcp"],
+] as const;
+
+export function renderHelp(spec: CommandSpec | undefined, color: boolean, ascii: boolean): string {
+  const report = new Report(80, ascii);
+  if (!spec) {
+    report.header("ares", "Help").section("Usage")
+      .line("  ares <command> [options]")
+      .line("  ares help <command> | ares <command> --help")
+      .line("  ares --version");
+    for (const [title, ...prefixes] of HELP_GROUPS) {
+      const commands = COMMANDS.filter(command => prefixes.some(prefix => command.name.split(" ")[0] === prefix))
+        .toSorted((left, right) => left.name.localeCompare(right.name, "en"));
+      report.section(title).kv(commands.map(command => [command.name, command.summary]), 2, { colon: false });
+    }
+    report.section("Global flags").kv(Object.entries(GLOBAL_HELP_FLAGS), 2, { colon: false });
+  } else {
+    const usage = helpUsage(spec);
+    report.header("ares", spec.name).section("Usage").line(`  ares ${usage}`)
+      .section("Description").note(spec.summary, "value");
+    if (usage.includes("<gate>")) {
+      report.note("Gate names: scope, screen, design, final, review, plan:node-id,", "value")
+        .note("accept:artifact or harness:round-id", "value");
+    }
+    const flags = Object.keys(spec.options).filter(flag => flag !== "--json")
+      .map(flag => [helpFlagLabel(spec, flag), flagDescription(spec, flag)] as const);
+    if (spec.options["--json"]) flags.push(["--json", GLOBAL_HELP_FLAGS["--json"]]);
+    flags.push(["--color=auto|always|never", GLOBAL_HELP_FLAGS["--color"]], ["--ascii", GLOBAL_HELP_FLAGS["--ascii"]], ["--help", GLOBAL_HELP_FLAGS["--help"]]);
+    report.section("Flags", String(flags.length)).kv(flags, 2, { colon: false });
+    if (spec.example) report.section("Examples").next(`ares ${spec.name} ${spec.example}`);
+  }
+  return report.render(color).join("\n");
+}
+
+export function usageHint(spec: CommandSpec | undefined, columns = 80): string {
+  const usage = spec ? helpUsage(spec) : "<command> [options]";
+  const help = spec ? `ares help ${spec.name}` : "ares --help";
+  return [...wrap(`Usage: ares ${usage}`, Math.min(columns, 80)), `Run '${help}' for details.`].join("\n");
+}
+
+export { cellWidth };

@@ -4,7 +4,8 @@ import * as child from "node:child_process";
 import { join } from "node:path";
 import * as ops from "../src/commands.ts";
 import { run } from "../src/cli.ts";
-import { COMMANDS, help } from "../src/commands-table.ts";
+import { COMMANDS } from "../src/commands-table.ts";
+import { renderHelp } from "../src/cli-output.ts";
 import { ARES_TOOLS, createAresMcp } from "../src/mcp-tools.ts";
 import { validArguments } from "../src/mcp.ts";
 import { readProvenance, compareLineage, type ExecutionReferenceV1 } from "../src/provenance.ts";
@@ -76,7 +77,8 @@ test("manifest discovery marks both tools local read-only and schemas bound thei
     expect(ops.manifest().mcp.tools.find(value => value.name === name)?.readOnly).toBe(true);
   }
   expect(COMMANDS.filter(value => value.name.startsWith("lineage ")).every(value => value.mutates === false)).toBe(true);
-  expect(help()).toContain("ares lineage show"); expect(help()).toContain("ares lineage compare");
+  expect(renderHelp(undefined, false, false)).toContain("lineage show");
+  expect(renderHelp(undefined, false, false)).toContain("lineage compare");
   const study = "/synthetic/study", show = tool("ares_lineage_show").inputSchema, compare = tool("ares_lineage_compare").inputSchema;
   expect(validArguments({ study, root: { v: 1, tool: "ares", projectKey: "synthetic", kind: "attempt", id: "a".repeat(16) }, cursor: "opaque" }, show)).toBe(true);
   for (const root of [{ kind: "attempt", id: "a" }, { v: 2, tool: "ares", projectKey: "synthetic", kind: "attempt", id: "a" }, { v: 1, tool: "ares", projectKey: "synthetic", kind: "unknown", id: "a" }]) expect(validArguments({ study, root }, show)).toBe(false);
