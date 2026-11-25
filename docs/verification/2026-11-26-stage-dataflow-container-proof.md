@@ -18,25 +18,36 @@ The fixture used a private mode-0700 executor directory and cached Alpine image 
 
 ### Stage receipt
 
-Attempt `ee1f366167949944`. The final proof invocation exited 0 after 2 minutes 41 seconds. The controller compared full Docker IDs. The table shows ID prefixes for readability. Digests are SHA-256.
+Attempt `363ce4fe91857fe4` from the review follow-up run, which exited 0 in 3 minutes 56 seconds. The controller compared full Docker IDs. The table shows ID prefixes for readability. Digests are SHA-256.
 
 | Stage | Docker ID prefix | Declared input digest | Sealed manifest digest |
 | --- | --- | --- | --- |
-| prepare | `f30fe3a484f2` | data `7aa7978d5993914049b72041270eec80b6a6e53f592cafd1db88b39a7664b622` | `748a4d8cd2bf6ae6fa8d7b630a47c01f6e9e571d7d18ad061680a65d428aa172` |
-| train | `f64af63ad997` | rows `748a4d8cd2bf6ae6fa8d7b630a47c01f6e9e571d7d18ad061680a65d428aa172` | `ad7a9473a3b5f68e673f12a7541294a7df09c5fe363488fb18c4b0450959c32c` |
-| predict | `47e59658e41c` | model `ad7a9473a3b5f68e673f12a7541294a7df09c5fe363488fb18c4b0450959c32c` | `f2fc986761e08ad6c0ea644b2aea32079089a74e85f3cd16e632bf5338b028bf` |
-| evaluator | `de805a1eb307` | Verified candidate mounts | Score 32, provenance `ares-observed` |
+| prepare | `ae372e61928e` | data `7aa7978d5993914049b72041270eec80b6a6e53f592cafd1db88b39a7664b622` | `f135215cf85e5ebd1615b24d7a1760a96b747f1399d24c7161502c5e9974e982` |
+| train | `6fd96f1c4e48` | rows `f135215cf85e5ebd1615b24d7a1760a96b747f1399d24c7161502c5e9974e982` | `bd5480d62e3453bb23ff98af5006a0cde030a3227755ac200e3e0d85d52e5c7e` |
+| predict | `341152f8b991` | model `bd5480d62e3453bb23ff98af5006a0cde030a3227755ac200e3e0d85d52e5c7e` | `06d80416092d7fcf3312a80f93f87638ff8ae4a2cce362d2ff4b7d1269f7f49f` |
+| evaluator | `372c2a43e0ad` | Verified candidate mounts | Score 32, provenance `ares-observed` |
 
 ### Acceptance criteria
 
 | Criterion | Result | Evidence and remaining coverage |
 | --- | --- | --- |
 | AC1 | Passed | Fresh `prepare → train → predict → evaluator` in four distinct Docker containers. After the evaluator exited, the production verifier joined each seal to its observed container ID and checked each declared input hash. The evaluator read the final bytes through its own mount, validated them and emitted score 32. |
-| AC2 | Unknown | Controller-side protocol writes refused a cycle, traversal path, undeclared port, mutable image tag and forbidden environment name without changing the ledger. Executor-side reservation overflow refused before changing reservations. Live unsafe-link, wrong-image identity, and cumulative size-limit cases remain unknown. |
-| AC3 | Unknown | Deliberate same-user mutation of a synthetic retained payload caused the executor to refuse materialization and leave the target absent. Missing bytes, a live writer, and process or host interruption at seal, publish, consume and prune remain unknown. |
+| AC2 | Passed | Controller-side protocol writes refused a cycle, traversal path, undeclared port, mutable image tag and forbidden environment name without changing the ledger. The executor refused an unsafe output link before sealing, an unavailable pinned image before launch, a cumulative 501st file before accepting evaluator evidence, and reservation overflow without changing reservation state. See the refusal receipts below. |
+| AC3 | Unknown | Changing the retained train payload and deleting the retained predict payload each caused the executor to refuse materialization and leave the target absent. A live writer and process or host interruption at seal, publish, consume and prune remain unknown. |
 | AC4 | Passed | Train and predict were refused writes to upstream inputs. Predict could see its declared input and did not receive the earlier rows port. The evaluator was refused writes to all three candidate artifacts, and each sealed hash still verified. Cancelling a running prepare container produced `cancelled`. Removing another running prepare container led reconciliation to record `unknown`. Each case launched exactly one container and no descendants. |
 | AC5 | Unknown | A 268,959,744-byte in-flight reservation counted against a 270,008,320-byte cap and a second reservation was refused without changing reservation state. A materialized consumer reference blocked prune. Releasing that reference allowed fingerprinted prune and left a visible tombstone. Interleaving concurrent prune and consume operations remains unknown. |
 | AC6 | Unknown | The v1 candidate and evaluator ran with the same isolation policy and produced score 6. The next seed was refused before a container launch or ledger mutation when the attempt limit was exhausted. First-final semantics, aggregate wall/compute budget probes, and release-level protocol v2 compatibility remain unknown in the live run. |
+
+### Refusal receipts
+
+| Probe | Observed refusal | Published evidence |
+| --- | --- | --- |
+| Declared output symlink to a path outside the output mount | The candidate exited and its output archive was rejected as `invalid-artifact`. One container launched. | Zero seals, outputs or metrics. |
+| Cumulative output count | Two candidate stages wrote 250 regular files each. The evaluator wrote one metrics file, which exceeded the shared 500-file limit. All three containers launched and the attempt failed with `artifact-limit`. | The two valid candidate seals and 500 candidate output records remained. The overflowing file and metrics were rejected. |
+| Unavailable pinned image | The declared digest was unavailable. The daemon's image lookup and pull failed against a loopback-only registry endpoint. Zero containers launched. | Zero seals, outputs or metrics. |
+| Missing retained bytes | The predict payload file was deleted from the private test workspace. Consumer materialization rejected the retained-manifest mismatch. | The consumer target remained absent. |
+
+All three failed attempts released their retention reservations. The image probe exercises pre-launch refusal for an unavailable digest. A running container with an image identity different from its recorded request would require substituting the container or changing the runtime. The executor checks that identity during inspection.
 
 ### Reproduce
 

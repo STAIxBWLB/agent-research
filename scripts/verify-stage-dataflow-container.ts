@@ -157,6 +157,15 @@ async function main(): Promise<void> {
     await assert.rejects(retainedOperation(executor, { ...materialize, stage: "tamper", target: join(workspace, "tamper"), inputs: { model: { ref: tampered, output: "model" } } }, runner), /integrity|payload/);
     assert.equal((await runOnExecutor(executor, "test", ["!", "-e", join(workspace, "tamper")], runner)).exitCode, 0);
     console.log(JSON.stringify({ case: "tampered retained payload refused before materialization", manifestSha256: tampered.sha256 }));
+
+    const missing = completed[2]!.ref;
+    const directory = join(executor.workdir, studyId, ".retained", "objects", attempt.id, missing.stage, "data");
+    const remove = await runOnExecutor(executor, "sh", ["-ec", 'chmod u+w "$1"; rm "$1/predictions.txt"', "synthetic-missing", directory], runner);
+    assert.equal(remove.exitCode, 0);
+    const missingTarget = join(workspace, "missing");
+    await assert.rejects(retainedOperation(executor, { ...materialize, stage: "missing", target: missingTarget, inputs: { predictions: { ref: missing, output: "predictions" } } }, runner), /integrity|payload/);
+    assert.equal((await runOnExecutor(executor, "test", ["!", "-e", missingTarget], runner)).exitCode, 0);
+    console.log(JSON.stringify({ case: "missing retained payload refused before materialization", manifestSha256: missing.sha256 }));
   } finally {
     await retainedOperation(executor, { op: "release", studyId, attemptId: first }, runner);
   }
@@ -208,6 +217,50 @@ async function main(): Promise<void> {
   assert.deepEqual(readLedger(legacy), beforeBudgetRefusal);
   assert.equal(containers.length, 8);
   console.log(JSON.stringify({ case: "v1 budget refusal before launch or ledger mutation" }));
+  await verifyOutputRefusals();
+}
+
+function writeFiles(count: number): string {
+  return `i=0; while [ "$i" -lt ${count} ]; do printf x > "/out/file-$i"; i=$((i+1)); done`;
+}
+
+async function verifyOutputRefusals(): Promise<void> {
+  const unsafe = { ...stage, name: "unsafe", command: command(policyProbe + "ln -s /tmp/escape /out/file-0"), inputs: {}, outputs: { sample: "file-0" } };
+  const batch = { ...unsafe, name: "first", command: command(policyProbe + writeFiles(250)) };
+  const unavailable = `localhost:1/ares-stage-proof@sha256:${"0".repeat(64)}`;
+  const cases = [
+    { name: "unsafe-link", stages: [unsafe], launches: 1, seals: 0 },
+    { name: "cumulative-file-cap", stages: [batch, { ...batch, name: "second", needs: ["first"] }], launches: 3, seals: 2 },
+    { name: "unavailable-image", stages: [{ ...batch, image: unavailable }], launches: 0, seals: 0 },
+  ];
+  for (const scenario of cases) {
+    const dir = join(root, scenario.name);
+    init(dir, { question: "Synthetic refusal?", mode: "experiment" }, { actor });
+    mkdirSync(join(dir, "task", "evaluator"), { recursive: true });
+    writeFileSync(join(dir, "task", "evaluator", "private"), "synthetic evaluator");
+    await withLock(dir, () => {
+      setProtocol(dir, { ...protocol, v: 2, candidate: { stages: scenario.stages } }, actor);
+      setExecutor(dir, executor, actor);
+    });
+    await gateDecide(dir, "design", "approve", undefined, ctx);
+    const before = containers.length;
+    const attempt = await runAttempt(dir, { repo, commit }, { actor, runner });
+    const inventory = await retainedOperation(executor, { op: "inspect", studyId: attempt.studyId }, runner);
+    console.log(JSON.stringify({ case: scenario.name, status: attempt.status, reason: attempt.reason, error: attempt.error,
+      launches: containers.length - before, seals: inventory.entries?.length, reservedBytes: inventory.reservedBytes,
+      outputs: attempt.outputs.length, metrics: attempt.metrics.length }));
+    assert.equal(attempt.status, "failed");
+    assert.equal(containers.length - before, scenario.launches);
+    assert.equal(inventory.entries?.length, scenario.seals);
+    assert.equal(inventory.reservedBytes, 0);
+    assert.equal(attempt.metrics.length, 0);
+    if (scenario.name === "unsafe-link") assert.match(attempt.error ?? "", /type|link/);
+    if (scenario.name === "cumulative-file-cap") {
+      assert.equal(attempt.reason, "artifact-limit");
+      assert.equal(attempt.outputs.length, 500);
+    }
+    if (scenario.name === "unavailable-image") assert.match(attempt.error ?? "", /image pull/);
+  }
 }
 
 try { await main(); }
