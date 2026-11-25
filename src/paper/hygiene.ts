@@ -12,7 +12,7 @@ export const SETTINGS_BYTES = 64 * 1024;
 export interface HygieneHit { code: HygieneCode; start: number; end: number; section: string[]; message: string }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
-function refuse(detail: string): never { throw new Error(`study.toml: ${detail}; fix the [paper] or [review] settings (paper keys maxGroup, maxBundleRepeats, reviewRounds, blocking, requireRender; review key surveyChecklist) or remove study.toml to use the defaults`); }
+function refuse(detail: string): never { throw new Error(`study.toml: ${detail}; fix the [paper] or [review] settings (paper keys maxGroup, maxBundleRepeats, reviewRounds, blocking, requireRender; review keys surveyChecklist, readback) or remove study.toml to use the defaults`); }
 function count(value: unknown, name: string, min: number): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < min || value > 1000) refuse(`paper.${name} must be an integer from ${min} to 1000`);
   return value;
@@ -23,7 +23,9 @@ export function readPaperSettings(dir: string): PaperSettings { return readStudy
 export const SURVEY_CHECKLIST_MODES = ["off", "show", "require"] as const;
 export type SurveyChecklistMode = typeof SURVEY_CHECKLIST_MODES[number];
 /** [review] settings; `surveyChecklist` is undefined when unset so the caller applies the study-mode default. */
-export interface ReviewSettings { surveyChecklist?: SurveyChecklistMode }
+export const READBACK_MODES = ["off", "show", "require"] as const;
+export type ReadbackMode = typeof READBACK_MODES[number];
+export interface ReviewSettings { surveyChecklist?: SurveyChecklistMode; readback?: ReadbackMode }
 export function readReviewSettings(dir: string): ReviewSettings { return readStudySettings(dir).review; }
 /** One closed reader for both tables, so an unknown key in either refuses for every caller. */
 function readStudySettings(dir: string): { paper: PaperSettings; review: ReviewSettings } {
@@ -36,11 +38,15 @@ function readStudySettings(dir: string): { paper: PaperSettings; review: ReviewS
   for (const key of Object.keys(raw)) if (key !== "paper" && key !== "review") refuse(`unknown setting ${JSON.stringify(key).slice(0, 80)}`);
   const review = raw.review ?? {};
   if (!isRecord(review)) refuse("review must be a table");
-  for (const key of Object.keys(review)) if (key !== "surveyChecklist") refuse(`unknown setting review.${JSON.stringify(key).slice(0, 80)}`);
+  for (const key of Object.keys(review)) if (key !== "surveyChecklist" && key !== "readback") refuse(`unknown setting review.${JSON.stringify(key).slice(0, 80)}`);
   const reviewSettings: ReviewSettings = {};
   if (review.surveyChecklist !== undefined) {
     if (typeof review.surveyChecklist !== "string" || !(SURVEY_CHECKLIST_MODES as readonly string[]).includes(review.surveyChecklist)) refuse(`review.surveyChecklist must be one of ${SURVEY_CHECKLIST_MODES.join(", ")}`);
     reviewSettings.surveyChecklist = review.surveyChecklist as SurveyChecklistMode;
+  }
+  if (review.readback !== undefined) {
+    if (typeof review.readback !== "string" || !(READBACK_MODES as readonly string[]).includes(review.readback)) refuse(`review.readback must be one of ${READBACK_MODES.join(", ")}`);
+    reviewSettings.readback = review.readback as ReadbackMode;
   }
   const paper = raw.paper ?? {};
   if (!isRecord(paper)) refuse("paper must be a table");
