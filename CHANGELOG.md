@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## [0.4.1] - 2026-11-25
+
+Version 0.4.0 was tagged but never published to npm or GitHub Releases. Version 0.4.1 is the first published release in the 0.4 line and carries all 0.4.0 features. Its N-1 compatibility statements remain those in the 0.4.0 section below.
+
 - The 0.4.0 tag was not published because the release smoke could not install the new runtime dependency from its empty offline cache. The smoke now pre-caches exact-pinned dependencies in isolation, then installs the staged package offline. Main CI stages and smoke-tests the package before tagging.
 
 ## [0.4.0] - 2026-11-25
