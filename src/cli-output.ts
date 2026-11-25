@@ -270,6 +270,11 @@ function renderView(report: Report, command: string, result: unknown, context: O
       report.note(`Resolve ${text(row.reviewId)}/${text(row.findingId)} with the reason for the repair`);
     }
     report.section("Reviews").kv([["Ready", value.ready], ["Reviews", array(value.reviews).length], ["Model families", array(value.families).join(", ")]]);
+    // Shown side by side for a person to compare; ares matches and marks nothing.
+    const readbacks = array(value.readbacks).map(record).flatMap(row => array(row.claims).map(claim => [`${text(row.reviewer)} (${text(row.modelFamily)})`, text(claim)]));
+    if (readbacks.length) report.section("Read-backs", String(readbacks.length)).table(["Reviewer", "Claim"], readbacks, 1, { columnCaps: [24, null], clip: true });
+    const planClaims = array(value.planClaims).map(record);
+    if (planClaims.length) report.section("Plan claims", String(planClaims.length)).table(["Point", "Claim"], planClaims.map(row => [text(row.point), text(row.claim)]), 1, { columnCaps: [24, null], clip: true });
     return;
   }
   if (command === "idea report") {
