@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "documents": {
     "README.md": {
-      "verifiedAgainst": "bbff9cf9677d5762e5155677b2caf60de40627f4",
+      "verifiedAgainst": "828339e452c7c6ce921d9664c998668b51261315",
       "paths": [
         "src/",
         "bin/",
@@ -11,7 +11,7 @@
       ]
     },
     "src/playbook.ts": {
-      "verifiedAgainst": "bbff9cf9677d5762e5155677b2caf60de40627f4",
+      "verifiedAgainst": "828339e452c7c6ce921d9664c998668b51261315",
       "paths": [
         "src/"
       ]
