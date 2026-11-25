@@ -336,8 +336,8 @@
     "\u001b[1;34m ares Review resolve\u001b[0m\n  \u001b[1;32m✓ \u001b[0m Resolved the review finding · synthetic · available"
   ],
   "review show": [
-    " ares Review show\n\n▸ Reviews\n  Ready:           (unset)\n  Reviews:         0\n  Model families:  (unset)",
-    "\u001b[1;34m ares Review show\u001b[0m\n\n\u001b[1;35m▸ Reviews\u001b[0m\n  \u001b[34mReady:\u001b[0m           \u001b[90m(unset)\u001b[0m\n  \u001b[34mReviews:\u001b[0m         0\n  \u001b[34mModel families:\u001b[0m  \u001b[90m(unset)\u001b[0m"
+    " ares Review show\n\n▸ Reviews\n  Ready:           false\n  Reviews:         1\n  Model families:  alpha\n\n▸ Read-backs (1)\n  REVIEWER            CLAIM\n  reviewer-a (alpha)  The method lowers error.\n\n▸ Plan claims (1)\n  POINT    CLAIM\n  claim-a  The synthetic method lowers error.",
+    "\u001b[1;34m ares Review show\u001b[0m\n\n\u001b[1;35m▸ Reviews\u001b[0m\n  \u001b[34mReady:\u001b[0m           false\n  \u001b[34mReviews:\u001b[0m         1\n  \u001b[34mModel families:\u001b[0m  alpha\n\n\u001b[1;35m▸ Read-backs\u001b[0m\u001b[90m (1)\u001b[0m\n  \u001b[34mREVIEWER          \u001b[0m  \u001b[34mCLAIM\u001b[0m\n  reviewer-a (alpha)  The method lowers error.\n\n\u001b[1;35m▸ Plan claims\u001b[0m\u001b[90m (1)\u001b[0m\n  \u001b[34mPOINT  \u001b[0m  \u001b[34mCLAIM\u001b[0m\n  claim-a  The synthetic method lowers error."
   ],
   "review checklist": [
     " ares Review checklist\n  Id:          synthetic\n  State:       available\n  Changed:     true\n  Started At:  1d ago",

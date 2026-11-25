@@ -15,6 +15,10 @@ const esc = ROLE_SGR.header[0]!;
 const render = (command: string, result: unknown, code = 0, color = false, ascii = false) => renderResult(command, result, code, color, ascii, 80, context);
 
 const cases = [
+  ["review show", { ready: false, reviews: [{}], families: ["alpha"], unmet: [], openBlocking: [],
+    readbacks: [{ reviewId: "r1", reviewer: "reviewer-a", modelFamily: "alpha", claims: ["The method lowers error."] }],
+    planClaims: [{ point: "claim-a", claim: "The synthetic method lowers error." }] },
+    ["▸ Reviews", "▸ Read-backs", "reviewer-a (alpha)", "The method lowers error.", "▸ Plan claims", "claim-a", "The synthetic method lowers error."]],
   ["selection calibrate", { method: "seed-sd", recommendedMinDelta: 0.5, sha256: "a".repeat(64) },
     ["Recorded the calibration recommendation", "Recommendation", "seed-sd", "0.5"]],
   ["status", { question: "Synthetic?", mode: "survey", scope: { set: true }, gates: [{ gate: "scope", state: "pending", current: "private-sha" }], literature: { unverified: 1 }, events: 99 },

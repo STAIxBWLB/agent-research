@@ -3,7 +3,9 @@ import { boundedText, commit, onlyKeys, openStudy, plain, readLedger, sha256, ty
 import { readCurrentBuild } from "./build.ts";
 import { renderSummary } from "./render.ts";
 import { checkPaper } from "./check.ts";
-import { DEFAULT_PAPER_SETTINGS, readPaperSettings, readReviewSettings, type SurveyChecklistMode } from "./hygiene.ts";
+import { DEFAULT_PAPER_SETTINGS, readPaperSettings, readReviewSettings, type ReadbackMode, type SurveyChecklistMode } from "./hygiene.ts";
+import { readPaperPlan } from "./plan.ts";
+export const READBACK_CLAIMS = 8, READBACK_CLAIM_CHARS = 500;
 export const REVIEW_KINDS = ["contradiction", "unsupported-claim", "number", "citation", "method", "clarity", "other"] as const;
 export const REPAIR_SCOPES = ["edit", "paragraph", "section"] as const;
 export type RepairScope = typeof REPAIR_SCOPES[number];
@@ -23,11 +25,14 @@ const SURVEY_KEYS: SurveyKey[] = SURVEY_CHECKLIST.map(item => item.key);
 export function reviewChecklist() { return { survey: SURVEY_CHECKLIST.map(item => ({ ...item })) }; }
 /** Unset means show for survey studies and off for experiment studies. */
 export function surveyChecklistMode(dir: string, mode: string): SurveyChecklistMode { return readReviewSettings(dir).surveyChecklist ?? (mode === "survey" ? "show" : "off"); }
+/** Unset means show for every study mode. */
+export function readbackMode(dir: string): ReadbackMode { return readReviewSettings(dir).readback ?? "show"; }
 export interface ReviewFinding { id: string; kind: typeof REVIEW_KINDS[number]; location: string; text: string; blocking: boolean; repair?: RepairScope; section?: string }
 export interface ReviewReport {
   v: 1; reviewer: { id: string; modelFamily: string }; buildSha256: string;
   checklist: { negativeResults: boolean; denominators: boolean; limitations: boolean; reproducibility: boolean; survey?: SurveyAnswers };
   findings: ReviewFinding[];
+  readback?: { claims: string[] };
 }
 export interface ReviewPointFindings {
   point: string; open: number; blocking: number;
@@ -50,7 +55,7 @@ function object(raw: unknown, keys: string[], field: string, strict: boolean): R
 }
 export function validateReview(raw: unknown, strict = true): ReviewReport {
   try {
-    const value = object(raw, ["v", "reviewer", "buildSha256", "checklist", "findings"], "report", strict);
+    const value = object(raw, ["v", "reviewer", "buildSha256", "checklist", "findings", "readback"], "report", strict);
     if (value.v !== 1) throw new Error("review: unsupported report version; use an ares version that supports this report, keeping the original bytes unchanged");
     const reviewer = object(value.reviewer, ["id", "modelFamily"], "reviewer", strict), checklist = object(value.checklist, ["negativeResults", "denominators", "limitations", "reproducibility", "survey"], "checklist", strict);
     const buildSha256 = text(value.buildSha256, "buildSha256", 64);
@@ -61,6 +66,18 @@ export function validateReview(raw: unknown, strict = true): ReviewReport {
       const block = object(checklist.survey, SURVEY_KEYS, "checklist.survey", strict);
       for (const key of SURVEY_KEYS) if (typeof block[key] !== "boolean") bad(`checklist.survey.${key} must be a boolean; run ares review checklist for the six questions`);
       survey = Object.fromEntries(SURVEY_KEYS.map(key => [key, block[key] as boolean])) as SurveyAnswers;
+    }
+    let readback: { claims: string[] } | undefined;
+    if (value.readback !== undefined) {
+      const block = object(value.readback, ["claims"], "readback", strict);
+      if (!Array.isArray(block.claims) || block.claims.length < 1 || block.claims.length > READBACK_CLAIMS) bad(`readback.claims must hold 1 to ${READBACK_CLAIMS} claims`);
+      readback = { claims: block.claims.map((claim, index) => {
+        if (typeof claim !== "string" || !claim.trim()) bad(`readback.claims[${index}] must be nonblank text`);
+        if (/[\r\n\u2028\u2029]/.test(claim)) bad(`readback.claims[${index}] must be a single line`);
+        const trimmed = claim.trim();
+        if ([...trimmed].length > READBACK_CLAIM_CHARS) bad(`readback.claims[${index}] exceeds ${READBACK_CLAIM_CHARS} characters`);
+        return trimmed;
+      }) };
     }
     if (!Array.isArray(value.findings) || value.findings.length > 200) bad("findings must be an array of at most 200 entries");
     const ids = new Set<string>();
@@ -74,7 +91,7 @@ export function validateReview(raw: unknown, strict = true): ReviewReport {
       return { id, kind: finding.kind as typeof REVIEW_KINDS[number], location: text(finding.location, `finding ${id}.location`), text: text(finding.text, `finding ${id}.text`), blocking: finding.kind === "contradiction" || finding.blocking,
         ...(finding.repair !== undefined ? { repair: finding.repair as RepairScope } : {}), ...(finding.section !== undefined ? { section: text(finding.section, `finding ${id}.section`, 256).trim() } : {}) };
     });
-    return { v: 1, reviewer: { id: text(reviewer.id, "reviewer.id", 128), modelFamily: text(reviewer.modelFamily, "reviewer.modelFamily", 128).trim().toLowerCase() }, buildSha256, checklist: { negativeResults: checklist.negativeResults as boolean, denominators: checklist.denominators as boolean, limitations: checklist.limitations as boolean, reproducibility: checklist.reproducibility as boolean, ...(survey ? { survey } : {}) }, findings };
+    return { v: 1, reviewer: { id: text(reviewer.id, "reviewer.id", 128), modelFamily: text(reviewer.modelFamily, "reviewer.modelFamily", 128).trim().toLowerCase() }, buildSha256, checklist: { negativeResults: checklist.negativeResults as boolean, denominators: checklist.denominators as boolean, limitations: checklist.limitations as boolean, reproducibility: checklist.reproducibility as boolean, ...(survey ? { survey } : {}) }, findings, ...(readback ? { readback } : {}) };
   } catch (error) {
     const message = error instanceof Error ? error.message : "invalid report";
     if (message.includes("; inspect ares review show") || message.includes("supports this report")) throw error;
@@ -102,6 +119,7 @@ export function addReview(dirArg: string, raw: unknown, actor: Actor) {
   requireCopilotAccept(dir, "paper");
   const report = validateReview(raw), current = readCurrentBuild(dir), events = readLedger(dir), rows = foldReviews(events);
   if (!report.checklist.survey && surveyChecklistMode(dir, study.mode) === "require") bad("checklist.survey is required by study.toml [review] surveyChecklist = \"require\"; add the six survey answers listed by ares review checklist (false answers are allowed)");
+  if (!report.readback && readbackMode(dir) === "require") bad("readback is required by study.toml [review] readback = \"require\"; add readback.claims with 1 to 8 single-line claims the manuscript makes");
   if (report.buildSha256 !== current.evidenceSha256) bad("stale buildSha256; use the evidenceSha256 from the current ares paper build output");
   if (rows.filter(row => row.report.buildSha256 === report.buildSha256).length >= 100) bad("100 reviews already recorded for this build; resolve existing findings or build a revised manuscript");
   const id = sha256(JSON.stringify([report, events.length])).slice(0, 16);
@@ -153,13 +171,13 @@ export function reviewReadiness(dirArg: string) {
   if (families.length < 2) unmet.push({ code: "model-families", message: "fewer than two distinct model families reviewed the current evidence hash; add current-build reviews from two families" });
   const openBlocking = reviews.flatMap(row => row.report.findings.filter(f => f.blocking && !row.resolutions[f.id]).map(f => ({ reviewId: row.id, findingId: f.id, kind: f.kind, location: f.location, text: f.text })));
   if (openBlocking.length) unmet.push({ code: "blocking-findings", message: `open blocking findings: ${openBlocking.map(f => `${f.reviewId}/${f.findingId} (${f.kind})`).join(", ")}; resolve each with a reason using ares review resolve` });
-  const rounds = roundsView(dir, rows, buildSha256), survey = surveyView(dir, study.mode, reviews), points = pointView(reviews);
+  const rounds = roundsView(dir, rows, buildSha256), survey = surveyView(dir, study.mode, reviews), points = pointView(reviews), readbacks = readbackView(dir, reviews);
   // Render status is informational unless study.toml [paper] requireRender = true (#162).
   const render = renderSummary(dir);
   let requireRender = false;
   try { requireRender = readPaperSettings(dir).requireRender === true; } catch { /* roundsView already reports unreadable settings */ }
   if (requireRender && !render.current) unmet.push({ code: "render", message: `requireRender is set and ${render.reason ?? "no current render"}` });
-  return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, ...points, checklists: reviews.map(row => { const { survey: answers, ...rest } = row.report.checklist; return { reviewId: row.id, ...rest, ...(survey.surveyChecklist === "off" || answers === undefined ? {} : { survey: answers }) }; }), claims: "unavailable (STAIxBWLB/agent-hub#931)", render, unmet, ...rounds, ...survey, info: [...rounds.info, ...survey.info] };
+  return { ready: unmet.length === 0, buildSha256: buildSha256 ?? null, ...(current ? { manuscriptSha256: current.manuscriptSha256 } : {}), check: check ?? null, reviews, families, openBlocking, ...points, checklists: reviews.map(row => { const { survey: answers, ...rest } = row.report.checklist; return { reviewId: row.id, ...rest, ...(survey.surveyChecklist === "off" || answers === undefined ? {} : { survey: answers }) }; }), claims: "unavailable (STAIxBWLB/agent-hub#931)", render, unmet, ...rounds, ...survey, readback: readbacks.readback, readbacks: readbacks.readbacks, ...(readbacks.planClaims ? { planClaims: readbacks.planClaims } : {}), info: [...rounds.info, ...survey.info, ...readbacks.info] };
 }
 /** Exact location metadata only: no paper-plan lookup, support judgment or readiness change. */
 function pointView(reviews: ReviewRecord[]): { openByPoint?: ReviewPointFindings[] } {
@@ -178,6 +196,18 @@ function pointView(reviews: ReviewRecord[]): { openByPoint?: ReviewPointFindings
   return { openByPoint: [...groups].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([point, findings]) => ({
     point, open: findings.length, blocking: findings.filter(finding => finding.blocking).length, findings,
   })) };
+}
+/** Display only: ares never compares read-backs with plan claims, and neither enters unmet. */
+function readbackView(dir: string, reviews: ReviewRecord[]): { readback: ReadbackMode; readbacks: { reviewId: string; reviewer: string; modelFamily: string; claims: string[] }[]; planClaims?: { point: string; claim: string }[]; info: { code: string; message: string }[] } {
+  let mode: ReadbackMode = "show";
+  const info: { code: string; message: string }[] = [];
+  try { mode = readbackMode(dir); }
+  catch (error) { info.push({ code: "review-readback-settings", message: `${error instanceof Error ? error.message : "study.toml unreadable"}; read-back display defaults to show` }); }
+  if (mode === "off") return { readback: mode, readbacks: [], info };
+  let planClaims: { point: string; claim: string }[] | undefined;
+  try { const claims = (readPaperPlan(dir)?.sections ?? []).flatMap(section => (section.points ?? []).map(point => ({ point: point.id, claim: point.claim }))); if (claims.length) planClaims = claims; }
+  catch { /* paper check reports an invalid plan */ }
+  return { readback: mode, readbacks: reviews.flatMap(row => row.report.readback ? [{ reviewId: row.id, reviewer: row.report.reviewer.id, modelFamily: row.report.reviewer.modelFamily, claims: row.report.readback.claims }] : []), ...(planClaims ? { planClaims } : {}), info };
 }
 /** Display only: answers, including false ones, never enter unmet. Off hides the block and the projection; require is enforced at review add. */
 function surveyView(dir: string, studyMode: string, reviews: ReviewRecord[]) {
