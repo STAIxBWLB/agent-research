@@ -56,6 +56,10 @@ jobs:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bun scripts/n1-check.ts
+      - name: Stage the release candidate
+        run: bun run release:stage "$RUNNER_TEMP/release-package"
+      - name: Smoke-test the staged package
+        run: bun run release:smoke "$RUNNER_TEMP/release-package"
 
   ci-ok:
     if: always()

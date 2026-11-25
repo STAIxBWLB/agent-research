@@ -5,9 +5,10 @@ import { delimiter, isAbsolute, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { FORMAT_VERSIONS } from "../src/manifest.ts";
 import { readBytesBounded, readTextBounded } from "../src/study.ts";
-import { isolatedEnv, verifyStaged, type ReleaseManifest } from "./release.ts";
+import { isolatedEnv, inspectStaged, type ReleaseManifest } from "./release.ts";
 
 const OUTPUT_BYTES = 2 * 1024 * 1024, PACKAGE_BYTES = 65_536, ASSET_BYTES = 2 * 1024 * 1024;
+const MAX_DEPENDENCIES = 16;
 type ObjectValue = Record<string, unknown>;
 function object(value: unknown): value is ObjectValue { return value !== null && typeof value === "object" && !Array.isArray(value); }
 function requireValue(condition: unknown, message: string): asserts condition {
@@ -23,24 +24,39 @@ function contained(root: string, file: string): string {
   requireValue(rel !== ".." && !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(rel), "installed path escapes the private prefix");
   return actual;
 }
+/** Only registry package names and stable versions can enter npm argv or a diagnostic. */
+export function exactRuntimeSpecs(packed: unknown): string[] {
+  requireValue(object(packed), "packed package metadata must be an object");
+  if (packed.dependencies === undefined) return [];
+  requireValue(object(packed.dependencies), "runtime dependencies must be an object");
+  const dependencies = Object.entries(packed.dependencies);
+  requireValue(dependencies.length <= MAX_DEPENDENCIES, `runtime dependencies must contain at most ${MAX_DEPENDENCIES} entries`);
+  return dependencies.map(([name, version]) => {
+    requireValue(name.length <= 214 && /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/.test(name), "invalid runtime dependency name");
+    requireValue(typeof version === "string" && version.length <= 128 && /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/.test(version),
+      `runtime dependency ${name} requires an exact x.y.z pin`);
+    return `${name}@${version}`;
+  });
+}
+
 /** All output is bounded before accumulation; diagnostics never echo child output. */
-function child(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeout: number, input = ""): Promise<string> {
+export function smokeChild(step: string, command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, timeout: number, input = ""): Promise<string> {
   return new Promise((accept, reject) => {
     const proc = spawn(command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     let failure: Error | undefined, bytes = 0;
     const output: Buffer[] = [];
-    const stop = (message: string) => { failure ??= new Error(`clean install smoke: ${message}; inspect the staged package and retry`); proc.kill("SIGKILL"); };
+    const stop = (message: string) => { failure ??= new Error(`clean install smoke: ${step}: ${message}; inspect the staged package and retry`); proc.kill("SIGKILL"); };
     const timer = setTimeout(() => stop("child timed out"), timeout);
     proc.stdout.on("data", (part: Buffer) => {
       bytes += part.length; if (bytes > OUTPUT_BYTES) { stop("child output exceeded its bound"); return; } output.push(part);
     });
     proc.stderr.on("data", (part: Buffer) => { bytes += part.length; if (bytes > OUTPUT_BYTES) stop("child output exceeded its bound"); });
-    proc.on("error", () => { failure ??= new Error("clean install smoke: child spawn failed; check npm and Bun are on the isolated PATH"); });
+    proc.on("error", () => { failure ??= new Error(`clean install smoke: ${step}: child spawn failed; check npm and Bun are on the isolated PATH`); });
     proc.stdin.on("error", () => stop("child stdin failed"));
     proc.on("close", (code) => {
       clearTimeout(timer);
       if (failure) reject(failure);
-      else if (code !== 0) reject(new Error("clean install smoke: child exited nonzero; inspect the staged package and retry"));
+      else if (code !== 0) reject(new Error(`clean install smoke: ${step}: child exited nonzero; inspect the staged package and retry`));
       else accept(Buffer.concat(output).toString("utf8"));
     });
     proc.stdin.end(input);
@@ -77,28 +93,32 @@ function checkMcp(stdout: string, version: string, expected: Map<string, boolean
 
 /** Install and inspect only a verified tarball, with a private home and no mutating ares commands. */
 export async function smokeStagedPackage(dir: string, root = process.cwd()): Promise<ReleaseManifest> {
-  const metadata = await verifyStaged(dir, root);
+  const { manifest: metadata, packed } = inspectStaged(dir, root);
+  const dependencies = exactRuntimeSpecs(packed);
   const work = realpathSync(mkdtempSync(join(realpathSync(tmpdir()), "ares-release-smoke-")));
   try {
     chmodSync(work, 0o700);
     const prefix = join(work, "prefix"), cwd = join(work, "cwd");
     mkdirSync(prefix, { mode: 0o700 }); mkdirSync(cwd, { mode: 0o700 });
     const baseEnv = isolatedEnv(work), env = { ...baseEnv, PATH: `${join(prefix, "bin")}${delimiter}${baseEnv.PATH ?? ""}` };
-    await child("npm", ["install", "-g", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", prefix, resolve(dir, "package.tgz")], cwd, env, 30_000);
+    for (const dependency of dependencies) {
+      await smokeChild(`dependency fetch (${dependency})`, "npm", ["cache", "add", "--offline=false", "--ignore-scripts", "--fetch-retries=0", dependency], cwd, env, 30_000);
+    }
+    await smokeChild("install", "npm", ["install", "-g", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--prefix", prefix, resolve(dir, "package.tgz")], cwd, env, 30_000);
     requireValue(/^(@[a-z0-9._-]+\/)?[a-z0-9._-]+$/.test(metadata.name), "invalid installed package name");
     const privatePrefix = realpathSync(prefix), packageRoot = contained(privatePrefix, join(prefix, "lib", "node_modules", ...metadata.name.split("/")));
     const installed = json(readTextBounded(contained(privatePrefix, join(packageRoot, "package.json")), PACKAGE_BYTES), "package");
     requireValue(installed.name === metadata.name && installed.version === metadata.version, "installed package identity mismatch");
     for (const asset of ["src/ui/panel.js", "src/ui/panel.css", "src/ui/plugin.ts"]) requireValue(readBytesBounded(contained(privatePrefix, join(packageRoot, asset)), ASSET_BYTES).length > 0, `installed ${asset} missing`);
     const executable = join(prefix, "bin", "ares"); contained(privatePrefix, executable);
-    requireValue((await child(executable, ["--version"], cwd, env, 10_000)).trim() === metadata.version, "installed CLI version mismatch");
-    const tools = manifestTools(json(await child(executable, ["manifest", "--json"], cwd, env, 10_000), "manifest"), metadata.version);
+    requireValue((await smokeChild("--version", executable, ["--version"], cwd, env, 10_000)).trim() === metadata.version, "installed CLI version mismatch");
+    const tools = manifestTools(json(await smokeChild("manifest", executable, ["manifest", "--json"], cwd, env, 10_000), "manifest"), metadata.version);
     const input = [
       { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "ares-release-smoke", version: "1" } } },
       { jsonrpc: "2.0", method: "notifications/initialized" },
       { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
     ].map(message => JSON.stringify(message)).join("\n") + "\n";
-    checkMcp(await child(executable, ["mcp"], cwd, env, 10_000, input), metadata.version, tools);
+    checkMcp(await smokeChild("mcp", executable, ["mcp"], cwd, env, 10_000, input), metadata.version, tools);
     return metadata;
   } finally { rmSync(work, { recursive: true, force: true }); }
 }

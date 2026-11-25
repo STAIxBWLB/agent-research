@@ -94,14 +94,22 @@ export function assertManifest(raw: unknown, expected: ReleaseIdentity, hash: st
     || !plain(packed) || packed.name !== expected.name || packed.version !== expected.version) fail("artifact identity, tag, commit, SHA-256 or dist-tag differs from the validated candidate");
   return raw as unknown as ReleaseManifest;
 }
-export function verifyStaged(dir: string, root = process.cwd(), env: NodeJS.ProcessEnv = process.env): ReleaseManifest {
+export function inspectStaged(dir: string, root = process.cwd(), env: NodeJS.ProcessEnv = process.env): { manifest: ReleaseManifest; packed: unknown } {
   const archive = join(resolve(dir), "package.tgz"), bytes = readBytesBounded(archive, ARCHIVE_BYTES, { noFollow: true }), hash = createHash("sha256").update(bytes).digest("hex"), raw = json(join(dir, "manifest.json"));
   const expected = identity(root, env);
   // Check the digest before asking tar to inspect any artifact data.
   if (!plain(raw) || raw.sha256 !== hash) fail("staged tarball SHA-256 does not match its manifest");
   archiveFiles(archive, root);
-  let packed: unknown; try { packed = JSON.parse(command("tar", ["-xzOf", archive, "package/package.json"], root)); } catch { fail("packed package.json cannot be read"); }
-  return assertManifest(raw, expected, hash, packed);
+  let packed: unknown;
+  try {
+    const text = command("tar", ["-xzOf", archive, "package/package.json"], root);
+    if (Buffer.byteLength(text) > METADATA_BYTES) fail("packed package.json exceeds its bound");
+    packed = JSON.parse(text);
+  } catch { fail("packed package.json is unreadable, oversized or invalid JSON"); }
+  return { manifest: assertManifest(raw, expected, hash, packed), packed };
+}
+export function verifyStaged(dir: string, root = process.cwd(), env: NodeJS.ProcessEnv = process.env): ReleaseManifest {
+  return inspectStaged(dir, root, env).manifest;
 }
 export function stageRelease(dir: string, root = process.cwd()): ReleaseManifest {
   const expected = identity(root), target = resolve(dir);

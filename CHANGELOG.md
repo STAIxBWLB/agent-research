@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The 0.4.0 tag was not published because the release smoke could not install the new runtime dependency from its empty offline cache. The smoke now pre-caches exact-pinned dependencies in isolation, then installs the staged package offline. Main CI stages and smoke-tests the package before tagging.
+
 ## [0.4.0] - 2026-11-25
 
 ### N-1 compatibility with 0.3.1
