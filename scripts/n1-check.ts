@@ -2,7 +2,7 @@
 // Network job (CI "n1"): resolves N-1 from npm, installs it into a private temp prefix and checks CLI, MCP and
 // study/ledger compatibility against this checkout. `bun run check` never runs it.
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { readBytesBounded, readTextBounded, STUDY_BYTES } from "../src/study.ts";
@@ -89,6 +89,36 @@ export async function checkN1Protocol(oldRoot: string, checkoutRoot: string, stu
   return afterIdentity;
 }
 
+/** #66 T5 (AC6): a synthetic harness round v1 with a gate decision. Fixture hashes only; nothing is executed. */
+export function harnessRoundFixture(): Record<string, unknown> {
+  const hash = (c: string) => c.repeat(64);
+  return { v: 1, id: "round-one", task: { id: "synthetic-task", inputSha256: hash("c") }, baseline: { guidanceSha256: hash("a") }, candidates: [{ id: "candidate", guidanceSha256: hash("b"), category: "procedure" }],
+    hypothesis: { deficiency: "Synthetic omission", predictedChange: "Synthetic named check" }, experience: [], authoring: "uncontrolled-authoring" };
+}
+type Cli = (...args: string[]) => Promise<Result>;
+interface HarnessView { rounds: { definition: { id: string }; binding: string }[] }
+interface Gate { gate: string; state: string; current?: string }
+/** One study per writer: the other version reads status, gate list and harness show, bindings agree and bytes stay unchanged. */
+export async function checkN1Harness(old: Cli, next: Cli, work: string): Promise<void> {
+  const file = join(work, "harness-round.json");
+  writeFileSync(file, JSON.stringify(harnessRoundFixture()));
+  for (const [writerName, writer, readerName, reader, step] of [["checkout", next, "N-1", old, STEPS.n1], ["N-1", old, "checkout", next, STEPS.checkout]] as const) {
+    const study = join(work, `harness-${writerName === "N-1" ? "n1" : "checkout"}`), writeStep = writerName === "N-1" ? STEPS.n1 : STEPS.checkout;
+    json(await writer("init", study, "--question", "synthetic harness n1 study", "--mode", "experiment", "--json"), `${writerName} init harness study`, writeStep);
+    json(await writer("harness", "set", study, "--file", file, "--json"), `${writerName} harness set`, writeStep);
+    json(await writer("gate", "approve", study, "harness:round-one", "--json"), `${writerName} harness gate approve`, writeStep);
+    const written = json<HarnessView>(await writer("harness", "show", study, "--json"), `${writerName} harness show`, writeStep);
+    const files = ["study.json", "ledger.jsonl", "design/harness.json"].map(name => [name, readBytesBounded(join(study, name), LEDGER_BYTES)] as const);
+    json(await reader("status", study, "--json"), `${readerName} status on a ${writerName} harness study`, step);
+    const gates = json<Gate[]>(await reader("gate", "list", study, "--json"), `${readerName} gate list on a ${writerName} harness study`, step);
+    const shown = json<HarnessView>(await reader("harness", "show", study, "--json"), `${readerName} harness show on a ${writerName} harness study`, step);
+    const round = shown.rounds?.find(r => r.definition?.id === "round-one"), gate = Array.isArray(gates) ? gates.find(g => g.gate === "harness:round-one") : undefined;
+    if (!round || round.binding !== written.rounds[0]?.binding) fail(`${readerName} harness show did not return the ${writerName} round with the same binding; ${step}`);
+    if (gate?.state !== "approved" || gate.current !== round!.binding) fail(`${readerName} gate list did not report the ${writerName} harness gate approved at the round binding; ${step}`);
+    for (const [name, bytes] of files) if (!bytes.equals(readBytesBounded(join(study, name), LEDGER_BYTES))) fail(`${readerName} rewrote ${name} of a ${writerName} harness study during reads; ${step}`);
+  }
+}
+
 async function main(): Promise<void> {
   const pinned = parseArgs(process.argv.slice(2)).version;
   const current = (JSON.parse(readTextBounded(join(root, "package.json"), 65_536)) as { version: string }).version;
@@ -148,6 +178,8 @@ async function main(): Promise<void> {
     } else if (read.code !== 0) fail(`N-1 advertises study v${format.version} but failed to read a checkout study (exit ${read.code}); the checkout must write studies N-1 can read, fix the study writer and rerun bun scripts/n1-check.ts`);
     if (!latestBytes.equals(readBytesBounded(join(latest, "study.json"), STUDY_BYTES))) fail(`N-1 changed study v${format.version} bytes while ${format.expect === "refuse" ? "refusing" : "reading"}; N-1 status must stay read-only, so investigate the N-1 reader and rerun bun scripts/n1-check.ts`);
     console.log(format.expect === "refuse" ? `n1: N-1 refuses checkout study v${format.version} with its unsupported-version error, bytes unchanged` : `n1: N-1 reads checkout study v${format.version} without rewriting bytes`);
+    await checkN1Harness(old, next, work);
+    console.log("n1: N-1 reads a checkout harness round (status, gate list, harness show) and the checkout reads an N-1 round, bytes unchanged");
     console.log("n1: ok");
   } finally { rmSync(work, { recursive: true, force: true }); }
 }

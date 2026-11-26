@@ -160,3 +160,25 @@ test("N-1 protocol creation passes the installed package root and reports its ow
     return { code: 1, stdout: "", stderr: "synthetic installed-package failure" };
   })).rejects.toThrow("the installed N-1 package failed");
 });
+
+test("#66 T5 AC6: checkN1Harness crosses both writers and fails on a missing round, a wrong gate or rewritten bytes", async () => {
+  const { checkN1Harness } = await import("../scripts/n1-check.ts"), { run: cli } = await import("../src/cli.ts");
+  const home = tempDir(), env = { HOME: home, AGENTHUB_HOME: join(home, "family"), NO_COLOR: "1" };
+  const local = async (...args: string[]) => {
+    try { const out = await cli(args, env, { http: fakeHttp([]).http }); return { code: out.code, stdout: out.text, stderr: "" }; }
+    catch (error) { return { code: 1, stdout: "", stderr: error instanceof Error ? error.message : String(error) }; }
+  };
+  await checkN1Harness(local, local, tempDir());
+  const noRound = async (...args: string[]) => args[0] === "harness" && args[1] === "show" && args[2]!.includes("harness-checkout") ? { code: 0, stdout: JSON.stringify({ rounds: [] }), stderr: "" } : local(...args);
+  await expect(checkN1Harness(noRound, local, tempDir())).rejects.toThrow("N-1 harness show did not return the checkout round");
+  const pending = async (...args: string[]) => {
+    const out = await local(...args);
+    return args[0] === "gate" && args[1] === "list" && args[2]!.includes("harness-checkout") ? { ...out, stdout: JSON.stringify((JSON.parse(out.stdout) as { gate: string }[]).map(g => ({ ...g, state: "pending" }))) } : out;
+  };
+  await expect(checkN1Harness(pending, local, tempDir())).rejects.toThrow("N-1 gate list did not report the checkout harness gate approved");
+  const rewriting = async (...args: string[]) => {
+    if (args[0] === "status" && args[1]!.includes("harness-checkout")) writeAtomic(join(args[1]!, "study.json"), readTextBounded(join(args[1]!, "study.json"), 1 << 20) + " ", 1 << 20);
+    return local(...args);
+  };
+  await expect(checkN1Harness(rewriting, local, tempDir())).rejects.toThrow("N-1 rewrote study.json of a checkout harness study");
+});
