@@ -12,7 +12,7 @@ import { randomUUID } from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { boundedText, commit, openStudy, plain, readJsonFile, readTextBounded, requireExperiment, requireGate, sha256, withLock, StudyLockBusyError, type Actor, type PendingEvent } from "../study.ts";
 import { canonical, designBinding, sameProtocolInputs, frozenProtocol, validateStoredProtocol, protocolHash, readProtocol, readDesign, type Protocol } from "./protocol.ts";
-import { buildContainerArgs, probeGpuAdmission, GpuAdmissionDeferred, validateGpuDevices, validateContainerInputSources, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, stageContainerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
+import { buildContainerArgs, dotRemoteGpus, probeGpuAdmission, GpuAdmissionDeferred, validateGpuDevices, validateContainerInputSources, executionPathsOverlap, verifyExecutorInputs, InputVerificationError, checkExecutorInputs, stageContainerName, readExecutor, runOnExecutor, shellQuote, spawnRunner, startWatchdog, type ContainerPaths, type GpuEnvironment, type Executor, type ProcessRunner, type Stage } from "./executor.ts";
 import { resolveSnapshot, transferSnapshot, transferTask } from "./snapshot.ts";
 import { screenCandidate, type ScreenSummary } from "./screen.ts";
 import { collectEvaluation as defaultEvaluationCollector, collectStageEvidence as defaultStageCollector, EvidenceError, MetricsError, OUTPUT_METADATA_BYTES, outputBudget, type StageEvidence } from "./metrics.ts";
@@ -33,7 +33,7 @@ export interface Attempt {
 }
 export interface AttemptOptions { repo: string; commit: string; seed?: number; run?: string; label?: string; retry?: string; detach?: boolean; expectedId?: string; reuse?: "off" | "eligible"; forceFresh?: boolean }
 /** collectEvaluation is T4's validating adapter; T3 does not parse or validate metric schemas. */
-export interface AttemptContext { actor: Actor; runner?: ProcessRunner; now?: () => number; sleep?: (ms: number) => Promise<void>; collectEvaluation?: (attempt: Attempt, runner: ProcessRunner) => Promise<Evaluation>; collectStageEvidence?: (attempt: Attempt, stage: Stage, runner: ProcessRunner) => Promise<StageEvidence> }
+export interface AttemptContext { actor: Actor; runner?: ProcessRunner; env?: GpuEnvironment; now?: () => number; sleep?: (ms: number) => Promise<void>; collectEvaluation?: (attempt: Attempt, runner: ProcessRunner) => Promise<Evaluation>; collectStageEvidence?: (attempt: Attempt, stage: Stage, runner: ProcessRunner) => Promise<StageEvidence> }
 export const ATTEMPT_BYTES = 1024 * 1024;
 // Startup includes bounded image pulls and two 5-minute transfers; claims never survive indefinitely after a crash.
 export const CONTROL_STALE_MS = 30 * 60_000;
@@ -664,8 +664,8 @@ export async function runAttempt(dirArg: string, options: AttemptOptions, ctx: A
   }
   const verifiedInputs = !existing && protocol.inputs !== undefined ? await verifyExecutorInputs(executor, protocol, ctx.runner ?? spawnRunner) : undefined;
   let gpuDevices: string[] | undefined;
-  if (!existing && executor.gpu && protocol.limits.gpus > 0) {
-    const admission = await probeGpuAdmission(executor, protocol.limits.gpus, ctx.runner ?? spawnRunner);
+  if (!existing && protocol.limits.gpus > 0 && (executor.gpu || dotRemoteGpus(ctx.env ?? process.env))) {
+    const admission = await probeGpuAdmission(executor, protocol.limits.gpus, ctx.runner ?? spawnRunner, ctx.env ?? process.env);
     if (admission.status === "deferred") {
       // An overlapping duplicate may have admitted the same identity during this read-only probe.
       const duplicate = await withLock(dir, () => load(dir).find(attempt => attempt.id === wanted));

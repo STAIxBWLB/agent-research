@@ -214,6 +214,14 @@ For a new attempt with GPUs and admission settings, ares makes one bounded read-
 
 Chosen UUIDs are frozen in `gpuDevices` and used for each candidate stage and the evaluator with explicit Docker device selection; inspection checks those UUIDs. Study bundles retain `gpuDeviceCount` only. Duplicate requests for an existing attempt do not probe again. Admission is a point-in-time check, not a resource reservation: host pressure can change after it. GPU settings affect new attempts only; without settings, GPU argv remains the existing `--gpus <n>` path. CPU-only attempts do not probe, even when the executor has GPU settings. Missing telemetry is never treated as an idle host. Tests use fake transport responses; no live GPU admission or training run is claimed.
 
+To share a remote GPU host with other `dot` users, run the attempt under a lease and without `--detach`:
+
+```sh
+dot remote hold --gpus N --gpu-min-free-mb MB -- ares attempt run <dir> --repo PATH --commit SHA
+```
+
+`dot remote hold` puts the leased UUIDs in `DOT_REMOTE_GPUS` (comma-separated). When that variable is set and non-empty, the candidates are exactly those UUIDs, in that order, instead of the allow-list order. Each one must also be in the executor allow-list, by index or UUID through the probed inventory. The probe, load check and per-device `minFreeMemoryMb` check run as usual. The first `protocol.limits.gpus` passing devices are used, and too few passing devices defer with `reason: "devices"` and exit 75. Each of these refuses with a usage error (exit 2) and never creates an attempt or event: a value that is not 1..64 distinct `GPU-...` UUIDs, fewer UUIDs than `protocol.limits.gpus`, a UUID outside the allow-list, or the variable set while the executor has no `gpu` settings. Every refusal comes before the probe, except allow-list membership when the allow-list has index entries: indexes need the inventory, so that check follows the one read-only probe. An unset or empty variable keeps the admission above. CPU-only attempts and duplicate requests do not read it. A detached run or MCP `ares_attempt_run` returns while the containers still run, so the hold would end early; use a foreground run. An MCP server started under a hold reads `DOT_REMOTE_GPUS` from its own environment, but holding detached or MCP attempts is not supported.
+
 ## Serial stage experiments and retained outputs
 
 Opt-in protocol v2 uses 1..16 fresh candidate stages in declared order, named task/upstream-output inputs, digest-pinned images and a separate fresh evaluator. See [the schema and lifecycle contract](docs/design/stage-protocol.md). V1 protocols keep the existing execution and identity behavior. V2 needs Python3 on the executor and a compatible minor release for distribution; no release is performed by setting a protocol.

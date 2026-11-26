@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { validateExecutor, validateExecutorGpu, validateGpuDevices, probeGpuAdmission, GpuAdmissionDeferred, buildContainerArgs, runOnExecutor, shellQuote, GPU_ADMISSION_SCRIPT, GPU_PROBE_TIMEOUT_MS, GPU_PROBE_OUTPUT_BYTES, GPU_INVENTORY_LIMIT, type Executor, type ProcessResult } from "../src/exp/executor.ts";
+import { GpuLeaseError, validateExecutor, validateExecutorGpu, validateGpuDevices, probeGpuAdmission, GpuAdmissionDeferred, buildContainerArgs, runOnExecutor, shellQuote, GPU_ADMISSION_SCRIPT, GPU_PROBE_TIMEOUT_MS, GPU_PROBE_OUTPUT_BYTES, GPU_INVENTORY_LIMIT, type Executor, type ProcessResult } from "../src/exp/executor.ts";
 import { metricProtocol } from "./metric-fixtures.ts";
 import { fakeRunner } from "./helpers.ts";
 
@@ -90,4 +90,46 @@ test("explicit UUID Docker CSV arguments preserve literal multi-device quotes lo
   protocol.limits.gpus = 0;
   expect(buildContainerArgs({ ...options, stage: "candidate", gpuDevices: [] })).not.toContain("--gpus");
   expect(buildContainerArgs({ ...options, stage: "candidate" })).not.toContain("--gpus");
+});
+
+test("#197 AC1: DOT_REMOTE_GPUS names the candidates in its order instead of the allow-list order", async () => {
+  const fake = fakeRunner([ok()]);
+  expect(await probeGpuAdmission(configured(), 2, fake.runner, { DOT_REMOTE_GPUS: `${C},GPU-${B.slice(4).toUpperCase()}` })).toEqual({ status: "admitted", devices: [C, B] });
+  const extra = fakeRunner([ok()]);
+  expect(await probeGpuAdmission(configured(), 1, extra.runner, { DOT_REMOTE_GPUS: ` ${B} , ${C}` })).toEqual({ status: "admitted", devices: [B] });
+});
+
+test("#197 AC2: a named device below minFreeMemoryMb defers even when an unnamed allowed device would pass", async () => {
+  const executor: Executor = { ...local, gpu: { ...settings(), minFreeMemoryMb: 1500 } }, fake = fakeRunner([ok()]);
+  expect(await probeGpuAdmission(executor, 1, fake.runner, { DOT_REMOTE_GPUS: B })).toMatchObject({ status: "deferred", reason: "devices", exitCode: 75 });
+  const heavy = fakeRunner([ok(telemetry(undefined, "9.00 1.00 0.50 1/20 123"))]);
+  expect(await probeGpuAdmission(executor, 1, heavy.runner, { DOT_REMOTE_GPUS: C })).toMatchObject({ status: "deferred", reason: "load" });
+});
+
+test("#197 AC3: malformed, short, outside the allow-list and GPU-less leases refuse and name DOT_REMOTE_GPUS", async () => {
+  const cases: [Executor, number, string, string, number][] = [
+    [configured(), 1, "GPU-invalid", "malformed value", 0],
+    [configured(), 1, `${A},${A.toUpperCase()}`, "duplicate UUID", 0],
+    [configured(), 1, Array(65).fill(A).join(","), "malformed value", 0],
+    [configured(), 2, A, "fewer UUIDs (1) than protocol.limits.gpus (2)", 0],
+    [{ ...local, gpu: { devices: [A, B], minFreeMemoryMb: 0, maxLoadRatio: 1 } }, 1, C, "UUID not in the executor allow-list", 0],
+    [{ ...local, gpu: { devices: [0, "1"], minFreeMemoryMb: 0, maxLoadRatio: 1 } }, 1, C, "UUID not in the executor allow-list", 1],
+    [local, 1, A, "set but the executor has no gpu settings", 0],
+  ];
+  for (const [executor, count, value, cause, probes] of cases) {
+    const fake = fakeRunner([ok()]);
+    const error = await probeGpuAdmission(executor, count, fake.runner, { DOT_REMOTE_GPUS: value }).then(() => undefined, (failure: unknown) => failure);
+    expect(error).toBeInstanceOf(GpuLeaseError);
+    expect(String(error)).toContain(`DOT_REMOTE_GPUS: ${cause}`);
+    expect(fake.requests).toHaveLength(probes);
+  }
+});
+
+test("#197 AC4: unset, empty and blank leases keep allow-list admission; zero GPUs never read the variable", async () => {
+  for (const env of [{}, { DOT_REMOTE_GPUS: "" }, { DOT_REMOTE_GPUS: "  " }]) {
+    const fake = fakeRunner([ok()]);
+    expect(await probeGpuAdmission(configured(), 2, fake.runner, env)).toEqual({ status: "admitted", devices: [A, B] });
+  }
+  const none = fakeRunner([]);
+  expect(await probeGpuAdmission(local, 0, none.runner, { DOT_REMOTE_GPUS: "GPU-invalid" })).toEqual({ status: "admitted", devices: [] });
 });

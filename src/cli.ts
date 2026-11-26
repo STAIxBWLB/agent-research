@@ -1,3 +1,4 @@
+import { GpuLeaseError } from "./exp/executor.ts";
 import { paperDocument } from "./paper/document.ts";
 import { version } from "../package.json";
 import { findCommand, helpUsage, type CommandSpec } from "./commands-table.ts";
@@ -118,7 +119,7 @@ async function execute(args: string[], env: NodeJS.ProcessEnv, io: Io, output: C
   output.context = { args: commandArgs, values, now: io.now?.() ?? Date.now() };
   const color = colorFor(output.options, output.tty ?? false, env);
   if (color instanceof Error) throw new UsageError(color.message);
-  const ctx: ops.Ctx = { actor: detectActor(env), http: io.http ?? createHttp(env), ...(io.signal ? { signal: io.signal } : {}), ...(io.sleep ? { sleep: io.sleep } : {}), ...(io.runner ? { runner: io.runner } : {}), ...(io.now ? { now: io.now } : {}), ...(io.collectEvaluation ? { collectEvaluation: io.collectEvaluation } : {}), ...(io.collectStageEvidence ? { collectStageEvidence: io.collectStageEvidence } : {}) };
+  const ctx: ops.Ctx = { actor: detectActor(env), env, http: io.http ?? createHttp(env), ...(io.signal ? { signal: io.signal } : {}), ...(io.sleep ? { sleep: io.sleep } : {}), ...(io.runner ? { runner: io.runner } : {}), ...(io.now ? { now: io.now } : {}), ...(io.collectEvaluation ? { collectEvaluation: io.collectEvaluation } : {}), ...(io.collectStageEvidence ? { collectStageEvidence: io.collectStageEvidence } : {}) };
   const str = (flag: string) => (typeof flags[flag] === "string" ? flags[flag] as string : undefined);
   const selectDocument = () => {
     try { return paperDocument(str("--doc")); }
@@ -542,7 +543,7 @@ export async function main(args: string[]): Promise<number> {
     const tty = Boolean(process.stderr.isTTY);
     const columns = streamWidth(tty, process.stderr.columns, env);
     const color = colorFor(cli.options, tty, env) === true;
-    const usage = error instanceof UsageError;
+    const usage = error instanceof UsageError || error instanceof GpuLeaseError;
     let message = error instanceof Error ? error.message : "operation failed";
     if (message.startsWith("usage: ares ")) message = `${cli.spec?.name ?? "command"}: missing or invalid arguments`;
     const diagnostic = renderError(fillMessage(message, cli.context?.values ?? {}), tty, color, outputAscii(cli.options, env), Math.min(columns ?? 80, 80));
