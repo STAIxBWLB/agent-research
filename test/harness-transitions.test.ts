@@ -326,3 +326,25 @@ test("inconclusive contrasts may be incomplete but cannot cite another candidate
   await ops.harnessContrast(f.dir, raw.id, {...contrast(f.dir, "incomplete-own"), outcome: "inconclusive", evidence: [ref(f.dir, "candidate")]}, f.ctx);
   expect(view(f.dir).transitions.contrasts.map(record => record.form.evidence.length)).toEqual([1, 1]);
 });
+
+/** #66 T5 (AC5): every study store that holds scientific metrics, selection or final results. */
+function metricStores(dir: string) {
+  const files = ["design/selection.json", "design/protocol.json", "runs"].map(name => [name, existsSync(join(dir, name))] as const);
+  const events = readLedger(dir).filter(event => /^(attempt|selection|investigate|final|ablate|posthoc)\./.test(event.type)).map(event => event.type);
+  return {attempts: ops.attemptList(dir).total, files, events};
+}
+test("#66 T5 AC5: contrast, compose and adopt create no attempt, metric, selection or final record", async () => {
+  const f = await fixture(), baseline = metricStores(f.dir);
+  expect(baseline).toEqual({attempts: 0, files: [["design/selection.json", false], ["design/protocol.json", false], ["runs", false]], events: []});
+  await ops.harnessContrast(f.dir, "round-one", contrast(f.dir), f.ctx);
+  await ops.harnessCompose(f.dir, "round-one", composition(f.dir, null), f.ctx);
+  const raw = {v: 1, id: "adopt-one", fingerprint: view(f.dir).transitions.fingerprint, decision: "adopt", arm: "candidate", reason: "Synthetic subjective preference only", checks: [ref(f.dir, "candidate")], independentCheck: {state: "unavailable" as const, source: {kind: "unavailable" as const, refs: []}}};
+  const preview = await ops.harnessAdopt(f.dir, "round-one", raw, undefined, f.ctx); if (!("needsConfirm" in preview)) throw new Error("preview required");
+  await ops.harnessAdopt(f.dir, "round-one", raw, preview.fingerprint, f.ctx);
+  const types = readLedger(f.dir).map(event => event.type);
+  expect(types).toContain("harness.contrast.recorded"); expect(types).toContain("harness.composition.recorded"); expect(types).toContain("harness.adoption.decided");
+  expect(view(f.dir).transitions.closure).toMatchObject({outcome: "adopted-experimental", current: true});
+  expect(view(f.dir).transitions.readiness).toMatchObject({experimental: true, correctness: "unavailable", transfer: "not-demonstrated"});
+  expect(metricStores(f.dir)).toEqual(baseline);
+  expect(f.transport.requests).toHaveLength(0);
+});
