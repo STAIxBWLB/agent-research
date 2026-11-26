@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.5.0] - 2026-11-26
+
+### N-1 compatibility with 0.4.1
+
+- **CLI** Retains all 98 published commands and their usage forms. Version 0.4.1 ignores `DOT_REMOTE_GPUS` and can choose devices outside an active lease. Use 0.5.0 for GPU attempts run under `dot remote hold`.
+- **MCP tools** Retains all 93 published tool names and `readOnly` values. Version 0.5.0 accepts the ten nonempty object arguments listed below and validates them in their handlers. Version 0.4.1 refuses those arguments with `-32602`. The remaining tool schemas are unchanged.
+- **Study and ledger formats** Reads 0.4.1 studies and ledgers without migration. The installed-package check covers representative study and design-gate reads and checks harness rounds and approved gate bindings in both directions without rewriting bytes. Version 0.4.1 ignores the optional attempt `cause` field. GPU lease admission keeps the existing `gpuDevices` field and record format. On public hub reads, 0.4.1 omits the screened rationale and still reports `rationaleOmitted: true`.
+
 - MCP object arguments (#198): ten tool arguments were declared as a bare `{type: "object"}`, which the MCP validator reads as closed, so any real value was refused over `tools/call`. They are `proposal` (`ares_lesson_propose`), `closure`, `contrast`, `composition`, `decision` (`ares_harness_close`, `_contrast`, `_compose`, `_adopt`), `stream` (`ares_harness_stream_set`), `selection` (`ares_experience_select`), `context` (`ares_experience_freeze`), `round` (`ares_harness_set`) and `fixture` (`ares_harness_import`). They now declare `{type: "object", additionalProperties: {}}`. Each handler still validates its closed shape and refuses unknown fields as a tool error, and each tool description says so. No other tool schema changes. N-1 (0.4.1): 0.4.1 refuses these arguments with `-32602` over MCP; CLI forms are unchanged.
 
 - Container-start cause class (#195): when `docker run` fails, or the cleanup of a failed start fails, the attempt now records `cause`. The value is one of `image-unavailable`, `name-conflict`, `daemon-unavailable`, `resource-refused`, `permission-denied` or `other`. It is classified from the exit status and the first 4096 bytes of stderr, and the stderr text, command line and paths are never stored. The error text names the class and gives a recovery for it; `other` keeps the generic `ares executor check` recovery. `attempt show` (CLI and MCP `ares_attempt_show`) shows the field. The `executor-start` and `executor-start-uncertain` reasons and the retry rules are unchanged, and records without `cause` read as before. N-1 (0.4.1): a 0.4.1 reader accepts and ignores `cause` on attempt records.
