@@ -206,10 +206,31 @@ function gpuProbe(stdout: string): { inventory: GpuInventoryRow[]; loadRatio: nu
   return { inventory, loadRatio: Number(parts[0]) / Number(cpu) };
 }
 /** One read-only probe; admission never sleeps, retries or reserves a physical GPU. */
-export async function probeGpuAdmission(executorArg: Executor, count: number, runner: ProcessRunner = spawnRunner): Promise<GpuAdmission> {
+/** A refused dot remote hold lease: a usage error raised before any probe, attempt or event. */
+export class GpuLeaseError extends Error {}
+export type GpuEnvironment = Readonly<Record<string, string | undefined>>;
+function leaseRefused(cause: string, next: string): never { throw new GpuLeaseError(`DOT_REMOTE_GPUS: ${cause}; ${next}`); }
+/** The UUIDs a `dot remote hold` lease names, in order, or undefined when unset or empty. */
+export function dotRemoteGpus(env: GpuEnvironment): string[] | undefined {
+  const raw = env.DOT_REMOTE_GPUS;
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const parts = raw.split(",").map(part => part.trim());
+  if (parts.length > 64 || parts.some(part => !GPU_UUID.test(part))) leaseRefused("malformed value", "pass 1..64 comma-separated GPU-... UUIDs from dot remote hold, or unset it");
+  const devices = parts.map(part => "GPU-" + part.slice(4).toLowerCase());
+  if (new Set(devices).size !== devices.length) leaseRefused("duplicate UUID", "pass distinct GPU UUIDs from dot remote hold, or unset it");
+  return devices;
+}
+export async function probeGpuAdmission(executorArg: Executor, count: number, runner: ProcessRunner = spawnRunner, env: GpuEnvironment = process.env): Promise<GpuAdmission> {
   const executor = validateExecutor(executorArg);
   if (!Number.isSafeInteger(count) || count < 0 || count > 64) throw new Error("GPU admission count: integer 0..64 required; use the protocol GPU count before retrying");
-  if (!executor.gpu || count === 0) return { status: "admitted", devices: [] };
+  if (count === 0) return { status: "admitted", devices: [] };
+  const leased = dotRemoteGpus(env);
+  if (leased && !executor.gpu) leaseRefused("set but the executor has no gpu settings", "add executor gpu settings with ares executor set, or unset DOT_REMOTE_GPUS");
+  if (!executor.gpu) return { status: "admitted", devices: [] };
+  if (leased && leased.length < count) leaseRefused(`fewer UUIDs (${leased.length}) than protocol.limits.gpus (${count})`, "hold at least that many GPUs with dot remote hold --gpus N");
+  const indexed = executor.gpu.devices.some(selector => !String(selector).startsWith("GPU-"));
+  // With UUID-only allow-lists membership is decided before probing; index entries need the inventory.
+  if (leased && !indexed && leased.some(uuid => !executor.gpu!.devices.map(String).includes(uuid))) leaseRefused("UUID not in the executor allow-list", "hold GPUs the executor gpu.devices allow, or widen the allow-list with ares executor set");
   let parsed: ReturnType<typeof gpuProbe>;
   try {
     const result = await runOnExecutor(executor, "sh", ["-c", GPU_ADMISSION_SCRIPT], runner, { timeoutMs: GPU_PROBE_TIMEOUT_MS, maxOutputBytes: GPU_PROBE_OUTPUT_BYTES });
@@ -218,6 +239,16 @@ export async function probeGpuAdmission(executorArg: Executor, count: number, ru
   } catch { return gpuDeferred("probe"); }
   if (parsed.loadRatio > executor.gpu.maxLoadRatio) return gpuDeferred("load");
   const devices: string[] = [];
+  if (leased) {
+    const allowed = new Set(executor.gpu.devices.flatMap(selector => parsed.inventory.filter(gpu => gpu.index === String(selector) || gpu.uuid === selector).map(gpu => gpu.uuid)));
+    if (leased.some(uuid => !allowed.has(uuid))) leaseRefused("UUID not in the executor allow-list", "hold GPUs the executor gpu.devices allow, or widen the allow-list with ares executor set");
+    for (const uuid of leased) {
+      const gpu = parsed.inventory.find(gpu => gpu.uuid === uuid);
+      if (!gpu || gpu.memory < executor.gpu.minFreeMemoryMb) continue;
+      devices.push(gpu.uuid); if (devices.length === count) return { status: "admitted", devices };
+    }
+    return gpuDeferred("devices");
+  }
   for (const selector of executor.gpu.devices) {
     const gpu = parsed.inventory.find(gpu => gpu.index === String(selector) || gpu.uuid === selector);
     if (!gpu || gpu.memory < executor.gpu.minFreeMemoryMb || devices.includes(gpu.uuid)) continue;

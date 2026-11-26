@@ -1090,3 +1090,16 @@ test("#195 a failed cleanup of our started container keeps it running with a cla
     for (const hidden of [MARKER, "docker.sock", "Is the docker daemon running"]) expect(text).not.toContain(hidden);
   }
 });
+test("#197 a refused DOT_REMOTE_GPUS lease creates no attempt or event and an admitted lease freezes the leased UUIDs", async () => {
+  const { dir, fake } = await setupGpu(1), before = readTextBounded(join(dir, "ledger.jsonl"), 1024 * 1024);
+  await expect(runAttempt(dir, request, { ...fake.ctx, env: { DOT_REMOTE_GPUS: "GPU-invalid" } })).rejects.toThrow("DOT_REMOTE_GPUS: malformed value");
+  const { run } = await import("../src/cli.ts"), { GpuLeaseError } = await import("../src/exp/executor.ts"), home = tempDir();
+  const cli = run(["attempt", "run", dir, "--repo", request.repo, "--commit", request.commit, "--detach", "--json"], { HOME: home, AGENTHUB_HOME: join(home, "family"), DOT_REMOTE_GPUS: `${GPU_A},${GPU_A}` }, { ...fake.ctx, http: fakeHttp([]).http });
+  await expect(cli).rejects.toBeInstanceOf(GpuLeaseError); await expect(cli).rejects.toThrow("DOT_REMOTE_GPUS: duplicate UUID");
+  expect(listAttempts(dir).attempts).toHaveLength(0); expect(readTextBounded(join(dir, "ledger.jsonl"), 1024 * 1024)).toBe(before);
+  expect(fake.requests.some(r => r.args.some(arg => arg.includes("ARES_GPU_INVENTORY")))).toBe(false);
+  const started = await runAttempt(dir, request, { ...fake.ctx, env: { DOT_REMOTE_GPUS: GPU_A } });
+  expect(started.gpuDevices).toEqual([GPU_A]);
+  const cpu = await setupGpu(0), cpuStarted = await runAttempt(cpu.dir, request, { ...cpu.fake.ctx, env: { DOT_REMOTE_GPUS: "GPU-invalid" } });
+  expect(cpuStarted.gpuDevices).toBeUndefined();
+});
