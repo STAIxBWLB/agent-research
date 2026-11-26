@@ -57,17 +57,46 @@ test("#198 the ten object arguments advertise an explicit open schema that the M
   for (const reply of wrong) expect(reply.error.code).toBe(-32602);
 });
 
-test("#198 real handlers behind the MCP server refuse an unknown field and accept a real round", async () => {
+const RECORDED_ROUND = ["ares_harness_close", "ares_harness_contrast", "ares_harness_compose", "ares_harness_adopt", "ares_harness_import"];
+async function study() {
   const home = tempDir(), dir = join(home, "study"), transport = fakeRunner([]), ctx = {actor: {kind: "person" as const}, http: fakeHttp([]).http, runner: transport.runner};
   ops.init(dir, {question: "Synthetic MCP object arguments", mode: "experiment", autonomy: "gates"}, ctx);
   const server = createAresMcp({HOME: home, AGENTHUB_HOME: join(home, "family")}, ctx.http, ctx);
-  const tools = server.tools.filter(tool => tool.name in OBJECT_ARGS);
-  const refused = await serve(tools, server.handlers, tools.map(tool => ({name: tool.name, arguments: {...requiredArgs(tool, {syntheticUnknownField: 1}), study: dir}})));
-  for (const reply of refused) { expect(reply.error).toBeUndefined(); expect(reply.result.isError).toBe(true); }
+  return {dir, ctx, server, tools: server.tools.filter(tool => tool.name in OBJECT_ARGS)};
+}
+function validRound() {
   const source = (name: string) => parseProbeFixture(JSON.parse(readTextBounded(join(import.meta.dir, "fixtures", "harness-rounds", name + ".json"), 65536)));
   const baseline = source("baseline"), candidate = source("candidate");
-  const round = {v: 1, id: "round-one", task: {id: baseline.taskId, inputSha256: baseline.taskInputHash}, baseline: {guidanceSha256: baseline.baselineHash}, candidates: [{id: candidate.arm, guidanceSha256: candidate.guidanceHash, category: "procedure"}], hypothesis: {deficiency: "Synthetic output omits a required check", predictedChange: "The synthetic candidate names that check"}, experience: [], authoring: "uncontrolled-authoring"};
-  const [set] = await serve(tools, server.handlers, [{name: "ares_harness_set", arguments: {study: dir, round}}]);
-  expect(set.error).toBeUndefined();
-  expect(set.result.isError ? JSON.parse(set.result.content[0].text) : "accepted").toBe("accepted");
+  return {v: 1, id: "round-one", task: {id: baseline.taskId, inputSha256: baseline.taskInputHash}, baseline: {guidanceSha256: baseline.baselineHash}, candidates: [{id: candidate.arm, guidanceSha256: candidate.guidanceHash, category: "procedure"}], hypothesis: {deficiency: "Synthetic output omits a required check", predictedChange: "The synthetic candidate names that check"}, experience: [], authoring: "uncontrolled-authoring"};
+}
+const refusal = (reply: {error?: unknown; result: {isError?: boolean; content: {text: string}[]}}) => { expect(reply.error).toBeUndefined(); expect(reply.result.isError).toBe(true); return JSON.parse(reply.result.content[0]!.text).issues[0].message as string; };
+
+test("#198 ares_harness_set over MCP accepts a real round and refuses that round plus one unknown key", async () => {
+  const {dir, server, tools} = await study(), round = validRound();
+  const [extra, set] = await serve(tools, server.handlers, [
+    {name: "ares_harness_set", arguments: {study: dir, round: {...round, syntheticUnknownField: 1}}},
+    {name: "ares_harness_set", arguments: {study: dir, round}},
+  ]);
+  expect(refusal(extra!)).toContain("unknown field");
+  expect(set.error).toBeUndefined(); expect(set.result.isError).toBeUndefined();
+});
+
+test("#198 lesson, stream, selection and context handlers over MCP name an unknown field", async () => {
+  const {dir, server, tools} = await study(), names = ["ares_lesson_propose", "ares_harness_stream_set", "ares_experience_select", "ares_experience_freeze"];
+  const picked = names.map(name => tools.find(tool => tool.name === name)!);
+  const replies = await serve(picked, server.handlers, picked.map(tool => ({name: tool.name, arguments: {...requiredArgs(tool, {syntheticUnknownField: 1}), study: dir}})));
+  for (const reply of replies) expect(refusal(reply)).toContain("unknown field");
+});
+
+test("#198 close, contrast, compose and adopt over MCP name an unknown field against a recorded round; import refuses the fixture shape", async () => {
+  const {dir, server, tools} = await study();
+  const [set] = await serve(tools, server.handlers, [{name: "ares_harness_set", arguments: {study: dir, round: validRound()}}]);
+  expect(set.result.isError).toBeUndefined();
+  const picked = RECORDED_ROUND.map(name => tools.find(tool => tool.name === name)!);
+  const replies = await serve(picked, server.handlers, picked.map(tool => ({name: tool.name, arguments: {...requiredArgs(tool, {syntheticUnknownField: 1}), study: dir, round: "round-one"}})));
+  for (const [index, reply] of replies.entries()) {
+    const message = refusal(reply);
+    if (picked[index]!.name === "ares_harness_import") expect(message).toContain("harness fixture probe shape/version");
+    else expect(message).toContain("harness transition: unknown field");
+  }
 });
