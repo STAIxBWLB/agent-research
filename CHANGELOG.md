@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Hub guidance rationale (#66 T4): the public hub guidance read parser (`parseHubGuidanceReadResult`, and `parseHarnessVariant` for hub-public input) now returns each record's hub-screened `rationale: {problemHypothesis, expectedObservableDifference}` verbatim. Each value is screened prose or the literal `withheld`, shown as is and never inferred or fetched. The closed shape is checked with the same inert-JSON rules and the hub's 2000-byte canonical bound. The available projection drops `rationaleOmitted: true`. A hub read without `rationale` (pre-rationale hubs) still parses, and its records carry no `rationale` key. The rationale is display only and never feeds matching, composition, adoption, selection or metrics. N-1 (0.4.1): 0.4.1 parses the new hub read but omits the rationale and still reports `rationaleOmitted: true`; callers that assert that flag must read the `rationale` key instead.
+
 ## [0.4.1] - 2026-11-25
 
 Version 0.4.0 was tagged but never published to npm or GitHub Releases. Version 0.4.1 is the first published release in the 0.4 line and carries all 0.4.0 features. Its N-1 compatibility statements remain those in the 0.4.0 section below.

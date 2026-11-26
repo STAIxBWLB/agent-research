@@ -12,18 +12,31 @@ function fixture() {
 }
 
 describe("inert public hub guidance projection", () => {
-  test("preserves screened metadata and omits rationale entirely", () => {
+  test("preserves screened metadata and the screened rationale verbatim, withheld included", () => {
     const input = fixture();
     const result = parseHubGuidanceReadResult(input);
     expect(result.state).toBe("available");
     if (result.state !== "available") throw new Error("available fixture required");
-    const {rationale: _rationale, ...metadata} = input.records[0]!;
-    expect(result.records as unknown).toEqual([metadata]);
-    expect(result.rationaleOmitted).toBe(true);
-    expect(JSON.stringify(result)).not.toContain("problemHypothesis");
-    expect(JSON.stringify(result)).not.toContain("첫 줄");
+    expect(result.records as unknown).toEqual([input.records[0]!]);
+    expect(result.records[0]!.rationale).toEqual({problemHypothesis: "[withheld]", expectedObservableDifference: "첫 줄\nsecond line"});
+    expect(Object.hasOwn(result, "rationaleOmitted")).toBe(false);
+    const withheld = fixture(); withheld.records[0]!.rationale = {problemHypothesis: "withheld", expectedObservableDifference: "withheld"};
+    const kept = parseHubGuidanceReadResult(withheld);
+    if (kept.state !== "available") throw new Error("available fixture required");
+    expect(kept.records[0]!.rationale).toEqual({problemHypothesis: "withheld", expectedObservableDifference: "withheld"});
     expect(parseHubGuidanceReadResult(JSON.stringify(input))).toEqual(result);
     expect(parseHubGuidanceReadResult({state: "unavailable"})).toEqual({state: "unavailable"});
+  });
+
+  test("an N-1 hub read without rationale parses with the rationale absent", () => {
+    const input = fixture(); const {rationale: _rationale, ...row} = input.records[0]!;
+    const result = parseHubGuidanceReadResult({state: "available", records: [row]});
+    if (result.state !== "available") throw new Error("available fixture required");
+    expect(result.records as unknown).toEqual([row]);
+    expect(Object.hasOwn(result.records[0]!, "rationale")).toBe(false);
+    for (const bad of [null, "withheld", {problemHypothesis: "withheld"}, {problemHypothesis: "", expectedObservableDifference: "x"}]) {
+      expect(() => parseHubGuidanceReadResult({state: "available", records: [{...row, rationale: bad}]})).toThrow("reload");
+    }
   });
 
   test("opaque whitespace identities and withheld rationale are preserved as valid inputs", () => {

@@ -53,7 +53,7 @@ test("pinned native golden identities and raw UTF-8 hashes/counts survive as pub
   expect(hash(JSON.stringify(["agent-hub.guidance-variant/v1", payload]))).toBe(golden.golden.expectedId);
   expect(hash(value.baseline.bytes)).toBe(value.baseline.sha256); expect(hash(value.candidate.bytes)).toBe(value.candidate.sha256);
   const view = publicReadResult(), mapped = parseHubGuidanceReadResult(view);
-  expect(mapped).toEqual({state: "available", records: [withoutRationale(view.records[0]!)], rationaleOmitted: true});
+  expect(mapped).toEqual({state: "available", records: [view.records[0]!]});
   if (mapped.state !== "available") throw new Error("available golden view required");
   expect(mapped.records[0]).toMatchObject({id: golden.golden.expectedId, experimentId: "experiment-a", taskId: 42, taskCreated: 100, flowRevision: 3, roleId: "test-engineer", layer: "project", changedSections: ["Scope"]});
   expect(typeof mapped.records[0]!.taskId).toBe("number");
@@ -69,7 +69,7 @@ test("public lifecycle, opaque experiment identity and changed-section order rem
   row.experimentId = "withheld"; row.layer = "shipped"; row.taskCreated = 0; row.flowRevision = 0;
   row.changedSections = ["Evidence", "Deliverables"]; row.status = "withdrawn"; row.applicable = false; row.evidence[0]!.status = "unavailable";
   row.rationale = {problemHypothesis: "withheld", expectedObservableDifference: "withheld"};
-  expect(parseHubGuidanceReadResult(view)).toEqual({state: "available", records: [withoutRationale(row)], rationaleOmitted: true});
+  expect(parseHubGuidanceReadResult(view)).toEqual({state: "available", records: [row]});
   row.status = "declared"; expect(parseHubGuidanceReadResult(view).state).toBe("available");
   row.status = "withdrawn"; row.applicable = true; refusesWithoutPrivateLeak(() => parseHubGuidanceReadResult(view));
   expect(parseHubGuidanceReadResult({state: "unavailable"})).toEqual({state: "unavailable"});
@@ -81,19 +81,20 @@ test("sixteen independently addressed native variants fit while seventeen refuse
   expect(new Set(records.map(record => record.id)).size).toBe(16);
   const mapped = parseHubGuidanceReadResult({state: "available", records});
   if (mapped.state !== "available") throw new Error("available bounded view required");
-  expect(mapped.records).toEqual(records.map(withoutRationale));
+  expect(mapped.records).toEqual(records);
   refusesWithoutPrivateLeak(() => parseHubGuidanceReadResult({state: "available", records: [...records, publicRecord(16)]}));
 });
 
-test("multiline synthetic PII-shaped rationale is shape-checked and omitted from every successful projection", () => {
+test("screened multiline rationale is shown verbatim in every projection and an N-1 read shows it absent", () => {
   const view = publicReadResult(); view.records[0]!.rationale = {...privateRationale};
   const mapped = parseHubGuidanceReadResult(view);
-  expect(mapped.state).toBe("available");
-  expect(mapped).toEqual({state: "available", records: [withoutRationale(view.records[0]!)], rationaleOmitted: true});
-  for (const result of [mapped, parseHarnessVariant(view), parseHubGuidanceReadResult(JSON.stringify(view))]) {
-    const serialized = JSON.stringify(result);
-    for (const hidden of [NAME, PHONE, "problemHypothesis", "expectedObservableDifference"]) expect(serialized).not.toContain(hidden);
-  }
+  expect(mapped).toEqual({state: "available", records: [view.records[0]!]});
+  expect(parseHubGuidanceReadResult(JSON.stringify(view))).toEqual(mapped);
+  expect(parseHarnessVariant(view)).toEqual({format: "hub-public", view: mapped});
+  expect(JSON.stringify(mapped)).not.toContain("rationaleOmitted");
+  const old = {state: "available" as const, records: [withoutRationale(view.records[0]!)]};
+  expect(parseHubGuidanceReadResult(old)).toEqual(old);
+  expect(parseHarnessVariant(JSON.stringify(old))).toEqual({format: "hub-public", view: old});
 });
 
 test("malformed, over-bound, raw snapshot and unknown field errors never echo planted rationale or field names", () => {

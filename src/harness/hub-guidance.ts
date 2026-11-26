@@ -18,9 +18,12 @@ export interface HubGuidanceMetadata {
   readonly status: "declared" | "withdrawn";
   readonly applicable: boolean;
   readonly evidence: readonly Readonly<{key: string; status: "declared" | "unavailable"}>[];
+  /** Display only: screened hub prose or the literal `withheld`. Absent when the hub read (N-1) carries none. */
+  readonly rationale?: HubGuidanceRationale;
 }
+export type HubGuidanceRationale = Readonly<{problemHypothesis: string; expectedObservableDifference: string}>;
 export type HubGuidanceReadProjection = {readonly state: "unavailable"}
-  | {readonly state: "available"; readonly records: readonly HubGuidanceMetadata[]; readonly rationaleOmitted: true};
+  | {readonly state: "available"; readonly records: readonly HubGuidanceMetadata[]};
 
 function invalid(): never {
   throw new Error("hub guidance read: invalid closed metadata shape or bounds; reload a supported public guidance read result and retry");
@@ -76,16 +79,18 @@ function token(raw: unknown, pattern: RegExp, maximum: number): string {
   if (!pattern.test(result)) invalid();
   return result;
 }
-function rationaleBytes(raw: unknown): number {
+function rationale(raw: unknown): HubGuidanceRationale {
   const row = object(raw, ["problemHypothesis", "expectedObservableDifference"]);
-  const result = {problemHypothesis: text(row.problemHypothesis, 2000), expectedObservableDifference: text(row.expectedObservableDifference, 2000)};
-  const bytes = Buffer.byteLength(JSON.stringify(result));
-  if (bytes > 2000) invalid();
-  return bytes;
+  const result = Object.freeze({problemHypothesis: text(row.problemHypothesis, 2000), expectedObservableDifference: text(row.expectedObservableDifference, 2000)});
+  if (Buffer.byteLength(JSON.stringify(result)) > 2000) invalid();
+  return result;
 }
+const FIELDS = ["id", "experimentId", "taskId", "taskCreated", "flowRevision", "roleId", "layer", "baselineSha256", "candidateSha256", "changedSections", "bytes", "author", "status", "applicable", "evidence"];
 
 function record(raw: unknown): {metadata: HubGuidanceMetadata; sourceBytes: number} {
-  const row = object(raw, ["id", "experimentId", "taskId", "taskCreated", "flowRevision", "roleId", "layer", "baselineSha256", "candidateSha256", "changedSections", "bytes", "author", "status", "applicable", "rationale", "evidence"]);
+  // A pre-rationale (N-1) hub read omits `rationale`; it parses with the rationale absent.
+  const hasRationale = raw !== null && typeof raw === "object" && !types.isProxy(raw) && Object.hasOwn(raw, "rationale");
+  const row = object(raw, hasRationale ? [...FIELDS, "rationale"] : FIELDS);
   const experimentId = text(row.experimentId, 256);
   if (/[\p{Cc}\p{Cs}]/u.test(experimentId)) invalid();
   if (row.layer !== "shipped" && row.layer !== "project") invalid();
@@ -109,12 +114,13 @@ function record(raw: unknown): {metadata: HubGuidanceMetadata; sourceBytes: numb
     baselineSha256: digest(row.baselineSha256), candidateSha256: digest(row.candidateSha256), changedSections: Object.freeze(changedSections),
     bytes: Object.freeze({baseline: integer(sizes.baseline, 1, 8192), candidate: integer(sizes.candidate, 1, 8192), record: integer(sizes.record, 1, 32_768)}),
     author: token(row.author, /^[a-z][a-z0-9-]{0,31}$/, 32), status: row.status, applicable: row.applicable, evidence: Object.freeze(evidence),
+    ...hasRationale ? {rationale: rationale(row.rationale)} : {},
   });
-  const sourceBytes = Buffer.byteLength(JSON.stringify(metadata)) + Buffer.byteLength(',"rationale":') + rationaleBytes(row.rationale);
+  const sourceBytes = Buffer.byteLength(JSON.stringify(metadata));
   return {metadata, sourceBytes};
 }
 
-/** Parse public lifecycle metadata, never private role snapshots or rationale output. */
+/** Parse public lifecycle metadata and the hub-screened rationale (display only), never private role snapshots. */
 export function parseHubGuidanceReadResult(raw: unknown): HubGuidanceReadProjection {
   if (typeof raw === "string") {
     if (raw.length > HUB_GUIDANCE_READ_BYTES || Buffer.byteLength(raw) > HUB_GUIDANCE_READ_BYTES) invalid();
@@ -132,9 +138,8 @@ export function parseHubGuidanceReadResult(raw: unknown): HubGuidanceReadProject
   const row = object(raw, ["state", "records"]);
   const parsed = array(row.records, 16).map(record);
   if (new Set(parsed.map(value => value.metadata.id)).size !== parsed.length) invalid();
-  // Rationale text never leaves its validator; only byte counts cross the record boundary.
   const sourceBytes = Buffer.byteLength('{"state":"available","records":[]}')
     + parsed.reduce((sum, value) => sum + value.sourceBytes, 0) + Math.max(0, parsed.length - 1);
   if (sourceBytes > HUB_GUIDANCE_READ_BYTES) invalid();
-  return Object.freeze({state: "available", records: Object.freeze(parsed.map(value => value.metadata)), rationaleOmitted: true});
+  return Object.freeze({state: "available", records: Object.freeze(parsed.map(value => value.metadata))});
 }
