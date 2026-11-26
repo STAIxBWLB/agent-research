@@ -1,6 +1,6 @@
 {
   "name": "@staix/agent-research",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Research engine for the agent family: literature with verified references, study ledger and gates (ares)",
   "license": "MIT",
   "type": "module",
