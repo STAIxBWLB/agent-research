@@ -181,4 +181,14 @@ test("#66 T5 AC6: checkN1Harness crosses both writers and fails on a missing rou
     return local(...args);
   };
   await expect(checkN1Harness(rewriting, local, tempDir())).rejects.toThrow("N-1 rewrote study.json of a checkout harness study");
+  // codex probe: dropping binding from both harness projections and current from the gate must not pass as undefined === undefined.
+  const unbound = async (...args: string[]) => {
+    const out = await local(...args);
+    if (out.code !== 0) return out;
+    if (args[0] === "harness" && args[1] === "show") { const view = JSON.parse(out.stdout) as { rounds: Record<string, unknown>[] }; for (const r of view.rounds) delete r.binding; return { ...out, stdout: JSON.stringify(view) }; }
+    if (args[0] === "gate" && args[1] === "list") return { ...out, stdout: JSON.stringify((JSON.parse(out.stdout) as Record<string, unknown>[]).map(({ current: _current, ...g }) => g)) };
+    return out;
+  };
+  await expect(checkN1Harness(unbound, unbound, tempDir())).rejects.toThrow("harness show reported no 64-hex round binding");
+  await expect(checkN1Harness(unbound, local, tempDir())).rejects.toThrow("N-1 harness show did not return the checkout round with the same binding");
 });

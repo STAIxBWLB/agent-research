@@ -113,8 +113,11 @@ export async function checkN1Harness(old: Cli, next: Cli, work: string): Promise
     const gates = json<Gate[]>(await reader("gate", "list", study, "--json"), `${readerName} gate list on a ${writerName} harness study`, step);
     const shown = json<HarnessView>(await reader("harness", "show", study, "--json"), `${readerName} harness show on a ${writerName} harness study`, step);
     const round = shown.rounds?.find(r => r.definition?.id === "round-one"), gate = Array.isArray(gates) ? gates.find(g => g.gate === "harness:round-one") : undefined;
-    if (!round || round.binding !== written.rounds[0]?.binding) fail(`${readerName} harness show did not return the ${writerName} round with the same binding; ${step}`);
-    if (gate?.state !== "approved" || gate.current !== round!.binding) fail(`${readerName} gate list did not report the ${writerName} harness gate approved at the round binding; ${step}`);
+    const binding = written.rounds?.[0]?.binding;
+    // A missing binding on every side must not compare equal as undefined.
+    if (typeof binding !== "string" || !/^[a-f0-9]{64}$/.test(binding)) fail(`${writerName} harness show reported no 64-hex round binding; ${writeStep}`);
+    if (!round || round.binding !== binding) fail(`${readerName} harness show did not return the ${writerName} round with the same binding; ${step}`);
+    if (gate?.state !== "approved" || gate.current !== binding) fail(`${readerName} gate list did not report the ${writerName} harness gate approved at the round binding; ${step}`);
     for (const [name, bytes] of files) if (!bytes.equals(readBytesBounded(join(study, name), LEDGER_BYTES))) fail(`${readerName} rewrote ${name} of a ${writerName} harness study during reads; ${step}`);
   }
 }
