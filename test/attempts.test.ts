@@ -24,7 +24,7 @@ function runtime(dir: string) {
   const requests: ProcessRequest[] = [], containers = new Map<string, FakeContainer>();
   const clock = { value: Date.parse("2030-01-01T00:00:00Z") };
   let beforeHash: (() => Promise<void>) | undefined;
-  let beforeResolve: (() => Promise<void>) | undefined, runFailure = false, daemonDown = false, lostStartResponse = false, versionFailure = false;
+  let beforeResolve: (() => Promise<void>) | undefined, runFailure = false, runStderr = "synthetic error must stay private", runExit = 125, killStderr: string | undefined, daemonDown = false, lostStartResponse = false, versionFailure = false;
   let gpuProbe: ProcessResult | undefined;
   let inputHash = "a".repeat(64);
   let metricsPayload: string | null = '{"score":7}';
@@ -77,13 +77,14 @@ function runtime(dir: string) {
       }
       if (args[0] === "run") {
         const name = value(args, "--name");
-        if (runFailure || containers.has(name)) return { exitCode: 125, stdout: "", stderr: "synthetic error must stay private" };
+        if (runFailure || containers.has(name)) return { exitCode: runExit, stdout: "", stderr: runStderr };
         const container = { id: sha256(name + args.join("|")), args, running: true, exitCode: 0, startedAt: new Date(clock.value).toISOString() };
         containers.set(name, container);
         if (lostStartResponse) { lostStartResponse = false; throw new Error("synthetic dropped response"); }
         return ok(container.id);
       }
       if (args[0] === "kill") {
+        if (killStderr !== undefined) return { exitCode: 1, stdout: "", stderr: killStderr };
         const target = args[1]!, found = containers.get(target) ?? [...containers.values()].find(c => c.id === target);
         if (!found) return { exitCode: 1, stdout: "", stderr: "missing" };
         found.running = false; found.exitCode = 137; found.finishedAt = new Date(clock.value).toISOString(); return ok();
@@ -106,7 +107,7 @@ function runtime(dir: string) {
     const log = { path: `/synthetic/${stage}.log`, sha256: sha256(""), bytes: 0, truncated: false };
     return { logs: { stdout: log, stderr: log }, outputs: [] };
   } };
-  return { requests, containers, clock, ctx, gpuProbe: (result: ProcessResult) => { gpuProbe = result; }, beforeHash: (hook: () => Promise<void>) => { beforeHash = hook; }, inputHash: (hash: string) => { inputHash = hash; }, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: () => { runFailure = true; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; }, screenTree: (entries: { blob: string; path: string }[]) => { screenTree = entries; }, screenInputBlobs: (blobs: string[]) => { screenInputBlobs = blobs; }, screenHits: (paths: string[], line = 1) => { screenPaths = paths; screenLine = line; } };
+  return { requests, containers, clock, ctx, gpuProbe: (result: ProcessResult) => { gpuProbe = result; }, beforeHash: (hook: () => Promise<void>) => { beforeHash = hook; }, inputHash: (hash: string) => { inputHash = hash; }, resolveHook: (hook: () => Promise<void>) => { beforeResolve = hook; }, failRun: (stderr?: string, exitCode = 125) => { runFailure = true; if (stderr !== undefined) runStderr = stderr; runExit = exitCode; }, failVersion: () => { versionFailure = true; }, daemonDown: () => { daemonDown = true; }, failKill: (stderr: string) => { killStderr = stderr; }, loseStartResponse: () => { lostStartResponse = true; }, setMetrics: (payload: string | null) => { metricsPayload = payload; }, screenTree: (entries: { blob: string; path: string }[]) => { screenTree = entries; }, screenInputBlobs: (blobs: string[]) => { screenInputBlobs = blobs; }, screenHits: (paths: string[], line = 1) => { screenPaths = paths; screenLine = line; } };
 }
 async function setup(p = protocol(), autonomy = "gates", approved = true) {
   const dir = tempDir(); init(dir, { question: "Synthetic?", mode: "experiment", autonomy }, { actor });
@@ -1036,4 +1037,56 @@ test("AC7: CLI and MCP report the same screen refusal object", async () => {
   expect(cli).toContain("attempt screen: candidate commit");
   expect(mcp).toBe(cli);
   expect(readLedger(dir).filter(event => event.type === "attempt.screen.refused")).toHaveLength(2);
+});
+
+const MARKER = "SYNTHETIC-STDERR-MARKER-7f3a";
+const startCases: [string, string, number][] = [
+  ["image-unavailable", `Unable to find image 'registry.example.test/synthetic@sha256:${"0".repeat(64)}' locally\ndocker: Error response from daemon: manifest unknown. ${MARKER}`, 125],
+  ["name-conflict", `docker: Error response from daemon: Conflict. The container name "/ares-synthetic" is already in use by container "${"e".repeat(64)}". ${MARKER}`, 125],
+  ["daemon-unavailable", `docker: Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running? ${MARKER}`, 125],
+  ["resource-refused", `docker: Error response from daemon: could not select device driver "" with capabilities: [[gpu]]. ${MARKER}`, 125],
+  ["other", `docker: Error response from daemon: failed to create task for container: OCI runtime create failed: exec: "/entry": permission denied ${MARKER}`, 126],
+  ["permission-denied", `docker: permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock ${MARKER}`, 125],
+  ["other", `docker: Error response from daemon: synthetic unrecognised failure ${MARKER}`, 125],
+];
+for (const [cause, stderr, exitCode] of startCases) test(`#195 container-start failure records the closed cause ${cause} and never stores stderr`, async () => {
+  const { dir, fake } = await setup(); fake.failRun(stderr, exitCode);
+  const failed = await runAttempt(dir, request, fake.ctx);
+  expect(failed.status).toBe("failed"); expect(failed.reason).toBe("executor-start"); expect(failed.cause).toBe(cause as never);
+  if (cause === "other") expect(failed.error).toContain("run ares executor check <dir> and fix the reported host or image setup");
+  else { expect(failed.error).toContain(`container start failed (${cause})`); expect(failed.error).not.toContain("ares executor check <dir> and fix the reported"); }
+  for (const file of fs.readdirSync(dir, { recursive: true }) as string[]) {
+    const path = join(dir, file); if (!statSync(path).isFile()) continue;
+    const text = readFileSync(path, "utf8");
+    for (const hidden of [MARKER, "docker.sock", "registry.example.test", "Error response"]) expect(text).not.toContain(hidden);
+  }
+  const { run } = await import("../src/cli.ts"), home = tempDir(), env = { HOME: home, AGENTHUB_HOME: join(home, "family") };
+  const cli = await run(["attempt", "show", dir, failed.id, "--json"], env, fake.ctx);
+  const mcp = createAresMcp(env, fakeHttp([]).http, fake.ctx);
+  const shown = await mcp.handlers.ares_attempt_show!({ study: dir, id: failed.id });
+  expect(JSON.parse(cli.text)).toEqual(shown); expect((shown as { cause?: string }).cause).toBe(cause);
+});
+test("#195 an attempt record without cause still parses and an unknown cause refuses", async () => {
+  const { dir, fake } = await setup(); fake.failRun();
+  const failed = await runAttempt(dir, request, fake.ctx), path = join(dir, "runs", failed.run, "attempts", `${failed.id}.json`);
+  const { cause: _cause, ...old } = failed;
+  writeAtomic(path, JSON.stringify(old, null, 2) + "\n", 1024 * 1024);
+  expect(showAttempt(dir, failed.id)).toEqual(old as never);
+  writeAtomic(path, JSON.stringify({ ...old, cause: "synthetic-unknown" }, null, 2) + "\n", 1024 * 1024);
+  expect(() => showAttempt(dir, failed.id)).toThrow("unknown class");
+});
+
+test("#195 a failed cleanup of our started container keeps it running with a classified cause and a reconcile next step", async () => {
+  const { dir, fake } = await setup();
+  fake.daemonDown(); fake.failKill(`Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running? ${MARKER}`);
+  const attempt = await runAttempt(dir, request, fake.ctx);
+  expect(fake.requests.some(r => r.command === "docker" && r.args[0] === "kill")).toBe(true);
+  expect(attempt.status).toBe("running"); expect(attempt.reason).toBe("executor-start"); expect(attempt.cause).toBe("daemon-unavailable");
+  expect(attempt.error).toContain("failed start cleanup failed (daemon-unavailable)");
+  expect(attempt.error).toMatch(/then run ares attempt reconcile <dir>$/); expect(attempt.error).not.toContain("--retry");
+  for (const file of fs.readdirSync(dir, { recursive: true }) as string[]) {
+    const path = join(dir, file); if (!statSync(path).isFile()) continue;
+    const text = readFileSync(path, "utf8");
+    for (const hidden of [MARKER, "docker.sock", "Is the docker daemon running"]) expect(text).not.toContain(hidden);
+  }
 });
