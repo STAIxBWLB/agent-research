@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Container-start cause class (#195): when `docker run` fails, or the cleanup of a failed start fails, the attempt now records `cause`. The value is one of `image-unavailable`, `name-conflict`, `daemon-unavailable`, `resource-refused`, `permission-denied` or `other`. It is classified from the exit status and the first 4096 bytes of stderr, and the stderr text, command line and paths are never stored. The error text names the class and gives a recovery for it; `other` keeps the generic `ares executor check` recovery. `attempt show` (CLI and MCP `ares_attempt_show`) shows the field. The `executor-start` and `executor-start-uncertain` reasons and the retry rules are unchanged, and records without `cause` read as before. N-1 (0.4.1): a 0.4.1 reader accepts and ignores `cause` on attempt records.
+
 - Hub guidance rationale (#66 T4): the public hub guidance read parser (`parseHubGuidanceReadResult`, and `parseHarnessVariant` for hub-public input) now returns each record's hub-screened `rationale: {problemHypothesis, expectedObservableDifference}` verbatim. Each value is screened prose or the literal `withheld`, shown as is and never inferred or fetched. The closed shape is checked with the same inert-JSON rules and the hub's 2000-byte canonical bound. The available projection drops `rationaleOmitted: true`. A hub read without `rationale` (pre-rationale hubs) still parses, and its records carry no `rationale` key. The rationale is display only and never feeds matching, composition, adoption, selection or metrics. N-1 (0.4.1): 0.4.1 parses the new hub read but omits the rationale and still reports `rationaleOmitted: true`; callers that assert that flag must read the `rationale` key instead.
 
 ## [0.4.1] - 2026-11-25

@@ -22,7 +22,7 @@ export interface AttemptStage { image: string; argv: string[]; mounts: { target:
 export interface Evaluation { metrics: { name: string; unit: string; value: number; provenance: "ares-observed" }[]; outputs: { path: string; sha256: string; bytes: number }[] }
 export interface Attempt {
   v: 1 | 2 | 3; pipeline?: PipelineState; reuse?: AttemptReuseState; freshRequest?: { reuse: "off" | "eligible"; forceFresh: boolean }; id: string; studyId: string; run: string; protocolHash: string; sealBinding: string; commit: string; treeId: string; snapshotSha256?: string; seed: number; label: string; retryOf?: string;
-  executor: Executor; protocol: Protocol; paths: ContainerPaths; status: AttemptStatus; stage: Stage; reason?: string; error?: string; startedAt: string; endedAt?: string;
+  executor: Executor; protocol: Protocol; paths: ContainerPaths; status: AttemptStatus; stage: Stage; reason?: string; cause?: StartCause; error?: string; startedAt: string; endedAt?: string;
   stages: Partial<Record<Stage, AttemptStage>>; metrics: Evaluation["metrics"]; outputs: Evaluation["outputs"];
   sealing: { separateContainers: boolean; evaluatorReadOnly: boolean; candidateHasNoEvaluator: boolean; verifiedBy: "ares-observed" };
   launching?: { pid: number; host: string; token: string; claimedAt: string; expiresAt: string };
@@ -40,6 +40,29 @@ export const CONTROL_STALE_MS = 30 * 60_000;
 // Filesystem mtime has sub-ms precision; Date.now is integral. Tolerate small future skew on live locks.
 export const CONTROL_FUTURE_SKEW_MS = 60_000;
 const controlScope = new AsyncLocalStorage<{ dir: string; token: string }>();
+/** Closed container-start cause classes. Only the class is stored; stderr, command lines and paths never are. */
+export const START_CAUSES = ["image-unavailable", "name-conflict", "daemon-unavailable", "resource-refused", "permission-denied", "other"] as const;
+export type StartCause = typeof START_CAUSES[number];
+export const START_STDERR_PREFIX = 4096;
+/** Classify from the exit status and a bounded stderr prefix. The text is inspected here and discarded. */
+export function classifyStartFailure(exitCode: number, stderr: string): StartCause {
+  const text = stderr.slice(0, START_STDERR_PREFIX).toLowerCase();
+  if (/permission denied|access denied for user|operation not permitted/.test(text)) return "permission-denied";
+  if (/cannot connect to the docker daemon|is the docker daemon running|error during connect|docker daemon is not running/.test(text)) return "daemon-unavailable";
+  if (/conflict\. the container name|is already in use by container/.test(text)) return "name-conflict";
+  if (/unable to find image|pull access denied|manifest unknown|manifest for .* not found|repository does not exist|no such image/.test(text)) return "image-unavailable";
+  if (/cannot allocate memory|out of memory|no space left on device|insufficient|could not select device driver|resource temporarily unavailable|minimum memory limit|range of cpus|exceeds .*limit/.test(text)) return "resource-refused";
+  if (exitCode === 126) return "permission-denied";
+  return "other";
+}
+const START_RECOVERY: Record<Exclude<StartCause, "other">, string> = {
+  "image-unavailable": "check that the protocol image digest is pulled or pullable on the executor host (docker image inspect)",
+  "name-conflict": "run ares attempt reconcile <dir> and remove the stale container with the attempt name on the executor host only if no study owns it",
+  "daemon-unavailable": "start the Docker daemon on the executor host and run ares executor check <dir>",
+  "resource-refused": "free memory, disk or devices on the executor host or lower the protocol limits",
+  "permission-denied": "give the executor user access to the Docker socket and run ares executor check <dir>",
+};
+class StartFailure extends Error { constructor(readonly cause: StartCause) { super("container start failed"); } }
 const STATUSES: AttemptStatus[] = ["running", "succeeded", "failed", "cancelled", "unknown"];
 const inspectFields = (prefix: string, fields: string[]) => fields.map(field => `${JSON.stringify(field)}:{{json ${prefix}.${field}}}`).join(",");
 // Exclude inherited image labels/env and other unbounded Docker metadata from the observation.
@@ -134,6 +157,7 @@ export function validateAttemptRecord(raw: unknown, run: string, wanted: string)
     if (!plain(raw.protocol.limits)) throw new Error("attempt GPU: limits missing; restore the frozen attempt record before retrying");
     validateGpuDevices(raw.gpuDevices, raw.protocol.limits.gpus as number);
   }
+  if (raw.cause !== undefined && !START_CAUSES.includes(raw.cause as StartCause)) throw new Error("attempt start cause: unknown class; use an ares version that supports this record, keeping the original file unchanged");
   return raw as unknown as Attempt;
 }
 function load(dir: string): Attempt[] { return [...records(dir)]; }
@@ -256,7 +280,8 @@ function finish(attempt: Attempt, status: AttemptStatus, reason: string | undefi
 function hostError(attempt: Attempt, step: string): Error {
   return new Error(`executor ${attempt.executor.host ?? "local"}: ${step} failed; check that step on the executor host and run ares attempt reconcile <dir>`);
 }
-function startupError(attempt: Attempt, step: string): string {
+function startupError(attempt: Attempt, step: string, cause?: StartCause): string {
+  if (cause && cause !== "other") return `executor ${attempt.executor.host ?? "local"}: ${step} failed (${cause}); ${START_RECOVERY[cause]}, then retry with the same attempt options and --retry ID`;
   const recovery = step === "private workspace preparation" ? "make the configured executor workdir an owned physical directory with mode 0700" : step === "evaluator transfer" || step === "design recheck" ? "restore the task evaluator files and approve the current design" : step === "snapshot transfer" ? "check the repository commit and executor workspace" : step === "controller lock" ? "wait for the active control operation to finish" : "run ares executor check <dir> and fix the reported host or image setup";
   return `executor ${attempt.executor.host ?? "local"}: ${step} failed; ${recovery}, then retry with the same attempt options and --retry ID`;
 }
@@ -329,7 +354,7 @@ async function recordVerifiedStage(dir: string, attempt: Attempt, state: Observe
     if (current.status !== "running" || current.stage !== attempt.stage) return undefined;
     const stage = current.stages[current.stage]!;
     stage.containerId = state.id; if (state.startedAt) stage.startedAt = state.startedAt;
-    if (current.reason === "executor-start" || current.reason === "executor-start-uncertain" || current.reason === "executor-preflight" || current.reason === "executor-seal") { delete current.reason; delete current.error; }
+    if (current.reason === "executor-start" || current.reason === "executor-start-uncertain" || current.reason === "executor-preflight" || current.reason === "executor-seal") { delete current.reason; delete current.cause; delete current.error; }
     delete current.launching;
     if (current.stage === "candidate") {
       current.sealing.candidateHasNoEvaluator = true;
@@ -532,14 +557,17 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
   }
   let startedId: string | undefined;
   try {
-    const result = await command(attempt, "container start", "docker", args, ctx), cid = result.stdout.trim();
+    const result = await runOnExecutor(attempt.executor, "docker", args, ctx.runner ?? spawnRunner);
+    if (result.exitCode !== 0 || result.timedOut || result.truncated) throw new StartFailure(result.timedOut || result.truncated ? "other" : classifyStartFailure(result.exitCode, result.stderr));
+    const cid = result.stdout.trim();
     if (!/^[a-f0-9]{64}$/.test(cid)) throw hostError(attempt, "container start");
     startedId = cid;
     attempt.stages[attempt.stage]!.containerId = cid;
     await startWatchdog(attempt.executor, attemptContainerName(attempt), remainingWallSeconds(dir, attempt, ctx), ctx.runner ?? spawnRunner, cid);
     const state = await inspect(dir, attempt, ctx); if (!state) throw hostError(attempt, "container start verification");
     return recordVerifiedStage(dir, attempt, state, ctx, "attempt.stage.started");
-  } catch {
+  } catch (error) {
+    const cause: StartCause = error instanceof StartFailure ? error.cause : "other";
     if (!startedId) {
       try {
         // A lost response is not proof that Docker rejected the start. Adopt only a verified owned container.
@@ -554,10 +582,17 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
     }
     // A name conflict can belong to another study with the same identity. Only clean up our returned container id.
     if (startedId) {
-      try { await command(attempt, "failed launch cleanup", "docker", ["kill", startedId], recoveryCtx); }
-      catch { return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start"; current.error = hostError(current, "failed start cleanup").message; return "attempt.executor-error"; }); }
+      let cleanupCause: StartCause | undefined;
+      try {
+        const killed = await runOnExecutor(attempt.executor, "docker", ["kill", startedId], recoveryCtx.runner ?? spawnRunner);
+        if (killed.exitCode !== 0 || killed.timedOut || killed.truncated) cleanupCause = killed.timedOut || killed.truncated ? "other" : classifyStartFailure(killed.exitCode, killed.stderr);
+      } catch { cleanupCause = "other"; }
+      if (cleanupCause) {
+        const recorded = cleanupCause;
+        return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start"; current.cause = recorded; current.error = recorded === "other" ? hostError(current, "failed start cleanup").message : startupError(current, "failed start cleanup", recorded); return "attempt.executor-error"; });
+      }
     }
-    return update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.error = startupError(current, "container start"); finish(current, "failed", "executor-start", ctx); return "attempt.failed"; });
+    return update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.cause = cause; current.error = startupError(current, "container start", cause); finish(current, "failed", "executor-start", ctx); return "attempt.failed"; });
   }
 }
 
