@@ -47,12 +47,13 @@ export const START_STDERR_PREFIX = 4096;
 /** Classify from the exit status and a bounded stderr prefix. The text is inspected here and discarded. */
 export function classifyStartFailure(exitCode: number, stderr: string): StartCause {
   const text = stderr.slice(0, START_STDERR_PREFIX).toLowerCase();
-  if (/permission denied|access denied for user|operation not permitted/.test(text)) return "permission-denied";
+  // Socket access only: an OCI runtime "exec ... permission denied" is an image problem and stays `other`.
+  if (/permission denied.*(docker daemon socket|docker\.sock)/.test(text)) return "permission-denied";
   if (/cannot connect to the docker daemon|is the docker daemon running|error during connect|docker daemon is not running/.test(text)) return "daemon-unavailable";
   if (/conflict\. the container name|is already in use by container/.test(text)) return "name-conflict";
   if (/unable to find image|pull access denied|manifest unknown|manifest for .* not found|repository does not exist|no such image/.test(text)) return "image-unavailable";
   if (/cannot allocate memory|out of memory|no space left on device|insufficient|could not select device driver|resource temporarily unavailable|minimum memory limit|range of cpus|exceeds .*limit/.test(text)) return "resource-refused";
-  if (exitCode === 126) return "permission-denied";
+  void exitCode;
   return "other";
 }
 const START_RECOVERY: Record<Exclude<StartCause, "other">, string> = {
@@ -279,6 +280,11 @@ function finish(attempt: Attempt, status: AttemptStatus, reason: string | undefi
 }
 function hostError(attempt: Attempt, step: string): Error {
   return new Error(`executor ${attempt.executor.host ?? "local"}: ${step} failed; check that step on the executor host and run ares attempt reconcile <dir>`);
+}
+/** The failed start's container may still run, so the next step stays reconcile, never --retry. */
+function cleanupError(attempt: Attempt, cause: StartCause): string {
+  if (cause === "other") return hostError(attempt, "failed start cleanup").message;
+  return `executor ${attempt.executor.host ?? "local"}: failed start cleanup failed (${cause}); ${START_RECOVERY[cause]}, then run ares attempt reconcile <dir>`;
 }
 function startupError(attempt: Attempt, step: string, cause?: StartCause): string {
   if (cause && cause !== "other") return `executor ${attempt.executor.host ?? "local"}: ${step} failed (${cause}); ${START_RECOVERY[cause]}, then retry with the same attempt options and --retry ID`;
@@ -589,7 +595,7 @@ async function launch(dir: string, attempt: Attempt, user: string, ctx: AttemptC
       } catch { cleanupCause = "other"; }
       if (cleanupCause) {
         const recorded = cleanupCause;
-        return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start"; current.cause = recorded; current.error = recorded === "other" ? hostError(current, "failed start cleanup").message : startupError(current, "failed start cleanup", recorded); return "attempt.executor-error"; });
+        return update(dir, attempt.id, ctx, current => { delete current.launching; current.reason = "executor-start"; current.cause = recorded; current.error = cleanupError(current, recorded); return "attempt.executor-error"; });
       }
     }
     return update(dir, attempt.id, ctx, current => { if (current.status !== "running") return undefined; current.cause = cause; current.error = startupError(current, "container start", cause); finish(current, "failed", "executor-start", ctx); return "attempt.failed"; });
